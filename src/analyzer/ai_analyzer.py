@@ -142,7 +142,7 @@ class AiAnalyzer:
                         json=payload,
                     )
                     if resp.status_code == 429 and attempt < max_retries - 1:
-                        wait = 5 * (attempt + 1)
+                        wait = [10, 30, 60][attempt]
                         logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
                         time.sleep(wait)
                         continue
@@ -153,7 +153,7 @@ class AiAnalyzer:
                     return content
             except httpx.HTTPStatusError as e:
                 if attempt < max_retries - 1 and e.response.status_code == 429:
-                    wait = 5 * (attempt + 1)
+                    wait = [10, 30, 60][attempt]
                     logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
                     time.sleep(wait)
                     continue
@@ -162,7 +162,7 @@ class AiAnalyzer:
             except httpx.RequestError as e:
                 logger.error(f"[AI分析] 网络错误: {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(5)
+                    time.sleep(10)
                     continue
                 return None
         return None
