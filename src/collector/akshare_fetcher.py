@@ -251,7 +251,8 @@ FIN_INDICATORS = {
     'profit_growth': '归属母公司净利润增长率',
 }
 
-def enrich_financial_data(stocks: list[dict], workers=8, batch_timeout=120) -> list[dict]:
+def enrich_financial_data(stocks: list[dict], workers=3, batch_timeout=120) -> list[dict]:
+    import gc
     import akshare as ak
     total = len(stocks)
     logger.info(f"[财务] 获取 {total} 只 ({workers}线程, 批次超时{batch_timeout}s)...")
@@ -261,6 +262,7 @@ def enrich_financial_data(stocks: list[dict], workers=8, batch_timeout=120) -> l
             df = ak.stock_financial_abstract(symbol=s['code'])
             cols = [c for c in df.columns if c not in ('选项', '指标')]
             if not cols:
+                del df
                 return s
             annual = [c for c in cols if c.endswith('1231')]
             latest_a = annual[0] if annual else cols[-1]
@@ -274,25 +276,30 @@ def enrich_financial_data(stocks: list[dict], workers=8, batch_timeout=120) -> l
             s['debt_ratio'] = fa.get('资产负债率')
             s['revenue_growth'] = fq.get('营业总收入增长率')
             s['profit_growth'] = fq.get('归属母公司净利润增长率')
+            del df, fa, fq
         except Exception as e:
             logger.debug(f"[财务] {s['code']} 失败: {e}")
         return s
 
-    # 分批 + 批次超时，避免单只卡死整个 pipeline
+    # 分批 + 批次超时，避免 OOM 和单只卡死
     done = 0
-    BATCH_SIZE = 100
+    BATCH_SIZE = 60
     for batch_start in range(0, total, BATCH_SIZE):
         batch = stocks[batch_start:batch_start + BATCH_SIZE]
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
             fut_map = {ex.submit(_fetch, s): s['code'] for s in batch}
             done_inner, _ = concurrent.futures.wait(
                 fut_map.keys(), timeout=batch_timeout)
-            # 超时的 task 就不等了
             for f in done_inner:
+                try:
+                    f.result()
+                except Exception:
+                    pass
                 done += 1
             timed_out = len(batch) - len(done_inner)
             if timed_out:
                 logger.warning(f"[财务] 批次 {batch_start//BATCH_SIZE+1} 超时 {timed_out} 只，跳过")
+        gc.collect()
         logger.info(f"[财务] {done}/{total}")
 
     with_roe = sum(1 for s in stocks if s.get('roe') is not None)

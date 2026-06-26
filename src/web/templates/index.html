@@ -211,6 +211,9 @@
         .market-change.up { color: var(--red); }
         .market-change.down { color: var(--green); }
 
+        .price-change .up { color: var(--red); font-size: 11px; }
+        .price-change .down { color: var(--green); font-size: 11px; }
+
         /* ========== Status Bar ========== */
         .status-bar {
             display: flex;
@@ -586,6 +589,23 @@
 
                 <div class="stock-metrics">
                     <div class="metric-cell">
+                        <div class="label">Price</div>
+                        {% if stock.current_price is not none %}
+                        <div class="value" id="price-{{ stock.code }}" style="font-weight:500;">
+                            {{ "%.2f"|format(stock.current_price) }}
+                        </div>
+                        {% else %}
+                        <div class="value" id="price-{{ stock.code }}" style="font-weight:500;">--</div>
+                        {% endif %}
+                        <div class="price-change" id="chg-{{ stock.code }}" style="font-size:11px;margin-top:-1px;">
+                            {% if stock.change_percent is not none %}
+                            <span style="color:{{ 'var(--red)' if stock.change_percent >= 0 else 'var(--green)' }}">
+                                {{ "%+.2f"|format(stock.change_percent) }}%
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="metric-cell">
                         <div class="label">PE</div>
                         <div class="value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">
                             {{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}
@@ -789,9 +809,30 @@
         bar.innerHTML = parts.join('');
     }
 
+    function renderStocks(stocks) {
+        if (!stocks || stocks.length === 0) return;
+        var header = document.querySelector('.section-count');
+        if (header) header.textContent = stocks.length + ' candidates';
+        stocks.forEach(function(s) {
+            var priceEl = document.getElementById('price-' + s.code);
+            var chgEl = document.getElementById('chg-' + s.code);
+            if (!priceEl) return;
+            if (s.current_price != null) {
+                priceEl.textContent = s.current_price.toFixed(2);
+            }
+            if (chgEl && s.change_percent != null) {
+                var cls = s.change_percent >= 0 ? 'up' : 'down';
+                var arrow = s.change_percent >= 0 ? '&#9650;' : '&#9660;';
+                chgEl.innerHTML = '<span class="' + cls + '">' + arrow + ' ' +
+                    (s.change_percent >= 0 ? '+' : '') + s.change_percent.toFixed(2) + '%</span>';
+            }
+        });
+    }
+
     function refreshDashboard() {
         fetchJSON('/api/indices').then(renderIndices).catch(function(){});
         fetchJSON('/api/status').then(renderStatus).catch(function(){});
+        fetchJSON('/api/stocks').then(renderStocks).catch(function(){});
         updateTimestamp();
     }
 

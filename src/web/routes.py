@@ -19,16 +19,32 @@ from src.models.database import (
     ScreeningResultDAO,
     RunLogDAO,
 )
+from src.scheduler import (
+    MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
+)
 
 logger = logging.getLogger(__name__)
 
 # -------- 创建 FastAPI 应用 --------
 app = FastAPI(title="价值投资选股看板")
 
+# 全局调度器
+_scheduler = MarketScheduler()
+
+
 @app.on_event("startup")
 def _startup():
     init_database()
-    logger.info("[Web] 数据库初始化完成")
+    # 启动后台调度器
+    _scheduler.start()
+    logger.info("[Web] 服务启动完成")
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    _scheduler.stop()
+    logger.info("[Web] 服务关闭")
+
 
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
@@ -65,6 +81,24 @@ async def index(request: Request):
     result_dao = ScreeningResultDAO()
     stocks = result_dao.get_latest_results()
 
+    # 注入 active codes 到调度器（只在首次加载时）
+    codes = [s['code'] for s in stocks]
+    set_active_codes(codes)
+
+    # 合并实时行情
+    realtime = get_realtime_cache()
+    for stock in stocks:
+        code = stock['code']
+        if code in realtime:
+            rt = realtime[code]
+            stock['current_price'] = rt.get('current_price')
+            stock['change_percent'] = rt.get('change_percent')
+            stock['change_amount'] = rt.get('change_amount')
+        else:
+            stock['current_price'] = None
+            stock['change_percent'] = None
+            stock['change_amount'] = None
+
     # 获取运行状态
     run_log = RunLogDAO().get_latest_run()
 
@@ -81,7 +115,7 @@ async def index(request: Request):
             except (json.JSONDecodeError, TypeError):
                 stock['trade_parsed'] = None
 
-    refresh = config.get('web', {}).get('refresh_interval', 60)
+    refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
         "request": request,
@@ -98,20 +132,50 @@ async def index(request: Request):
 async def api_indices():
     """大盘数据 API"""
     indices = MarketIndexDAO().get_latest()
+    # 有实时缓存就覆盖
+    rt = get_realtime_cache()
+    # 如果有实时大盘数据可以放这里，但目前大盘走数据库
     return [dict(i) for i in indices]
 
 
 @app.get("/api/stocks")
 async def api_stocks():
-    """最新选股结果 API"""
+    """最新选股结果 + 实时行情 API"""
     stocks = ScreeningResultDAO().get_latest_results()
+
+    # 确保 active codes 已注册
+    codes = [s['code'] for s in stocks]
+    set_active_codes(codes)
+
+    # 合并实时行情，缓存空时主动拉一次
+    realtime = get_realtime_cache()
+    if not realtime and codes:
+        quotes = fetch_stock_realtime(codes)
+        if quotes:
+            # 也存入缓存
+            import src.scheduler as sched
+            with sched._cache_lock:
+                sched._realtime_cache.update(quotes)
+            realtime = quotes
     for s in stocks:
+        code = s['code']
+        if code in realtime:
+            rt = realtime[code]
+            s['current_price'] = rt.get('current_price')
+            s['change_percent'] = rt.get('change_percent')
+            s['change_amount'] = rt.get('change_amount')
+        else:
+            s['current_price'] = None
+            s['change_percent'] = None
+            s['change_amount'] = None
+
         for key in ['ai_analysis', 'ai_trade_strategy']:
             if s.get(key):
                 try:
                     s[key] = json.loads(s[key])
                 except (json.JSONDecodeError, TypeError):
                     pass
+
     return [dict(s) for s in stocks]
 
 
@@ -120,6 +184,36 @@ async def api_status():
     """运行状态 API"""
     run = RunLogDAO().get_latest_run()
     return dict(run) if run else {"status": "no_runs"}
+
+
+@app.get("/api/realtime")
+async def api_realtime():
+    """纯实时行情 API — 仅返回价格变化信息"""
+    import src.scheduler as sched
+    cache = get_realtime_cache()
+
+    # 如果缓存为空，主动拉一次
+    if not cache and sched._active_codes:
+        quotes = fetch_stock_realtime(sched._active_codes)
+        if quotes:
+            cache.update(quotes)
+
+    # 只返回前端需要的关键字段
+    result = []
+    for code, q in cache.items():
+        result.append({
+            'code': code,
+            'name': q.get('name'),
+            'current_price': q.get('current_price'),
+            'prev_close': q.get('prev_close'),
+            'change_percent': q.get('change_percent'),
+            'change_amount': q.get('change_amount'),
+            'high': q.get('high'),
+            'low': q.get('low'),
+            'volume': q.get('volume'),
+            'amount': q.get('amount'),
+        })
+    return result
 
 
 @app.post("/api/trigger_update")
@@ -144,5 +238,7 @@ def run_server():
 
     import uvicorn
     print(f"Stock Dashboard running at http://{host}:{port}")
+    print(f"Market index: every 30min | Stock quote: every 5min (trading hours)")
+    print(f"Daily pipeline: 15:30 (weekdays)")
     print(f"Press Ctrl+C to stop")
     uvicorn.run(app, host=host, port=port, log_level="info")
