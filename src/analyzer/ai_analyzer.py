@@ -70,6 +70,10 @@ class AiAnalyzer:
         self.temperature = config.get('temperature', 0.3)
         self.max_tokens = config.get('max_tokens', 2000)
 
+        # 限流冷却状态
+        self._last_429_time = 0.0
+        self._rate_limit_cooldown = 120  # 遇到429后冷却120秒
+
         # 从环境变量读取 API Key
         import os
         self.api_key = os.getenv('STOCK_AI_API_KEY') or os.getenv('OPENAI_API_KEY')
@@ -117,7 +121,14 @@ class AiAnalyzer:
             return None
 
     def _call_llm(self, prompt: str) -> Optional[str]:
-        """调用 LLM API（含自动重试与退避）"""
+        """调用 LLM API（含智能限流冷却 + 退避重试）"""
+        # 检查是否在限流冷却期
+        now = time.time()
+        if self._last_429_time > 0 and now - self._last_429_time < self._rate_limit_cooldown:
+            remaining = int(self._rate_limit_cooldown - (now - self._last_429_time))
+            logger.info(f"[AI分析] 限流冷却中，跳过（剩余 {remaining}s）")
+            return None
+
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -132,7 +143,7 @@ class AiAnalyzer:
             'max_tokens': self.max_tokens,
         }
 
-        max_retries = 3
+        max_retries = 4
         for attempt in range(max_retries):
             try:
                 with httpx.Client(timeout=60.0) as client:
@@ -141,22 +152,32 @@ class AiAnalyzer:
                         headers=headers,
                         json=payload,
                     )
-                    if resp.status_code == 429 and attempt < max_retries - 1:
-                        wait = [10, 30, 60][attempt]
-                        logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
-                        time.sleep(wait)
-                        continue
+                    if resp.status_code == 429:
+                        self._last_429_time = time.time()
+                        if attempt < max_retries - 1:
+                            wait = [30, 60, 120][attempt]
+                            logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
+                            time.sleep(wait)
+                            continue
+                        logger.error(f"[AI分析] 限流(429)，已达最大重试次数，跳过")
+                        return None
                     resp.raise_for_status()
+                    # 成功后重置冷却状态
+                    self._last_429_time = 0.0
                     data = resp.json()
                     content = data['choices'][0]['message']['content']
                     logger.debug(f"[AI分析] API 响应: {content[:100]}...")
                     return content
             except httpx.HTTPStatusError as e:
-                if attempt < max_retries - 1 and e.response.status_code == 429:
-                    wait = [10, 30, 60][attempt]
-                    logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
-                    time.sleep(wait)
-                    continue
+                if e.response.status_code == 429:
+                    self._last_429_time = time.time()
+                    if attempt < max_retries - 1:
+                        wait = [30, 60, 120][attempt]
+                        logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
+                        time.sleep(wait)
+                        continue
+                    logger.error(f"[AI分析] 限流(429)，已达最大重试次数，跳过")
+                    return None
                 logger.error(f"[AI分析] API 调用失败: {e}")
                 return None
             except httpx.RequestError as e:
@@ -248,9 +269,9 @@ def run_ai_analysis(config: dict, candidates: list[dict]) -> list[dict]:
 
         enhanced.append(stock)
 
-        # 请求间隔，避免限流
+        # 请求间隔，避免限流（Free tier 建议 30s+）
         if i < len(candidates) - 1:
-            time.sleep(1)
+            time.sleep(30)
 
     analyzed = sum(1 for s in enhanced if s.get('ai_analysis'))
     logger.info(f"[AI分析] 完成: 成功 {analyzed}/{len(candidates)} 只")
