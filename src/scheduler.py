@@ -144,47 +144,55 @@ def fetch_stock_realtime(codes: list[str]) -> dict[str, dict]:
 
 
 def fetch_indices_realtime() -> list[dict]:
-    """获取大盘指数实时行情（新浪）"""
+    """获取大盘指数实时行情（腾讯 qt.gtimg.cn，与选股行情统一接口）"""
     now = datetime.now()
     ds, ts = now.strftime("%Y-%m-%d"), now.isoformat()
-    targets = {
+    tc_codes = ['sh000001', 'sz399001', 'sz399006', 'sh000688']
+    target_map = {
         'sh000001': '上证指数', 'sz399001': '深证成指',
         'sz399006': '创业板指', 'sh000688': '科创50',
     }
-    codes = list(targets.keys())
     raw = _curl_get(
-        f"https://hq.sinajs.cn/list={','.join(codes)}", timeout=15)
+        f"https://qt.gtimg.cn/q={','.join(tc_codes)}", timeout=15)
     if not raw:
         return []
     indices = []
     for line in raw.strip().split('\n'):
         if '=' not in line:
             continue
-        eq = line.index('=')
-        key = line[:eq].replace('var hq_str_', '').strip()
-        name = targets.get(key)
+        line = line.split(';')[0]
+        eq = line.find('=')
+        if eq < 0:
+            continue
+        val = line[eq + 1:].strip().strip('"')
+        parts = val.split('~')
+        if len(parts) < 35:
+            continue
+        code = parts[2].strip()
+        tc_key = f"{'sh' if code.startswith('00') else 'sz'}{code}"
+        name = target_map.get(tc_key)
         if not name:
             continue
-        val = line[eq + 1:].strip().strip('"').strip(';')
-        parts = val.split(',')
-        if len(parts) < 32:
-            continue
-        cur = _safe_float(parts[1])
-        yes_close = _safe_float(parts[3])
+        cur = _safe_float(parts[3])
+        yes_close = _safe_float(parts[4])
         chg_pct = ((cur - yes_close) / yes_close * 100) if (
             cur and yes_close and yes_close != 0) else None
         chg_amt = (cur - yes_close) if (cur and yes_close) else None
+        volume = _safe_float(parts[6]) if len(parts) > 6 else None
+        amount = _safe_float(parts[37]) if len(parts) > 37 else None
         indices.append({
-            'index_code': key,
+            'index_code': tc_key,
             'index_name': name,
             'current_value': cur or 0,
             'change_percent': _safe_float(chg_pct),
             'change_amount': _safe_float(chg_amt),
-            'volume': _safe_float(parts[8]) or 0,
-            'amount': _safe_float(parts[9]) or 0,
+            'volume': volume or 0,
+            'amount': amount or 0,
             'pe': None, 'pb': None,
             'timestamp': ts, 'date': ds,
         })
+    if indices:
+        logger.info(f"[采集] 大盘: {len(indices)} 条")
     return indices
 
 
