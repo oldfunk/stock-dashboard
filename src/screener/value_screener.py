@@ -371,7 +371,7 @@ def run_screener(config: dict, candidates: list[dict] = None,
         for c in candidates:
             reasons = screener._check_value_criteria(c)
             if reasons:
-                score = screener._calculate_score(c)
+                score = screener._calculate_score(c, reasons)
                 scored.append({
                     'run_id': run_id,
                     'run_date': run_date,

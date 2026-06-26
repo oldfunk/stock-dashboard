@@ -189,17 +189,25 @@ def enrich_financial_data(stocks: list[dict], workers=8) -> list[dict]:
             df = ak.stock_financial_abstract(symbol=s['code'])
             cols = [c for c in df.columns if c not in ('选项', '指标')]
             if not cols: return s
-            lk = cols[0]  # newest period
-            fin = {}
+            # 最新年报: 列名以 1231 结尾
+            annual_cols = [c for c in cols if c.endswith('1231')]
+            latest_annual = annual_cols[0] if annual_cols else cols[-1]
+            latest_q = cols[0]  # 最新一期（可能是季报）
+
+            fin_a, fin_q = {}, {}
             for _, r in df.iterrows():
-                fin[str(r.get('指标', ''))] = _safe_float(r.get(lk))
-            # Always overwrite with Sina data
-            s['roe'] = fin.get('净资产收益率(ROE)')
-            s['debt_ratio'] = fin.get('资产负债率')
-            s['revenue_growth'] = fin.get('营业总收入增长率')
-            s['profit_growth'] = fin.get('归属母公司净利润增长率')
-        except Exception:
-            pass
+                ind = str(r.get('指标', ''))
+                fin_a[ind] = _safe_float(r.get(latest_annual))
+                fin_q[ind] = _safe_float(r.get(latest_q))
+
+            # ROE/负债率: 用年报
+            s['roe'] = fin_a.get('净资产收益率(ROE)')
+            s['debt_ratio'] = fin_a.get('资产负债率')
+            # 增长率: 用最新一期同比
+            s['revenue_growth'] = fin_q.get('营业总收入增长率')
+            s['profit_growth'] = fin_q.get('归属母公司净利润增长率')
+        except Exception as e:
+            logger.debug(f"[财务] {s['code']} 失败: {e}")
         return s
 
     done = 0
