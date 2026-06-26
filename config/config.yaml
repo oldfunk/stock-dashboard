@@ -1,0 +1,51 @@
+# 股票盯盘看板配置文件
+# 复制为 local.yaml 覆盖默认值（local.yaml 已被 .gitignore 排除）
+
+# -------- 数据源配置 --------
+data_source:
+  market: "A"              # A: A股, 未来扩展: HK, US
+  cache_days: 1            # 缓存有效期（天），1 表示每日刷新
+
+# -------- 量化筛选条件 (价值投资) --------
+screener:
+  # 格雷厄姆/巴菲特风格价值投资过滤
+  conditions:
+    max_pe: 20              # 市盈率上限（TTM）
+    min_pe: 3               # 市盈率下限（排除亏损和微利股）
+    max_pb: 3.5             # 市净率上限
+    min_roe: 12             # ROE 下限（%）— 巴菲特偏好 ≥15%
+    min_revenue_growth: 5   # 营收增长率下限（%）
+    min_profit_growth: 5    # 净利润增长率下限（%）
+    max_debt_ratio: 65      # 资产负债率上限（%）
+    min_market_cap: 50      # 最低流通市值（亿元），排除过小股票
+    max_market_cap: 10000   # 最高市值（亿元）
+    min_dividend_yield: 0   # 股息率下限（%），0=不要求
+
+  # 额外过滤
+  exclude_st: true          # 排除 ST/*ST 股票
+  exclude_new_stocks: 60    # 上市不足 N 天的次新股排除
+  max_candidates: 20        # 最大候选股票数量
+
+# -------- AI 分析配置 --------
+ai:
+  # LLM API 配置 (兼容 OpenAI API)
+  provider: "openai"        # openai / custom
+  api_base: "https://api.openai.com/v1"
+  model: "gpt-4o-mini"      # 经济高效的分析模型
+  temperature: 0.3
+  max_tokens: 2000
+
+# -------- Web 服务配置 --------
+web:
+  host: "0.0.0.0"
+  port: 9527
+  refresh_interval: 60      # 前端自动刷新秒数
+  page_title: "价值投资选股看板"
+
+# -------- 定时任务配置 --------
+schedule:
+  # A 股交易时间：周一至周五 9:30-15:00
+  # 每日收盘后运行（15:30 后数据基本更新完毕）
+  daily_update_time: "15:30"
+  # 大盘数据更新间隔（分钟）
+  market_index_interval: 30

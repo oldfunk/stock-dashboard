@@ -1,0 +1,24 @@
+[project]
+name = "stock-dashboard"
+version = "0.1.0"
+description = "A股价值投资选股看板 - AI 驱动的价值投资选股工具"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.29,<1",
+    "akshare>=1.14,<2",
+    "pandas>=2.0,<3",
+    "httpx>=0.27,<1",
+    "jinja2>=3.1,<4",
+    "pyyaml>=6.0,<8",
+    "python-dotenv>=1.0,<2",
+    "pydantic>=2.5,<3",
+    "sse-starlette>=2.0,<3",
+    "pytz>=2024.1,<2025",
+]
+
+[project.scripts]
+stock-dashboard = "src.main:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]

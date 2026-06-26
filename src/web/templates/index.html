@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }}</title>
+    <meta http-equiv="refresh" content="{{ refresh_interval }}">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --red: #f85149;
+            --gold: #d29922;
+            --purple: #bc8cff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* Header */
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 24px; padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header h1 {
+            font-size: 24px; font-weight: 600;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .header .status {
+            font-size: 13px; color: var(--muted);
+            display: flex; align-items: center; gap: 12px;
+        }
+        .header .status .dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; background: var(--green);
+            margin-right: 4px;
+        }
+        .btn-refresh {
+            background: var(--card); color: var(--accent);
+            border: 1px solid var(--border); padding: 6px 14px;
+            border-radius: 6px; cursor: pointer; font-size: 13px;
+            transition: all 0.2s;
+        }
+        .btn-refresh:hover { background: #21262d; border-color: var(--accent); }
+
+        /* Market indices */
+        .indices-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px; margin-bottom: 24px;
+        }
+        .index-card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 8px; padding: 16px;
+        }
+        .index-card .name { font-size: 13px; color: var(--muted); }
+        .index-card .value { font-size: 28px; font-weight: 600; margin: 4px 0; }
+        .index-card .change { font-size: 14px; }
+        .index-card .change.up { color: var(--red); }
+        .index-card .change.down { color: var(--green); }
+
+        /* Run info */
+        .run-info {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;
+            font-size: 13px; color: var(--muted);
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        }
+        .run-info .label { font-weight: 500; color: var(--text); }
+
+        /* Stock cards */
+        .stock-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+            gap: 16px;
+        }
+        .stock-card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 10px; padding: 20px;
+            transition: border-color 0.2s;
+        }
+        .stock-card:hover { border-color: var(--accent); }
+
+        .stock-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 12px;
+        }
+        .stock-header .code {
+            font-size: 14px; color: var(--muted);
+        }
+        .stock-header .name {
+            font-size: 18px; font-weight: 600;
+        }
+        .stock-header .score {
+            background: linear-gradient(135deg, var(--gold), #ffd700);
+            color: #000; font-weight: 700; font-size: 16px;
+            padding: 4px 12px; border-radius: 20px;
+        }
+
+        .stock-metrics {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 8px; margin-bottom: 12px;
+        }
+        .metric {
+            text-align: center; padding: 6px; border-radius: 6px;
+            background: rgba(48, 54, 61, 0.3);
+        }
+        .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+        .metric .val { font-size: 15px; font-weight: 600; margin-top: 2px; }
+        .metric .val.good { color: var(--green); }
+        .metric .val.warn { color: var(--gold); }
+        .metric .val.bad { color: var(--red); }
+
+        .stock-reason {
+            font-size: 12px; color: var(--muted);
+            margin-bottom: 12px; line-height: 1.4;
+        }
+
+        .ai-section {
+            margin-top: 12px; padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .ai-section .tab-bar {
+            display: flex; gap: 4px; margin-bottom: 10px;
+        }
+        .ai-section .tab-btn {
+            padding: 4px 12px; border-radius: 4px; font-size: 12px;
+            border: 1px solid var(--border); background: transparent;
+            color: var(--muted); cursor: pointer;
+        }
+        .ai-section .tab-btn.active {
+            background: var(--accent); color: #fff; border-color: var(--accent);
+        }
+        .ai-content {
+            font-size: 13px; color: var(--muted); line-height: 1.7;
+            max-height: 200px; overflow-y: auto;
+        }
+        .ai-content p { margin-bottom: 8px; }
+        .ai-content strong { color: var(--text); }
+        .trade-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .trade-item {
+            background: rgba(48, 54, 61, 0.2);
+            border-radius: 6px; padding: 10px;
+        }
+        .trade-item .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+        .trade-item .val { font-size: 13px; color: var(--text); margin-top: 2px; }
+
+        /* Empty state */
+        .empty {
+            text-align: center; padding: 60px 20px; color: var(--muted);
+        }
+        .empty h2 { font-size: 20px; margin-bottom: 8px; }
+        .empty p { font-size: 14px; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stock-grid { grid-template-columns: 1fr; }
+            .stock-metrics { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <!-- Header -->
+    <div class="header">
+        <h1>📊 {{ page_title }}</h1>
+        <div class="status">
+            <span><span class="dot"></span>{{ now }}</span>
+            <button class="btn-refresh" onclick="location.reload()">刷新</button>
+        </div>
+    </div>
+
+    <!-- Market Indices -->
+    {% if indices %}
+    <div class="indices-grid">
+        {% for idx in indices %}
+        <div class="index-card">
+            <div class="name">{{ idx.index_name }}</div>
+            <div class="value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
+            <div class="change {{ 'up' if idx.change_percent and idx.change_percent >= 0 else 'down' }}">
+                {{ "%+.2f"|format(idx.change_percent) if idx.change_percent else '--' }}%
+                {% if idx.change_amount %}({{ "%+.2f"|format(idx.change_amount) }}){% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Run Info -->
+    {% if run_log %}
+    <div class="run-info">
+        <span><span class="label">最近运行:</span> {{ run_log.start_time[:16] }}</span>
+        <span><span class="label">状态:</span>
+            {% if run_log.status == 'completed' %}
+            <span style="color: var(--green);">✅ 成功</span>
+            {% elif run_log.status == 'running' %}
+            <span style="color: var(--gold);">⟳ 运行中</span>
+            {% else %}
+            <span style="color: var(--red);">❌ 失败</span>
+            {% endif %}
+        </span>
+        {% if run_log.total_stocks %}
+        <span><span class="label">全市场:</span> {{ run_log.total_stocks }} 只</span>
+        {% endif %}
+        {% if run_log.screened_count %}
+        <span><span class="label">筛选入选:</span> {{ run_log.screened_count }} 只</span>
+        {% endif %}
+        {% if run_log.analyzed_count %}
+        <span><span class="label">AI 分析:</span> {{ run_log.analyzed_count }} 只</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Stock Results -->
+    {% if stocks %}
+    <div class="stock-grid">
+        {% for stock in stocks %}
+        <div class="stock-card" id="stock-{{ stock.code }}">
+            <!-- Header -->
+            <div class="stock-header">
+                <div>
+                    <div class="code">{{ stock.code }}</div>
+                    <div class="name">{{ stock.name }}</div>
+                </div>
+                <div class="score">{{ stock.score }}</div>
+            </div>
+
+            <!-- Key Metrics -->
+            <div class="stock-metrics">
+                <div class="metric">
+                    <div class="label">PE</div>
+                    <div class="val {{ 'good' if stock.pe and stock.pe < 15 else 'warn' }}">
+                        {{ "%.1f"|format(stock.pe) if stock.pe else '--' }}
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">PB</div>
+                    <div class="val {{ 'good' if stock.pb and stock.pb < 2 else 'warn' }}">
+                        {{ "%.2f"|format(stock.pb) if stock.pb else '--' }}
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">ROE</div>
+                    <div class="val {{ 'good' if stock.roe and stock.roe >= 15 else 'warn' }}">
+                        {{ "%.1f"|format(stock.roe) if stock.roe else '--' }}%
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">负债率</div>
+                    <div class="val {{ 'good' if stock.debt_ratio and stock.debt_ratio < 40 else 'warn' }}">
+                        {{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio else '--' }}%
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">营收增长</div>
+                    <div class="val {{ 'good' if stock.revenue_growth and stock.revenue_growth >= 10 else 'warn' }}">
+                        {{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth else '--' }}%
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">净利增长</div>
+                    <div class="val {{ 'good' if stock.profit_growth and stock.profit_growth >= 10 else 'warn' }}">
+                        {{ "%.1f"|format(stock.profit_growth) if stock.profit_growth else '--' }}%
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="label">市值(亿)</div>
+                    <div class="val">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="label">股息率</div>
+                    <div class="val">{{ "%.2f"|format(stock.dividend_yield) if stock.dividend_yield else '--' }}%</div>
+                </div>
+            </div>
+
+            <!-- Reason -->
+            {% if stock.reason %}
+            <div class="stock-reason">📋 {{ stock.reason }}</div>
+            {% endif %}
+
+            <!-- AI Analysis -->
+            {% if stock.ai_parsed %}
+            <div class="ai-section">
+                <div class="tab-bar">
+                    <button class="tab-btn active" onclick="switchTab(this, 'analysis-{{ stock.code }}')">选股解析</button>
+                    <button class="tab-btn" onclick="switchTab(this, 'strategy-{{ stock.code }}')">投资策略</button>
+                    <button class="tab-btn" onclick="switchTab(this, 'trade-{{ stock.code }}')">买卖策略</button>
+                </div>
+
+                <div id="analysis-{{ stock.code }}" class="ai-content tab-content" style="display:block;">
+                    <p>{{ stock.ai_parsed.analysis }}</p>
+                </div>
+
+                <div id="strategy-{{ stock.code }}" class="ai-content tab-content" style="display:none;">
+                    <p>{{ stock.ai_parsed.investment_strategy }}</p>
+                </div>
+
+                <div id="trade-{{ stock.code }}" class="ai-content tab-content" style="display:none;">
+                    {% if stock.trade_parsed %}
+                    <div class="trade-grid">
+                        <div class="trade-item">
+                            <div class="label">买入区间</div>
+                            <div class="val">{{ stock.trade_parsed.buy_zone }}</div>
+                        </div>
+                        <div class="trade-item">
+                            <div class="label">目标价</div>
+                            <div class="val">{{ stock.trade_parsed.target_price }}</div>
+                        </div>
+                        <div class="trade-item">
+                            <div class="label">止损</div>
+                            <div class="val">{{ stock.trade_parsed.stop_loss }}</div>
+                        </div>
+                        <div class="trade-item">
+                            <div class="label">止盈</div>
+                            <div class="val">{{ stock.trade_parsed.take_profit }}</div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <!-- Empty State -->
+    <div class="empty">
+        <h2>📋 暂无筛选结果</h2>
+        <p>请先运行每日选股流程，或等待定时任务自动执行</p>
+        <br>
+        <button class="btn-refresh" onclick="triggerUpdate()" style="font-size:14px; padding:8px 20px;">
+            🚀 立即运行选股
+        </button>
+        <p style="margin-top:12px; font-size:12px;">
+            首次运行需要采集全 A 股数据，约需 3-5 分钟
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Footer -->
+    <div style="margin-top:32px; padding-top:16px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted);">
+        价值投资选股看板 v0.1 · 数据来源于 AKShare · 不构成投资建议
+    </div>
+</div>
+
+<script>
+// Tab switching
+function switchTab(btn, targetId) {
+    // 找到父级 ai-section
+    const section = btn.closest('.ai-section');
+    // 隐藏所有 tab content
+    section.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    // 取消所有 tab 高亮
+    section.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    // 显示目标，高亮当前
+    document.getElementById(targetId).style.display = 'block';
+    btn.classList.add('active');
+}
+
+// Trigger update
+function triggerUpdate() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '⏳ 运行中...';
+    fetch('/api/trigger_update', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            alert('更新已启动，请等待 3-5 分钟后刷新页面');
+            setTimeout(() => location.reload(), 5000);
+        })
+        .catch(err => {
+            alert('启动失败: ' + err);
+            btn.disabled = false;
+            btn.textContent = '🚀 立即运行选股';
+        });
+}
+</script>
+</body>
+</html>
