@@ -1,332 +1,671 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ page_title }}</title>
-    <meta http-equiv="refresh" content="{{ refresh_interval }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* ========== Design Tokens ========== */
         :root {
-            --bg: #0d1117;
-            --card: #161b22;
-            --border: #30363d;
-            --text: #e6edf3;
-            --muted: #8b949e;
-            --accent: #58a6ff;
-            --green: #3fb950;
-            --red: #f85149;
-            --gold: #d29922;
-            --purple: #bc8cff;
+            --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --bg-hover: #e8eaed;
+
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --accent-soft: #e8f0fe;
+
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
+
+            --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+            --radius: 8px;
+            --radius-sm: 4px;
         }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        [data-theme="dark"] {
+            --bg-primary: #1a1c1e;
+            --bg-secondary: #202124;
+            --bg-tertiary: #282a2d;
+            --bg-hover: #303134;
+
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --text-tertiary: #5f6368;
+
+            --accent: #8ab4f8;
+            --accent-hover: #aecbfa;
+            --accent-soft: #1a3a5c;
+
+            --green: #81c995;
+            --green-bg: #1e3527;
+            --red: #f28b82;
+            --red-bg: #3c2022;
+            --gold: #fdd663;
+            --gold-bg: #3d2e00;
+
+            --divider: #3c4043;
+            --divider-thin: #303134;
+
+            --shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        /* ========== Base ========== */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            line-height: 1.6;
-            padding: 20px;
+            font-family: var(--font-sans);
+            font-weight: 400;
+            font-size: 14px;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            transition: background 0.2s, color 0.2s;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
 
-        /* Header */
+        /* ========== Layout ========== */
+        .app {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px 32px;
+        }
+
+        /* ========== Header ========== */
         .header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 24px; padding-bottom: 16px;
-            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 24px;
         }
-        .header h1 {
-            font-size: 24px; font-weight: 600;
-            background: linear-gradient(135deg, var(--accent), var(--purple));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .header .status {
-            font-size: 13px; color: var(--muted);
-            display: flex; align-items: center; gap: 12px;
-        }
-        .header .status .dot {
-            display: inline-block; width: 8px; height: 8px;
-            border-radius: 50%; background: var(--green);
-            margin-right: 4px;
-        }
-        .btn-refresh {
-            background: var(--card); color: var(--accent);
-            border: 1px solid var(--border); padding: 6px 14px;
-            border-radius: 6px; cursor: pointer; font-size: 13px;
-            transition: all 0.2s;
-        }
-        .btn-refresh:hover { background: #21262d; border-color: var(--accent); }
 
-        /* Market indices */
-        .indices-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px; margin-bottom: 24px;
-        }
-        .index-card {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; padding: 16px;
-        }
-        .index-card .name { font-size: 13px; color: var(--muted); }
-        .index-card .value { font-size: 28px; font-weight: 600; margin: 4px 0; }
-        .index-card .change { font-size: 14px; }
-        .index-card .change.up { color: var(--red); }
-        .index-card .change.down { color: var(--green); }
-
-        /* Run info */
-        .run-info {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;
-            font-size: 13px; color: var(--muted);
-            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-        }
-        .run-info .label { font-weight: 500; color: var(--text); }
-
-        /* Stock cards */
-        .stock-grid {
-            display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        .header-left {
+            display: flex;
+            align-items: baseline;
             gap: 16px;
         }
-        .stock-card {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 10px; padding: 20px;
-            transition: border-color 0.2s;
-        }
-        .stock-card:hover { border-color: var(--accent); }
 
-        .stock-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 12px;
+        .header-title {
+            font-size: 18px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
         }
-        .stock-header .code {
-            font-size: 14px; color: var(--muted);
+
+        .header-subtitle {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
         }
-        .stock-header .name {
-            font-size: 18px; font-weight: 600;
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
-        .stock-header .score {
-            background: linear-gradient(135deg, var(--gold), #ffd700);
-            color: #000; font-weight: 700; font-size: 16px;
-            padding: 4px 12px; border-radius: 20px;
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .theme-toggle {
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .last-updated {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-weight: 400;
+        }
+
+        /* ========== Market Row ========== */
+        .market-row {
+            display: flex;
+            gap: 32px;
+            padding: 16px 0;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+
+        .market-item {
+            flex: 1;
+        }
+
+        .market-name {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 4px;
+        }
+
+        .market-value {
+            font-size: 26px;
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        .market-change {
+            font-size: 13px;
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
+        .market-change.up { color: var(--red); }
+        .market-change.down { color: var(--green); }
+
+        /* ========== Status Bar ========== */
+        .status-bar {
+            display: flex;
+            gap: 24px;
+            padding: 10px 0;
+            margin-bottom: 24px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--divider-thin);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-label {
+            color: var(--text-tertiary);
+            font-weight: 400;
+        }
+
+        .status-value {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        /* ========== Section Header ========== */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0 8px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .section-count {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
+        }
+
+        /* ========== Stock Cards ========== */
+        .stock-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .stock-card {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            transition: background 0.15s;
+        }
+
+        .stock-card:hover {
+            background: var(--bg-hover);
+        }
+
+        .stock-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .stock-info {
+            flex: 0 0 180px;
+        }
+
+        .stock-code {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            letter-spacing: 0.02em;
+            margin-bottom: 1px;
+        }
+
+        .stock-name {
+            font-size: 17px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+            line-height: 1.3;
+        }
+
+        .stock-score {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            display: inline-block;
+            margin-top: 4px;
         }
 
         .stock-metrics {
-            display: grid; grid-template-columns: repeat(4, 1fr);
-            gap: 8px; margin-bottom: 12px;
+            flex: 1;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding-top: 2px;
         }
-        .metric {
-            text-align: center; padding: 6px; border-radius: 6px;
-            background: rgba(48, 54, 61, 0.3);
+
+        .metric-cell {
+            min-width: 56px;
         }
-        .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
-        .metric .val { font-size: 15px; font-weight: 600; margin-top: 2px; }
-        .metric .val.good { color: var(--green); }
-        .metric .val.warn { color: var(--gold); }
-        .metric .val.bad { color: var(--red); }
+
+        .metric-cell .label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .metric-cell .value {
+            font-size: 15px;
+            font-weight: 400;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+            margin-top: 1px;
+        }
+
+        .metric-cell .value.good { color: var(--green); }
+        .metric-cell .value.warn { color: var(--gold); }
+        .metric-cell .value.bad { color: var(--red); }
 
         .stock-reason {
-            font-size: 12px; color: var(--muted);
-            margin-bottom: 12px; line-height: 1.4;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider-thin);
         }
 
+        /* ========== AI Section ========== */
         .ai-section {
-            margin-top: 12px; padding-top: 12px;
-            border-top: 1px solid var(--border);
+            margin-top: 8px;
+            padding-top: 10px;
+            border-top: 1px solid var(--divider-thin);
         }
-        .ai-section .tab-bar {
-            display: flex; gap: 4px; margin-bottom: 10px;
+
+        .ai-tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
         }
-        .ai-section .tab-btn {
-            padding: 4px 12px; border-radius: 4px; font-size: 12px;
-            border: 1px solid var(--border); background: transparent;
-            color: var(--muted); cursor: pointer;
+
+        .ai-tab {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 3px 0;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
         }
-        .ai-section .tab-btn.active {
-            background: var(--accent); color: #fff; border-color: var(--accent);
+
+        .ai-tab:hover {
+            color: var(--text-secondary);
         }
-        .ai-content {
-            font-size: 13px; color: var(--muted); line-height: 1.7;
-            max-height: 200px; overflow-y: auto;
+
+        .ai-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
         }
-        .ai-content p { margin-bottom: 8px; }
-        .ai-content strong { color: var(--text); }
+
+        .ai-panel {
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        .ai-panel p {
+            margin-bottom: 6px;
+        }
+
+        .ai-panel strong {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
         .trade-grid {
-            display: grid; grid-template-columns: 1fr 1fr;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
             gap: 8px;
+            margin-top: 9px;
         }
-        .trade-item {
-            background: rgba(48, 54, 61, 0.2);
-            border-radius: 6px; padding: 10px;
-        }
-        .trade-item .label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
-        .trade-item .val { font-size: 13px; color: var(--text); margin-top: 2px; }
 
-        /* Empty state */
-        .empty {
-            text-align: center; padding: 60px 20px; color: var(--muted);
+        .trade-cell {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
         }
-        .empty h2 { font-size: 20px; margin-bottom: 8px; }
-        .empty p { font-size: 14px; }
 
-        /* Responsive */
-        @media (max-width: 768px) {
-            .stock-grid { grid-template-columns: 1fr; }
-            .stock-metrics { grid-template-columns: repeat(2, 1fr); }
+        .trade-cell .label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 3px;
+        }
+
+        .trade-cell .value {
+            font-size: 12px;
+            color: var(--text-primary);
+            line-height: 1.4;
+        }
+
+        /* ========== Empty State ========== */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        .empty-state .icon {
+            font-size: 32px;
+            color: var(--text-tertiary);
+            margin-bottom: 12px;
+        }
+
+        .empty-state h2 {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .empty-state p {
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+
+        /* ========== Footer ========== */
+        .footer {
+            text-align: center;
+            padding: 24px 0 12px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            border-top: 1px solid var(--divider-thin);
+            margin-top: 32px;
+        }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 900px) {
+            .app { padding: 16px; }
+            .market-row { gap: 16px; flex-wrap: wrap; }
+            .market-item { flex: 1 1 40%; }
+            .stock-row { flex-direction: column; }
+            .stock-info { flex: none; }
+            .stock-metrics { gap: 12px; }
+            .trade-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+            .market-item { flex: 1 1 100%; }
+            .status-bar { flex-wrap: wrap; gap: 8px; }
+            .header-title { font-size: 15px; }
+        }
+
+        /* ========== Loading shimmer ========== */
+        .shimmer {
+            width: 100%;
+            height: 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
         }
     </style>
 </head>
 <body>
-<div class="container">
+<div class="app" id="app">
     <!-- Header -->
-    <div class="header">
-        <h1>📊 {{ page_title }}</h1>
-        <div class="status">
-            <span><span class="dot"></span>{{ now }}</span>
-            <button class="btn-refresh" onclick="location.reload()">刷新</button>
+    <header class="header">
+        <div class="header-left">
+            <h1 class="header-title">{{ page_title }}</h1>
+            <span class="header-subtitle">Value Investing Dashboard</span>
         </div>
-    </div>
+        <div class="header-right">
+            <div class="live-indicator">
+                <span class="live-dot"></span>
+                <span>Live</span>
+            </div>
+            <span class="last-updated" id="lastUpdated">{{ now }}</span>
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
+        </div>
+    </header>
 
     <!-- Market Indices -->
-    {% if indices %}
-    <div class="indices-grid">
+    <div class="market-row" id="marketRow">
+        {% if indices %}
         {% for idx in indices %}
-        <div class="index-card">
-            <div class="name">{{ idx.index_name }}</div>
-            <div class="value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
-            <div class="change {{ 'up' if idx.change_percent and idx.change_percent >= 0 else 'down' }}">
-                {{ "%+.2f"|format(idx.change_percent) if idx.change_percent else '--' }}%
-                {% if idx.change_amount %}({{ "%+.2f"|format(idx.change_amount) }}){% endif %}
+        <div class="market-item">
+            <div class="market-name">{{ idx.index_name }}</div>
+            <div class="market-value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
+            <div class="market-change {{ 'up' if idx.change_percent is not none and idx.change_percent >= 0 else 'down' }}">
+                {{ "%+.2f"|format(idx.change_percent) if idx.change_percent is not none else '--' }}%
             </div>
         </div>
         {% endfor %}
+        {% else %}
+        <div class="market-item">
+            <div class="market-name">Loading</div>
+            <div class="market-value">--</div>
+            <div class="market-change">--</div>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 
-    <!-- Run Info -->
-    {% if run_log %}
-    <div class="run-info">
-        <span><span class="label">最近运行:</span> {{ run_log.start_time[:16] }}</span>
-        <span><span class="label">状态:</span>
-            {% if run_log.status == 'completed' %}
-            <span style="color: var(--green);">✅ 成功</span>
-            {% elif run_log.status == 'running' %}
-            <span style="color: var(--gold);">⟳ 运行中</span>
-            {% else %}
-            <span style="color: var(--red);">❌ 失败</span>
-            {% endif %}
-        </span>
+    <!-- Status Bar -->
+    <div class="status-bar" id="statusBar">
+        {% if run_log %}
+        <div class="status-item">
+            <span class="status-label">Last run</span>
+            <span class="status-value">{{ run_log.start_time[:16] if run_log.start_time else '--' }}</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Status</span>
+            <span class="status-value" style="color: var(--green);">
+                {{ run_log.status }}
+            </span>
+        </div>
         {% if run_log.total_stocks %}
-        <span><span class="label">全市场:</span> {{ run_log.total_stocks }} 只</span>
+        <div class="status-item">
+            <span class="status-label">Market</span>
+            <span class="status-value">{{ run_log.total_stocks }} stocks</span>
+        </div>
         {% endif %}
         {% if run_log.screened_count %}
-        <span><span class="label">筛选入选:</span> {{ run_log.screened_count }} 只</span>
+        <div class="status-item">
+            <span class="status-label">Candidates</span>
+            <span class="status-value">{{ run_log.screened_count }}</span>
+        </div>
         {% endif %}
-        {% if run_log.analyzed_count %}
-        <span><span class="label">AI 分析:</span> {{ run_log.analyzed_count }} 只</span>
+        {% else %}
+        <div class="status-item">
+            <span class="status-label">Waiting for data</span>
+        </div>
         {% endif %}
     </div>
-    {% endif %}
 
     <!-- Stock Results -->
     {% if stocks %}
-    <div class="stock-grid">
+    <div class="section-header">
+        <span class="section-title">Selected Stocks</span>
+        <span class="section-count">{{ stocks|length }} candidates</span>
+    </div>
+
+    <div class="stock-list" id="stockList">
         {% for stock in stocks %}
-        <div class="stock-card" id="stock-{{ stock.code }}">
-            <!-- Header -->
-            <div class="stock-header">
-                <div>
-                    <div class="code">{{ stock.code }}</div>
-                    <div class="name">{{ stock.name }}</div>
+        <div class="stock-card">
+            <div class="stock-row">
+                <div class="stock-info">
+                    <div class="stock-code">{{ stock.code }}</div>
+                    <div class="stock-name">{{ stock.name }}</div>
+                    <span class="stock-score">{{ stock.score }}</span>
                 </div>
-                <div class="score">{{ stock.score }}</div>
-            </div>
 
-            <!-- Key Metrics -->
-            <div class="stock-metrics">
-                <div class="metric">
-                    <div class="label">PE</div>
-                    <div class="val {{ 'good' if stock.pe and stock.pe < 15 else 'warn' }}">
-                        {{ "%.1f"|format(stock.pe) if stock.pe else '--' }}
+                <div class="stock-metrics">
+                    <div class="metric-cell">
+                        <div class="label">PE</div>
+                        <div class="value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">
+                            {{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">PB</div>
-                    <div class="val {{ 'good' if stock.pb and stock.pb < 2 else 'warn' }}">
-                        {{ "%.2f"|format(stock.pb) if stock.pb else '--' }}
+                    <div class="metric-cell">
+                        <div class="label">PB</div>
+                        <div class="value {{ 'good' if stock.pb is not none and stock.pb < 2 else ('warn' if stock.pb is not none and stock.pb < 3.5 else '') }}">
+                            {{ "%.2f"|format(stock.pb) if stock.pb is not none else '--' }}
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">ROE</div>
-                    <div class="val {{ 'good' if stock.roe and stock.roe >= 15 else 'warn' }}">
-                        {{ "%.1f"|format(stock.roe) if stock.roe else '--' }}%
+                    <div class="metric-cell">
+                        <div class="label">ROE</div>
+                        <div class="value {{ 'good' if stock.roe is not none and stock.roe >= 15 else 'warn' }}">
+                            {{ "%.1f"|format(stock.roe) if stock.roe is not none else '--' }}%
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">负债率</div>
-                    <div class="val {{ 'good' if stock.debt_ratio and stock.debt_ratio < 40 else 'warn' }}">
-                        {{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio else '--' }}%
+                    <div class="metric-cell">
+                        <div class="label">Debt</div>
+                        <div class="value {{ 'good' if stock.debt_ratio is not none and stock.debt_ratio < 40 else 'warn' }}">
+                            {{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio is not none else '--' }}%
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">营收增长</div>
-                    <div class="val {{ 'good' if stock.revenue_growth and stock.revenue_growth >= 10 else 'warn' }}">
-                        {{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth else '--' }}%
+                    <div class="metric-cell">
+                        <div class="label">Rev Growth</div>
+                        <div class="value {{ 'good' if stock.revenue_growth is not none and stock.revenue_growth >= 10 else 'warn' }}">
+                            {{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth is not none else '--' }}%
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">净利增长</div>
-                    <div class="val {{ 'good' if stock.profit_growth and stock.profit_growth >= 10 else 'warn' }}">
-                        {{ "%.1f"|format(stock.profit_growth) if stock.profit_growth else '--' }}%
+                    <div class="metric-cell">
+                        <div class="label">Profit Growth</div>
+                        <div class="value {{ 'good' if stock.profit_growth is not none and stock.profit_growth >= 10 else 'warn' }}">
+                            {{ "%.1f"|format(stock.profit_growth) if stock.profit_growth is not none else '--' }}%
+                        </div>
                     </div>
-                </div>
-                <div class="metric">
-                    <div class="label">市值(亿)</div>
-                    <div class="val">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}</div>
-                </div>
-                <div class="metric">
-                    <div class="label">股息率</div>
-                    <div class="val">{{ "%.2f"|format(stock.dividend_yield) if stock.dividend_yield else '--' }}%</div>
+                    <div class="metric-cell">
+                        <div class="label">Market Cap</div>
+                        <div class="value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}B</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Reason -->
             {% if stock.reason %}
-            <div class="stock-reason">📋 {{ stock.reason }}</div>
+            <div class="stock-reason">{{ stock.reason }}</div>
             {% endif %}
 
-            <!-- AI Analysis -->
             {% if stock.ai_parsed %}
             <div class="ai-section">
-                <div class="tab-bar">
-                    <button class="tab-btn active" onclick="switchTab(this, 'analysis-{{ stock.code }}')">选股解析</button>
-                    <button class="tab-btn" onclick="switchTab(this, 'strategy-{{ stock.code }}')">投资策略</button>
-                    <button class="tab-btn" onclick="switchTab(this, 'trade-{{ stock.code }}')">买卖策略</button>
+                <div class="ai-tabs">
+                    <button class="ai-tab active" onclick="switchTab(this, 'analysis-{{ stock.code }}')">Analysis</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'strategy-{{ stock.code }}')">Strategy</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'trade-{{ stock.code }}')">Trade</button>
                 </div>
 
-                <div id="analysis-{{ stock.code }}" class="ai-content tab-content" style="display:block;">
+                <div id="analysis-{{ stock.code }}" class="ai-panel tab-content" style="display:block;">
                     <p>{{ stock.ai_parsed.analysis }}</p>
                 </div>
 
-                <div id="strategy-{{ stock.code }}" class="ai-content tab-content" style="display:none;">
+                <div id="strategy-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
                     <p>{{ stock.ai_parsed.investment_strategy }}</p>
                 </div>
 
-                <div id="trade-{{ stock.code }}" class="ai-content tab-content" style="display:none;">
+                <div id="trade-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
                     {% if stock.trade_parsed %}
                     <div class="trade-grid">
-                        <div class="trade-item">
-                            <div class="label">买入区间</div>
-                            <div class="val">{{ stock.trade_parsed.buy_zone }}</div>
+                        <div class="trade-cell">
+                            <div class="label">Buy Zone</div>
+                            <div class="value">{{ stock.trade_parsed.buy_zone }}</div>
                         </div>
-                        <div class="trade-item">
-                            <div class="label">目标价</div>
-                            <div class="val">{{ stock.trade_parsed.target_price }}</div>
+                        <div class="trade-cell">
+                            <div class="label">Target</div>
+                            <div class="value">{{ stock.trade_parsed.target_price }}</div>
                         </div>
-                        <div class="trade-item">
-                            <div class="label">止损</div>
-                            <div class="val">{{ stock.trade_parsed.stop_loss }}</div>
+                        <div class="trade-cell">
+                            <div class="label">Stop Loss</div>
+                            <div class="value">{{ stock.trade_parsed.stop_loss }}</div>
                         </div>
-                        <div class="trade-item">
-                            <div class="label">止盈</div>
-                            <div class="val">{{ stock.trade_parsed.take_profit }}</div>
+                        <div class="trade-cell">
+                            <div class="label">Take Profit</div>
+                            <div class="value">{{ stock.trade_parsed.take_profit }}</div>
                         </div>
                     </div>
                     {% endif %}
@@ -337,57 +676,128 @@
         {% endfor %}
     </div>
     {% else %}
-    <!-- Empty State -->
-    <div class="empty">
-        <h2>📋 暂无筛选结果</h2>
-        <p>请先运行每日选股流程，或等待定时任务自动执行</p>
-        <br>
-        <button class="btn-refresh" onclick="triggerUpdate()" style="font-size:14px; padding:8px 20px;">
-            🚀 立即运行选股
-        </button>
-        <p style="margin-top:12px; font-size:12px;">
-            首次运行需要采集全 A 股数据，约需 3-5 分钟
-        </p>
+    <div class="empty-state">
+        <div class="icon">&#9678;</div>
+        <h2>No screening results yet</h2>
+        <p>The daily screening pipeline runs at 15:30 on trading days.<br>Results will appear here automatically once available.</p>
     </div>
     {% endif %}
 
-    <!-- Footer -->
-    <div style="margin-top:32px; padding-top:16px; border-top:1px solid var(--border); text-align:center; font-size:12px; color:var(--muted);">
-        价值投资选股看板 v0.1 · 数据来源于 AKShare · 不构成投资建议
-    </div>
+    <footer class="footer">
+        Stock Dashboard v0.1 &middot; Data via AKShare &middot; Not investment advice
+    </footer>
 </div>
 
 <script>
-// Tab switching
-function switchTab(btn, targetId) {
-    // 找到父级 ai-section
-    const section = btn.closest('.ai-section');
-    // 隐藏所有 tab content
-    section.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-    // 取消所有 tab 高亮
-    section.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    // 显示目标，高亮当前
-    document.getElementById(targetId).style.display = 'block';
-    btn.classList.add('active');
-}
+    // ========== Dark Mode ==========
+    const themeToggle = document.getElementById('themeToggle');
 
-// Trigger update
-function triggerUpdate() {
-    const btn = event.target;
-    btn.disabled = true;
-    btn.textContent = '⏳ 运行中...';
-    fetch('/api/trigger_update', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            alert('更新已启动，请等待 3-5 分钟后刷新页面');
-            setTimeout(() => location.reload(), 5000);
-        })
-        .catch(err => {
-            alert('启动失败: ' + err);
-            btn.disabled = false;
-            btn.textContent = '🚀 立即运行选股';
+    function getPreferredTheme() {
+        const stored = localStorage.getItem('stock-dashboard-theme');
+        if (stored) return stored;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('stock-dashboard-theme', theme);
+        themeToggle.innerHTML = theme === 'dark' ? '&#9728;' : '&#9681;';
+    }
+
+    function toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getPreferredTheme());
+
+    // ========== Tab Switching ==========
+    function switchTab(btn, targetId) {
+        const section = btn.closest('.ai-section');
+        section.querySelectorAll('.tab-content').forEach(function(el) {
+            el.style.display = 'none';
         });
-}
+        section.querySelectorAll('.ai-tab').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById(targetId).style.display = 'block';
+        btn.classList.add('active');
+    }
+
+    // ========== Auto-Refresh via JSON API ==========
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+
+    function updateTimestamp() {
+        var el = document.getElementById('lastUpdated');
+        if (el) {
+            el.textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+        }
+    }
+
+    function fetchJSON(url) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url, true);
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch(e) { reject(e); }
+                } else {
+                    reject(new Error('Status ' + xhr.status));
+                }
+            };
+            xhr.onerror = reject;
+            xhr.send();
+        });
+    }
+
+    function renderIndices(indices) {
+        var row = document.getElementById('marketRow');
+        if (!row || !indices || indices.length === 0) return;
+        row.innerHTML = indices.map(function(idx) {
+            var cls = idx.change_percent !== null && idx.change_percent >= 0 ? 'up' : 'down';
+            var val = idx.current_value != null ? idx.current_value.toFixed(2) : '--';
+            var chg = idx.change_percent != null ? (idx.change_percent >= 0 ? '+' : '') + idx.change_percent.toFixed(2) + '%' : '--';
+            return '<div class="market-item">' +
+                '<div class="market-name">' + (idx.index_name || 'Index') + '</div>' +
+                '<div class="market-value">' + val + '</div>' +
+                '<div class="market-change ' + cls + '">' + chg + '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    function renderStatus(run) {
+        var bar = document.getElementById('statusBar');
+        if (!bar) return;
+        if (!run || run.status === 'no_runs') {
+            bar.innerHTML = '<div class="status-item"><span class="status-label">Waiting for data</span></div>';
+            return;
+        }
+        var parts = [];
+        if (run.start_time) parts.push(
+            '<div class="status-item"><span class="status-label">Last run</span><span class="status-value">' +
+            run.start_time.slice(0, 16) + '</span></div>');
+        parts.push(
+            '<div class="status-item"><span class="status-label">Status</span><span class="status-value" style="color:var(--green);">' +
+            run.status + '</span></div>');
+        if (run.total_stocks) parts.push(
+            '<div class="status-item"><span class="status-label">Market</span><span class="status-value">' +
+            run.total_stocks + ' stocks</span></div>');
+        if (run.screened_count) parts.push(
+            '<div class="status-item"><span class="status-label">Candidates</span><span class="status-value">' +
+            run.screened_count + '</span></div>');
+        bar.innerHTML = parts.join('');
+    }
+
+    function refreshDashboard() {
+        fetchJSON('/api/indices').then(renderIndices).catch(function(){});
+        fetchJSON('/api/status').then(renderStatus).catch(function(){});
+        updateTimestamp();
+    }
+
+    // Auto-refresh
+    setInterval(refreshDashboard, REFRESH_INTERVAL);
+    setInterval(updateTimestamp, 10000);
 </script>
 </body>
 </html>
