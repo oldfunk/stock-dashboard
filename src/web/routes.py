@@ -34,6 +34,12 @@ _scheduler = MarketScheduler()
 
 @app.on_event("startup")
 def _startup():
+    # 加载 .env 环境变量（AI API Key 等）
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+        logger.info(f"[Web] 加载 .env: {env_path}")
     init_database()
     # 启动后台调度器
     _scheduler.start()

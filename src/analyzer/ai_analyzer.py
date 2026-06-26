@@ -117,7 +117,7 @@ class AiAnalyzer:
             return None
 
     def _call_llm(self, prompt: str) -> Optional[str]:
-        """调用 LLM API"""
+        """调用 LLM API（含自动重试与退避）"""
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -132,50 +132,83 @@ class AiAnalyzer:
             'max_tokens': self.max_tokens,
         }
 
-        try:
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.post(
-                    f'{self.api_base.rstrip("/")}/chat/completions',
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data['choices'][0]['message']['content']
-                logger.debug(f"[AI分析] API 响应: {content[:100]}...")
-                return content
-        except httpx.HTTPError as e:
-            logger.error(f"[AI分析] API 调用失败: {e}")
-            return None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with httpx.Client(timeout=60.0) as client:
+                    resp = client.post(
+                        f'{self.api_base.rstrip("/")}/chat/completions',
+                        headers=headers,
+                        json=payload,
+                    )
+                    if resp.status_code == 429 and attempt < max_retries - 1:
+                        wait = 5 * (attempt + 1)
+                        logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
+                        time.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    content = data['choices'][0]['message']['content']
+                    logger.debug(f"[AI分析] API 响应: {content[:100]}...")
+                    return content
+            except httpx.HTTPStatusError as e:
+                if attempt < max_retries - 1 and e.response.status_code == 429:
+                    wait = 5 * (attempt + 1)
+                    logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
+                    time.sleep(wait)
+                    continue
+                logger.error(f"[AI分析] API 调用失败: {e}")
+                return None
+            except httpx.RequestError as e:
+                logger.error(f"[AI分析] 网络错误: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                return None
+        return None
 
     def _parse_response(self, content: str) -> Optional[dict]:
-        """解析 LLM 返回的 JSON"""
-        # 尝试从 markdown 代码块中提取 JSON
+        """解析 LLM 返回的 JSON——兼容各种格式噪声"""
+        # 1. 去掉 markdown 代码块包裹
         if '```json' in content:
             content = content.split('```json')[1].split('```')[0].strip()
         elif '```' in content:
-            content = content.split('```')[1].split('```')[0].strip()
+            # 取最后一个代码块
+            blocks = content.split('```')
+            for b in reversed(blocks):
+                b = b.strip()
+                if b.startswith('{'):
+                    content = b
+                    break
+            else:
+                content = blocks[1] if len(blocks) > 1 else content
 
+        # 2. 去掉前后非 JSON 文本，只保留 {} 包裹的内容
+        import re
+        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+        if json_match:
+            content = json_match.group(1)
+
+        # 3. 宽松解析
         try:
-            result = json.loads(content)
-            # 验证必要字段
-            required = ['analysis', 'investment_strategy', 'trade_strategy']
-            if not all(k in result for k in required):
-                logger.warning(f"[AI分析] 返回字段不完整: {list(result.keys())}")
-                return None
-            return result
+            result = json.loads(content, strict=False)
         except json.JSONDecodeError:
-            logger.warning(f"[AI分析] JSON 解析失败，尝试修复...")
-            # 尝试用更宽松的方式解析
-            import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                try:
-                    return json.loads(json_match.group())
-                except json.JSONDecodeError:
-                    pass
-            logger.error(f"[AI分析] JSON 解析彻底失败")
+            # 尝试修复常见问题：末尾逗号、单引号
+            cleaned = content.replace("'", '"')
+            cleaned = re.sub(r',\s*}', '}', cleaned)
+            cleaned = re.sub(r',\s*]', ']', cleaned)
+            try:
+                result = json.loads(cleaned, strict=False)
+            except json.JSONDecodeError:
+                logger.error(f"[AI分析] JSON 解析彻底失败，前200字符: {content[:200]}")
+                return None
+
+        # 4. 验证必要字段
+        required = ['analysis', 'investment_strategy', 'trade_strategy']
+        if not all(k in result for k in required):
+            logger.warning(f"[AI分析] 返回字段不完整: {list(result.keys())}")
             return None
+        return result
 
 
 def run_ai_analysis(config: dict, candidates: list[dict]) -> list[dict]:
