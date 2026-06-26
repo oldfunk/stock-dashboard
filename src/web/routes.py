@@ -78,7 +78,7 @@ async def index(request: Request):
 
     refresh = config.get('web', {}).get('refresh_interval', 60)
 
-    return templates.TemplateResponse("index.html", {
+    return templates.TemplateResponse(request, "index.html", {
         "request": request,
         "page_title": page_title,
         "indices": indices,
