@@ -202,8 +202,8 @@ def fetch_all_stocks_basic() -> list[dict]:
             'pe': _f(item.get('f9')),     # 市盈率-动态
             'pb': _f(item.get('f23')),    # 市净率
             'ps': None,
-            'market_cap': _f(item.get('f20')),  # 总市值
-            'circulating_cap': _f(item.get('f21')),  # 流通市值
+            'market_cap': _cap(_f(item.get('f20'))),  # 总市值（元→亿）
+            'circulating_cap': _cap(_f(item.get('f21'))),  # 流通市值（元→亿）
             'roe': None,
             'revenue': None,
             'revenue_growth': None,
@@ -272,6 +272,13 @@ def _enrich_financial(records: list[dict]):
             enriched += 1
 
     logger.info(f"[采集] 财务指标补充: {enriched}/{len(records)}")
+
+
+def _cap(val) -> Optional[float]:
+    """将市值从元转换为亿"""
+    if val is None:
+        return None
+    return round(val / 100_000_000, 2)
 
 
 def _f(val) -> Optional[float]:
