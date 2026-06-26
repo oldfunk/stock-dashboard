@@ -34,3 +34,6 @@ logs/
 
 # Config override
 config/local.yaml
+
+# Cache
+data/cache/

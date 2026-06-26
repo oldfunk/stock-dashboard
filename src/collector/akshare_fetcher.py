@@ -251,14 +251,17 @@ FIN_INDICATORS = {
     'profit_growth': '归属母公司净利润增长率',
 }
 
-def enrich_financial_data(stocks: list[dict], workers=8) -> list[dict]:
+def enrich_financial_data(stocks: list[dict], workers=8, batch_timeout=120) -> list[dict]:
     import akshare as ak
-    logger.info(f"[财务] 获取 {len(stocks)} 只 ({workers}线程)...")
+    total = len(stocks)
+    logger.info(f"[财务] 获取 {total} 只 ({workers}线程, 批次超时{batch_timeout}s)...")
+
     def _fetch(s):
         try:
             df = ak.stock_financial_abstract(symbol=s['code'])
             cols = [c for c in df.columns if c not in ('选项', '指标')]
-            if not cols: return s
+            if not cols:
+                return s
             annual = [c for c in cols if c.endswith('1231')]
             latest_a = annual[0] if annual else cols[-1]
             latest_q = cols[0]
@@ -274,13 +277,26 @@ def enrich_financial_data(stocks: list[dict], workers=8) -> list[dict]:
         except Exception as e:
             logger.debug(f"[财务] {s['code']} 失败: {e}")
         return s
+
+    # 分批 + 批次超时，避免单只卡死整个 pipeline
     done = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        for f in concurrent.futures.as_completed({ex.submit(_fetch, s): i for i, s in enumerate(stocks)}):
-            done += 1
-            if done % 20 == 0 or done == len(stocks):
-                logger.info(f"[财务] {done}/{len(stocks)}")
-    logger.info(f"[财务] ROE: {sum(1 for s in stocks if s.get('roe') is not None)}/{len(stocks)}")
+    BATCH_SIZE = 100
+    for batch_start in range(0, total, BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            fut_map = {ex.submit(_fetch, s): s['code'] for s in batch}
+            done_inner, _ = concurrent.futures.wait(
+                fut_map.keys(), timeout=batch_timeout)
+            # 超时的 task 就不等了
+            for f in done_inner:
+                done += 1
+            timed_out = len(batch) - len(done_inner)
+            if timed_out:
+                logger.warning(f"[财务] 批次 {batch_start//BATCH_SIZE+1} 超时 {timed_out} 只，跳过")
+        logger.info(f"[财务] {done}/{total}")
+
+    with_roe = sum(1 for s in stocks if s.get('roe') is not None)
+    logger.info(f"[财务] ROE: {with_roe}/{total}")
     return stocks
 
 # ── 采集流水线 ──
