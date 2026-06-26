@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 # -------- 创建 FastAPI 应用 --------
 app = FastAPI(title="价值投资选股看板")
 
+@app.on_event("startup")
+def _startup():
+    init_database()
+    logger.info("[Web] 数据库初始化完成")
+
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
