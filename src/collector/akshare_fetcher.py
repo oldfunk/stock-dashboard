@@ -1,295 +1,240 @@
 """
-数据采集模块
-使用系统 curl 绕过 sing-box TLS 指纹检测
-直接调用东方财富 API 获取 A 股数据
+A 股数据采集模块
+数据源：东方财富行情API（通过 curl 子进程，绕过 TUN 代理 SSL 阻断）
+策略：curl全量快照(含PE/PB/市值ROE) → 初筛 → 并行财务补充
 """
 
-import time
-import json
-import logging
 import subprocess
+import json
+import time
+import logging
+import concurrent.futures
 from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _curl_get(url: str, timeout: int = 30) -> Optional[str]:
-    """使用系统 curl 发起 GET 请求"""
+def _safe_float(val) -> Optional[float]:
+    if val is None: return None
     try:
-        result = subprocess.run(
-            [
-                'curl', '-s', '--connect-timeout', str(timeout // 2),
-                '--max-time', str(timeout),
-                '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                '-H', 'Referer: https://quote.eastmoney.com/',
-                url,
-            ],
-            capture_output=True, text=True, timeout=timeout + 5,
-        )
-        if result.returncode == 0 and result.stdout:
-            return result.stdout
-        return None
-    except subprocess.TimeoutExpired:
-        logger.warning(f"[采集] curl 超时")
-        return None
-    except Exception as e:
-        logger.error(f"[采集] curl 异常: {e}")
+        v = float(val)
+        import math
+        return None if (math.isnan(v) or math.isinf(v)) else round(v, 2)
+    except (ValueError, TypeError):
         return None
 
 
-def _fetch_paginated(base_url: str, params: dict, page_size: int = 100,
-                     max_pages: int = 60, max_retries: int = 5) -> list[dict]:
-    """
-    从东方财富分页 API 拉取全量数据
-    东方财富每页最多返回 100 条
-    使用系统 curl 避免 TLS 指纹封锁
-    自动重试，跳过失败页面
-    """
-    import urllib.parse
-
-    all_data = []
-    total_items = 0
-    consecutive_empty = 0
-
-    for page in range(1, max_pages + 1):
-        params['pn'] = str(page)
-        params['pz'] = str(page_size)
-        query = urllib.parse.urlencode(params, doseq=True)
-        url = f'{base_url}?{query}'
-
-        success = False
-        for attempt in range(max_retries):
-            text = _curl_get(url)
-            if text:
-                try:
-                    data = json.loads(text)
-                    if data.get('data') is None or data['data'].get('diff') is None:
-                        consecutive_empty += 1
-                        break  # retry loop
-
-                    items = data['data']['diff']
-                    if not items:
-                        consecutive_empty += 1
-                        break  # retry loop
-
-                    all_data.extend(items)
-
-                    total = data['data'].get('total', 0)
-                    if total_items == 0 and total > 0:
-                        total_items = total
-                        expected_pages = (total + page_size - 1) // page_size
-                        if expected_pages > 1:
-                            logger.info(f"[采集] 共 {total} 条，约 {expected_pages} 页")
-
-                    success = True
-                    consecutive_empty = 0  # reset on success
-
-                    # 已获取全部 → 结束
-                    if total_items > 0 and len(all_data) >= total_items:
-                        return all_data
-                    break  # retry loop
-                except (json.JSONDecodeError, KeyError, ValueError):
-                    pass
-
-            if attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))
-
-        if not success:
-            logger.warning(f"[采集] 第 {page} 页失败")
-
-        # 连续 3 次空页 → 结束
-        if consecutive_empty >= 3:
-            logger.info(f"[采集] 连续 {consecutive_empty} 页空，结束翻页")
-            break
-
-    logger.info(f"[采集] 共获取 {len(all_data)} 条")
-    return all_data
+def _curl_get(url: str, timeout=15) -> Optional[str]:
+    """系统 curl 发 GET（绕过 Python requests 在 TUN 下的 SSL 问题）"""
+    try:
+        r = subprocess.run(
+            ['curl', '-s', '--connect-timeout', str(timeout),
+             '--max-time', str(timeout + 5), url],
+            capture_output=True, text=True, timeout=timeout + 10)
+        if r.returncode == 0 and r.stdout:
+            return r.stdout
+    except Exception:
+        pass
+    return None
 
 
-def fetch_market_index() -> list[dict]:
-    """获取大盘指数（上证综指、深证成指、创业板指、科创50）"""
-    now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d")
-    ts = now.isoformat()
-
-    all_items = []
-
-    # 上证系列指数 (m:1+t:1)
-    params = {
-        'pn': '1', 'pz': '50', 'po': '1', 'np': '1',
-        'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
-        'fltt': '2', 'invt': '2', 'fid': 'f3',
-        'fs': 'm:1+t:1',
-        'fields': 'f2,f3,f4,f5,f6,f12,f14',
-    }
-    all_items.extend(_fetch_paginated('https://48.push2.eastmoney.com/api/qt/clist/get', params))
-
-    # 沪深重要指数 (b:MK0010) — 含上证指数、深证成指、创业板指等
-    params2 = {
-        'pn': '1', 'pz': '50', 'po': '1', 'np': '1',
-        'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
-        'fltt': '2', 'invt': '2', 'dect': '1', 'fid': '',
-        'fs': 'b:MK0010',
-        'fields': 'f2,f3,f4,f5,f6,f12,f14',
-    }
-    all_items.extend(_fetch_paginated('https://33.push2.eastmoney.com/api/qt/clist/get', params2))
-
-    target_names = {
-        '上证指数': '000001', '深证成指': '399001',
-        '创业板指': '399006', '科创50': '000688',
-    }
-
-    indices = []
-    seen = set()
-    for item in all_items:
-        name = str(item.get('f14', ''))
-        if name in target_names and name not in seen:
-            seen.add(name)
-            indices.append({
-                'index_code': str(item.get('f12', '')),
-                'index_name': name,
-                'current_value': float(item.get('f2', 0) or 0),
-                'change_percent': float(item.get('f3', 0) or 0),
-                'change_amount': float(item.get('f4', 0) or 0),
-                'volume': float(item.get('f5', 0) or 0),
-                'amount': float(item.get('f6', 0) or 0),
-                'pe': None,
-                'pb': None,
-                'timestamp': ts,
-                'date': date_str,
-            })
-
-    logger.info(f"[采集] 大盘指数: {len(indices)} 条 {[i['index_name'] for i in indices]}")
-    return indices
+# 东方财富 API 字段映射
+# f12=代码, f14=名称, f2=最新价, f9=动态市盈率
+# f20=总市值, f23=市净率, f37=ROE, f38=营收增长率
+# f39=净利润增长率, f40=资产负债率, f41=股息率
+EM_FIELDS = "f12,f14,f2,f3,f4,f9,f20,f23,f37,f38,f39,f40,f41"
+# A 股全部板块
+EM_A_SHARES = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 
 
-def fetch_all_stocks_basic() -> list[dict]:
-    """获取全 A 股行情+基础财务数据"""
-    now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d")
+def _build_em_url(pn: int, pz: int = 200) -> str:
+    return (f"https://push2.eastmoney.com/api/qt/clist/get"
+            f"?pn={pn}&pz={pz}&po=1&np=1&fltt=2&invt=2"
+            f"&fid=f12&fs={EM_A_SHARES}&fields={EM_FIELDS}")
 
-    params = {
-        'pn': '1', 'pz': '500', 'po': '1', 'np': '1',
-        'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
-        'fltt': '2', 'invt': '2', 'fid': 'f3',
-        'fs': 'm:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048',
-        'fields': 'f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f115,f152',
-    }
 
-    items = _fetch_paginated(
-        'https://82.push2.eastmoney.com/api/qt/clist/get',
-        params, page_size=500
-    )
-
-    if not items:
+def _parse_em(raw: str) -> list[dict]:
+    try:
+        d = json.loads(raw).get('data', {})
+        return d.get('diff', []) if isinstance(d.get('diff'), list) else []
+    except (json.JSONDecodeError, AttributeError):
         return []
 
-    records = []
-    for item in items:
-        name = str(item.get('f14', '') or '')
-        code = str(item.get('f12', '') or '')
-        if not code or not name:
+
+# ── 大盘指数 ──
+
+def fetch_market_index(max_retries=3) -> list[dict]:
+    import akshare as ak
+    now = datetime.now()
+    ds = now.strftime("%Y-%m-%d")
+    ts = now.isoformat()
+    targets = {'上证指数', '深证成指', '创业板指', '科创50'}
+
+    for att in range(max_retries):
+        try:
+            df = ak.stock_zh_index_spot_em()
+            idx = []
+            for _, r in df.iterrows():
+                n = str(r.get('名称', ''))
+                if n in targets:
+                    idx.append({'index_code': str(r.get('代码', '')), 'index_name': n,
+                                'current_value': _safe_float(r.get('最新价')) or 0,
+                                'change_percent': _safe_float(r.get('涨跌幅')),
+                                'change_amount': _safe_float(r.get('涨跌额')),
+                                'volume': _safe_float(r.get('成交量')) or 0,
+                                'amount': _safe_float(r.get('成交额')) or 0,
+                                'pe': None, 'pb': None, 'timestamp': ts, 'date': ds})
+            if len(idx) >= 2:
+                logger.info(f"[采集] 大盘: {len(idx)} 条")
+                return idx
+        except Exception as e:
+            logger.warning(f"[采集] 大盘第{att+1}次失败: {e}")
+            if att < max_retries - 1:
+                time.sleep(5)
+    return []
+
+
+# ── 全 A 股快照 ──
+
+def fetch_all_stocks_basic() -> list[dict]:
+    """curl → 东方财富, 取全A股含PE/PB/ROE"""
+    now = datetime.now()
+    ds = now.strftime("%Y-%m-%d")
+
+    raw = _curl_get(_build_em_url(1, 1))
+    if not raw:
+        return []
+    meta = json.loads(raw).get('data', {})
+    total = meta.get('total', 5000)
+    pz = 200
+    pages = (total // pz) + 1
+    logger.info(f"[采集] curl EM: ~{total}只, {pages}页×{pz}")
+
+    all_items = []
+    for pn in range(1, pages + 1):
+        raw = _curl_get(_build_em_url(pn, pz))
+        if not raw:
+            logger.warning(f"[采集] 第{pn}页失败, 跳过")
             continue
+        all_items.extend(_parse_em(raw))
+        if pn % 5 == 0 or pn == pages:
+            logger.info(f"[采集] 进度 {pn}/{pages} ({len(all_items)}只)")
+        if pn < pages:
+            time.sleep(0.3)
 
-        is_st = 1 if (name.startswith('*ST') or name.startswith('ST')) else 0
-
+    records = []
+    for item in all_items:
+        code = str(item.get('f12', '')).zfill(6)
+        name = str(item.get('f14', ''))
+        mc = _safe_float(item.get('f20'))
         records.append({
-            'code': code,
-            'name': name,
-            'market': 'A',
+            'code': code, 'name': name.replace(' ', ''), 'market': 'A',
             'sector': None,
-            'pe': _f(item.get('f9')),     # 市盈率-动态
-            'pb': _f(item.get('f23')),    # 市净率
+            'pe': _safe_float(item.get('f9')),
+            'pb': _safe_float(item.get('f23')),
             'ps': None,
-            'market_cap': _cap(_f(item.get('f20'))),  # 总市值（元→亿）
-            'circulating_cap': _cap(_f(item.get('f21'))),  # 流通市值（元→亿）
-            'roe': None,
+            'market_cap': round(mc / 1e8, 2) if mc else None,
+            'circulating_cap': None,
+            'roe': _safe_float(item.get('f37')),
             'revenue': None,
-            'revenue_growth': None,
+            'revenue_growth': _safe_float(item.get('f38')),
             'profit': None,
-            'profit_growth': None,
-            'debt_ratio': None,
-            'dividend_yield': None,
-            'current_price': _f(item.get('f2')),  # 最新价
-            'high_52w': _f(item.get('f15')),  # 最高
-            'low_52w': _f(item.get('f16')),   # 最低
-            'is_st': is_st,
-            'list_date': None,
-            'snapshot_date': date_str,
+            'profit_growth': _safe_float(item.get('f39')),
+            'debt_ratio': _safe_float(item.get('f40')),
+            'dividend_yield': _safe_float(item.get('f41')),
+            'current_price': _safe_float(item.get('f2')),
+            'high_52w': None, 'low_52w': None,
+            'is_st': 1 if ('ST' in name or '*ST' in name) else 0,
+            'list_date': None, 'snapshot_date': ds,
         })
 
-    logger.info(f"[采集] 全A股: {len(records)} 只")
-
-    # 补充财务指标（从财务分析API）
-    _enrich_financial(records)
-
+    logger.info(f"[采集] 全A股完成: {len(records)}只")
     return records
 
 
-def _enrich_financial(records: list[dict]):
-    """补充 ROE、营收增长、负债率等财务指标"""
-    logger.info(f"[采集] 开始补充财务指标 ({len(records)} 只)...")
+# ── 初筛 ──
 
-    # 分页获取全部股票的财务指标
-    params = {
-        'pn': '1', 'pz': '500', 'po': '1', 'np': '1',
-        'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
-        'fltt': '2', 'invt': '2', 'fid': 'f3',
-        'fs': 'm:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048',
-        'fields': 'f9,f12,f23,f37,f38,f39,f40,f41,f42,f45,f46,f48,f49,f50,f57,f58,f84,f85,f86,f87,f88,f115,f125,f128,f140,f152,f162,f167,f168,f169,f170,f171,f172,f173,f257,f258,f266,f267,f268,f375,f376,f377',
-    }
-
-    items = _fetch_paginated(
-        'https://82.push2.eastmoney.com/api/qt/clist/get',
-        params, page_size=500
-    )
-
-    if not items:
-        return
-
-    # 建立快速查找
-    fin_map = {}
-    for item in items:
-        code = str(item.get('f12', '') or '')
-        if code:
-            fin_map[code] = item
-
-    enriched = 0
-    for rec in records:
-        fin = fin_map.get(rec['code'])
-        if fin:
-            # 东方财富字段映射:
-            # f37=ROE, f39=营收增长%, f40=净利润增长%, f41=资产负债率%
-            # f45=营业收入, f46=净利润, f57=股息率%
-            rec['roe'] = _f(fin.get('f37'))
-            rec['revenue'] = _f(fin.get('f45'))
-            rec['revenue_growth'] = _f(fin.get('f39'))
-            rec['profit'] = _f(fin.get('f46'))
-            rec['profit_growth'] = _f(fin.get('f40'))
-            rec['debt_ratio'] = _f(fin.get('f41'))
-            rec['dividend_yield'] = _f(fin.get('f57'))
-            enriched += 1
-
-    logger.info(f"[采集] 财务指标补充: {enriched}/{len(records)}")
+def pre_filter_stocks(records: list[dict], config: dict) -> list[dict]:
+    cfg = config.get('screener', {}).get('conditions', {})
+    candidates = []
+    for s in records:
+        if cfg.get('exclude_st', True) and s['is_st']:
+            continue
+        pe = s.get('pe')
+        if pe is None or pe < cfg.get('min_pe', 3) or pe > cfg.get('max_pe', 20):
+            continue
+        pb = s.get('pb')
+        if pb is not None and pb > cfg.get('max_pb', 3.5):
+            continue
+        mc = s.get('market_cap')
+        if mc is not None and (mc < cfg.get('min_market_cap', 50) or mc > cfg.get('max_market_cap', 10000)):
+            continue
+        candidates.append(s)
+    logger.info(f"[初筛] {len(records)} -> {len(candidates)}")
+    return candidates
 
 
-def _cap(val) -> Optional[float]:
-    """将市值从元转换为亿"""
-    if val is None:
-        return None
-    return round(val / 100_000_000, 2)
+# ── 财务补充 ──
+
+def enrich_financial_data(stocks: list[dict], workers=8) -> list[dict]:
+    """并行补全财务指标（新浪源 stock_financial_abstract），覆盖 curl 原始值"""
+    import akshare as ak
+
+    need = stocks  # always fetch from Sina (curl EM values may be raw/unscaled)
+    logger.info(f"[财务] 获取{len(need)}只财务指标 ({workers}线程)...")
+
+    def _fetch(s):
+        try:
+            df = ak.stock_financial_abstract(symbol=s['code'])
+            cols = [c for c in df.columns if c not in ('选项', '指标')]
+            if not cols: return s
+            lk = cols[0]  # newest period
+            fin = {}
+            for _, r in df.iterrows():
+                fin[str(r.get('指标', ''))] = _safe_float(r.get(lk))
+            # Always overwrite with Sina data
+            s['roe'] = fin.get('净资产收益率(ROE)')
+            s['debt_ratio'] = fin.get('资产负债率')
+            s['revenue_growth'] = fin.get('营业总收入增长率')
+            s['profit_growth'] = fin.get('归属母公司净利润增长率')
+        except Exception:
+            pass
+        return s
+
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        fs = {ex.submit(_fetch, s): i for i, s in enumerate(stocks)}
+        for f in concurrent.futures.as_completed(fs):
+            done += 1
+            if done % 20 == 0 or done == len(stocks):
+                logger.info(f"[财务] {done}/{len(stocks)}")
+
+    roe_ok = sum(1 for s in stocks if s.get('roe') is not None)
+    logger.info(f"[财务] ROE数据: {roe_ok}/{len(stocks)}")
+    return stocks
 
 
-def _f(val) -> Optional[float]:
-    """安全转 float"""
-    if val is None or val == '-' or val == '':
-        return None
-    try:
-        v = float(str(val).replace(',', ''))
-        import math
-        if math.isnan(v) or math.isinf(v):
-            return None
-        return round(v, 2)
-    except (ValueError, TypeError):
-        return None
+# ── 采集流水线 ──
+
+def run_collect_pipeline(config: dict) -> list[dict]:
+    """采集 → 快照 → 初筛 → 财务补充"""
+    from src.models.database import MarketIndexDAO, StockSnapshotDAO
+
+    indices = fetch_market_index()
+    if indices:
+        MarketIndexDAO().save(indices)
+        for i in indices:
+            logger.info(f"  {i['index_name']}: {i['current_value']}")
+
+    records = fetch_all_stocks_basic()
+    if not records:
+        return []
+    StockSnapshotDAO().save_batch(records)
+
+    candidates = pre_filter_stocks(records, config)
+    if not candidates:
+        return []
+
+    enrich_financial_data(candidates)
+    return candidates

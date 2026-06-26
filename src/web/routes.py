@@ -138,6 +138,6 @@ def run_server():
     init_database()
 
     import uvicorn
-    print(f"🌐 价值投资选股看板启动: http://{host}:{port}")
-    print(f"   按 Ctrl+C 停止服务")
+    print(f"Stock Dashboard running at http://{host}:{port}")
+    print(f"Press Ctrl+C to stop")
     uvicorn.run(app, host=host, port=port, log_level="info")

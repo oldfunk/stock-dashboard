@@ -119,6 +119,59 @@ class ValueScreener:
             self.run_log_dao.complete_run(run_id, 0, 0, 0, str(e))
             return []
 
+    def run_from_candidates(self, candidates: list[dict]) -> list[dict]:
+        """
+        对已采集+初筛的候选列表执行完整价值投资筛选 + 评分
+
+        1. 调用 _check_value_criteria 做完整过滤（含 ROE/负债/增长等）
+        2. 综合评分排序
+        3. 保存结果到 screening_result
+        4. 返回 Top N
+        """
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_date = datetime.now().strftime("%Y-%m-%d")
+        self.run_log_dao.start_run(run_id)
+
+        try:
+            total = len(candidates)
+            passed = []
+            for s in candidates:
+                reasons = self._check_value_criteria(s)
+                if reasons:
+                    score = self._calculate_score(s, reasons)
+                    passed.append({
+                        'run_id': run_id,
+                        'run_date': run_date,
+                        'code': s['code'],
+                        'name': s['name'],
+                        'score': round(score, 1),
+                        'pe': s.get('pe'),
+                        'pb': s.get('pb'),
+                        'roe': s.get('roe'),
+                        'revenue_growth': s.get('revenue_growth'),
+                        'profit_growth': s.get('profit_growth'),
+                        'debt_ratio': s.get('debt_ratio'),
+                        'market_cap': s.get('market_cap'),
+                        'reason': '; '.join(reasons),
+                    })
+
+            passed.sort(key=lambda x: x['score'], reverse=True)
+            top_n = passed[:self.cfg.get('max_candidates', 20)]
+
+            self.result_dao.save_batch(top_n)
+            self.run_log_dao.complete_run(run_id, total, len(top_n), 0)
+
+            logger.info(
+                f"[筛选] 候选 {total} 只 → "
+                f"通过 {len(passed)} 只 → Top {len(top_n)} 只"
+            )
+            return top_n
+
+        except Exception as e:
+            logger.error(f"[筛选] 失败: {e}", exc_info=True)
+            self.run_log_dao.complete_run(run_id, 0, 0, 0, str(e))
+            return []
+
     def _check_value_criteria(self, stock: dict) -> list[str]:
         """
         检查是否符合价值投资标准
@@ -291,7 +344,66 @@ class ValueScreener:
         return score
 
 
-def run_screener(config: dict) -> list[dict]:
-    """便捷入口"""
-    screener = ValueScreener(config.get('screener', {}).get('conditions', {}))
-    return screener.run()
+def run_screener(config: dict, candidates: list[dict] = None,
+                 run_id: str = None, run_date: str = None) -> list[dict]:
+    """
+    对候选股票进行评分排序，保存 top N 到数据库。
+
+    Args:
+        config: 完整配置字典
+        candidates: 预筛选的候选股列表（如果为 None，则从数据库读取最新快照）
+        run_id: 运行批次 ID
+        run_date: 运行日期
+    """
+    conditions = config.get('screener', {}).get('conditions', {})
+    screener = ValueScreener(conditions)
+
+    if candidates is not None:
+        # 使用已预筛选+补充财务数据的候选股
+        from src.models.database import ScreeningResultDAO, RunLogDAO
+        result_dao = ScreeningResultDAO()
+        if not run_id:
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if not run_date:
+            run_date = datetime.now().strftime("%Y-%m-%d")
+
+        scored = []
+        for c in candidates:
+            reasons = screener._check_value_criteria(c)
+            if reasons:
+                score = screener._calculate_score(c)
+                scored.append({
+                    'run_id': run_id,
+                    'run_date': run_date,
+                    'code': c['code'],
+                    'name': c['name'],
+                    'score': round(score, 1),
+                    'pe': c.get('pe'),
+                    'pb': c.get('pb'),
+                    'roe': c.get('roe'),
+                    'revenue_growth': c.get('revenue_growth'),
+                    'profit_growth': c.get('profit_growth'),
+                    'debt_ratio': c.get('debt_ratio'),
+                    'market_cap': c.get('market_cap'),
+                    'reason': '; '.join(reasons),
+                })
+
+        scored.sort(key=lambda x: x['score'], reverse=True)
+        top_n = scored[:conditions.get('max_candidates', 20)]
+
+        if top_n:
+            result_dao.save_batch(top_n)
+            # 更新 run_log 中的筛选数量
+            from src.models.database import get_connection
+            conn = get_connection()
+            conn.execute(
+                "UPDATE run_log SET screened_count = ? WHERE run_id = ?",
+                (len(top_n), run_id)
+            )
+            conn.commit()
+            conn.close()
+
+        return top_n
+    else:
+        # 原始行为：从数据库读取快照
+        return screener.run()
