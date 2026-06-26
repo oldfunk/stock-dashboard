@@ -238,7 +238,7 @@ class ScreeningResultDAO:
         conn = get_connection()
         rows = conn.execute("""
             SELECT sr.* FROM screening_result sr
-            WHERE sr.run_date = (SELECT MAX(run_date) FROM screening_result)
+            WHERE sr.run_id = (SELECT MAX(run_id) FROM screening_result)
             ORDER BY sr.score DESC LIMIT ?
         """, (limit,)).fetchall()
         conn.close()
