@@ -89,22 +89,15 @@ def run_daily_pipeline(config: dict = None):
     for s in top_stocks:
         logger.info(f"  {s['code']} {s['name']:10s} score={s['score']:.0f}  PE={s['pe']} PB={s.get('pb')} ROE={s.get('roe')}%")
 
-    # Step 6: AI analysis
-    logger.info("\n[3/3] AI analysis")
-    from src.analyzer.ai_analyzer import run_ai_analysis
-
-    enhanced = run_ai_analysis(config, top_stocks)
-    analyzed = sum(1 for s in enhanced if s.get('ai_analysis'))
-
-    # Finish
-    RunLogDAO().complete_run(run_id, total_stocks, len(top_stocks), analyzed)
+    # Finish (AI analysis runs separately via cron — see scripts/run_ai_analysis.py)
+    RunLogDAO().complete_run(run_id, total_stocks, len(top_stocks), 0)
 
     logger.info(f"\n{'=' * 55}")
     logger.info("Pipeline complete")
     logger.info(f"  Market: {total_stocks} stocks")
     logger.info(f"  Candidates: {len(candidates)}")
     logger.info(f"  Selected: {len(top_stocks)}")
-    logger.info(f"  AI analyzed: {analyzed}")
+    logger.info(f"  AI analyzed: via background cron (scripts/run_ai_analysis.py)")
     logger.info(f"{'=' * 55}")
 
 

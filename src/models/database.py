@@ -123,6 +123,20 @@ CREATE INDEX IF NOT EXISTS idx_screening_run_date ON screening_result(run_date);
 CREATE INDEX IF NOT EXISTS idx_screening_code ON screening_result(code);
 CREATE INDEX IF NOT EXISTS idx_market_index_date ON market_index(date);
 CREATE INDEX IF NOT EXISTS idx_stock_snapshot_sector ON stock_snapshot(sector);
+
+-- 股票AI分析历史（逐日累积，可追溯）
+CREATE TABLE IF NOT EXISTS stock_analysis_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stock_code TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    analysis_date TEXT NOT NULL,
+    score REAL,
+    ai_analysis TEXT,
+    ai_trade_strategy TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_history_code_date ON stock_analysis_history(stock_code, analysis_date);
+CREATE INDEX IF NOT EXISTS idx_analysis_history_run ON stock_analysis_history(run_id);
 """
 
 
@@ -304,5 +318,41 @@ class RunLogDAO:
         row = conn.execute("""
             SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1
         """).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+class StockAnalysisHistoryDAO:
+    """股票 AI 分析历史 DAO"""
+
+    def save(self, stock_code: str, run_id: str, score: float,
+             ai_analysis: str, ai_trade_strategy: str):
+        conn = get_connection()
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT INTO stock_analysis_history
+            (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (stock_code, run_id, now[:10], score, ai_analysis, ai_trade_strategy, now))
+        conn.commit()
+        conn.close()
+
+    def get_history(self, code: str, limit: int = 10) -> list[dict]:
+        conn = get_connection()
+        rows = conn.execute("""
+            SELECT * FROM stock_analysis_history
+            WHERE stock_code = ?
+            ORDER BY analysis_date DESC, id DESC LIMIT ?
+        """, (code, limit)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_latest_for_code(self, code: str) -> Optional[dict]:
+        conn = get_connection()
+        row = conn.execute("""
+            SELECT * FROM stock_analysis_history
+            WHERE stock_code = ?
+            ORDER BY analysis_date DESC, id DESC LIMIT 1
+        """, (code,)).fetchone()
         conn.close()
         return dict(row) if row else None

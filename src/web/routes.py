@@ -17,6 +17,7 @@ from src.models.database import (
     init_database,
     MarketIndexDAO,
     ScreeningResultDAO,
+    StockAnalysisHistoryDAO,
     RunLogDAO,
 )
 from src.scheduler import (
@@ -108,8 +109,10 @@ async def index(request: Request):
     # 获取运行状态
     run_log = RunLogDAO().get_latest_run()
 
-    # 解析 AI 分析 JSON
+    # 解析 AI 分析 JSON 并附加历史记录
+    history_dao = StockAnalysisHistoryDAO()
     for stock in stocks:
+        code = stock['code']
         if stock.get('ai_analysis'):
             try:
                 stock['ai_parsed'] = json.loads(stock['ai_analysis'])
@@ -120,6 +123,8 @@ async def index(request: Request):
                 stock['trade_parsed'] = json.loads(stock['ai_trade_strategy'])
             except (json.JSONDecodeError, TypeError):
                 stock['trade_parsed'] = None
+        # 附加历史分析摘要
+        stock['analysis_history'] = history_dao.get_history(code, limit=5)
 
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
@@ -182,7 +187,18 @@ async def api_stocks():
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+    # 附加历史记录
+    hist_dao = StockAnalysisHistoryDAO()
+    for s in stocks:
+        s['analysis_history'] = hist_dao.get_history(s['code'], limit=5)
+
     return [dict(s) for s in stocks]
+
+
+@app.get("/api/history/{code}")
+async def api_stock_history(code: str):
+    """单只股票的历史分析记录"""
+    return StockAnalysisHistoryDAO().get_history(code, limit=20)
 
 
 @app.get("/api/status")

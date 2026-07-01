@@ -477,6 +477,58 @@
             color: var(--text-tertiary);
         }
 
+        /* ========== History Bar ========== */
+        .history-bar {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        .history-toggle {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 2px 0;
+            transition: color 0.15s;
+        }
+
+        .history-toggle:hover {
+            color: var(--text-secondary);
+        }
+
+        .history-list {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .history-item {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .hist-date {
+            font-weight: 500;
+            color: var(--text-primary);
+            min-width: 80px;
+        }
+
+        .hist-score {
+            color: var(--text-tertiary);
+            min-width: 60px;
+        }
+
+        .hist-status {
+            font-size: 10px;
+        }
+
         /* ========== Footer ========== */
         .footer {
             text-align: center;
@@ -707,6 +759,27 @@
                 </div>
             </div>
             {% endif %}
+
+            {% if stock.analysis_history and stock.analysis_history|length > 0 %}
+            <div class="history-bar">
+                <button class="history-toggle" onclick="toggleHistory('{{ stock.code }}')">
+                    &#128214; 历史分析 ({{ stock.analysis_history|length }}次)
+                </button>
+                <div id="hist-{{ stock.code }}" class="history-list" style="display:none;">
+                    {% for h in stock.analysis_history %}
+                    <div class="history-item">
+                        <span class="hist-date">{{ h.analysis_date }}</span>
+                        <span class="hist-score">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>
+                        {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                        <span class="hist-status" style="color:var(--color-up);">&#9679; 有分析</span>
+                        {% else %}
+                        <span class="hist-status" style="color:var(--text-tertiary);">&#9675; 已尝试</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -770,6 +843,14 @@
     }
 
     setColorScheme(getPreferredColorScheme());
+
+    // ========== History Toggle ==========
+    function toggleHistory(code) {
+        var el = document.getElementById('hist-' + code);
+        if (el) {
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
 
     // ========== Tab Switching ==========
     function switchTab(btn, targetId) {
