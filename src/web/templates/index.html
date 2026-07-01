@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="light" data-color-scheme="cn">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -32,6 +32,12 @@
             --red-bg: #fce8e6;
             --gold: #b06000;
             --gold-bg: #fef7e0;
+
+            /* Color scheme: 红涨绿跌 (cn, default) */
+            --color-up: var(--red);
+            --color-up-bg: var(--red-bg);
+            --color-down: var(--green);
+            --color-down-bg: var(--green-bg);
 
             --divider: #e0e3e7;
             --divider-thin: #e8eaed;
@@ -66,6 +72,14 @@
             --divider-thin: #303134;
 
             --shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        /* Color scheme: 绿涨红跌 (Western) */
+        [data-color-scheme="us"] {
+            --color-up: var(--green);
+            --color-up-bg: var(--green-bg);
+            --color-down: var(--red);
+            --color-down-bg: var(--red-bg);
         }
 
         /* ========== Base ========== */
@@ -208,11 +222,11 @@
             margin-top: 2px;
         }
 
-        .market-change.up { color: var(--red); }
-        .market-change.down { color: var(--green); }
+        .market-change.up { color: var(--color-up); }
+        .market-change.down { color: var(--color-down); }
 
-        .price-change .up { color: var(--red); font-size: 11px; }
-        .price-change .down { color: var(--green); font-size: 11px; }
+        .price-change .up { color: var(--color-up); font-size: 11px; }
+        .price-change .down { color: var(--color-down); font-size: 11px; }
 
         /* ========== Status Bar ========== */
         .status-bar {
@@ -514,6 +528,7 @@
             </div>
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
+            <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
     </header>
 
@@ -599,7 +614,7 @@
                         {% endif %}
                         <div class="price-change" id="chg-{{ stock.code }}" style="font-size:11px;margin-top:-1px;">
                             {% if stock.change_percent is not none %}
-                            <span style="color:{{ 'var(--red)' if stock.change_percent >= 0 else 'var(--green)' }}">
+                            <span style="color:{{ 'var(--color-up)' if stock.change_percent >= 0 else 'var(--color-down)' }}">
                                 {{ "%+.2f"|format(stock.change_percent) }}%
                             </span>
                             {% endif %}
@@ -730,6 +745,31 @@
     }
 
     setTheme(getPreferredTheme());
+
+    // ========== Color Scheme (红涨绿跌 / 绿涨红跌) ==========
+    const colorToggle = document.getElementById('colorToggle');
+
+    function getPreferredColorScheme() {
+        const stored = localStorage.getItem('stock-dashboard-color');
+        if (stored) return stored;
+        return 'cn'; // default: 红涨绿跌
+    }
+
+    function setColorScheme(scheme) {
+        document.documentElement.setAttribute('data-color-scheme', scheme);
+        localStorage.setItem('stock-dashboard-color', scheme);
+        colorToggle.innerHTML = scheme === 'cn' ? '红涨' : '绿涨';
+        colorToggle.title = scheme === 'cn'
+            ? '当前：红涨绿跌（A股），点击切换为绿涨红跌'
+            : '当前：绿涨红跌（美股），点击切换为红涨绿跌';
+    }
+
+    function toggleColorScheme() {
+        const current = document.documentElement.getAttribute('data-color-scheme') || 'cn';
+        setColorScheme(current === 'cn' ? 'us' : 'cn');
+    }
+
+    setColorScheme(getPreferredColorScheme());
 
     // ========== Tab Switching ==========
     function switchTab(btn, targetId) {
