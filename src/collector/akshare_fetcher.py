@@ -254,55 +254,67 @@ FIN_INDICATORS = {
     'profit_growth': '归属母公司净利润增长率',
 }
 
-def enrich_financial_data(stocks: list[dict], workers=3, batch_timeout=120) -> list[dict]:
-    import gc
-    import akshare as ak
+def _code_to_em(code: str) -> str:
+    """6位代码转东财格式: 600519→600519.SH, 000807→000807.SZ"""
+    return f"{code}.SH" if code.startswith(('6', '9')) else f"{code}.SZ"
+
+def enrich_financial_data(stocks: list[dict], workers=5, batch_size=200) -> list[dict]:
+    """用东财 data center API 批量获取财务指标（ROE/负债率/营收增长/利润增长）"""
+    import httpx
     total = len(stocks)
-    logger.info(f"[财务] 获取 {total} 只 ({workers}线程, 批次超时{batch_timeout}s)...")
+    logger.info(f"[财务] 获取 {total} 只（东财datacenter API）...")
+    url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
+    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ'
 
-    def _fetch(s):
-        try:
-            df = ak.stock_financial_abstract(symbol=s['code'])
-            cols = [c for c in df.columns if c not in ('选项', '指标')]
-            if not cols:
-                del df
-                return s
-            annual = [c for c in cols if c.endswith('1231')]
-            latest_a = annual[0] if annual else cols[-1]
-            latest_q = cols[0]
-            fa, fq = {}, {}
-            for _, r in df.iterrows():
-                i = str(r.get('指标', ''))
-                fa[i] = _safe_float(r.get(latest_a))
-                fq[i] = _safe_float(r.get(latest_q))
-            s['roe'] = fa.get('净资产收益率(ROE)')
-            s['debt_ratio'] = fa.get('资产负债率')
-            s['revenue_growth'] = fq.get('营业总收入增长率')
-            s['profit_growth'] = fq.get('归属母公司净利润增长率')
-            del df, fa, fq
-        except Exception as e:
-            logger.debug(f"[财务] {s['code']} 失败: {e}")
-        return s
-
-    # 分批 + 批次超时，避免 OOM 和单只卡死
+    # 批量查询：每批 batch_size 只
     done = 0
-    BATCH_SIZE = 60
-    for batch_start in range(0, total, BATCH_SIZE):
-        batch = stocks[batch_start:batch_start + BATCH_SIZE]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            fut_map = {ex.submit(_fetch, s): s['code'] for s in batch}
-            done_inner, _ = concurrent.futures.wait(
-                fut_map.keys(), timeout=batch_timeout)
-            for f in done_inner:
-                try:
-                    f.result()
-                except Exception:
-                    pass
-                done += 1
-            timed_out = len(batch) - len(done_inner)
-            if timed_out:
-                logger.warning(f"[财务] 批次 {batch_start//BATCH_SIZE+1} 超时 {timed_out} 只，跳过")
-        gc.collect()
+    for batch_start in range(0, total, batch_size):
+        batch = stocks[batch_start:batch_start + batch_size]
+        # 构建 filter: SECUCODE in ("600519.SH","000807.SZ",...)
+        em_codes = ','.join(f'"{_code_to_em(s["code"])}"' for s in batch)
+        params = {
+            'reportName': 'RPT_F10_FINANCE_MAINFINADATA',
+            'columns': columns,
+            'filter': f'(SECUCODE in ({em_codes}))',
+            'pageNumber': 1, 'pageSize': batch_size * 2,  # 多拿几页
+            'sortTypes': '-1', 'sortColumns': 'REPORT_DATE',
+            'source': 'HSF10', 'client': 'PC',
+        }
+        try:
+            with httpx.Client(timeout=30) as client:
+                r = client.get(url, params=params)
+                data = r.json()
+            if not data.get('result') or not data['result'].get('data'):
+                logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 无数据: {data.get('message','')}")
+                done += len(batch)
+                continue
+            # 每只取最新报告期的指标
+            code_map = {s['code']: s for s in batch}
+            # 按 SECUCODE 分组，每组取最新报告
+            from collections import defaultdict
+            latest = defaultdict(dict)  # code → {date, roe, ...}
+            for row in data['result']['data']:
+                raw = row['SECUCODE'].split('.')[0]  # 600519.SH→600519
+                if raw not in code_map:
+                    continue
+                date = (row.get('REPORT_DATE') or '')[:10]
+                if date > latest[raw].get('date', ''):
+                    latest[raw] = {
+                        'date': date,
+                        'roe': _safe_float(row.get('ROEJQ')),
+                        'debt_ratio': _safe_float(row.get('ZCFZL')),
+                        'revenue_growth': _safe_float(row.get('TOTALOPERATEREVETZ')),
+                        'profit_growth': _safe_float(row.get('PARENTNETPROFITTZ')),
+                    }
+            for code, info in latest.items():
+                s = code_map[code]
+                s['roe'] = info['roe']
+                s['debt_ratio'] = info['debt_ratio']
+                s['revenue_growth'] = info['revenue_growth']
+                s['profit_growth'] = info['profit_growth']
+        except Exception as e:
+            logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 异常: {e}")
+        done += len(batch)
         logger.info(f"[财务] {done}/{total}")
 
     with_roe = sum(1 for s in stocks if s.get('roe') is not None)

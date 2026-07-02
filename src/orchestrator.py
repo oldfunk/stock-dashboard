@@ -73,6 +73,14 @@ def run_daily_pipeline(config: dict = None):
 
     enriched = sum(1 for c in candidates if c.get('roe') is not None)
     logger.info(f"  Candidates: {len(candidates)}, with ROE data: {enriched}")
+    # ── 质量门禁 ──
+    # 如果 ROE 覆盖率 < 50%，说明财务补充失败，中止本次管道，
+    # 保留上一次的 screening_result 数据不变
+    if enriched < len(candidates) * 0.5:
+        logger.error(f"[门禁] ROE 覆盖率 {enriched}/{len(candidates)} < 50%，管道中止")
+        RunLogDAO().complete_run(run_id, total_stocks, 0, 0,
+            f"ROE coverage {enriched}/{len(candidates)} < 50%, aborted")
+        return
 
     # Step 5: Full screening
     logger.info("\n[2/3] Value screening")
