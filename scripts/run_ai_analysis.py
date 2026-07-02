@@ -108,17 +108,23 @@ Reason for selection: {reason}
 
 Output JSON with: "analysis", "investment_strategy", "trade_strategy"(with buy_zone, target_price, stop_loss, take_profit)."""
 
-# ── API call ──
+# ── 智谱专用指数退避 ──
+# GLM-4.7-Flash 使用人数极多，常返回 code:1305(访问量过大)
+# 策略：长退避 + 多次重试，每 2h cron 只做 1 只
+BACKOFF_SCHEDULE = [30, 60, 120, 240, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300]
+
 def call_api(prompt):
     payload = {'model': model, 'messages': [
-        {'role': 'system', 'content': '你是专业价值投资分析师。输出严格JSON。'},
+        {'role': 'system', 'content': '你是专业的A股价值投资分析师。请严格按JSON格式输出。'},
         {'role': 'user', 'content': prompt}
     ], 'temperature': 0.3, 'max_tokens': 2000}
 
-    for attempt in range(10):
+    max_retries = len(BACKOFF_SCHEDULE)
+    for attempt in range(max_retries):
         try:
-            with httpx.Client(timeout=60) as c:
+            with httpx.Client(timeout=120) as c:
                 r = c.post(api_url, headers=headers, json=payload)
+ 
                 if r.status_code == 200:
                     content = r.json()['choices'][0]['message']['content']
                     # 尝试多种 JSON 提取策略
@@ -136,21 +142,43 @@ def call_api(prompt):
                             return json.loads(cleaned)
                         except json.JSONDecodeError:
                             pass
-                    # 未解析成功，重试
-                    print(f"  Attempt {attempt+1}: bad JSON ({len(content)} chars), retrying...")
-                    time.sleep(30)
-                    continue
-                elif r.status_code == 429:
-                    wait = 120
-                    print(f"  429, waiting {wait}s...")
+                    print(f"  Attempt {attempt+1}/{max_retries}: bad JSON ({len(content)} chars), retrying...")
+                    wait = BACKOFF_SCHEDULE[attempt]
                     time.sleep(wait)
+                    continue
+
+                elif r.status_code == 429:
+                    # 智谱 1305 或标准 429
+                    try:
+                        err = r.json().get('error', {})
+                        err_code = err.get('code', '')
+                        if err_code == '1305':
+                            print(f"  拥挤{err_code}({err.get('message','')}) 退避{attempt+1}/{max_retries}")
+                    except Exception:
+                        pass
+                    wait = BACKOFF_SCHEDULE[attempt]
+                    print(f"  429, 退避 {wait}s (attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait)
+
+                elif r.status_code == 503:
+                    wait = BACKOFF_SCHEDULE[attempt]
+                    print(f"  503, 退避 {wait}s")
+                    time.sleep(wait)
+
                 else:
-                    print(f"  HTTP {r.status_code}, retrying...")
-                    time.sleep(60)
+                    print(f"  HTTP {r.status_code}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
+                    time.sleep(BACKOFF_SCHEDULE[attempt])
+
+        except httpx.TimeoutException:
+            print(f"  Timeout (attempt {attempt+1}/{max_retries}), backoff {BACKOFF_SCHEDULE[attempt]}s...")
+            time.sleep(BACKOFF_SCHEDULE[attempt])
+        except httpx.ConnectError as e:
+            print(f"  ConnectError: {e}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
+            time.sleep(BACKOFF_SCHEDULE[attempt])
         except Exception as e:
-            print(f"  Error: {e}")
-            if attempt < 9:
-                time.sleep(30)
+            print(f"  Error: {e}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
+            time.sleep(BACKOFF_SCHEDULE[attempt])
+
     return None
 
 # ── 逐一分析 ──
@@ -184,6 +212,8 @@ for stock in targets:
 
     analysis_json = json.dumps(result, ensure_ascii=False)
     strategy = result.get('investment_strategy', '')
+    if isinstance(strategy, dict):
+        strategy = json.dumps(strategy, ensure_ascii=False)
     trade = result.get('trade_strategy', {})
     trade_json = json.dumps(trade, ensure_ascii=False) if isinstance(trade, dict) else str(trade)
 
