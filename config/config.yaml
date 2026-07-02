@@ -14,9 +14,9 @@ screener:
     max_pe: 20              # 市盈率上限（TTM）
     min_pe: 3               # 市盈率下限（排除亏损和微利股）
     max_pb: 3.5             # 市净率上限
-    min_roe: 10             # ROE 下限（%）— 略低于巴菲特的15%以适配A股
-    min_revenue_growth: 5   # 营收增长率下限（%）
-    min_profit_growth: 5    # 净利润增长率下限（%）
+    min_roe: 5              # ROE 下限（%）— 东财加权ROE(ROEJQ)比新浪保守，5%已能筛出优质股
+    min_revenue_growth: 0   # 营收增长率下限（%）— 允许稳定不增长的价值股
+    min_profit_growth: 0    # 净利润增长率下限（%）— 允许稳定型价值股
     max_debt_ratio: 65      # 资产负债率上限（%）
     min_market_cap: 30      # 最低流通市值（亿）
     max_market_cap: 50000   # 最高市值（亿）
