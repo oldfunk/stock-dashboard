@@ -477,6 +477,62 @@
             color: var(--text-tertiary);
         }
 
+        /* ========== Dashboard Layout (2-column) ========== */
+        .dashboard-layout {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+        .dashboard-main { flex: 1; min-width: 0; }
+        .knowledge-panel {
+            width: 320px;
+            flex-shrink: 0;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px;
+            position: sticky;
+            top: 12px;
+        }
+        .knowledge-panel h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .kp-section { margin-bottom: 10px; }
+        .kp-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+        .kp-title:hover { opacity: 0.8; }
+        .kp-title .arrow { font-size: 10px; transition: transform 0.15s; }
+        .kp-title.open .arrow { transform: rotate(90deg); }
+        .kp-body {
+            display: none;
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+        .kp-body.open { display: block; }
+        .kp-body .good { color: var(--green); font-weight: 500; }
+        .kp-body .warn { color: var(--gold); font-weight: 500; }
+        .kp-body .bad { color: var(--red); font-weight: 500; }
+        .kp-body ul { margin: 4px 0; padding-left: 16px; }
+        .kp-body li { margin-bottom: 2px; }
+        @media (max-width: 900px) {
+            .dashboard-layout { flex-direction: column; }
+            .knowledge-panel { width: 100%; position: static; }
+        }
+
         /* ========== History Bar ========== */
         .history-bar {
             margin-top: 8px;
@@ -512,6 +568,70 @@
             align-items: center;
             font-size: 11px;
             color: var(--text-secondary);
+            cursor: pointer;
+            padding: 3px 6px;
+            border-radius: var(--radius-sm);
+            transition: background 0.1s;
+        }
+        .history-item:hover { background: var(--bg-hover); }
+
+        .history-detail {
+            display: none;
+            margin: 4px 0 6px 0;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+        .history-detail.open { display: block; }
+        .history-detail .hd-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .history-detail .hd-tab {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .history-detail .hd-tab:hover { color: var(--text-secondary); }
+        .history-detail .hd-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .history-detail .hd-panel { display: none; }
+        .history-detail .hd-panel.open { display: block; }
+        .history-detail .trade-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .history-detail .trade-cell {
+            background: var(--bg-secondary);
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+        }
+        .history-detail .trade-cell .label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .history-detail .trade-cell .value {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 2px;
         }
 
         .hist-date {
@@ -644,6 +764,8 @@
         <span class="section-count">{{ stocks|length }} candidates</span>
     </div>
 
+    <div class="dashboard-layout">
+    <div class="dashboard-main">
     <div class="stock-list" id="stockList">
         {% for stock in stocks %}
         <div class="stock-card">
@@ -767,7 +889,8 @@
                 </button>
                 <div id="hist-{{ stock.code }}" class="history-list" style="display:none;">
                     {% for h in stock.analysis_history %}
-                    <div class="history-item">
+                    <div>
+                    <div class="history-item" onclick="toggleHistDetail('{{ stock.code }}-{{ loop.index0 }}')">
                         <span class="hist-date">{{ h.analysis_date }}</span>
                         <span class="hist-score">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>
                         {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
@@ -776,6 +899,35 @@
                         <span class="hist-status" style="color:var(--text-tertiary);">&#9675; 已尝试</span>
                         {% endif %}
                     </div>
+                    {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail">
+                        <div class="hd-tabs">
+                            <button class="hd-tab active" onclick="switchHistTab(this,'hd-a-{{ stock.code }}-{{ loop.index0 }}')">分析</button>
+                            <button class="hd-tab" onclick="switchHistTab(this,'hd-s-{{ stock.code }}-{{ loop.index0 }}')">策略</button>
+                            <button class="hd-tab" onclick="switchHistTab(this,'hd-t-{{ stock.code }}-{{ loop.index0 }}')">交易</button>
+                        </div>
+                        <div id="hd-a-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel open">
+                            <p>{{ h.ai_analysis_obj.analysis if h.ai_analysis_obj else '--' }}</p>
+                        </div>
+                        <div id="hd-s-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel">
+                            <p>{{ h.ai_analysis_obj.investment_strategy if h.ai_analysis_obj else '--' }}</p>
+                        </div>
+                        <div id="hd-t-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel">
+                            {% if h.ai_analysis_obj and h.ai_analysis_obj.trade_strategy %}
+                            {% set ts = h.ai_analysis_obj.trade_strategy %}
+                            <div class="trade-grid">
+                                <div class="trade-cell"><div class="label">Buy Zone</div><div class="value">{{ ts.buy_zone if ts.buy_zone else '--' }}</div></div>
+                                <div class="trade-cell"><div class="label">Target</div><div class="value">{{ ts.target_price if ts.target_price else '--' }}</div></div>
+                                <div class="trade-cell"><div class="label">Stop Loss</div><div class="value">{{ ts.stop_loss if ts.stop_loss else '--' }}</div></div>
+                                <div class="trade-cell"><div class="label">Take Profit</div><div class="value">{{ ts.take_profit if ts.take_profit else '--' }}</div></div>
+                            </div>
+                            {% else %}
+                            <p style="color:var(--text-tertiary);">暂无交易策略</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    </div>
                     {% endfor %}
                 </div>
             </div>
@@ -783,6 +935,93 @@
         </div>
         {% endfor %}
     </div>
+    </div><!-- /dashboard-main -->
+
+    <!-- Knowledge Panel -->
+    <aside class="knowledge-panel">
+        <h3>价值投资指标指南</h3>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> PE 市盈率</div>
+            <div class="kp-body">
+                <b>含义</b>：股价 ÷ 每股收益。反映回本年限。<br>
+                <b>A股价值区间</b>：<span class="good">3~10 低估</span> · <span class="warn">10~20 合理</span> · <span class="bad">&gt;20 偏贵</span><br>
+                <ul>
+                    <li>PE &lt; 0 = 亏损，不适用本指标</li>
+                    <li>周期股（铝、煤炭）PE 低时反而是卖点</li>
+                    <li>本看板排除 PE &lt; 3（微利）和 PE &gt; 20（偏贵）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> PB 市净率</div>
+            <div class="kp-body">
+                <b>含义</b>：股价 ÷ 每股净资产。低于 1 表示"打折买资产"。<br>
+                <b>价值区间</b>：<span class="good">&lt; 1.0 破净</span> · <span class="warn">1.0~2.0 合理</span> · <span class="bad">&gt; 3.5 偏贵</span><br>
+                <ul>
+                    <li>轻资产公司（互联网）PB 天然偏高</li>
+                    <li>银行/地产破净很常见，不代表低估</li>
+                    <li>本看板上限 PB ≤ 3.5</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> ROE 净资产收益率</div>
+            <div class="kp-body">
+                <b>含义</b>：净利润 ÷ 净资产。衡量股东资本的回报效率。<b>巴菲特最看重的指标。</b><br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> · <span class="warn">5~10%</span> · <span class="good">10~20% 优秀</span> · <span class="good" style="color:var(--accent);">&gt; 20% 卓越</span><br>
+                <ul>
+                    <li>连续 5 年 ROE &gt; 15% 是优质公司标志</li>
+                    <li>本看板使用东财加权 ROE（ROEJQ），比摊薄 ROE 更保守</li>
+                    <li>筛选门槛 ROE ≥ 5%（适配 A 股整体水平）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 资产负债率</div>
+            <div class="kp-body">
+                <b>含义</b>：总负债 ÷ 总资产。反映财务杠杆和风险水平。<br>
+                <b>价值区间</b>：<span class="good">&lt; 35% 低杠杆</span> · <span class="warn">35~50% 适中</span> · <span class="bad">&gt; 65% 高风险</span><br>
+                <ul>
+                    <li>银行业的负债率天然很高（80%+），不适用此标准</li>
+                    <li>负债率 &lt; 20% 的公司安全边际最高</li>
+                    <li>本看板上限 65%</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 营收/利润增长率</div>
+            <div class="kp-body">
+                <b>含义</b>：同比（YoY）增长百分比。反映公司成长性。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 0% 衰退</span> · <span class="warn">0~10% 平稳</span> · <span class="good">&gt; 10% 成长</span><br>
+                <ul>
+                    <li>价值投资不追求高增长，稳定也有价值</li>
+                    <li>营收增长但利润不增长 → 可能是增收不增利</li>
+                    <li>本看板不要求正增长（允许稳定型价值股）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 综合评分体系</div>
+            <div class="kp-body">
+                <b>0~100 分</b>，五大维度加权：<br>
+                <ul>
+                    <li><b>ROE 30%</b> — 回报效率（核心）</li>
+                    <li><b>增长 25%</b> — 营收+利润增长</li>
+                    <li><b>PE 20%</b> — 估值安全边际</li>
+                    <li><b>负债 15%</b> — 财务风险</li>
+                    <li><b>PB 10%</b> — 资产折价</li>
+                </ul>
+                <span class="good">60+ 优秀</span> · <span class="warn">40~60 良好</span> · <span class="bad">&lt; 40 一般</span>
+            </div>
+        </div>
+    </aside>
+    </div><!-- /dashboard-layout -->
     {% else %}
     <div class="empty-state">
         <div class="icon">&#9678;</div>
@@ -850,6 +1089,34 @@
         if (el) {
             el.style.display = el.style.display === 'none' ? 'flex' : 'none';
         }
+    }
+
+    // ========== History Detail Toggle ==========
+    function toggleHistDetail(id) {
+        var el = document.getElementById('hd-' + id);
+        if (el) {
+            el.classList.toggle('open');
+        }
+    }
+
+    // ========== History Detail Tab Switch ==========
+    function switchHistTab(btn, targetId) {
+        var detail = btn.closest('.history-detail');
+        detail.querySelectorAll('.hd-panel').forEach(function(el) {
+            el.classList.remove('open');
+        });
+        detail.querySelectorAll('.hd-tab').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById(targetId).classList.add('open');
+        btn.classList.add('active');
+    }
+
+    // ========== Knowledge Panel Toggle ==========
+    function toggleKP(titleEl) {
+        var body = titleEl.nextElementSibling;
+        titleEl.classList.toggle('open');
+        body.classList.toggle('open');
     }
 
     // ========== Tab Switching ==========

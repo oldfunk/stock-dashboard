@@ -124,7 +124,13 @@ async def index(request: Request):
             except (json.JSONDecodeError, TypeError):
                 stock['trade_parsed'] = None
         # 附加历史分析摘要
-        stock['analysis_history'] = history_dao.get_history(code, limit=5)
+        history = history_dao.get_history(code, limit=5)
+        for h in history:
+            try:
+                h['ai_analysis_obj'] = json.loads(h.get('ai_analysis') or '{}')
+            except (json.JSONDecodeError, TypeError):
+                h['ai_analysis_obj'] = None
+        stock['analysis_history'] = history
 
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
