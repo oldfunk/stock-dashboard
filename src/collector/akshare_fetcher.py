@@ -288,23 +288,28 @@ def enrich_financial_data(stocks: list[dict], workers=5, batch_size=200) -> list
                 logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 无数据: {data.get('message','')}")
                 done += len(batch)
                 continue
-            # 每只取最新报告期的指标
+            # 每只股票取最新年报（12-31）的指标
+            # 增长率（TOTALOPERATEREVETZ/PARENTNETPROFITTZ）是同比的，可以用最新报告
+            # ROE（ROEJQ）和负债率（ZCFZL）是时期性指标，只能用年报比较
             code_map = {s['code']: s for s in batch}
-            # 按 SECUCODE 分组，每组取最新报告
             from collections import defaultdict
-            latest = defaultdict(dict)  # code → {date, roe, ...}
+            latest = defaultdict(dict)  # code → {date, roe, debt, ...}
             for row in data['result']['data']:
-                raw = row['SECUCODE'].split('.')[0]  # 600519.SH→600519
+                raw = row['SECUCODE'].split('.')[0]
                 if raw not in code_map:
                     continue
                 date = (row.get('REPORT_DATE') or '')[:10]
-                if date > latest[raw].get('date', ''):
+                is_annual = date.endswith('12-31')
+                # 优先取年报，没有年报才用季度数据
+                prev = latest[raw].get('date', '')
+                if not prev or (is_annual and not prev.endswith('12-31')) or (is_annual == prev.endswith('12-31') and date > prev):
                     latest[raw] = {
                         'date': date,
                         'roe': _safe_float(row.get('ROEJQ')),
                         'debt_ratio': _safe_float(row.get('ZCFZL')),
                         'revenue_growth': _safe_float(row.get('TOTALOPERATEREVETZ')),
                         'profit_growth': _safe_float(row.get('PARENTNETPROFITTZ')),
+                        'is_annual': is_annual,
                     }
             for code, info in latest.items():
                 s = code_map[code]
