@@ -110,8 +110,9 @@ Output JSON with: "analysis", "investment_strategy", "trade_strategy"(with buy_z
 
 # ── 智谱专用指数退避 ──
 # GLM-4.7-Flash 使用人数极多，常返回 code:1305(访问量过大)
-# 策略：长退避 + 多次重试，每 2h cron 只做 1 只
-BACKOFF_SCHEDULE = [30, 60, 120, 240, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300]
+# 策略：长退避 + 大量重试，拥堵时持续等待绝不放弃
+BACKOFF_SCHEDULE = [30, 60, 120, 240, 300, 300, 300, 300, 300, 300,
+                     300, 300, 300, 300, 300, 300, 300, 300, 300, 300]
 
 def call_api(prompt):
     payload = {'model': model, 'messages': [

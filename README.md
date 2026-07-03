@@ -1,32 +1,32 @@
 # 📊 Stock Dashboard — A 股价值投资实时选股看板
 
 基于价值投资理念的 A 股实时监控 + 量化选股 + AI 分析 Web 系统。
-运行在 Debian VM (192.168.50.56)，systemd 服务管理。
+运行在 Debian VM (192.168.50.56)，后台进程管理。
 
 ## 系统架构
 
 ```
                      ┌──────────────────────────────────┐
-                     │  systemd: stock-dashboard.service  │
-                     │  (开机自启 · 崩溃自愈)              │
-                     │                                    │
+                     │  Hermes 管理的后台进程             │
+                     │  (nohup / cron 保活)              │
+                     │                                  │
  腾讯API ──────────→ │  Uvicorn Web 服务 (FastAPI)        │
   qt.gtimg.cn        │    ├─ 大盘指数轮询 (30分钟)         │
                      │    ├─ 选股池实时价格 (5分钟/交易时段) │
                      │    ├─ 每日选股流水线 (15:30自动触发) │
-                     │    └─ AI 分析 (OpenCode Zen)        │
-                     │                                    │
-                     └─────────┬──────────────────────────┘
+                     │    └─ AI 分析 (GLM 免费模型)       │
+                     │                                  │
+                     └─────────┬────────────────────────┘
                                │
                      ┌────────▼──────────┐
                      │  SQLite 数据库      │
-                     │  data/db/          │
-                     │  ├─ stock_snapshot  │  5527 只股票基本行情
-                     │  ├─ screening_result│  20 只精选股票
-                     │  ├─ market_index    │  4 条大盘指数
-                     │  ├─ run_log         │  运行记录
-                     │  └─ ai_analysis_log │  AI 分析日志
-                     └───────────────────┘
+                     │  data/stock_dashboard.db │
+                     │  ├─ stock_snapshot    │ 全 A 股行情
+                     │  ├─ screening_result  │ 精选 20 只
+                     │  ├─ market_index      │ 大盘指数
+                     │  ├─ run_log           │ 运行记录
+                     │  └─ stock_analysis_history │ AI 分析累积
+                     └─────────────────────┘
 ```
 
 ## 核心能力
@@ -50,7 +50,7 @@ AKShare 财务数据补充 (ROE / 负债率 / 增长率)
     ↓
 TOP 20 精选股票 → 存入 screening_result
     ↓
-AI 分析 (DeepSeek V4 Flash Free via OpenCode Zen)
+AI 分析 (GLM-4.7-Flash 免费模型)
     → 逐股生成：选股解析 / 投资策略 / 买卖策略
 ```
 
@@ -59,38 +59,48 @@ AI 分析 (DeepSeek V4 Flash Free via OpenCode Zen)
 - 大盘指数（上证/深证/创业板/科创50）实时显示
 - 20 只精选股票卡片，含 PE/PB/ROE/市值/实时价格
 - 实时价格涨跌 ▲▼ 红绿指示
-- 30 秒自动刷新（API 驱动）
-- 浅色/深色主题切换
+- 60 秒自动刷新（API 驱动）
+- 浅色/深色主题切换 + 红涨绿跌/绿涨红跌风格切换
+- **右侧知识面板**: PE/PB/ROE/负债率/增长率/评分体系 科普注解
+- **历史分析追溯**: 点击展开历史分析完整详情（分析/策略/交易合并展示）
 
 ### 4. AI 分析
-- 模型：`deepseek-v4-flash-free` (OpenCode Zen)
-- 对每只精选股票生成三部分：
-  - 选股解析（竞争优势/财务健康/风险）
-  - 投资策略（仓位/持有周期）
-  - 买卖策略（买入区间/目标价/止损/止盈）
-- **限流处理**：Free tier 限流严格（≈1次/分钟）。代码含智能冷却：
-  - 股票间间隔 30 秒
-  - 遇到 429 后冷却 120 秒，期间跳过剩余股票
-  - 单股票最多重试 4 次（30s→60s→120s 退避）
-  - 20 只股票约 10-30 分钟完成
-- JSON 解析兼容 markdown/前缀/后缀/末尾逗号
+- 模型：`glm-4.7-flash` (智谱 AI — 免费，兼容 OpenAI API)
+- 对每只精选股票生成：选股解析 + 投资策略 + 买卖策略
+- **极致重试策略**：20次指数退避 (30s→60s→120s→240s→300s×16)
+- **离线时段**：凌晨 2-4 点（非交易时段）批量分析
+- **失败记录**：24 小时内自动跳过失败股票，次日重试
+- JSON 解析兼容 markdown/前缀/后缀/末尾逗号等多种格式
+
+### 5. 基础知识科普
+- 内置价值投资指标指南（PE、PB、ROE、负债率、增长率、评分体系）
+- 每个指标附带意义、A股参考区间、筛选逻辑说明
+
+## 启动方式
+
+```bash
+# 启动 Web 服务（默认）
+python src/main.py serve
+
+# 运行选股流程
+python src/main.py run
+
+# 全量 AI 分析（离线时段使用）
+python scripts/run_ai_analysis.py --all
+
+# 运行完整流水线
+python scripts/run_pipeline.py
+```
 
 ## 状态检查
 
 ```bash
-# 服务状态
-sudo systemctl status stock-dashboard
-sudo journalctl -u stock-dashboard -n 30 --no-pager    # 最近日志
-sudo journalctl -u stock-dashboard -f                   # 实时日志
-
-# Cron 日志
-tail -f ~/stock-dashboard/data/logs/cron.log
-
 # API 端点
-curl -s http://127.0.0.1:9527/api/status      # 运行状态
-curl -s http://127.0.0.1:9527/api/indices     # 大盘指数
-curl -s http://127.0.0.1:9527/api/stocks      # 选股结果+实时行情
-curl -s http://127.0.0.1:9527/api/realtime    # 纯实时行情
+curl -s http://127.0.0.1:9527/api/status          # 运行状态
+curl -s http://127.0.0.1:9527/api/indices          # 大盘指数
+curl -s http://127.0.0.1:9527/api/stocks           # 选股结果+实时行情+AI分析
+curl -s http://127.0.0.1:9527/api/realtime         # 纯实时行情
+curl -s http://127.0.0.1:9527/api/history/000612   # 单只股票历史分析
 ```
 
 ## 配置文件
@@ -101,81 +111,83 @@ curl -s http://127.0.0.1:9527/api/realtime    # 纯实时行情
 screener.conditions:
   max_pe: 20, min_pe: 3       # 市盈率范围
   max_pb: 3.5                 # 市净率上限
-  min_roe: 10                 # ROE 下限
+  min_roe: 5                  # ROE 下限（东财加权ROE）
   max_debt_ratio: 65          # 负债率上限
   max_candidates: 20          # 候选股数量
 
 ai:
-  api_base: "https://opencode.ai/zen/v1"
-  model: "deepseek-v4-flash-free"
+  api_base: "https://open.bigmodel.cn/api/paas/v4"
+  model: "glm-4.7-flash"
 ```
 
 API Key 存在 `.env` 中（被 .gitignore 排除）：
 ```
-STOCK_AI_API_KEY=sk-xxxx...
+STOCK_AI_API_KEY=4207ea...        # 智谱 API Key
+STOCK_AI_API_BASE=https://open.bigmodel.cn/api/paas/v4/chat/completions
+STOCK_AI_MODEL=glm-4.7-flash
 ```
 
-## 数据文件
+## 项目文件结构
 
 ```
-~/stock-dashboard/
-├── config/config.yaml          # 主配置
-├── data/db/stock_dashboard.db  # SQLite 数据库
-├── data/cache/stock_codes.json # 股票代码缓存
-├── data/logs/cron.log          # Cron 运行日志
+stock-dashboard/
+├── config/config.yaml                   # 主配置
 ├── src/
-│   ├── collector/akshare_fetcher.py   327行  采集层
-│   ├── screener/value_screener.py     409行  筛选引擎
-│   ├── analyzer/ai_analyzer.py        224行  AI 分析
-│   ├── models/database.py             308行  数据层
-│   ├── web/routes.py                  244行  路由
-│   ├── scheduler.py                   306行  调度器
-│   ├── orchestrator.py                117行  流水线编排
-│   └── main.py                        35行  入口
-├── scripts/daily_update.sh      # Cron 脚本
-└── .env                          # API Key (不提交)
+│   ├── main.py                          # 35行  入口 (run/serve)
+│   ├── orchestrator.py                  # 流水线编排
+│   ├── scheduler.py                     # 调度器 (实时轮询+每日触发)
+│   ├── collector/akshare_fetcher.py     # 数据采集 (腾讯API+AKShare)
+│   ├── screener/value_screener.py       # 价值投资筛选引擎
+│   ├── analyzer/ai_analyzer.py          # AI 分析器
+│   ├── models/database.py               # 数据层
+│   └── web/routes.py                    # FastAPI 路由
+├── scripts/
+│   ├── run_pipeline.py                  # 完整流水线
+│   ├── run_ai_analysis.py               # AI 分析 (--all 全量)
+│   ├── daily_update.sh                  # Shell 版每日更新
+│   └── stock-ai-slow-feed.sh            # Hermes cron wrapper
+├── .env                                 # API Key (不提交)
+└── README.md
 ```
 
 ## 数据库结构
 
 | 表 | 行数 | 说明 |
 |:---|---:|:---|
-| stock_snapshot | 5527 | 全 A 股基本行情（代码/名称/PE/PB/市值/现价） |
-| screening_result | 20 | 最新精选股票（评分/PE/PB/ROE/负债率/AI分析） |
+| stock_snapshot | 5527 | 全 A 股基本行情（代码/名称/PE/PB/市值） |
+| screening_result | 20 | 最新精选（评分/指标/AI分析） |
 | market_index | ~N | 大盘指数历史（上证/深证/创业板/科创50） |
-| run_log | 1 | 最近一次流水线运行记录 |
-| ai_analysis_log | 0 | AI 分析消耗记录 |
+| run_log | 1/N | 流水线运行记录 |
+| stock_analysis_history | ~N | AI 分析累积历史（支持多次回看） |
 
 ## 定时任务
 
 | 触发方式 | 时间 | 任务 |
 |:---|---:|:---|
-| systemd 服务 | 开机自启 | Web 服务 + 调度器 |
-| 调度器 _check_daily_pipeline() | 工作日 15:30 | 每日选股流水线 |
-| 系统 crontab | 工作日 15:30 | `python -m src.orchestrator`（备份触发） |
-| 调度器 _poll_indices | 每 30 分钟 | 大盘指数更新 |
-| 调度器 _poll_stocks | 每 5 分钟 | 选股池实时价格（仅交易时段） |
+| 调度器 | 工作日 15:30 | 每日选股流水线 |
+| 调度器 | 每 30 分钟 | 大盘指数更新 |
+| 调度器 | 每 5 分钟 | 选股池实时价格（仅交易时段） |
+| Hermes cron | 凌晨 2/3/4 点 | AI 全量分析（离峰时段） |
 
-两路 15:30 触发互不冲突（`_last_daily_date` 去重）。
+## AI 分析重试策略
+
+GLM-4.7-Flash 是免费模型，使用人数众多。脚本采用激进的重试策略：
+
+1. **20次指数退避**：30s → 60s → 120s → 240s → 300s×16
+2. **单次最大等待**：约 88 分钟（20次全部重试）
+3. **全体分析最坏情况**：约 29 小时（20只×88分钟，极端拥堵）
+4. **正常情况**：1-5 只分析成功/每次 cron 执行
+5. **失败记录**：当日失败的股票自动标记，24 小时后重试
 
 ## 历史开发关键决策
 
-1. **数据源选择**: 腾讯 qt.gtimg.cn 为主要行情源（curl 绕过 TUN 代理阻断），AKShare 用于财务数据补充
-2. **TUN 代理兼容**: 新浪 hq.sinajs.cn 被阻断 → 改为腾讯 qt.gtimg.cn 统一接口
-3. **部署方式**: Flask 开发 → systemd 服务（开机自启 + 崩溃自愈）
-4. **筛选指标**: PE<20/PB<3.5/ROE≥10%/负债率<65%/增长≥5%，五项加权评分
-5. **UI 风格**: 纯白浅色背景 + Inter 字体 + 深色模式切换 + 细线分割 + 无 emoji/渐变色
-6. **AI Provider**: OpenAI → GLM-4.7-Flash → OpenCode Zen DeepSeek V4 Flash Free
-
-## 2.0 规划
-
-- [ ] 全量财务数据补进 stock_snapshot 表（支持按 ROE/负债率排序）
-- [ ] 个股详情页（评分历史 + 实时走势）
-- [ ] SSE 替代 30 秒前端轮询
-- [ ] 价格预警推送（Telegram/Discord）
-- [ ] 模拟投资组合
-- [ ] 板块聚合分析
-- [ ] Pi 3B 轻量副节点部署
+1. **数据源选择**: 腾讯 qt.gtimg.cn 为主要行情源（绕过 TUN 代理阻断），AKShare 补充财务数据
+2. **TUN 代理兼容**: 新浪 hq.sinajs.cn 被阻断 → 改为腾讯 qt.gtimg.cn
+3. **筛选指标**: PE 3-20/PB<3.5/ROE≥5%/负债率<65%，五项加权评分
+4. **UI 风格**: 浅色/深色切换 + Inter 字体 + 红涨绿跌/绿涨红跌双风格
+5. **AI Provider**: → GLM-4.7-Flash（免费，20次重试应对拥堵）
+6. **右侧面板**: 价值投资指标科普注解（PE/PB/ROE/负债率/增长率/评分体系）
+7. **历史分析**: 点击展开详情（合并分析/策略/交易三板块）
 
 ## 免责声明
 
