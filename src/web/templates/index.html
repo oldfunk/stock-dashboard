@@ -1227,16 +1227,28 @@
             return;
         }
         el.style.display = 'block';
+
+        // 阶段标签
         document.getElementById('progressLabel').textContent = p.stage_label || p.stage;
-        var total = p.total_stocks || 0;
-        var done = p.processed_stocks || 0;
-        var pct = 0;
+
+        // 对analyzing阶段：同时显示采集状态和AI进度
         if (p.stage === 'analyzing') {
             var aiTotal = p.ai_total || 1;
             var aiDone = p.ai_done || 0;
-            pct = Math.round(aiDone / aiTotal * 100);
-            document.getElementById('progressCount').textContent = aiDone + '/' + aiTotal;
-        } else if (total > 0) {
+            var aiPct = Math.round(aiDone / aiTotal * 100);
+            var total = p.total_stocks || 0;
+            document.getElementById('progressCount').textContent = '全A股' + total + ' ✓ | AI ' + aiDone + '/' + aiTotal;
+            document.getElementById('progressFill').style.width = aiPct + '%';
+            document.getElementById('progressStage').textContent =
+                '全A股 ' + total + '只 ✓ → 精选' + p.processed_stocks + '只 → AI分析 ' + aiDone + '/' + aiTotal;
+            return;
+        }
+
+        // 其他阶段
+        var total = p.total_stocks || 0;
+        var done = p.processed_stocks || 0;
+        var pct = 0;
+        if (total > 0) {
             pct = Math.round(done / total * 100);
             document.getElementById('progressCount').textContent = done + '/' + total;
         } else {

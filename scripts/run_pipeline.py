@@ -18,14 +18,15 @@ from src.models.database import (get_connection, RunLogDAO, MarketIndexDAO,
 init_database()
 cfg = yaml.safe_load(open('config/config.yaml'))
 progress = PipelineProgressDAO()
-run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-progress.init_run(run_id, 'collecting', '采集全A股行情...')
 
 # ── 1. 采集行情 ──
 from src.collector.akshare_fetcher import fetch_all_stocks_basic
 records = fetch_all_stocks_basic()
 total = len(records)
+run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
 logger.info(f'全A股: {total} 只')
+# 先初始化进度（现在有实际total了）
+progress.init_run(run_id, 'collecting', f'采集全A股 {total} 只', total=total, ai_total=20)
 progress.update(run_id, 'collecting', f'采集完成 {total} 只', processed=total, total=total)
 progress.update(run_id, 'screening', f'初筛 {total} 只...', processed=total, total=total, ai_total=0)
 
