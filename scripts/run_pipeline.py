@@ -51,7 +51,8 @@ n_top = len(top)
 logger.info(f'筛选: {n_top} 只')
 for s in top[:10]:
     logger.info(f'  score={s["score"]} {s["code"]} {s["name"]:10s} PE={s.get("pe")} ROE={s.get("roe")}%')
-progress.update(run_id, 'screened', f'筛选完成 {n_top} 只', processed=n_top, ai_total=n_top)
+# processed_stocks 保持全A股采集数(5527)，不覆盖为候选数
+progress.update(run_id, 'screened', f'筛选完成 {n_top} 只', ai_total=n_top)
 
 # ── 5. 大盘指数 ──
 time.sleep(1)

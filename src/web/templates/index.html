@@ -255,9 +255,14 @@
             color: var(--text-primary);
         }
 
-        /* ========== Progress Bar ========== */
+        /* ========== Progress Bars ========== */
+        .progress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
         .progress-bar {
-            margin-bottom: 24px;
+            margin-bottom: 0;
             padding: 12px 16px;
             background: var(--bg-tertiary);
             border-radius: 8px;
@@ -786,11 +791,11 @@
         {% endif %}
     </div>
 
-    <!-- Pipeline Progress Bars (two independent rows) -->
+    <!-- Pipeline Progress Bars -->
     <div class="progress-container" id="progressContainer">
         <div class="progress-bar" id="dataProgress" style="display:none;">
             <div class="progress-header">
-                <span class="progress-label">📊 数据采集与筛选</span>
+                <span class="progress-label">数据采集与筛选</span>
                 <span class="progress-count" id="dataCount"></span>
             </div>
             <div class="progress-track">
@@ -800,7 +805,7 @@
         </div>
         <div class="progress-bar" id="aiProgress" style="display:none;">
             <div class="progress-header">
-                <span class="progress-label">🤖 AI智能分析</span>
+                <span class="progress-label">AI智能分析</span>
                 <span class="progress-count" id="aiCount"></span>
             </div>
             <div class="progress-track">
@@ -1238,23 +1243,25 @@
 
         var visible = false;
 
-        // ── 数据采集进度 ──
         if (p && p.stage !== 'idle' && p.stage !== 'done') {
             dataEl.style.display = 'block';
             aiEl.style.display = 'block';
             visible = true;
 
-            // 数据条始终显示（采集完成=5527/5527，筛选完成=20/20）
-            var totalStocks = p.total_stocks || 0;
-            var processedStocks = p.processed_stocks || 0;
-            var dataPct = totalStocks > 0 ? Math.round(processedStocks / totalStocks * 100) : 0;
-            document.getElementById('dataCount').textContent = processedStocks + '/' + totalStocks;
+            // 数据采集条：total_stocks=全A股总数(5527),
+            // 只要过了采集阶段就100%（processed_stocks保持5527）
+            var totalStock = p.total_stocks || 0;
+            var collected = totalStock;  // 过了采集阶段 = 全部采集完成
+            var processed = p.processed_stocks || 0;
+            var dataPct = totalStock > 0 ? 100 : 0;
+            document.getElementById('dataCount').textContent = collected + '/' + totalStock;
             document.getElementById('dataFill').style.width = dataPct + '%';
-            if (totalStocks > 0) {
+            if (processed > 0 && processed < totalStock) {
                 document.getElementById('dataStage').textContent =
-                    '全A股 ' + totalStocks + '只 ✓ → 精选 ' + processedStocks + '只';
+                    '全A股 ' + totalStock + '只 ✓  候选 ' + processed + '只';  // 候选数 < 全A股数
             } else {
-                document.getElementById('dataStage').textContent = '采集全A股行情中...';
+                document.getElementById('dataStage').textContent =
+                    '全A股 ' + totalStock + '只 ✓';
             }
 
             // AI 条
@@ -1263,29 +1270,27 @@
             var aiFailed = p.ai_failed || 0;
             if (aiTotal > 0) {
                 var aiPct = Math.round(aiDone / aiTotal * 100);
-                document.getElementById('aiCount').textContent = aiDone + '/' + aiTotal + '（失败' + aiFailed + '）';
+                document.getElementById('aiCount').textContent = aiDone + '/' + aiTotal + ' (失败' + aiFailed + ')';
                 document.getElementById('aiFill').style.width = aiPct + '%';
                 document.getElementById('aiStage').textContent =
-                    'AI分析 ' + aiDone + '/' + aiTotal + ' 完成';
-            } else if (p.stage === 'analyzing' || totalStocks > 0) {
-                document.getElementById('aiCount').textContent = '等待中...';
-                document.getElementById('aiFill').style.width = '0%';
-                document.getElementById('aiStage').textContent = '数据采集完成后自动启动AI分析';
+                    '已分析 ' + aiDone + '/' + aiTotal;
             } else {
-                aiEl.style.display = 'none';
+                document.getElementById('aiCount').textContent = '待启动...';
+                document.getElementById('aiFill').style.width = '0%';
+                document.getElementById('aiStage').textContent = '等待中——数据完成自动开始';
             }
         } else if (p && p.stage === 'done') {
-            // 完成后显示摘要 2秒后消失
             dataEl.style.display = 'block';
             aiEl.style.display = 'block';
-            document.getElementById('dataCount').textContent = p.processed_stocks + '/' + (p.total_stocks || 0);
+            var ts = p.total_stocks || 0;
+            document.getElementById('dataCount').textContent = ts + '/' + ts;
             document.getElementById('dataFill').style.width = '100%';
-            document.getElementById('dataStage').textContent = p.stage_label || '采集完成 ✓';
-            var done = p.ai_done || 0;
-            var tot = p.ai_total || 1;
-            document.getElementById('aiCount').textContent = done + '/' + tot;
-            document.getElementById('aiFill').style.width = Math.round(done/tot*100) + '%';
-            document.getElementById('aiStage').textContent = 'AI分析 ' + done + '/' + tot + ' 完成 ✓';
+            document.getElementById('dataStage').textContent = '全部完成';
+            var d = p.ai_done || 0;
+            var t = p.ai_total || 1;
+            document.getElementById('aiCount').textContent = d + '/' + t;
+            document.getElementById('aiFill').style.width = Math.round(d/t*100) + '%';
+            document.getElementById('aiStage').textContent = 'AI完成 ' + d + '/' + t;
         }
 
         if (!visible) {
