@@ -901,29 +901,8 @@
                     </div>
                     {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
                     <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail">
-                        <div class="hd-tabs">
-                            <button class="hd-tab active" onclick="switchHistTab(this,'hd-a-{{ stock.code }}-{{ loop.index0 }}')">分析</button>
-                            <button class="hd-tab" onclick="switchHistTab(this,'hd-s-{{ stock.code }}-{{ loop.index0 }}')">策略</button>
-                            <button class="hd-tab" onclick="switchHistTab(this,'hd-t-{{ stock.code }}-{{ loop.index0 }}')">交易</button>
-                        </div>
-                        <div id="hd-a-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel open">
-                            <p>{{ h.ai_analysis_obj.analysis if h.ai_analysis_obj else '--' }}</p>
-                        </div>
-                        <div id="hd-s-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel">
-                            <p>{{ h.ai_analysis_obj.investment_strategy if h.ai_analysis_obj else '--' }}</p>
-                        </div>
-                        <div id="hd-t-{{ stock.code }}-{{ loop.index0 }}" class="hd-panel">
-                            {% if h.ai_analysis_obj and h.ai_analysis_obj.trade_strategy %}
-                            {% set ts = h.ai_analysis_obj.trade_strategy %}
-                            <div class="trade-grid">
-                                <div class="trade-cell"><div class="label">Buy Zone</div><div class="value">{{ ts.buy_zone if ts.buy_zone else '--' }}</div></div>
-                                <div class="trade-cell"><div class="label">Target</div><div class="value">{{ ts.target_price if ts.target_price else '--' }}</div></div>
-                                <div class="trade-cell"><div class="label">Stop Loss</div><div class="value">{{ ts.stop_loss if ts.stop_loss else '--' }}</div></div>
-                                <div class="trade-cell"><div class="label">Take Profit</div><div class="value">{{ ts.take_profit if ts.take_profit else '--' }}</div></div>
-                            </div>
-                            {% else %}
-                            <p style="color:var(--text-tertiary);">暂无交易策略</p>
-                            {% endif %}
+                        <div class="hd-panel open">
+                            <p>{{ h.combined_analysis if h.combined_analysis else '--' }}</p>
                         </div>
                     </div>
                     {% endif %}

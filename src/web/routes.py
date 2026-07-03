@@ -123,14 +123,28 @@ async def index(request: Request):
                 stock['trade_parsed'] = json.loads(stock['ai_trade_strategy'])
             except (json.JSONDecodeError, TypeError):
                 stock['trade_parsed'] = None
+
         # 附加历史分析摘要
         history = history_dao.get_history(code, limit=5)
+        parsed_history = []
         for h in history:
-            try:
-                h['ai_analysis_obj'] = json.loads(h.get('ai_analysis') or '{}')
-            except (json.JSONDecodeError, TypeError):
-                h['ai_analysis_obj'] = None
-        stock['analysis_history'] = history
+            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
+                try:
+                    ai_obj = json.loads(h['ai_analysis'])
+                    combined = []
+                    if ai_obj.get('analysis'):
+                        combined.append(ai_obj['analysis'])
+                    if ai_obj.get('investment_strategy'):
+                        combined.append(ai_obj['investment_strategy'])
+                    if ai_obj.get('trade_strategy'):
+                        combined.append(str(ai_obj['trade_strategy']))
+                    h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
+                except:
+                    h['combined_analysis'] = '--'
+            else:
+                h['combined_analysis'] = '--'
+            parsed_history.append(h)
+        stock['analysis_history'] = parsed_history
 
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
@@ -196,7 +210,24 @@ async def api_stocks():
     # 附加历史记录
     hist_dao = StockAnalysisHistoryDAO()
     for s in stocks:
-        s['analysis_history'] = hist_dao.get_history(s['code'], limit=5)
+        history = hist_dao.get_history(s['code'], limit=5)
+        for h in history:
+            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
+                try:
+                    ai_obj = json.loads(h['ai_analysis'])
+                    parts = []
+                    if ai_obj.get('analysis'):
+                        parts.append(ai_obj['analysis'])
+                    if ai_obj.get('investment_strategy'):
+                        parts.append(ai_obj['investment_strategy'])
+                    if ai_obj.get('trade_strategy'):
+                        parts.append(str(ai_obj['trade_strategy']))
+                    h['combined_analysis'] = '\n\n'.join(parts) if parts else '--'
+                except:
+                    h['combined_analysis'] = '--'
+            else:
+                h['combined_analysis'] = '--'
+        s['analysis_history'] = history
 
     return [dict(s) for s in stocks]
 
