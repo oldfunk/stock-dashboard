@@ -137,6 +137,20 @@ CREATE TABLE IF NOT EXISTS stock_analysis_history (
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_history_code_date ON stock_analysis_history(stock_code, analysis_date);
 CREATE INDEX IF NOT EXISTS idx_analysis_history_run ON stock_analysis_history(run_id);
+
+-- 流水线进度跟踪
+CREATE TABLE IF NOT EXISTS pipeline_progress (
+    run_id TEXT PRIMARY KEY,
+    stage TEXT NOT NULL DEFAULT 'idle',
+    stage_label TEXT DEFAULT '',
+    total_stocks INTEGER DEFAULT 0,
+    processed_stocks INTEGER DEFAULT 0,
+    ai_total INTEGER DEFAULT 0,
+    ai_done INTEGER DEFAULT 0,
+    ai_failed INTEGER DEFAULT 0,
+    started_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -318,6 +332,66 @@ class RunLogDAO:
         row = conn.execute("""
             SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1
         """).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+class PipelineProgressDAO:
+    """流水线进度 DAO"""
+
+    def init_run(self, run_id: str, stage: str = 'idle', stage_label: str = '',
+                 total: int = 0, ai_total: int = 0):
+        conn = get_connection()
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT OR REPLACE INTO pipeline_progress
+            (run_id, stage, stage_label, total_stocks, ai_total, started_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (run_id, stage, stage_label, total, ai_total, now, now))
+        conn.commit()
+        conn.close()
+
+    def update(self, run_id: str, stage: str = None, stage_label: str = None,
+               processed: int = None, ai_total: int = None, ai_done: int = None, ai_failed: int = None):
+        sets = []
+        params = []
+        if stage is not None:
+            sets.append('stage = ?')
+            params.append(stage)
+        if stage_label is not None:
+            sets.append('stage_label = ?')
+            params.append(stage_label)
+        if processed is not None:
+            sets.append('processed_stocks = ?')
+            params.append(processed)
+        if ai_total is not None:
+            sets.append('ai_total = ?')
+            params.append(ai_total)
+        if ai_done is not None:
+            sets.append('ai_done = ?')
+            params.append(ai_done)
+        if ai_failed is not None:
+            sets.append('ai_failed = ?')
+            params.append(ai_failed)
+        sets.append('updated_at = ?')
+        params.append(datetime.now().isoformat())
+        params.append(run_id)
+
+        if sets:
+            conn = get_connection()
+            conn.execute(f"UPDATE pipeline_progress SET {','.join(sets)} WHERE run_id = ?", params)
+            conn.commit()
+            conn.close()
+
+    def get_progress(self) -> Optional[dict]:
+        conn = get_connection()
+        row = conn.execute('SELECT * FROM pipeline_progress ORDER BY started_at DESC LIMIT 1').fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_progress_for_run(self, run_id: str) -> Optional[dict]:
+        conn = get_connection()
+        row = conn.execute('SELECT * FROM pipeline_progress WHERE run_id = ?', (run_id,)).fetchone()
         conn.close()
         return dict(row) if row else None
 

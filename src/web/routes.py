@@ -19,6 +19,7 @@ from src.models.database import (
     ScreeningResultDAO,
     StockAnalysisHistoryDAO,
     RunLogDAO,
+    PipelineProgressDAO,
 )
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
@@ -242,7 +243,25 @@ async def api_stock_history(code: str):
 async def api_status():
     """运行状态 API"""
     run = RunLogDAO().get_latest_run()
-    return dict(run) if run else {"status": "no_runs"}
+    result = dict(run) if run else {"status": "no_runs"}
+    # 附带进度
+    try:
+        p = PipelineProgressDAO().get_progress()
+        if p:
+            result['progress'] = dict(p)
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/progress")
+async def api_progress():
+    """流水线进度 API"""
+    try:
+        p = PipelineProgressDAO().get_progress()
+        return dict(p) if p else {"stage": "idle", "stage_label": "无运行中任务"}
+    except Exception as e:
+        return {"stage": "error", "stage_label": str(e)}
 
 
 @app.get("/api/realtime")
