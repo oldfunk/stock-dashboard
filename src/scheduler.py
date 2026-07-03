@@ -7,16 +7,18 @@
 3. 每日 15:30 自动触发选股流水线
 
 所有实时数据通过 /api/realtime 接口推送给前端。
+
+行情抓取与解析统一复用 src.utils 与 src.collector.akshare_fetcher，
+本模块只保留「调度」与「选股池实时行情」相关逻辑。
 """
 
 import logging
 import threading
 import time
-import subprocess
-import json
-import re
-from datetime import datetime, date, time as dtime
+from datetime import time as dtime
 from typing import Optional
+
+from src.utils import now_cn, curl_get, tc_encode, parse_tc_line, split_tc_response
 
 logger = logging.getLogger(__name__)
 
@@ -41,36 +43,9 @@ def get_realtime_cache() -> dict:
 
 # ── 工具函数 ──
 
-def _safe_float(val) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        v = float(val)
-        import math
-        return None if (math.isnan(v) or math.isinf(v)) else round(v, 2)
-    except (ValueError, TypeError):
-        return None
-
-
-def _curl_get(url: str, timeout=20) -> Optional[str]:
-    try:
-        r = subprocess.run(
-            ['curl', '-s', '--connect-timeout', '6',
-             '--max-time', str(timeout), url],
-            capture_output=True, timeout=timeout + 5)
-        if r.returncode == 0 and r.stdout:
-            try:
-                return r.stdout.decode('utf-8')
-            except UnicodeDecodeError:
-                return r.stdout.decode('gbk', errors='replace')
-    except Exception:
-        pass
-    return None
-
-
 def _is_trading_time() -> bool:
-    """A股交易时间判断：周一至周五 9:30-11:30, 13:00-15:00"""
-    now = datetime.now()
+    """A股交易时间判断：周一至周五 9:30-11:30, 13:00-15:00（Asia/Shanghai）"""
+    now = now_cn()
     if now.weekday() >= 5:  # 周六日
         return False
     t = now.time()
@@ -78,122 +53,26 @@ def _is_trading_time() -> bool:
             dtime(13, 0) <= t <= dtime(15, 0))
 
 
-def _tc_encode(code: str) -> str:
-    c = code.strip()
-    if c.startswith('6') or c.startswith('9'):
-        return f"sh{c}"
-    return f"sz{c}"
-
-
-def _parse_tc_line(raw: str) -> Optional[dict]:
-    """解析腾讯行情行"""
-    try:
-        parts = raw.split('~')
-        if len(parts) < 50:
-            return None
-        code = parts[2].strip()
-        return {
-            'code': code,
-            'name': parts[1].strip(),
-            'current_price': _safe_float(parts[3]),
-            'prev_close': _safe_float(parts[4]),
-            'open_price': _safe_float(parts[5]),
-            'high': _safe_float(parts[33]),
-            'low': _safe_float(parts[34]),
-            'change_percent': _safe_float(parts[32]),
-            'change_amount': _safe_float(parts[31]),
-            'volume': _safe_float(parts[6]),
-            'amount': _safe_float(parts[37]),
-            'pe': _safe_float(parts[39]) if len(parts) > 39 else None,
-            'pb': _safe_float(parts[46]) if len(parts) > 46 else None,
-            'market_cap': _safe_float(parts[45]) if len(parts) > 45 else None,
-            'amplitude': _safe_float(parts[43]) if len(parts) > 43 else None,
-            'turnover_rate': _safe_float(parts[38]) if len(parts) > 38 else None,
-        }
-    except Exception:
-        return None
-
-
 # ── 数据采集任务 ──
 
 def fetch_stock_realtime(codes: list[str]) -> dict[str, dict]:
-    """批量获取股票实时行情"""
+    """批量获取股票实时行情（腾讯 qt.gtimg.cn）"""
     if not codes:
         return {}
-    tc_codes = [_tc_encode(c) for c in codes]
+    tc_codes = [tc_encode(c) for c in codes]
     batch_size = 80
     results: dict[str, dict] = {}
     for i in range(0, len(tc_codes), batch_size):
         batch = tc_codes[i:i + batch_size]
-        raw = _curl_get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=20)
+        raw = curl_get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=20)
         if raw:
-            for line in raw.strip().split('\n'):
-                if '=' not in line:
-                    continue
-                line = line.split(';')[0]
-                eq = line.find('=')
-                if eq < 0:
-                    continue
-                val = line[eq + 1:].strip().strip('"')
-                q = _parse_tc_line(val)
+            for val in split_tc_response(raw):
+                q = parse_tc_line(val)
                 if q:
                     results[q['code']] = q
         if i + batch_size < len(tc_codes):
             time.sleep(0.3)
     return results
-
-
-def fetch_indices_realtime() -> list[dict]:
-    """获取大盘指数实时行情（腾讯 qt.gtimg.cn，与选股行情统一接口）"""
-    now = datetime.now()
-    ds, ts = now.strftime("%Y-%m-%d"), now.isoformat()
-    tc_codes = ['sh000001', 'sz399001', 'sz399006', 'sh000688']
-    target_map = {
-        'sh000001': '上证指数', 'sz399001': '深证成指',
-        'sz399006': '创业板指', 'sh000688': '科创50',
-    }
-    raw = _curl_get(
-        f"https://qt.gtimg.cn/q={','.join(tc_codes)}", timeout=15)
-    if not raw:
-        return []
-    indices = []
-    for line in raw.strip().split('\n'):
-        if '=' not in line:
-            continue
-        line = line.split(';')[0]
-        eq = line.find('=')
-        if eq < 0:
-            continue
-        val = line[eq + 1:].strip().strip('"')
-        parts = val.split('~')
-        if len(parts) < 35:
-            continue
-        code = parts[2].strip()
-        tc_key = f"{'sh' if code.startswith('00') else 'sz'}{code}"
-        name = target_map.get(tc_key)
-        if not name:
-            continue
-        cur = _safe_float(parts[3])
-        yes_close = _safe_float(parts[4])
-        chg_pct = ((cur - yes_close) / yes_close * 100) if (
-            cur and yes_close and yes_close != 0) else None
-        chg_amt = (cur - yes_close) if (cur and yes_close) else None
-        volume = _safe_float(parts[6]) if len(parts) > 6 else None
-        amount = _safe_float(parts[37]) if len(parts) > 37 else None
-        indices.append({
-            'index_code': tc_key,
-            'index_name': name,
-            'current_value': cur or 0,
-            'change_percent': _safe_float(chg_pct),
-            'change_amount': _safe_float(chg_amt),
-            'volume': volume or 0,
-            'amount': amount or 0,
-            'pe': None, 'pb': None,
-            'timestamp': ts, 'date': ds,
-        })
-    if indices:
-        logger.info(f"[采集] 大盘: {len(indices)} 条")
-    return indices
 
 
 # ── 调度器 ──
@@ -211,7 +90,7 @@ class MarketScheduler:
         self.daily_time = dtime(15, 30)     # 每日自动运行时间
         self._last_index_time = 0.0
         self._last_stock_time = 0.0
-        self._last_daily_date = datetime.now().date()  # 启动时不触发当日流水线
+        self._last_daily_date = now_cn().date()  # 启动时不触发当日流水线
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -260,10 +139,11 @@ class MarketScheduler:
             self._stop.wait(30)
 
     def _poll_indices(self):
-        """轮询大盘指数并存入数据库"""
+        """轮询大盘指数并存入数据库（委托 collector 统一实现）"""
         from src.models.database import MarketIndexDAO
+        from src.collector.akshare_fetcher import fetch_market_index
         try:
-            indices = fetch_indices_realtime()
+            indices = fetch_market_index()
             if indices:
                 MarketIndexDAO().save(indices)
                 names = [i['index_name'] for i in indices]
@@ -292,7 +172,7 @@ class MarketScheduler:
 
     def _check_daily_pipeline(self):
         """检查是否需要触发每日流水线"""
-        now = datetime.now()
+        now = now_cn()
         today = now.date()
         # 交易日 + 时间超过 15:30 + 当天未运行过
         if now.weekday() >= 5:
@@ -305,7 +185,7 @@ class MarketScheduler:
         logger.info("[调度器] 触发每日选股流水线...")
         try:
             from src.orchestrator import run_daily_pipeline
-            from src.orchestrator import load_config
+            from src.config import load_config
             config = load_config()
             run_daily_pipeline(config)
             self._last_daily_date = today

@@ -4,15 +4,15 @@ Web 看板 - FastAPI 路由
 
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import yaml
 
+from src.config import load_config
 from src.models.database import (
     init_database,
     MarketIndexDAO,
@@ -23,54 +23,45 @@ from src.models.database import (
 )
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
+    _active_codes, _cache_lock, _realtime_cache,
 )
+from src.utils import now_cn
 
 logger = logging.getLogger(__name__)
-
-# -------- 创建 FastAPI 应用 --------
-app = FastAPI(title="价值投资选股看板")
 
 # 全局调度器
 _scheduler = MarketScheduler()
 
 
-@app.on_event("startup")
-def _startup():
-    # 加载 .env 环境变量（AI API Key 等）
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时加载 .env / 初始化 DB / 启动调度器；停止时关调度器。"""
     from dotenv import load_dotenv
     env_path = Path(__file__).parent.parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
         logger.info(f"[Web] 加载 .env: {env_path}")
     init_database()
-    # 启动后台调度器
     _scheduler.start()
     logger.info("[Web] 服务启动完成")
+    try:
+        yield
+    finally:
+        _scheduler.stop()
+        logger.info("[Web] 服务关闭")
 
 
-@app.on_event("shutdown")
-def _shutdown():
-    _scheduler.stop()
-    logger.info("[Web] 服务关闭")
+# -------- 创建 FastAPI 应用 --------
+app = FastAPI(title="价值投资选股看板", lifespan=lifespan)
 
 
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
-templates = Jinja2Templates(directory=str(templates_dir), cache_size=0)
+templates = Jinja2Templates(directory=str(templates_dir))
 
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-
-def load_config_safe():
-    """安全加载配置"""
-    config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    except Exception:
-        return {}
 
 
 # -------- 路由 --------
@@ -78,7 +69,7 @@ def load_config_safe():
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """看板首页"""
-    config = load_config_safe()
+    config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
 
     # 获取最新大盘数据
@@ -140,7 +131,7 @@ async def index(request: Request):
                     if ai_obj.get('trade_strategy'):
                         combined.append(str(ai_obj['trade_strategy']))
                     h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
-                except:
+                except Exception:
                     h['combined_analysis'] = '--'
             else:
                 h['combined_analysis'] = '--'
@@ -156,7 +147,7 @@ async def index(request: Request):
         "stocks": stocks,
         "run_log": run_log,
         "refresh_interval": refresh,
-        "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
 
@@ -164,9 +155,6 @@ async def index(request: Request):
 async def api_indices():
     """大盘数据 API"""
     indices = MarketIndexDAO().get_latest()
-    # 有实时缓存就覆盖
-    rt = get_realtime_cache()
-    # 如果有实时大盘数据可以放这里，但目前大盘走数据库
     return [dict(i) for i in indices]
 
 
@@ -184,10 +172,8 @@ async def api_stocks():
     if not realtime and codes:
         quotes = fetch_stock_realtime(codes)
         if quotes:
-            # 也存入缓存
-            import src.scheduler as sched
-            with sched._cache_lock:
-                sched._realtime_cache.update(quotes)
+            with _cache_lock:
+                _realtime_cache.update(quotes)
             realtime = quotes
     for s in stocks:
         code = s['code']
@@ -224,7 +210,7 @@ async def api_stocks():
                     if ai_obj.get('trade_strategy'):
                         parts.append(str(ai_obj['trade_strategy']))
                     h['combined_analysis'] = '\n\n'.join(parts) if parts else '--'
-                except:
+                except Exception:
                     h['combined_analysis'] = '--'
             else:
                 h['combined_analysis'] = '--'
@@ -244,7 +230,6 @@ async def api_status():
     """运行状态 API"""
     run = RunLogDAO().get_latest_run()
     result = dict(run) if run else {"status": "no_runs"}
-    # 附带进度
     try:
         p = PipelineProgressDAO().get_progress()
         if p:
@@ -267,12 +252,11 @@ async def api_progress():
 @app.get("/api/realtime")
 async def api_realtime():
     """纯实时行情 API — 仅返回价格变化信息"""
-    import src.scheduler as sched
     cache = get_realtime_cache()
 
     # 如果缓存为空，主动拉一次
-    if not cache and sched._active_codes:
-        quotes = fetch_stock_realtime(sched._active_codes)
+    if not cache and _active_codes:
+        quotes = fetch_stock_realtime(_active_codes)
         if quotes:
             cache.update(quotes)
 
@@ -296,10 +280,10 @@ async def api_realtime():
 
 @app.post("/api/trigger_update")
 async def trigger_update():
-    """手动触发每日更新"""
-    from src.orchestrator import run_daily_pipeline, load_config
-    config = load_config()
+    """手动触发每日更新（后台线程；orchestrator 内部有锁防并发）"""
+    from src.orchestrator import run_daily_pipeline
     import threading
+    config = load_config()
     thread = threading.Thread(target=run_daily_pipeline, args=(config,), daemon=True)
     thread.start()
     return {"status": "started", "message": "更新流程已启动，请在日志中查看进度"}
@@ -307,7 +291,7 @@ async def trigger_update():
 
 def run_server():
     """启动 Web 服务"""
-    config = load_config_safe()
+    config = load_config()
     host = config.get('web', {}).get('host', '0.0.0.0')
     port = config.get('web', {}).get('port', 9527)
 
@@ -317,6 +301,6 @@ def run_server():
     import uvicorn
     print(f"Stock Dashboard running at http://{host}:{port}")
     print(f"Market index: every 30min | Stock quote: every 5min (trading hours)")
-    print(f"Daily pipeline: 15:30 (weekdays)")
+    print(f"Daily pipeline: 15:30 (weekdays, Beijing time)")
     print(f"Press Ctrl+C to stop")
     uvicorn.run(app, host=host, port=port, log_level="info")

@@ -1,25 +1,42 @@
 """
-AI 选股分析模块
-调用 LLM 对筛选出的股票生成选股解析、投资策略、买卖策略
-支持 OpenAI 兼容 API
+AI 选股分析模块（项目唯一的 AI 调用实现）
+
+调用 LLM 对筛选出的股票生成：选股解析 / 投资策略 / 买卖策略。
+所有脚本（run_pipeline.py / run_ai_analysis.py）都应通过本模块调用 AI，
+避免多套重试策略与默认值不一致的问题。
+
+设计要点：
+- 20 次指数退避（30→60→120→240→300×16），应对 GLM-4.7-Flash 免费模型的拥堵
+- 健壮 JSON 解析（兼容 markdown 包裹 / 前后噪声文本 / 末尾逗号 / 单引号 / 截断）
+- 默认 API/模型与 config.yaml 对齐（智谱 glm-4.7-flash），可被环境变量覆盖
 """
 
 import json
 import logging
+import os
+import re
 import time
-from datetime import datetime
-from typing import Optional
+from typing import Optional, Callable
 
 import httpx
 
-from src.models.database import ScreeningResultDAO
-from src.models.database import AiAnalysisLogDAO
-
 logger = logging.getLogger(__name__)
 
+
+# 20 次指数退避表（秒）。GLM-4.7-Flash 拥堵时持续等待绝不放弃
+BACKOFF_SCHEDULE: list[int] = [
+    30, 60, 120, 240,
+    300, 300, 300, 300, 300, 300,
+    300, 300, 300, 300, 300, 300,
+    300, 300, 300, 300,
+]
+
+# 默认配置与 config.yaml / README 保持一致
+DEFAULT_API_BASE = "https://open.bigmodel.cn/api/paas/v4"
+DEFAULT_MODEL = "glm-4.7-flash"
+
 # AI 分析 Prompt 模板
-ANALYSIS_PROMPT = """
-你是一位专业的价值投资分析师，基于格雷厄姆和巴菲特的价值投资理念，
+ANALYSIS_PROMPT = """你是一位专业的价值投资分析师，基于格雷厄姆和巴菲特的价值投资理念，
 对以下A股股票进行深度分析并给出投资建议。
 
 ## 股票基本面数据
@@ -48,48 +65,101 @@ ANALYSIS_PROMPT = """
         "stop_loss": "止损线——基本面或价格止损条件",
         "take_profit": "止盈条件——分批止盈触发条件"
     }}
-}}
-"""
+}}"""
+
+
+def parse_ai_response(content: str) -> Optional[dict]:
+    """健壮地解析 LLM 返回的 JSON。
+
+    兼容：markdown 代码块包裹、前后噪声文本、末尾逗号、单引号、截断补全。
+    返回包含 analysis / investment_strategy / trade_strategy 的 dict，失败返回 None。
+    """
+    if not content:
+        return None
+
+    text = content.strip()
+
+    # 1. 去掉 markdown 代码块包裹
+    if '```json' in text:
+        text = text.split('```json', 1)[1]
+        text = text.split('```', 1)[0].strip()
+    elif '```' in text:
+        blocks = text.split('```')
+        # 取最后一个以 { 开头的代码块
+        extracted = None
+        for b in reversed(blocks):
+            b = b.strip()
+            if b.startswith('{'):
+                extracted = b
+                break
+        text = extracted if extracted else (blocks[1] if len(blocks) > 1 else text)
+
+    # 2. 截取第一个 { 到最后一个 } 之间的内容
+    m = re.search(r'(\{.*\})', text, re.DOTALL)
+    if m:
+        text = m.group(1)
+
+    # 3. 直接解析
+    try:
+        result = json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        # 4. 修复常见问题：末尾逗号、单引号、截断补全
+        cleaned = text.replace("'", '"')
+        cleaned = re.sub(r',\s*}', '}', cleaned)
+        cleaned = re.sub(r',\s*]', ']', cleaned)
+        if cleaned.startswith('{') and not cleaned.endswith('}'):
+            cleaned += '}'
+        try:
+            result = json.loads(cleaned, strict=False)
+        except json.JSONDecodeError:
+            logger.error(f"[AI分析] JSON 解析失败，前200字符: {text[:200]}")
+            return None
+
+    # 5. 校验必要字段
+    required = ['analysis', 'investment_strategy', 'trade_strategy']
+    if not all(k in result for k in required):
+        logger.warning(f"[AI分析] 返回字段不完整: {list(result.keys())}")
+        return None
+    return result
 
 
 class AiAnalyzer:
-    """AI 选股分析器"""
+    """AI 选股分析器（项目唯一实现）。"""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict = None):
         """
-        config: {
-            'api_base': 'https://api.openai.com/v1',
-            'model': 'gpt-4o-mini',
-            'temperature': 0.3,
-            'max_tokens': 2000,
-        }
+        Args:
+            config: config.yaml 中 ai 段，形如::
+
+                {
+                    'api_base': 'https://open.bigmodel.cn/api/paas/v4',
+                    'model': 'glm-4.7-flash',
+                    'temperature': 0.3,
+                    'max_tokens': 2000,
+                }
+
+            环境变量优先于 config：STOCK_AI_API_KEY / STOCK_AI_API_BASE / STOCK_AI_MODEL
         """
-        self.cfg = config
-        self.api_base = config.get('api_base', 'https://api.openai.com/v1')
-        self.model = config.get('model', 'gpt-4o-mini')
-        self.temperature = config.get('temperature', 0.3)
-        self.max_tokens = config.get('max_tokens', 2000)
+        cfg = config or {}
+        self.api_base = (
+            os.getenv('STOCK_AI_API_BASE')
+            or cfg.get('api_base')
+            or DEFAULT_API_BASE
+        ).rstrip('/')
+        self.model = os.getenv('STOCK_AI_MODEL') or cfg.get('model') or DEFAULT_MODEL
+        self.temperature = cfg.get('temperature', 0.3)
+        self.max_tokens = cfg.get('max_tokens', 2000)
 
-        # 限流冷却状态
-        self._last_429_time = 0.0
-        self._rate_limit_cooldown = 120  # 遇到429后冷却120秒
-
-        # 从环境变量读取 API Key
-        import os
         self.api_key = os.getenv('STOCK_AI_API_KEY') or os.getenv('OPENAI_API_KEY')
         if not self.api_key:
             logger.warning("[AI分析] 未设置 API Key（STOCK_AI_API_KEY / OPENAI_API_KEY）")
 
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
     def analyze_stock(self, stock: dict) -> Optional[dict]:
-        """
-        对一只股票进行 AI 分析
-        stock: {
-            'code', 'name', 'pe', 'pb', 'roe',
-            'revenue_growth', 'profit_growth', 'debt_ratio',
-            'market_cap', 'sector', 'reason'
-        }
-        返回: {'analysis': ..., 'investment_strategy': ..., 'trade_strategy': ...}
-        """
+        """对一只股票进行 AI 分析，返回解析后的 dict（失败返回 None）。"""
         if not self.api_key:
             logger.error("[AI分析] 无 API Key，跳过分析")
             return None
@@ -108,27 +178,13 @@ class AiAnalyzer:
             reason=stock.get('reason', ''),
         )
 
-        try:
-            response = self._call_llm(prompt)
-            if not response:
-                return None
-
-            result = self._parse_response(response)
-            return result
-
-        except Exception as e:
-            logger.error(f"[AI分析] {stock['code']} 分析失败: {e}")
+        content = self._call_llm(prompt)
+        if not content:
             return None
+        return parse_ai_response(content)
 
     def _call_llm(self, prompt: str) -> Optional[str]:
-        """调用 LLM API（含智能限流冷却 + 退避重试）"""
-        # 检查是否在限流冷却期
-        now = time.time()
-        if self._last_429_time > 0 and now - self._last_429_time < self._rate_limit_cooldown:
-            remaining = int(self._rate_limit_cooldown - (now - self._last_429_time))
-            logger.info(f"[AI分析] 限流冷却中，跳过（剩余 {remaining}s）")
-            return None
-
+        """调用 LLM API，使用 BACKOFF_SCHEDULE 做 20 次退避重试。"""
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -136,143 +192,159 @@ class AiAnalyzer:
         payload = {
             'model': self.model,
             'messages': [
-                {'role': 'system', 'content': '你是一位专业的价值投资分析师，精通A股市场分析。输出严格为JSON格式。'},
+                {'role': 'system',
+                 'content': '你是一位专业的价值投资分析师，精通A股市场分析。输出严格为JSON格式。'},
                 {'role': 'user', 'content': prompt},
             ],
             'temperature': self.temperature,
             'max_tokens': self.max_tokens,
         }
+        url = f"{self.api_base}/chat/completions"
+        max_retries = len(BACKOFF_SCHEDULE)
 
-        max_retries = 4
         for attempt in range(max_retries):
             try:
-                with httpx.Client(timeout=60.0) as client:
-                    resp = client.post(
-                        f'{self.api_base.rstrip("/")}/chat/completions',
-                        headers=headers,
-                        json=payload,
-                    )
-                    if resp.status_code == 429:
-                        self._last_429_time = time.time()
-                        if attempt < max_retries - 1:
-                            wait = [30, 60, 120][attempt]
-                            logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
-                            time.sleep(wait)
-                            continue
-                        logger.error(f"[AI分析] 限流(429)，已达最大重试次数，跳过")
-                        return None
-                    resp.raise_for_status()
-                    # 成功后重置冷却状态
-                    self._last_429_time = 0.0
-                    data = resp.json()
-                    content = data['choices'][0]['message']['content']
-                    logger.debug(f"[AI分析] API 响应: {content[:100]}...")
-                    return content
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    self._last_429_time = time.time()
-                    if attempt < max_retries - 1:
-                        wait = [30, 60, 120][attempt]
-                        logger.warning(f"[AI分析] 限流(429)，{wait}s后重试...")
-                        time.sleep(wait)
+                with httpx.Client(timeout=120.0) as client:
+                    resp = client.post(url, headers=headers, json=payload)
+
+                if resp.status_code == 200:
+                    try:
+                        content = resp.json()['choices'][0]['message']['content']
+                    except (KeyError, IndexError, ValueError) as e:
+                        logger.warning(f"[AI分析] 200但响应结构异常: {e}")
+                        time.sleep(BACKOFF_SCHEDULE[attempt])
                         continue
-                    logger.error(f"[AI分析] 限流(429)，已达最大重试次数，跳过")
-                    return None
-                logger.error(f"[AI分析] API 调用失败: {e}")
-                return None
-            except httpx.RequestError as e:
-                logger.error(f"[AI分析] 网络错误: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(10)
+                    if not content or len(content) < 10:
+                        logger.warning(
+                            f"[AI分析] 响应内容过短({len(content)}字符), 重试...")
+                        time.sleep(BACKOFF_SCHEDULE[attempt])
+                        continue
+                    return content
+
+                if resp.status_code == 429:
+                    # 智谱常返回 code:1305（访问量过大）
+                    self._log_rate_limit(resp, attempt, max_retries)
+                    time.sleep(BACKOFF_SCHEDULE[attempt])
                     continue
-                return None
+
+                if resp.status_code == 503:
+                    logger.warning(
+                        f"[AI分析] 503, 退避 {BACKOFF_SCHEDULE[attempt]}s")
+                    time.sleep(BACKOFF_SCHEDULE[attempt])
+                    continue
+
+                logger.warning(
+                    f"[AI分析] HTTP {resp.status_code}, 退避 {BACKOFF_SCHEDULE[attempt]}s")
+                time.sleep(BACKOFF_SCHEDULE[attempt])
+
+            except httpx.TimeoutException:
+                logger.warning(
+                    f"[AI分析] 超时, 退避 {BACKOFF_SCHEDULE[attempt]}s")
+                time.sleep(BACKOFF_SCHEDULE[attempt])
+            except httpx.RequestError as e:
+                logger.warning(f"[AI分析] 网络错误: {e}, 退避 {BACKOFF_SCHEDULE[attempt]}s")
+                time.sleep(BACKOFF_SCHEDULE[attempt])
+            except Exception as e:
+                logger.warning(f"[AI分析] 异常: {e}, 退避 {BACKOFF_SCHEDULE[attempt]}s")
+                time.sleep(BACKOFF_SCHEDULE[attempt])
+
+        logger.error(f"[AI分析] 已达最大重试次数 {max_retries}，放弃")
         return None
 
-    def _parse_response(self, content: str) -> Optional[dict]:
-        """解析 LLM 返回的 JSON——兼容各种格式噪声"""
-        # 1. 去掉 markdown 代码块包裹
-        if '```json' in content:
-            content = content.split('```json')[1].split('```')[0].strip()
-        elif '```' in content:
-            # 取最后一个代码块
-            blocks = content.split('```')
-            for b in reversed(blocks):
-                b = b.strip()
-                if b.startswith('{'):
-                    content = b
-                    break
-            else:
-                content = blocks[1] if len(blocks) > 1 else content
-
-        # 2. 去掉前后非 JSON 文本，只保留 {} 包裹的内容
-        import re
-        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
-        if json_match:
-            content = json_match.group(1)
-
-        # 3. 宽松解析
+    @staticmethod
+    def _log_rate_limit(resp: httpx.Response, attempt: int, max_retries: int):
         try:
-            result = json.loads(content, strict=False)
-        except json.JSONDecodeError:
-            # 尝试修复常见问题：末尾逗号、单引号
-            cleaned = content.replace("'", '"')
-            cleaned = re.sub(r',\s*}', '}', cleaned)
-            cleaned = re.sub(r',\s*]', ']', cleaned)
-            try:
-                result = json.loads(cleaned, strict=False)
-            except json.JSONDecodeError:
-                logger.error(f"[AI分析] JSON 解析彻底失败，前200字符: {content[:200]}")
-                return None
-
-        # 4. 验证必要字段
-        required = ['analysis', 'investment_strategy', 'trade_strategy']
-        if not all(k in result for k in required):
-            logger.warning(f"[AI分析] 返回字段不完整: {list(result.keys())}")
-            return None
-        return result
+            err = resp.json().get('error', {})
+            err_code = err.get('code', '')
+            if err_code == '1305':
+                logger.warning(
+                    f"[AI分析] 拥挤1305({err.get('message','')}) 退避 {attempt+1}/{max_retries}")
+                return
+        except Exception:
+            pass
+        logger.warning(
+            f"[AI分析] 限流(429), 退避 {BACKOFF_SCHEDULE[attempt]}s ({attempt+1}/{max_retries})")
 
 
-def run_ai_analysis(config: dict, candidates: list[dict]) -> list[dict]:
+# ── 批量分析 ──
+
+def _save_analysis(stock: dict, result: dict, run_id: str):
+    """把 AI 分析结果写入 screening_result 与 stock_analysis_history。"""
+    from src.models.database import ScreeningResultDAO, StockAnalysisHistoryDAO
+
+    analysis_json = json.dumps(result, ensure_ascii=False)
+    strategy = result.get('investment_strategy', '')
+    if isinstance(strategy, dict):
+        strategy = json.dumps(strategy, ensure_ascii=False)
+    trade = result.get('trade_strategy', {})
+    trade_json = json.dumps(trade, ensure_ascii=False) if isinstance(trade, dict) else str(trade)
+
+    ScreeningResultDAO().update_ai_analysis(
+        run_id, stock['code'], analysis_json, strategy, trade_json)
+    StockAnalysisHistoryDAO().save(
+        stock['code'], run_id, stock.get('score'),
+        analysis_json, trade_json)
+
+
+def _save_failure(stock: dict, run_id: str):
+    """记录一次失败尝试（写入空记录，避免短时间内重复尝试）。"""
+    from src.models.database import StockAnalysisHistoryDAO
+    StockAnalysisHistoryDAO().save(
+        stock['code'], run_id, stock.get('score'), '{}', '{}')
+
+
+def analyze_batch(stocks: list[dict], run_id: str,
+                  interval_seconds: int = 60,
+                  on_progress: Optional[Callable[[int, int, int], None]] = None
+                  ) -> tuple[int, int]:
+    """批量分析股票并持久化结果。
+
+    Args:
+        stocks: 待分析股票列表（需含 code/name/score 等字段）
+        run_id: 运行批次 ID
+        interval_seconds: 每只股票之间的冷却间隔（默认 60s，避免限流）
+        on_progress: 进度回调 (analyzed_ok, analyzed_failed, current_index)
+
+    Returns:
+        (成功数, 失败数)
     """
-    对筛选结果批量运行 AI 分析
-    返回附带分析结果的增强列表
-    """
-    ai_config = config.get('ai', {})
-    analyzer = AiAnalyzer(ai_config)
-    result_dao = ScreeningResultDAO()
-    run_id = candidates[0]['run_id'] if candidates else datetime.now().strftime("%Y%m%d_%H%M%S")
+    from src.config import load_config
+    analyzer = AiAnalyzer(load_config().get('ai', {}))
+    total = len(stocks)
+    if total == 0:
+        return 0, 0
+    if not analyzer.configured:
+        logger.error("[AI分析] 无 API Key，跳过全部")
+        for i, s in enumerate(stocks):
+            _save_failure(s, run_id)
+        return 0, total
 
-    logger.info(f"[AI分析] 开始分析 {len(candidates)} 只股票...")
+    logger.info(f"[AI分析] 开始分析 {total} 只股票...")
+    analyzed_ok = 0
+    analyzed_failed = 0
 
-    enhanced = []
-    for i, stock in enumerate(candidates):
-        logger.info(f"[AI分析] ({i+1}/{len(candidates)}) {stock['code']} {stock['name']}...")
-        analysis = analyzer.analyze_stock(stock)
+    for idx, stock in enumerate(stocks):
+        code, name = stock.get('code'), stock.get('name')
+        logger.info(f"[AI分析] ({idx+1}/{total}) {code} {name}...")
+        if on_progress:
+            on_progress(analyzed_ok, analyzed_failed, idx)
 
-        if analysis:
-            stock['ai_analysis'] = json.dumps(analysis, ensure_ascii=False)
-            stock['ai_investment_strategy'] = analysis.get('investment_strategy', '')
-            trade = analysis.get('trade_strategy', {})
-            stock['ai_trade_strategy'] = json.dumps(trade, ensure_ascii=False)
-
-            # 保存到数据库
-            result_dao.update_ai_analysis(
-                run_id, stock['code'],
-                stock['ai_analysis'],
-                stock['ai_investment_strategy'],
-                stock['ai_trade_strategy'],
-            )
+        result = analyzer.analyze_stock(stock)
+        if result:
+            _save_analysis(stock, result, run_id)
+            analyzed_ok += 1
+            logger.info(f"  ✅ {analyzed_ok}/{total}")
         else:
-            stock['ai_analysis'] = None
-            stock['ai_investment_strategy'] = None
-            stock['ai_trade_strategy'] = None
+            _save_failure(stock, run_id)
+            analyzed_failed += 1
+            logger.warning(f"  ✗ Failed {analyzed_failed}")
 
-        enhanced.append(stock)
+        # 股票之间冷却
+        if idx < total - 1:
+            time.sleep(interval_seconds)
 
-        # 请求间隔，避免限流（Free tier 建议 30s+）
-        if i < len(candidates) - 1:
-            time.sleep(30)
-
-    analyzed = sum(1 for s in enhanced if s.get('ai_analysis'))
-    logger.info(f"[AI分析] 完成: 成功 {analyzed}/{len(candidates)} 只")
-    return enhanced
+    if on_progress:
+        on_progress(analyzed_ok, analyzed_failed, total)
+    logger.info(
+        f"[AI分析] 完成: 成功 {analyzed_ok}/{total}（失败 {analyzed_failed}）")
+    return analyzed_ok, analyzed_failed

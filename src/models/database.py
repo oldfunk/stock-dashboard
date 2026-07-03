@@ -4,10 +4,11 @@ SQLite 本地存储，无外部依赖
 """
 
 import sqlite3
-import os
+from contextlib import contextmanager
 from pathlib import Path
-from datetime import datetime, date
 from typing import Optional
+
+from src.utils import now_cn
 
 
 def get_db_path() -> str:
@@ -18,12 +19,35 @@ def get_db_path() -> str:
 
 
 def get_connection() -> sqlite3.Connection:
-    """获取数据库连接"""
+    """获取数据库连接（裸连接，调用方需自行 close）。
+
+    推荐改用 ``db_conn()`` 上下文管理器以避免连接泄漏。
+    """
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+@contextmanager
+def db_conn():
+    """数据库连接上下文管理器：自动 commit / rollback / close。
+
+    使用示例::
+
+        with db_conn() as conn:
+            conn.execute("INSERT ...", (...))
+    """
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 SCHEMA_SQL = """
@@ -156,10 +180,8 @@ CREATE TABLE IF NOT EXISTS pipeline_progress (
 
 def init_database():
     """初始化数据库，创建表结构"""
-    conn = get_connection()
-    conn.executescript(SCHEMA_SQL)
-    conn.commit()
-    conn.close()
+    with db_conn() as conn:
+        conn.executescript(SCHEMA_SQL)
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
 
@@ -167,173 +189,179 @@ def init_database():
 
 class MarketIndexDAO:
     def save(self, records: list[dict]):
-        conn = get_connection()
-        for r in records:
-            conn.execute("""
-                INSERT INTO market_index (index_code, index_name, current_value,
-                    change_percent, change_amount, volume, amount, pe, pb, timestamp, date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (r['index_code'], r['index_name'], r.get('current_value'),
-                  r.get('change_percent'), r.get('change_amount'),
-                  r.get('volume'), r.get('amount'), r.get('pe'),
-                  r.get('pb'), r['timestamp'], r['date']))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            for r in records:
+                conn.execute("""
+                    INSERT INTO market_index (index_code, index_name, current_value,
+                        change_percent, change_amount, volume, amount, pe, pb, timestamp, date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (r['index_code'], r['index_name'], r.get('current_value'),
+                      r.get('change_percent'), r.get('change_amount'),
+                      r.get('volume'), r.get('amount'), r.get('pe'),
+                      r.get('pb'), r['timestamp'], r['date']))
 
     def get_latest(self, index_code: str = None) -> list[dict]:
-        conn = get_connection()
-        if index_code:
-            rows = conn.execute("""
-                SELECT * FROM market_index WHERE index_code = ?
-                ORDER BY timestamp DESC LIMIT 1
-            """, (index_code,)).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT m.* FROM market_index m
-                INNER JOIN (
-                    SELECT index_code, MAX(timestamp) as max_ts
-                    FROM market_index GROUP BY index_code
-                ) latest ON m.index_code = latest.index_code AND m.timestamp = latest.max_ts
-            """).fetchall()
-        conn.close()
+        with db_conn() as conn:
+            if index_code:
+                rows = conn.execute("""
+                    SELECT * FROM market_index WHERE index_code = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (index_code,)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT m.* FROM market_index m
+                    INNER JOIN (
+                        SELECT index_code, MAX(timestamp) as max_ts
+                        FROM market_index GROUP BY index_code
+                    ) latest ON m.index_code = latest.index_code AND m.timestamp = latest.max_ts
+                """).fetchall()
         return [dict(r) for r in rows]
 
 
 class StockSnapshotDAO:
     def save_batch(self, records: list[dict]):
-        conn = get_connection()
-        conn.execute("BEGIN")
-        for r in records:
-            conn.execute("""
-                INSERT OR REPLACE INTO stock_snapshot
-                (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
-                 roe, revenue, revenue_growth, profit, profit_growth, debt_ratio,
-                 dividend_yield, current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (r['code'], r['name'], r.get('market', 'A'),
-                  r.get('sector'), r.get('pe'), r.get('pb'), r.get('ps'),
-                  r.get('market_cap'), r.get('circulating_cap'),
-                  r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
-                  r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
-                  r.get('dividend_yield'), r.get('current_price'),
-                  r.get('high_52w'), r.get('low_52w'),
-                  1 if r.get('is_st') else 0, r.get('list_date'),
-                  r['snapshot_date']))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            for r in records:
+                conn.execute("""
+                    INSERT OR REPLACE INTO stock_snapshot
+                    (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
+                     roe, revenue, revenue_growth, profit, profit_growth, debt_ratio,
+                     dividend_yield, current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (r['code'], r['name'], r.get('market', 'A'),
+                      r.get('sector'), r.get('pe'), r.get('pb'), r.get('ps'),
+                      r.get('market_cap'), r.get('circulating_cap'),
+                      r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
+                      r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
+                      r.get('dividend_yield'), r.get('current_price'),
+                      r.get('high_52w'), r.get('low_52w'),
+                      1 if r.get('is_st') else 0, r.get('list_date'),
+                      r['snapshot_date']))
 
     def get_latest_snapshot_date(self) -> Optional[str]:
-        conn = get_connection()
-        row = conn.execute("SELECT snapshot_date FROM stock_snapshot ORDER BY snapshot_date DESC LIMIT 1").fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT snapshot_date FROM stock_snapshot ORDER BY snapshot_date DESC LIMIT 1"
+            ).fetchone()
         return row['snapshot_date'] if row else None
 
     def count(self) -> int:
-        conn = get_connection()
-        row = conn.execute("SELECT COUNT(*) as cnt FROM stock_snapshot").fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM stock_snapshot").fetchone()
         return row['cnt']
 
 
 class ScreeningResultDAO:
     def save_batch(self, records: list[dict]):
-        conn = get_connection()
-        conn.execute("BEGIN")
-        for r in records:
-            conn.execute("""
-                INSERT INTO screening_result
-                (run_id, run_date, code, name, score, pe, pb, roe,
-                 revenue_growth, profit_growth, debt_ratio, market_cap, reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (r['run_id'], r['run_date'], r['code'], r['name'],
-                  r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
-                  r.get('revenue_growth'), r.get('profit_growth'),
-                  r.get('debt_ratio'), r.get('market_cap'), r.get('reason')))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            for r in records:
+                conn.execute("""
+                    INSERT INTO screening_result
+                    (run_id, run_date, code, name, score, pe, pb, roe,
+                     revenue_growth, profit_growth, debt_ratio, market_cap, reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (r['run_id'], r['run_date'], r['code'], r['name'],
+                      r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
+                      r.get('revenue_growth'), r.get('profit_growth'),
+                      r.get('debt_ratio'), r.get('market_cap'), r.get('reason')))
 
     def update_ai_analysis(self, run_id: str, code: str, analysis: str, strategy: str, trade_strategy: str):
-        conn = get_connection()
-        conn.execute("""
-            UPDATE screening_result
-            SET ai_analysis = ?, ai_investment_strategy = ?, ai_trade_strategy = ?
-            WHERE run_id = ? AND code = ?
-        """, (analysis, strategy, trade_strategy, run_id, code))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            conn.execute("""
+                UPDATE screening_result
+                SET ai_analysis = ?, ai_investment_strategy = ?, ai_trade_strategy = ?
+                WHERE run_id = ? AND code = ?
+            """, (analysis, strategy, trade_strategy, run_id, code))
 
     def get_latest_results(self, limit: int = 50) -> list[dict]:
-        conn = get_connection()
-        rows = conn.execute("""
-            SELECT sr.* FROM screening_result sr
-            WHERE sr.run_id = (SELECT MAX(run_id) FROM screening_result)
-            ORDER BY sr.score DESC LIMIT ?
-        """, (limit,)).fetchall()
-        conn.close()
+        with db_conn() as conn:
+            rows = conn.execute("""
+                SELECT sr.* FROM screening_result sr
+                WHERE sr.run_id = (SELECT MAX(run_id) FROM screening_result)
+                ORDER BY sr.score DESC LIMIT ?
+            """, (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def get_history(self, code: str, limit: int = 10) -> list[dict]:
-        conn = get_connection()
-        rows = conn.execute("""
-            SELECT * FROM screening_result
-            WHERE code = ? AND status = 'active'
-            ORDER BY run_date DESC LIMIT ?
-        """, (code, limit)).fetchall()
-        conn.close()
+        with db_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM screening_result
+                WHERE code = ? AND status = 'active'
+                ORDER BY run_date DESC LIMIT ?
+            """, (code, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def get_latest_run_id(self) -> Optional[str]:
-        conn = get_connection()
-        row = conn.execute("SELECT MAX(run_id) as rid FROM run_log WHERE status = 'completed'").fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(run_id) as rid FROM run_log WHERE status = 'completed'"
+            ).fetchone()
         return row['rid'] if row and row['rid'] else None
+
+    def get_results_for_run(self, run_id: str) -> list[dict]:
+        """获取指定批次的筛选结果（按评分降序）"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM screening_result WHERE run_id = ? ORDER BY score DESC",
+                (run_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 class AiAnalysisLogDAO:
     """AI 分析日志 DAO"""
     def log(self, run_id: str, code: str, model: str,
             prompt_tokens: int, completion_tokens: int, cost: float):
-        conn = get_connection()
-        conn.execute("""
-            INSERT INTO ai_analysis_log (run_id, code, model, prompt_tokens,
-                completion_tokens, cost, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (run_id, code, model, prompt_tokens, completion_tokens,
-              cost, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT INTO ai_analysis_log (run_id, code, model, prompt_tokens,
+                    completion_tokens, cost, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (run_id, code, model, prompt_tokens, completion_tokens,
+                  cost, now_cn().isoformat()))
 
 
 class RunLogDAO:
     def start_run(self, run_id: str) -> str:
-        conn = get_connection()
-        conn.execute("""
-            INSERT INTO run_log (run_id, start_time, status)
-            VALUES (?, ?, 'running')
-        """, (run_id, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT INTO run_log (run_id, start_time, status)
+                VALUES (?, ?, 'running')
+            """, (run_id, now_cn().isoformat()))
         return run_id
 
     def complete_run(self, run_id: str, total: int, screened: int, analyzed: int, error: str = None):
-        conn = get_connection()
         status = 'failed' if error else 'completed'
-        conn.execute("""
-            UPDATE run_log SET end_time = ?, status = ?,
-                total_stocks = ?, screened_count = ?, analyzed_count = ?,
-                error_message = ?
-            WHERE run_id = ?
-        """, (datetime.now().isoformat(), status, total, screened, analyzed, error, run_id))
-        conn.commit()
-        conn.close()
+        with db_conn() as conn:
+            conn.execute("""
+                UPDATE run_log SET end_time = ?, status = ?,
+                    total_stocks = ?, screened_count = ?, analyzed_count = ?,
+                    error_message = ?
+                WHERE run_id = ?
+            """, (now_cn().isoformat(), status, total, screened, analyzed, error, run_id))
+
+    def update_screened_count(self, run_id: str, screened: int):
+        """更新某次运行的筛选数量"""
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE run_log SET screened_count = ? WHERE run_id = ?",
+                (screened, run_id)
+            )
 
     def get_latest_run(self) -> Optional[dict]:
-        conn = get_connection()
-        row = conn.execute("""
-            SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1
-        """).fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute("""
+                SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1
+            """).fetchone()
         return dict(row) if row else None
+
+    def get_latest_completed_run_id(self) -> Optional[str]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT run_id FROM run_log WHERE status='completed' "
+                "ORDER BY start_time DESC LIMIT 1"
+            ).fetchone()
+        return row['run_id'] if row else None
 
 
 class PipelineProgressDAO:
@@ -341,15 +369,13 @@ class PipelineProgressDAO:
 
     def init_run(self, run_id: str, stage: str = 'idle', stage_label: str = '',
                  total: int = 0, ai_total: int = 0):
-        conn = get_connection()
-        now = datetime.now().isoformat()
-        conn.execute("""
-            INSERT OR REPLACE INTO pipeline_progress
-            (run_id, stage, stage_label, total_stocks, processed_stocks, ai_total, started_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (run_id, stage, stage_label, total, total, ai_total, now, now))
-        conn.commit()
-        conn.close()
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO pipeline_progress
+                (run_id, stage, stage_label, total_stocks, processed_stocks, ai_total, started_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (run_id, stage, stage_label, total, total, ai_total, now, now))
 
     def update(self, run_id: str, stage: str = None, stage_label: str = None,
                processed: int = None, total: int = None, ai_total: int = None,
@@ -377,26 +403,30 @@ class PipelineProgressDAO:
         if ai_failed is not None:
             sets.append('ai_failed = ?')
             params.append(ai_failed)
+        if not sets:
+            return
         sets.append('updated_at = ?')
-        params.append(datetime.now().isoformat())
+        params.append(now_cn().isoformat())
         params.append(run_id)
 
-        if sets:
-            conn = get_connection()
-            conn.execute(f"UPDATE pipeline_progress SET {','.join(sets)} WHERE run_id = ?", params)
-            conn.commit()
-            conn.close()
+        with db_conn() as conn:
+            conn.execute(
+                f"UPDATE pipeline_progress SET {','.join(sets)} WHERE run_id = ?",
+                params
+            )
 
     def get_progress(self) -> Optional[dict]:
-        conn = get_connection()
-        row = conn.execute('SELECT * FROM pipeline_progress ORDER BY started_at DESC LIMIT 1').fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute(
+                'SELECT * FROM pipeline_progress ORDER BY started_at DESC LIMIT 1'
+            ).fetchone()
         return dict(row) if row else None
 
     def get_progress_for_run(self, run_id: str) -> Optional[dict]:
-        conn = get_connection()
-        row = conn.execute('SELECT * FROM pipeline_progress WHERE run_id = ?', (run_id,)).fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute(
+                'SELECT * FROM pipeline_progress WHERE run_id = ?', (run_id,)
+            ).fetchone()
         return dict(row) if row else None
 
 
@@ -405,32 +435,28 @@ class StockAnalysisHistoryDAO:
 
     def save(self, stock_code: str, run_id: str, score: float,
              ai_analysis: str, ai_trade_strategy: str):
-        conn = get_connection()
-        now = datetime.now().isoformat()
-        conn.execute("""
-            INSERT INTO stock_analysis_history
-            (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (stock_code, run_id, now[:10], score, ai_analysis, ai_trade_strategy, now))
-        conn.commit()
-        conn.close()
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT INTO stock_analysis_history
+                (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (stock_code, run_id, now[:10], score, ai_analysis, ai_trade_strategy, now))
 
     def get_history(self, code: str, limit: int = 10) -> list[dict]:
-        conn = get_connection()
-        rows = conn.execute("""
-            SELECT * FROM stock_analysis_history
-            WHERE stock_code = ?
-            ORDER BY analysis_date DESC, id DESC LIMIT ?
-        """, (code, limit)).fetchall()
-        conn.close()
+        with db_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM stock_analysis_history
+                WHERE stock_code = ?
+                ORDER BY analysis_date DESC, id DESC LIMIT ?
+            """, (code, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def get_latest_for_code(self, code: str) -> Optional[dict]:
-        conn = get_connection()
-        row = conn.execute("""
-            SELECT * FROM stock_analysis_history
-            WHERE stock_code = ?
-            ORDER BY analysis_date DESC, id DESC LIMIT 1
-        """, (code,)).fetchone()
-        conn.close()
+        with db_conn() as conn:
+            row = conn.execute("""
+                SELECT * FROM stock_analysis_history
+                WHERE stock_code = ?
+                ORDER BY analysis_date DESC, id DESC LIMIT 1
+            """, (code,)).fetchone()
         return dict(row) if row else None

@@ -11,17 +11,27 @@
 退出码:
   0 = 成功分析了 1 只
   1 = 没有需要分析的股票（全部完成）
-  2 = API 错误
+  2 = API 错误 / 未配置 API Key
 """
-import sys, os, json, time, re, httpx
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+import sys
+from datetime import datetime
+
+PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJ)
+os.chdir(PROJ)
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'), override=True)
+load_dotenv(os.path.join(PROJ, '.env'), override=True)
 
+from src.config import load_config
 from src.models.database import (
-    ScreeningResultDAO, StockAnalysisHistoryDAO, get_connection, RunLogDAO
+    ScreeningResultDAO, StockAnalysisHistoryDAO, RunLogDAO, init_database,
 )
+from src.analyzer.ai_analyzer import AiAnalyzer, _save_analysis, _save_failure
+from src.utils import now_cn
+
+init_database()
 
 # ── 解析参数 ──
 analyze_all = '--all' in sys.argv
@@ -30,41 +40,25 @@ for a in sys.argv:
     if a.startswith('--stale='):
         stale_days = int(a.split('=')[1])
 
-# ── 配置 ──
-api_key = os.getenv('STOCK_AI_API_KEY')
-if not api_key:
+# ── 校验 API Key ──
+analyzer = AiAnalyzer(load_config().get('ai', {}))
+if not analyzer.configured:
     print("[ERROR] STOCK_AI_API_KEY not set in .env")
     sys.exit(2)
+print(f"[AI] model={analyzer.model} api_base={analyzer.api_base}")
 
-api_url = os.getenv('STOCK_AI_API_BASE', 'https://opencode.ai/zen/v1/chat/completions')
-model = os.getenv('STOCK_AI_MODEL', 'deepseek-v4-flash-free')
-headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
-
-# ── 获取最新批次 ──
-conn = get_connection()
-row = conn.execute(
-    "SELECT run_id FROM run_log WHERE status='completed' ORDER BY start_time DESC LIMIT 1"
-).fetchone()
-conn.close()
-if not row:
+# ── 获取最新完成批次 ──
+run_id = RunLogDAO().get_latest_completed_run_id()
+if not run_id:
     print("[SKIP] No completed runs found")
     sys.exit(1)
-
-run_id = row['run_id']
 print(f"Latest run: {run_id}")
 
 # ── 获取候选池 ──
-conn = get_connection()
-rows = conn.execute("""
-    SELECT * FROM screening_result WHERE run_id = ? ORDER BY score DESC
-""", (run_id,)).fetchall()
-conn.close()
-
-if not rows:
+stocks = ScreeningResultDAO().get_results_for_run(run_id)
+if not stocks:
     print("[SKIP] No stocks in latest run")
     sys.exit(1)
-
-stocks = [dict(r) for r in rows]
 
 # ── 确定需要分析的股票 ──
 pending = []
@@ -75,8 +69,7 @@ for s in stocks:
     if has_analysis and not analyze_all:
         latest = StockAnalysisHistoryDAO().get_latest_for_code(code)
         if latest and latest.get('ai_analysis') and latest['ai_analysis'] != '{}':
-            from datetime import datetime
-            age = (datetime.now() - datetime.fromisoformat(latest['created_at'])).days
+            age = (now_cn() - datetime.fromisoformat(latest['created_at'])).days
             if age < stale_days:
                 continue  # 足够新鲜，跳过
         # 有分析但已过期，重新分析
@@ -84,8 +77,9 @@ for s in stocks:
         # 无分析：检查今天是否已经尝试过但失败了
         latest = StockAnalysisHistoryDAO().get_latest_for_code(code)
         if latest and latest.get('ai_analysis') == '{}':
-            from datetime import datetime
-            attempted_today = (datetime.now() - datetime.fromisoformat(latest['created_at'])).total_seconds() < 86400
+            attempted_today = (
+                now_cn() - datetime.fromisoformat(latest['created_at'])
+            ).total_seconds() < 86400
             if attempted_today:
                 continue  # 今天已试过且失败了，跳过去试下一只
 
@@ -99,131 +93,22 @@ if not pending:
 targets = pending if analyze_all else pending[:1]
 print(f"Pending: {len(pending)}, analyzing this run: {len(targets)}")
 
-# ── Prompt ──
-PROMPT_TEMPLATE = """Analyze A-share stock {name}({code}) for value investing.
-PE={pe}, PB={pb}, ROE={roe}%,
-Revenue growth={revenue_growth}%, Profit growth={profit_growth}%,
-Debt ratio={debt_ratio}%, Market cap={market_cap}B.
-Reason for selection: {reason}
-
-Output JSON with: "analysis", "investment_strategy", "trade_strategy"(with buy_zone, target_price, stop_loss, take_profit)."""
-
-# ── 智谱专用指数退避 ──
-# GLM-4.7-Flash 使用人数极多，常返回 code:1305(访问量过大)
-# 策略：长退避 + 大量重试，拥堵时持续等待绝不放弃
-BACKOFF_SCHEDULE = [30, 60, 120, 240, 300, 300, 300, 300, 300, 300,
-                     300, 300, 300, 300, 300, 300, 300, 300, 300, 300]
-
-def call_api(prompt):
-    payload = {'model': model, 'messages': [
-        {'role': 'system', 'content': '你是专业的A股价值投资分析师。请严格按JSON格式输出。'},
-        {'role': 'user', 'content': prompt}
-    ], 'temperature': 0.3, 'max_tokens': 2000}
-
-    max_retries = len(BACKOFF_SCHEDULE)
-    for attempt in range(max_retries):
-        try:
-            with httpx.Client(timeout=120) as c:
-                r = c.post(api_url, headers=headers, json=payload)
- 
-                if r.status_code == 200:
-                    content = r.json()['choices'][0]['message']['content']
-                    # 尝试多种 JSON 提取策略
-                    jmatch = re.search(r'\{.*\}', content, re.DOTALL)
-                    if jmatch:
-                        try:
-                            return json.loads(jmatch.group())
-                        except json.JSONDecodeError:
-                            pass
-                    # 尝试修复截断：补上缺失的 }
-                    cleaned = content.strip()
-                    if cleaned.startswith('{') and not cleaned.endswith('}'):
-                        cleaned += '}'
-                        try:
-                            return json.loads(cleaned)
-                        except json.JSONDecodeError:
-                            pass
-                    print(f"  Attempt {attempt+1}/{max_retries}: bad JSON ({len(content)} chars), retrying...")
-                    wait = BACKOFF_SCHEDULE[attempt]
-                    time.sleep(wait)
-                    continue
-
-                elif r.status_code == 429:
-                    # 智谱 1305 或标准 429
-                    try:
-                        err = r.json().get('error', {})
-                        err_code = err.get('code', '')
-                        if err_code == '1305':
-                            print(f"  拥挤{err_code}({err.get('message','')}) 退避{attempt+1}/{max_retries}")
-                    except Exception:
-                        pass
-                    wait = BACKOFF_SCHEDULE[attempt]
-                    print(f"  429, 退避 {wait}s (attempt {attempt+1}/{max_retries})")
-                    time.sleep(wait)
-
-                elif r.status_code == 503:
-                    wait = BACKOFF_SCHEDULE[attempt]
-                    print(f"  503, 退避 {wait}s")
-                    time.sleep(wait)
-
-                else:
-                    print(f"  HTTP {r.status_code}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
-                    time.sleep(BACKOFF_SCHEDULE[attempt])
-
-        except httpx.TimeoutException:
-            print(f"  Timeout (attempt {attempt+1}/{max_retries}), backoff {BACKOFF_SCHEDULE[attempt]}s...")
-            time.sleep(BACKOFF_SCHEDULE[attempt])
-        except httpx.ConnectError as e:
-            print(f"  ConnectError: {e}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
-            time.sleep(BACKOFF_SCHEDULE[attempt])
-        except Exception as e:
-            print(f"  Error: {e}, retrying in {BACKOFF_SCHEDULE[attempt]}s...")
-            time.sleep(BACKOFF_SCHEDULE[attempt])
-
-    return None
-
-# ── 逐一分析 ──
-history_dao = StockAnalysisHistoryDAO()
-screening_dao = ScreeningResultDAO()
+# ── 逐一分析（复用 AiAnalyzer）──
 analyzed_ok = 0
 
 for stock in targets:
     code, name = stock['code'], stock['name']
     print(f"\n[{code}] {name} (score={stock['score']})...")
 
-    prompt = PROMPT_TEMPLATE.format(
-        name=name, code=code,
-        pe=stock.get('pe', 'N/A'), pb=stock.get('pb', 'N/A'),
-        roe=stock.get('roe', 'N/A'),
-        revenue_growth=stock.get('revenue_growth', 'N/A'),
-        profit_growth=stock.get('profit_growth', 'N/A'),
-        debt_ratio=stock.get('debt_ratio', 'N/A'),
-        market_cap=stock.get('market_cap', 'N/A'),
-        reason=stock.get('reason', ''),
-    )
-
-    result = call_api(prompt)
+    result = analyzer.analyze_stock(stock)
     if not result:
         print(f"  ✗ Failed")
-        # 记录失败尝试，避免下次重复试
-        history_dao.save(code, run_id, stock.get('score'), '{}', '{}')
+        _save_failure(stock, run_id)
         if not analyze_all:
             sys.exit(2)
         continue
 
-    analysis_json = json.dumps(result, ensure_ascii=False)
-    strategy = result.get('investment_strategy', '')
-    if isinstance(strategy, dict):
-        strategy = json.dumps(strategy, ensure_ascii=False)
-    trade = result.get('trade_strategy', {})
-    trade_json = json.dumps(trade, ensure_ascii=False) if isinstance(trade, dict) else str(trade)
-
-    # 写入历史表（累积记录）
-    history_dao.save(code, run_id, stock.get('score'), analysis_json, trade_json)
-
-    # 更新 screening_result 当前视图
-    screening_dao.update_ai_analysis(run_id, code, analysis_json, strategy, trade_json)
-
+    _save_analysis(stock, result, run_id)
     print(f"  ✅ Saved to analysis history")
     analyzed_ok += 1
 
@@ -234,6 +119,7 @@ for stock in targets:
     # --all 模式间隔 60s
     if stock != targets[-1]:
         print("  Cooling 60s...")
+        import time
         time.sleep(60)
 
 # ── 输出摘要 ──
@@ -243,7 +129,7 @@ if analyze_all:
 else:
     remaining = len(pending) - 1
     print(f"\nAnalyzed: {analyzed_ok} this run, {remaining} still pending")
-    if remaining > 0:
-        print(f"Next run will process: {targets[0]['code'] if analyzed_ok > 0 else pending[1]['code']}")
+    if remaining > 0 and analyzed_ok == 0 and len(pending) > 1:
+        print(f"Next run will process: {pending[1]['code']}")
 
 sys.exit(0 if analyzed_ok > 0 else 2)

@@ -14,7 +14,6 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "pydantic>=2.5,<3",
     "sse-starlette>=2.0,<3",
-    "pytz>=2024.1,<2025",
 ]
 
 [project.scripts]
