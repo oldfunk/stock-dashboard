@@ -345,14 +345,15 @@ class PipelineProgressDAO:
         now = datetime.now().isoformat()
         conn.execute("""
             INSERT OR REPLACE INTO pipeline_progress
-            (run_id, stage, stage_label, total_stocks, ai_total, started_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (run_id, stage, stage_label, total, ai_total, now, now))
+            (run_id, stage, stage_label, total_stocks, processed_stocks, ai_total, started_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (run_id, stage, stage_label, total, total, ai_total, now, now))
         conn.commit()
         conn.close()
 
     def update(self, run_id: str, stage: str = None, stage_label: str = None,
-               processed: int = None, ai_total: int = None, ai_done: int = None, ai_failed: int = None):
+               processed: int = None, total: int = None, ai_total: int = None,
+               ai_done: int = None, ai_failed: int = None):
         sets = []
         params = []
         if stage is not None:
@@ -364,6 +365,9 @@ class PipelineProgressDAO:
         if processed is not None:
             sets.append('processed_stocks = ?')
             params.append(processed)
+        if total is not None:
+            sets.append('total_stocks = ?')
+            params.append(total)
         if ai_total is not None:
             sets.append('ai_total = ?')
             params.append(ai_total)

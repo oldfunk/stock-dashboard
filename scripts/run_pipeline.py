@@ -26,7 +26,8 @@ from src.collector.akshare_fetcher import fetch_all_stocks_basic
 records = fetch_all_stocks_basic()
 total = len(records)
 logger.info(f'全A股: {total} 只')
-progress.update(run_id, 'screening', f'初筛 {total} 只...', processed=total, ai_total=0)
+progress.update(run_id, 'collecting', f'采集完成 {total} 只', processed=total, total=total)
+progress.update(run_id, 'screening', f'初筛 {total} 只...', processed=total, total=total, ai_total=0)
 
 # ── 2. 初筛 ──
 from src.collector.akshare_fetcher import pre_filter_stocks
@@ -142,23 +143,37 @@ for idx, stock in enumerate(top):
             with httpx.Client(timeout=120) as c:
                 r = c.post(api_url, headers=headers, json=payload)
                 if r.status_code == 200:
-                    content = r.json()['choices'][0]['message']['content']
-                    jmatch = re.search(r'\{.*\}', content, re.DOTALL)
+                    content = r.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+                    if not content or len(content) < 10:
+                        logger.warning(f'  模型返回内容太短({len(content)} chars), retrying...')
+                        time.sleep(BACKOFF_SCHEDULE[attempt])
+                        continue
+                    # 尝试多种JSON提取方式
+                    result = None
+                    # 1) ```json ... ``` 代码块
+                    jmatch = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
                     if jmatch:
                         try:
-                            result = json.loads(jmatch.group())
-                            break
+                            result = json.loads(jmatch.group(1).strip())
                         except json.JSONDecodeError:
                             pass
-                    cleaned = content.strip()
-                    if cleaned.startswith('{') and not cleaned.endswith('}'):
-                        cleaned += '}'
+                    # 2) 第一个 { 到最后一个 }
+                    if not result:
+                        jmatch = re.search(r'\{.*\}', content, re.DOTALL)
+                        if jmatch:
+                            try:
+                                result = json.loads(jmatch.group())
+                            except json.JSONDecodeError:
+                                pass
+                    # 3) 直接整段解析
+                    if not result:
                         try:
-                            result = json.loads(cleaned)
-                            break
+                            result = json.loads(content.strip())
                         except json.JSONDecodeError:
                             pass
-                    logger.warning(f'  Attempt {attempt+1}/{max_retries}: bad JSON, retrying...')
+                    if result:
+                        break
+                    logger.warning(f'  200响应但无法解析JSON, retrying...')
                     time.sleep(BACKOFF_SCHEDULE[attempt])
                 elif r.status_code == 429:
                     wait = BACKOFF_SCHEDULE[attempt]
