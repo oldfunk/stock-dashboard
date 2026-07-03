@@ -786,16 +786,28 @@
         {% endif %}
     </div>
 
-    <!-- Pipeline Progress Bar -->
-    <div class="progress-bar" id="progressBar" style="display:none;">
-        <div class="progress-header">
-            <span class="progress-label" id="progressLabel">准备中...</span>
-            <span class="progress-count" id="progressCount"></span>
+    <!-- Pipeline Progress Bars (two independent rows) -->
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar" id="dataProgress" style="display:none;">
+            <div class="progress-header">
+                <span class="progress-label">📊 数据采集与筛选</span>
+                <span class="progress-count" id="dataCount"></span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" id="dataFill" style="width:0%"></div>
+            </div>
+            <div class="progress-stage" id="dataStage"></div>
         </div>
-        <div class="progress-track">
-            <div class="progress-fill" id="progressFill" style="width:0%"></div>
+        <div class="progress-bar" id="aiProgress" style="display:none;">
+            <div class="progress-header">
+                <span class="progress-label">🤖 AI智能分析</span>
+                <span class="progress-count" id="aiCount"></span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" id="aiFill" style="width:0%"></div>
+            </div>
+            <div class="progress-stage" id="aiStage"></div>
         </div>
-        <div class="progress-stage" id="progressStage"></div>
     </div>
 
     <!-- Stock Results -->
@@ -1220,42 +1232,66 @@
     }
 
     function renderProgress(p) {
-        var el = document.getElementById('progressBar');
-        if (!el) return;
-        if (!p || p.stage === 'idle' || p.stage === 'done') {
-            el.style.display = 'none';
-            return;
-        }
-        el.style.display = 'block';
+        var dataEl = document.getElementById('dataProgress');
+        var aiEl = document.getElementById('aiProgress');
+        if (!dataEl || !aiEl) return;
 
-        // 阶段标签
-        document.getElementById('progressLabel').textContent = p.stage_label || p.stage;
+        var visible = false;
 
-        // 对analyzing阶段：同时显示采集状态和AI进度
-        if (p.stage === 'analyzing') {
-            var aiTotal = p.ai_total || 1;
+        // ── 数据采集进度 ──
+        if (p && p.stage !== 'idle' && p.stage !== 'done') {
+            dataEl.style.display = 'block';
+            aiEl.style.display = 'block';
+            visible = true;
+
+            // 数据条始终显示（采集完成=5527/5527，筛选完成=20/20）
+            var totalStocks = p.total_stocks || 0;
+            var processedStocks = p.processed_stocks || 0;
+            var dataPct = totalStocks > 0 ? Math.round(processedStocks / totalStocks * 100) : 0;
+            document.getElementById('dataCount').textContent = processedStocks + '/' + totalStocks;
+            document.getElementById('dataFill').style.width = dataPct + '%';
+            if (totalStocks > 0) {
+                document.getElementById('dataStage').textContent =
+                    '全A股 ' + totalStocks + '只 ✓ → 精选 ' + processedStocks + '只';
+            } else {
+                document.getElementById('dataStage').textContent = '采集全A股行情中...';
+            }
+
+            // AI 条
+            var aiTotal = p.ai_total || 0;
             var aiDone = p.ai_done || 0;
-            var aiPct = Math.round(aiDone / aiTotal * 100);
-            var total = p.total_stocks || 0;
-            document.getElementById('progressCount').textContent = '全A股' + total + ' ✓ | AI ' + aiDone + '/' + aiTotal;
-            document.getElementById('progressFill').style.width = aiPct + '%';
-            document.getElementById('progressStage').textContent =
-                '全A股 ' + total + '只 ✓ → 精选' + p.processed_stocks + '只 → AI分析 ' + aiDone + '/' + aiTotal;
-            return;
+            var aiFailed = p.ai_failed || 0;
+            if (aiTotal > 0) {
+                var aiPct = Math.round(aiDone / aiTotal * 100);
+                document.getElementById('aiCount').textContent = aiDone + '/' + aiTotal + '（失败' + aiFailed + '）';
+                document.getElementById('aiFill').style.width = aiPct + '%';
+                document.getElementById('aiStage').textContent =
+                    'AI分析 ' + aiDone + '/' + aiTotal + ' 完成';
+            } else if (p.stage === 'analyzing' || totalStocks > 0) {
+                document.getElementById('aiCount').textContent = '等待中...';
+                document.getElementById('aiFill').style.width = '0%';
+                document.getElementById('aiStage').textContent = '数据采集完成后自动启动AI分析';
+            } else {
+                aiEl.style.display = 'none';
+            }
+        } else if (p && p.stage === 'done') {
+            // 完成后显示摘要 2秒后消失
+            dataEl.style.display = 'block';
+            aiEl.style.display = 'block';
+            document.getElementById('dataCount').textContent = p.processed_stocks + '/' + (p.total_stocks || 0);
+            document.getElementById('dataFill').style.width = '100%';
+            document.getElementById('dataStage').textContent = p.stage_label || '采集完成 ✓';
+            var done = p.ai_done || 0;
+            var tot = p.ai_total || 1;
+            document.getElementById('aiCount').textContent = done + '/' + tot;
+            document.getElementById('aiFill').style.width = Math.round(done/tot*100) + '%';
+            document.getElementById('aiStage').textContent = 'AI分析 ' + done + '/' + tot + ' 完成 ✓';
         }
 
-        // 其他阶段
-        var total = p.total_stocks || 0;
-        var done = p.processed_stocks || 0;
-        var pct = 0;
-        if (total > 0) {
-            pct = Math.round(done / total * 100);
-            document.getElementById('progressCount').textContent = done + '/' + total;
-        } else {
-            document.getElementById('progressCount').textContent = '...';
+        if (!visible) {
+            dataEl.style.display = 'none';
+            aiEl.style.display = 'none';
         }
-        document.getElementById('progressFill').style.width = pct + '%';
-        document.getElementById('progressStage').textContent = 'Stage: ' + p.stage;
     }
 
     function refreshDashboard() {
