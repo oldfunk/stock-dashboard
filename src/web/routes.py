@@ -57,7 +57,7 @@ def _shutdown():
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
-templates = Jinja2Templates(directory=str(templates_dir))
+templates = Jinja2Templates(directory=str(templates_dir), cache_size=0)
 
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
