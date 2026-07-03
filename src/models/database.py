@@ -208,12 +208,17 @@ class MarketIndexDAO:
                     ORDER BY timestamp DESC LIMIT 1
                 """, (index_code,)).fetchall()
             else:
+                # 只返回带 sh/sz 前缀的规范代码（如 sh000001），
+                # 过滤掉旧数据源存入的无前缀代码（如 000001）
                 rows = conn.execute("""
                     SELECT m.* FROM market_index m
                     INNER JOIN (
                         SELECT index_code, MAX(timestamp) as max_ts
-                        FROM market_index GROUP BY index_code
+                        FROM market_index
+                        WHERE index_code LIKE 'sh%' OR index_code LIKE 'sz%'
+                        GROUP BY index_code
                     ) latest ON m.index_code = latest.index_code AND m.timestamp = latest.max_ts
+                    WHERE m.index_code LIKE 'sh%' OR m.index_code LIKE 'sz%'
                 """).fetchall()
         return [dict(r) for r in rows]
 

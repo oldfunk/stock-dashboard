@@ -23,13 +23,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-# 20 次指数退避表（秒）。GLM-4.7-Flash 拥堵时持续等待绝不放弃
+# 激进重试策略：贴着智谱免费版限流边缘（~60 RPM）持续请求，绝不放弃
+# 前 5 次快速重试（5-30s）应对瞬时抖动，之后固定 60s 间隔（≈1 RPM/股，配合串行 60s 股票间隔）
+# 共 120 次 ≈ 2 小时持续重试，覆盖晚高峰到凌晨低峰
 BACKOFF_SCHEDULE: list[int] = [
-    30, 60, 120, 240,
-    300, 300, 300, 300, 300, 300,
-    300, 300, 300, 300, 300, 300,
-    300, 300, 300, 300,
-]
+    5, 10, 15, 20, 30,      # 前 5 次：快速探测恢复
+] + [60] * 115              # 之后：每 60s 重试一次，贴着 60 RPM 限制边缘
 
 # 默认配置与 config.yaml / README 保持一致
 DEFAULT_API_BASE = "https://open.bigmodel.cn/api/paas/v4"
@@ -66,6 +65,22 @@ ANALYSIS_PROMPT = """你是一位专业的价值投资分析师，基于格雷�
         "take_profit": "止盈条件——分批止盈触发条件"
     }}
 }}"""
+
+
+def _complete_truncated_json(text: str) -> str:
+    """补全被截断的 JSON：统计未闭合的 { [ 并补全 } ]"""
+    cleaned = text.replace("'", '"')
+    cleaned = re.sub(r',\s*}', '}', cleaned)
+    cleaned = re.sub(r',\s*]', ']', cleaned)
+    
+    # 统计未闭合的大括号和中括号
+    open_braces = cleaned.count('{') - cleaned.count('}')
+    open_brackets = cleaned.count('[') - cleaned.count(']')
+    
+    # 补全
+    cleaned += '}' * max(0, open_braces)
+    cleaned += ']' * max(0, open_brackets)
+    return cleaned
 
 
 def parse_ai_response(content: str) -> Optional[dict]:
@@ -107,13 +122,20 @@ def parse_ai_response(content: str) -> Optional[dict]:
         cleaned = text.replace("'", '"')
         cleaned = re.sub(r',\s*}', '}', cleaned)
         cleaned = re.sub(r',\s*]', ']', cleaned)
+        # 处理截断：如果 trade_strategy 未闭合，补全它
         if cleaned.startswith('{') and not cleaned.endswith('}'):
+            # 找到最后一个完整的字段，补全剩余结构
             cleaned += '}'
         try:
             result = json.loads(cleaned, strict=False)
         except json.JSONDecodeError:
-            logger.error(f"[AI分析] JSON 解析失败，前200字符: {text[:200]}")
-            return None
+            # 终极兜底：逐层补全嵌套结构
+            cleaned = _complete_truncated_json(text)
+            try:
+                result = json.loads(cleaned, strict=False)
+            except json.JSONDecodeError:
+                logger.error(f"[AI分析] JSON 解析失败，前200字符: {text[:200]}")
+                return None
 
     # 5. 校验必要字段
     required = ['analysis', 'investment_strategy', 'trade_strategy']
@@ -146,6 +168,9 @@ class AiAnalyzer:
             or cfg.get('api_base')
             or DEFAULT_API_BASE
         ).rstrip('/')
+        # 允许 .env 里已包含 /chat/completions
+        if self.api_base.endswith('/chat/completions'):
+            self.api_base = self.api_base[:-len('/chat/completions')]
         self.model = os.getenv('STOCK_AI_MODEL') or cfg.get('model') or DEFAULT_MODEL
         self.temperature = cfg.get('temperature', 0.3)
         self.max_tokens = cfg.get('max_tokens', 2000)
