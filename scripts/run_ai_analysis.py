@@ -60,28 +60,47 @@ if not stocks:
     print("[SKIP] No stocks in latest run")
     sys.exit(1)
 
-# ── 确定需要分析的股票 ──
+# ── 确定需要分析的股票（每天每只仅一条）──
+today_str = now_cn().strftime('%Y-%m-%d')
 pending = []
 for s in stocks:
     code = s['code']
     has_analysis = bool((s.get('ai_analysis') or '').strip())
 
     if has_analysis and not analyze_all:
+        # 已分析：检查是否需要刷新
         latest = StockAnalysisHistoryDAO().get_latest_for_code(code)
         if latest and latest.get('ai_analysis') and latest['ai_analysis'] != '{}':
-            age = (now_cn() - datetime.fromisoformat(latest['created_at'])).days
+            created = datetime.fromisoformat(latest['created_at'])
+            age = (now_cn() - created).days
             if age < stale_days:
                 continue  # 足够新鲜，跳过
         # 有分析但已过期，重新分析
+        # 注意：fall through — 仍在 has_analysis 但过期分支
     else:
-        # 无分析：检查今天是否已经尝试过但失败了
+        # 无分析：检查今天是否已经有分析记录
         latest = StockAnalysisHistoryDAO().get_latest_for_code(code)
-        if latest and latest.get('ai_analysis') == '{}':
-            attempted_today = (
-                now_cn() - datetime.fromisoformat(latest['created_at'])
-            ).total_seconds() < 86400
-            if attempted_today:
-                continue  # 今天已试过且失败了，跳过去试下一只
+        if latest:
+            created = datetime.fromisoformat(latest['created_at'])
+            already = latest.get('ai_analysis') and latest['ai_analysis'] not in ('{}', '')
+            if already and created.strftime('%Y-%m-%d') == today_str:
+                continue  # 今天已经分析过了，跳过
+            # 今天尝试过但失败了
+            if latest.get('ai_analysis') == '{}':
+                attempted_today = (
+                    now_cn() - created
+                ).total_seconds() < 86400
+                if attempted_today:
+                    continue  # 今天已试过且失败了，跳过
+
+    # 通用去重：无论 --all 与否，今天已有分析则跳过
+    if not latest:
+        latest = StockAnalysisHistoryDAO().get_latest_for_code(code)
+    if latest:
+        created = datetime.fromisoformat(latest['created_at'])
+        already = latest.get('ai_analysis') and latest['ai_analysis'] not in ('{}', '')
+        if already and created.strftime('%Y-%m-%d') == today_str:
+            continue
 
     pending.append(s)
 

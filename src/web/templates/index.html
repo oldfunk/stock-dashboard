@@ -32,6 +32,7 @@
             --red-bg: #fce8e6;
             --gold: #b06000;
             --gold-bg: #fef7e0;
+            --color-warn: var(--gold);
 
             /* Color scheme: 红涨绿跌 (cn, default) */
             --color-up: var(--red);
@@ -461,6 +462,30 @@
         .ai-panel strong {
             color: var(--text-primary);
             font-weight: 500;
+        }
+
+        .ai-text {
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }
+
+        .trade-signal {
+            grid-column: span 2;
+        }
+        .signal-buy {
+            color: var(--color-up) !important;
+            font-weight: 600;
+            font-size: 14px !important;
+        }
+        .signal-hold {
+            color: var(--color-warn) !important;
+            font-weight: 600;
+            font-size: 14px !important;
+        }
+        .signal-avoid {
+            color: var(--color-down) !important;
+            font-weight: 600;
+            font-size: 14px !important;
         }
 
         .trade-grid {
@@ -908,16 +933,33 @@
                 </div>
 
                 <div id="analysis-{{ stock.code }}" class="ai-panel tab-content" style="display:block;">
-                    <p>{{ stock.ai_parsed.analysis }}</p>
+                    <div class="ai-text">{{ stock.ai_parsed.analysis }}</div>
                 </div>
 
                 <div id="strategy-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
-                    <p>{{ stock.ai_parsed.investment_strategy }}</p>
+                    <div class="ai-text">{{ stock.ai_parsed.investment_strategy }}</div>
                 </div>
 
                 <div id="trade-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
                     {% if stock.trade_parsed %}
                     <div class="trade-grid">
+                        <div class="trade-cell trade-signal">
+                            <div class="label">Signal</div>
+                            {% set signal = stock.trade_parsed.signal|upper if stock.trade_parsed.signal else '--' %}
+                            {% if signal == 'BUY' %}
+                            <div class="value signal-buy">{{ signal }}</div>
+                            {% elif signal == 'HOLD' %}
+                            <div class="value signal-hold">{{ signal }}</div>
+                            {% elif signal == 'AVOID' %}
+                            <div class="value signal-avoid">{{ signal }}</div>
+                            {% else %}
+                            <div class="value">{{ signal }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">Confidence</div>
+                            <div class="value">{{ stock.trade_parsed.confidence if stock.trade_parsed.confidence else '--' }}</div>
+                        </div>
                         <div class="trade-cell">
                             <div class="label">Buy Zone</div>
                             <div class="value">{{ stock.trade_parsed.buy_zone }}</div>

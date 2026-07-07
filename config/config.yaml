@@ -29,12 +29,12 @@ screener:
 
 # -------- AI 分析配置 --------
 ai:
-  # LLM API 配置 (兼容 OpenAI API)
-  provider: "zai"               # 智谱AI / Z.AI
-  api_base: "https://open.bigmodel.cn/api/paas/v4"
-  model: "glm-4.7-flash"        # GLM-4.7-Flash 免费模型
+  # LLM API 配置 (OpenAI 兼容)
+  provider: "opencode-zen"           # OpenCode Zen
+  api_base: "https://opencode.ai/zen/v1"
+  model: "deepseek-v4-flash-free"   # 默认模型（自动发现+故障轮换，详见 ai_analyzer.FreeModelPool）
   temperature: 0.3
-  max_tokens: 2000
+  max_tokens: 6000
 
 # -------- Web 服务配置 --------
 web:
