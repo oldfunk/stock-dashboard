@@ -191,7 +191,7 @@ def parse_ai_response(content: str) -> Optional[dict]:
                 result = json.loads(cleaned, strict=False)
             except (json.JSONDecodeError, ValueError):
                 # 6. 终极兜底：逐层补全嵌套结构
-                cleaned = _complete_truncated_json(text)
+                cleaned = _complete_truncated_json(cleaned)
                 try:
                     result = json.loads(cleaned, strict=False)
                 except json.JSONDecodeError:
