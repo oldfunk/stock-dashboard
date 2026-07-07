@@ -917,6 +917,18 @@
                         <div class="label">Market Cap</div>
                         <div class="value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}B</div>
                     </div>
+                    <div class="metric-cell">
+                        <div class="label">毛利率</div>
+                        <div class="value {{ 'good' if stock.gross_margin is not none and stock.gross_margin >= 30 else ('warn' if stock.gross_margin is not none and stock.gross_margin >= 15 else 'bad') }}">
+                            {{ "%.1f"|format(stock.gross_margin) if stock.gross_margin is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">OCF/股</div>
+                        <div class="value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else 'bad' }}">
+                            {{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -929,6 +941,7 @@
                 <div class="ai-tabs">
                     <button class="ai-tab active" onclick="switchTab(this, 'analysis-{{ stock.code }}')">Analysis</button>
                     <button class="ai-tab" onclick="switchTab(this, 'strategy-{{ stock.code }}')">Strategy</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'risks-{{ stock.code }}')">⛔ Risks</button>
                     <button class="ai-tab" onclick="switchTab(this, 'trade-{{ stock.code }}')">Trade</button>
                 </div>
 
@@ -938,6 +951,10 @@
 
                 <div id="strategy-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
                     <div class="ai-text">{{ stock.ai_parsed.investment_strategy }}</div>
+                </div>
+
+                <div id="risks-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
+                    <div class="ai-text">{{ stock.ai_parsed.reverse_thinking if stock.ai_parsed.reverse_thinking else '无逆向分析数据' }}</div>
                 </div>
 
                 <div id="trade-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
@@ -1081,6 +1098,32 @@
                     <li>价值投资不追求高增长，稳定也有价值</li>
                     <li>营收增长但利润不增长 → 可能是增收不增利</li>
                     <li>本看板不要求正增长（允许稳定型价值股）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 毛利率 <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：（营业收入 - 营业成本）÷ 营业收入。反映定价权和生意质量。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 15% 无定价权</span> · <span class="warn">15~30% 一般</span> · <span class="good">&gt; 30% 有护城河</span><br>
+                <ul>
+                    <li>高毛利率不代表好生意（需要结合ROE和现金流）</li>
+                    <li>Costco 毛利率约 12% 但 ROE 25%+，是薄利高周转的例外</li>
+                    <li>筛选门槛：毛利率 ≥ 15%，低于此值且 ROE &lt; 20% 则排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> OCF/股 <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：经营活动现金流净额 ÷ 总股本。衡量利润的"含金量"。<br>
+                <b>判断</b>：<span class="good">正数</span> — 利润有真金白银支撑 · <span class="bad">负数或为零</span> — 警惕"纸面利润"<br>
+                <ul>
+                    <li>利润 + 经营现金流同时增长 → 高质量的成长</li>
+                    <li>利润持续增长但经营现金流为负 → 警惕应收账款恶化</li>
+                    <li>筛选门槛：经营现金流为负且毛利率 &lt; 30% 或增长 &lt; 20% 则排除</li>
                 </ul>
             </div>
         </div>

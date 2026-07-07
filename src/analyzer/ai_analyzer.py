@@ -49,12 +49,14 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 - PE：{pe} | PB：{pb} | ROE：{roe}%
 - 营收增长：{revenue_growth}% | 净利增长：{profit_growth}%
 - 资产负债率：{debt_ratio}% | 市值：{market_cap}亿
-
-为什么会被筛选出来：{reason}
+- 毛利率：{gross_margin}%
+- 每股经营现金流：{ocf_per_share}
+- 为什么会被筛选出来：{reason}
 
 请你写三段话（写在 analysis 字段里）：
+
 第一段：这生意怎么样？
-这句话能不能说清楚它怎么赚钱？它的护城河是真有还是看着有？财务数据（ROE、增长、负债）在你看来是真是假？你觉得它10年后还在不在？
+你能不能一句话说清楚它怎么赚钱？它的护城河是真有还是看着有？财务数据（ROE、毛利率、增长、负债、现金流）在你看来是真是假？你觉得它10年后还在不在？
 
 第二段：现在值不值？
 这个价格你觉得贵不贵？PE/PB相对于增长和ROE是什么水平？安全垫够不够厚？如果判断错了你能亏多少？
@@ -62,12 +64,16 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 第三段：你怎么决定？
 诚实地说你的决定是 BUY / HOLD / AVOID 之一（注意：不是每只股票都值得买）。你的信心度是高/中/低？简单说核心理由。
 
-写完三段后，在 investment_strategy 里写下你的投资策略——仓位建议、持有周期、什么类型的人适合买。
+写完三段后，在 reverse_thinking 字段里写一段"逆向思考"——
+什么情况下这家公司会死？如果现在看不到风险，说明你还没认真想。至少列出2-3个真实的致死场景。如果确实想不出，就写"目前看不到明确的致命风险"。
+
+写完之后，在 investment_strategy 里写下你的投资策略——仓位建议、持有周期、什么类型的人适合买。
 在 trade_strategy 里填入买卖信号、价格区间、止盈止损。
 
 输出严格为以下JSON格式，不要包含其他内容：
 {{
     "analysis": "你的三段式笔记正文。用第一人称，自然语气。不用markdown格式。",
+    "reverse_thinking": "逆向思考——什么情况下这家公司会死？至少2-3个真实风险场景。",
     "investment_strategy": "投资策略建议。一句话说清仓位和周期。",
     "trade_strategy": {{
         "signal": "BUY 或 HOLD 或 AVOID",
@@ -396,6 +402,8 @@ class AiAnalyzer:
             debt_ratio=stock.get('debt_ratio', 'N/A'),
             market_cap=stock.get('market_cap', 'N/A'),
             sector=stock.get('sector', '未知'),
+            gross_margin=stock.get('gross_margin', 'N/A'),
+            ocf_per_share=stock.get('ocf_per_share', 'N/A'),
             reason=stock.get('reason', ''),
         )
 

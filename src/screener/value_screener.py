@@ -36,7 +36,20 @@ class ValueScreener:
     def check_criteria(self, stock: dict) -> list[str]:
         """
         检查是否符合价值投资标准。
-        返回符合的理由列表（空列表 = 不符合）。
+        返回符合的理由列表（空列表 = 不符合，即被排除）。
+
+        硬性排除规则（一票否决）：
+        - PE 不在 [min_pe, max_pe] 范围内
+        - PB > max_pb
+        - ROE < min_roe
+        - 毛利率 < min_gross_margin（有豁免条款）
+        - 负债率 > max_debt_ratio
+        - 市值不在 [min_market_cap, max_market_cap]
+        - ST/*ST 股票
+        - 经营现金流为负（有豁免条款）
+
+        符合以上全部规则后，才进入评分排序阶段。
+        换言之，这套筛选是"及格线制"而非"排名制"。
         """
         reasons: list[str] = []
         cfg = self.cfg
@@ -104,6 +117,36 @@ class ValueScreener:
             if market_cap < min_mc or market_cap > max_mc:
                 return []
             reasons.append(f"市值={market_cap}亿")
+
+        # ── 新增：毛利率 (XSMLL) ──
+        min_gm = cfg.get('min_gross_margin', 15)
+        gross_margin = stock.get('gross_margin')
+        if gross_margin is not None:
+            if gross_margin < min_gm:
+                # 豁免C：高周转薄利模式（如Costco：毛利率12%但ROE>20%）
+                roe = stock.get('roe') or 0
+                if roe >= 20:
+                    reasons.append(
+                        f"毛利率={gross_margin}%（<{min_gm}%，豁免：高ROE={roe}%薄利模式）")
+                else:
+                    return []
+            else:
+                reasons.append(f"毛利率={gross_margin}%（≥{min_gm}%）")
+
+        # ── 新增：经营现金流质量 (MGJYXJJE) ──
+        ocf = stock.get('ocf_per_share')
+        if ocf is not None:
+            if ocf <= 0:
+                # 豁免：战略投入期（高毛利率+高增长可豁免）
+                gm = stock.get('gross_margin') or 0
+                rev_g = stock.get('revenue_growth') or 0
+                if gm >= 30 and rev_g >= 20:
+                    reasons.append(
+                        f"OCF/股={ocf}（≤0，豁免：高毛利率{gm}%+高增长{rev_g}%投入期）")
+                else:
+                    return []
+            else:
+                reasons.append(f"OCF/股={ocf}（正数）")
 
         return reasons
 
@@ -220,6 +263,8 @@ class ValueScreener:
                 'pe': c.get('pe'),
                 'pb': c.get('pb'),
                 'roe': c.get('roe'),
+                'gross_margin': c.get('gross_margin'),
+                'ocf_per_share': c.get('ocf_per_share'),
                 'revenue_growth': c.get('revenue_growth'),
                 'profit_growth': c.get('profit_growth'),
                 'debt_ratio': c.get('debt_ratio'),

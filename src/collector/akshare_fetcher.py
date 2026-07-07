@@ -189,7 +189,7 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     total = len(stocks)
     logger.info(f"[财务] 获取 {total} 只（东财datacenter API）...")
     url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
-    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ'
+    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,MGJYXJJE'
 
     done = 0
     for batch_start in range(0, total, batch_size):
@@ -230,6 +230,8 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
                         'debt_ratio': safe_float(row.get('ZCFZL')),
                         'revenue_growth': safe_float(row.get('TOTALOPERATEREVETZ')),
                         'profit_growth': safe_float(row.get('PARENTNETPROFITTZ')),
+                        'gross_margin': safe_float(row.get('XSMLL')),
+                        'ocf_per_share': safe_float(row.get('MGJYXJJE')),
                         'is_annual': is_annual,
                     }
             for code, info in latest.items():
@@ -238,13 +240,17 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
                 s['debt_ratio'] = info['debt_ratio']
                 s['revenue_growth'] = info['revenue_growth']
                 s['profit_growth'] = info['profit_growth']
+                s['gross_margin'] = info['gross_margin']
+                s['ocf_per_share'] = info['ocf_per_share']
         except Exception as e:
             logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 异常: {e}")
         done += len(batch)
         logger.info(f"[财务] {done}/{total}")
 
     with_roe = sum(1 for s in stocks if s.get('roe') is not None)
-    logger.info(f"[财务] ROE: {with_roe}/{total}")
+    with_gm = sum(1 for s in stocks if s.get('gross_margin') is not None)
+    with_ocf = sum(1 for s in stocks if s.get('ocf_per_share') is not None)
+    logger.info(f"[财务] ROE: {with_roe}/{total} | 毛利率: {with_gm}/{total} | OCF/股: {with_ocf}/{total}")
     return stocks
 
 

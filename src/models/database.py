@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS screening_result (
     pe REAL,
     pb REAL,
     roe REAL,
+    gross_margin REAL,                -- 毛利率 %（新增）
+    ocf_per_share REAL,               -- 每股经营现金流（新增）
     revenue_growth REAL,
     profit_growth REAL,
     debt_ratio REAL,
@@ -182,7 +184,19 @@ def init_database():
     """初始化数据库，创建表结构"""
     with db_conn() as conn:
         conn.executescript(SCHEMA_SQL)
+        # 向后兼容：为旧表增加新字段（如果不存在）
+        _add_column_if_not_exists(conn, 'screening_result', 'gross_margin', 'REAL')
+        _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
+
+
+def _add_column_if_not_exists(conn, table: str, column: str, col_type: str):
+    """安全添加列：检查是否存在，不存在则 ALTER TABLE ADD"""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cursor.fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        print(f"[DB] 表 {table} 新增列: {column} {col_type}")
 
 
 # -------- 数据访问对象 --------
@@ -263,10 +277,12 @@ class ScreeningResultDAO:
                 conn.execute("""
                     INSERT INTO screening_result
                     (run_id, run_date, code, name, score, pe, pb, roe,
+                     gross_margin, ocf_per_share,
                      revenue_growth, profit_growth, debt_ratio, market_cap, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (r['run_id'], r['run_date'], r['code'], r['name'],
                       r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
+                      r.get('gross_margin'), r.get('ocf_per_share'),
                       r.get('revenue_growth'), r.get('profit_growth'),
                       r.get('debt_ratio'), r.get('market_cap'), r.get('reason')))
 
