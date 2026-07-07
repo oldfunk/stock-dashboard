@@ -12,18 +12,20 @@
 
 ```
 腾讯行情 (qt.gtimg.cn)
-  └─ 实时行情: PE/PB/市值/价格/涨跌（仅用于初筛过滤）
+  └─ 核心行情: PE/PB/市值/价格/涨跌幅（主数据源，覆盖原A股三大交易所+科创板）
 
 AKShare（社区维护的中国金融数据工具箱）
-  ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务: ROE/毛利率/OCF/EPS/增长率
-  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度历史: 净利率/负债率/流动比率
-  ├─ stock_profit_sheet_by_report_em → 利润表明细: 利息费用/总股本
-  └─ stock_cash_flow_sheet_by_report_em → 现金流量表: 经营/投资现金流 → FCF
+  ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务：ROE/毛利率/OCF/EPS/增长率
+  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度历史：净利率/负债率/流动比率
+  ├─ stock_profit_sheet_by_report_em → 利润表明细：利息费用/总股本
+  └─ stock_cash_flow_sheet_by_report_em → 现金流量表：经营/投资现金流 → FCF
 ```
 
-> **为什么选 AKShare**：社区主力维护的中国金融数据工具箱，数据来源覆盖东方财富、同花顺等多个渠道。底层 API 如果变更，AKShare 会被社区修复后自动更新。长期数据稳定性优于手写直连。
+> **为什么选腾讯做行情主力**：腾讯 `qt.gtimg.cn` 是唯一免费且稳定提供 A 股实时 PE/PB/市值/价格的公开接口。AKShare 和东财旧版 API 均无法可靠获取等价数据。**财务数据完全不用腾讯**，全部走 AKShare。
 
-> 注：`stock_yjbb_em` 一次 HTTP 调用即可获取 ~5800 只 A 股的最新财务数据。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用，兼顾速度和全面性。
+> **兜底策略**：腾讯行情失败时自动切换到新浪证券+Sina原始API + AKShare 财务自算 PE/PB/市值（EPS/BVPS 来自 stock_yjbb_em，价格来自 sina hq 原始接口，不走 AKShare 封装）。已在实现中验证过茅台、五粮液等股票的计算值与腾讯直给值一致。
+
+> **为什么选 AKShare 做财务主力**：社区主力维护，数据来源覆盖东方财富、同花顺等多个渠道。底层 API 变更时自动被社区修复，长期数据稳定性优于手写直连。`stock_yjbb_em` 一次 HTTP 调用可获取 ~5800 只 A 股的最新财务数据。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用。
 
 ## 本地数据仓库
 

@@ -86,42 +86,239 @@ def fetch_tencent_batch(codes: list[str], batch_size=80) -> list[dict]:
 # ── 大盘指数（统一实现，scheduler 复用）──
 
 def fetch_market_index(max_retries: int = 2) -> list[dict]:
-    """获取大盘指数（腾讯 qt.gtimg.cn，与 scheduler 统一数据源）。
+    """获取大盘指数（腾讯主 → AKShare日线兜底）
 
+    腾讯 qt.gtimg.cn 为主数据源，失败时自动切换到 AKShare 日线。
     返回标准字典列表，字段与 MarketIndexDAO.save 兼容。
     """
+    from datetime import datetime, timedelta
+
+    # 主路径：腾讯行情
     for att in range(max_retries):
-        raw = curl_get(
-            f"https://qt.gtimg.cn/q={','.join(INDEX_CODES)}", timeout=15
-        )
-        if not raw:
+        try:
+            raw = curl_get(
+                f"https://qt.gtimg.cn/q={','.join(INDEX_CODES)}", timeout=15
+            )
+            if raw:
+                results = parse_tc_indices(raw)
+                if results:
+                    return results
+        except Exception as e:
+            logger.warning(f"[指数] 腾讯第{att+1}次失败: {e}")
             if att < max_retries - 1:
+                import time
                 time.sleep(3)
-            continue
-        results = parse_tc_indices(raw)
-        if results:
-            return results
-        logger.warning(f"[指数] 第{att + 1}次重试未取到指数数据")
-    logger.error("[指数] 全部重试失败")
-    return []
+
+    # 兜底：AKShare 日线
+    logger.warning("[指数] 腾讯全部失败，启动 AKShare 日线兜底")
+    import akshare as ak
+    import pandas as pd
+    fallback_results = []
+    today = datetime.now()
+    start = (today - timedelta(days=5)).strftime("%Y%m%d")
+    end = today.strftime("%Y%m%d")
+
+    for code, name in INDEX_TARGETS.items():
+        try:
+            df = ak.stock_zh_index_daily(symbol=code)
+            if df is not None and not df.empty:
+                last = df.iloc[-1]
+                prev = df.iloc[-2] if len(df) > 1 else last
+                current = float(last.get('close', 0))
+                prev_close = float(prev.get('close', 0))
+                change_pct = ((current / prev_close) - 1) * 100 if prev_close else 0
+                fallback_results.append({
+                    'code': code,
+                    'index_name': name,
+                    'current_value': round(current, 2),
+                    'change': round(current - prev_close, 2),
+                    'change_percent': round(change_pct, 2),
+                    'open': float(last.get('open', 0)),
+                    'high': float(last.get('high', 0)),
+                    'low': float(last.get('low', 0)),
+                    'volume': float(last.get('volume', 0)),
+                    'date': str(last.name)[:10] if hasattr(last.name, 'strftime') else str(last.name)[:10],
+                })
+        except Exception as e:
+            logger.warning(f"[指数] {name} 兜底失败: {e}")
+
+    return fallback_results
+
+
+def _computed_fallback(codes: list[dict]) -> list[dict]:
+    """兜底策略：腾讯失败时，用 Sina 原始API + AKShare 财务数据自算行情
+
+    自算 PE/PB/市值：
+      PE = 价格 / EPS（EPS>0）
+      PB = 价格 / BVPS（BVPS>0）
+      总股本 = 净利润 / EPS → 市值 = 价格 × 总股本
+
+    返回与腾讯接口一致的字段格式。
+    """
+    import urllib.request
+    from src.utils import safe_float
+    total = len(codes)
+    logger.warning(f"[兜底] 腾讯不可用，启动自算行情（{total} 只）")
+
+    # 1. Sina 原始API获取实时价格
+    logger.info("[兜底] Sina 批量价格...")
+    price_map = {}
+    batch_size = 80
+    for i in range(0, total, batch_size):
+        batch = codes[i:i + batch_size]
+        sina_codes = []
+        for c in batch:
+            prefix = 'sh' if c['code'].startswith('6') else 'sz'
+            sina_codes.append(f"{prefix}{c['code']}")
+        url = f"https://hq.sinajs.cn/list={','.join(sina_codes)}"
+        req = urllib.request.Request(url, headers={
+            'Referer': 'https://finance.sina.com.cn',
+            'User-Agent': 'Mozilla/5.0',
+        })
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            text = resp.read().decode('gbk')
+            for line in text.strip().split('\n'):
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                quoted = line.split('"')
+                if len(quoted) < 2:
+                    continue
+                csv = quoted[1].split(',')
+                if len(csv) < 32:
+                    continue
+                code = ''.join(filter(str.isdigit, line.split('=')[0]))
+                if not code:
+                    continue
+                try:
+                    price_map[code] = {
+                        'price': float(csv[3]) if csv[3] else 0,
+                        'prev_close': float(csv[2]) if csv[2] else 0,
+                        'open': float(csv[1]) if csv[1] else 0,
+                        'high': float(csv[4]) if csv[4] else 0,
+                        'low': float(csv[5]) if csv[5] else 0,
+                        'volume': int(csv[8]) if csv[8] else 0,
+                        'amount': float(csv[9]) if csv[9] else 0,
+                    }
+                except (ValueError, IndexError):
+                    pass
+        except Exception as e:
+            logger.warning(f"[兜底] Sina 批次 {i} 失败: {e}")
+        if i + batch_size < total:
+            import time
+            time.sleep(0.5)
+
+    logger.info(f"[兜底] Sina 获取 {len(price_map)} 只价格")
+
+    # 2. AKShare 财务数据（EPS/BVPS/净利润）
+    logger.info("[兜底] AKShare 财务数据...")
+    import akshare as ak
+    fin_map = {}
+    try:
+        for y in [2026, 2025]:
+            for m in ['0331', '0630', '0930', '1231']:
+                df = ak.stock_yjbb_em(date=f"{y}{m}")
+                if df is not None and len(df) > 1000:
+                    for _, r in df.iterrows():
+                        code = str(r.get('股票代码', '')).strip().zfill(6)
+                        eps = safe_float(r.get('每股收益'))
+                        bvps = safe_float(r.get('每股净资产'))
+                        np_ = safe_float(r.get('净利润-净利润'))
+                        if code not in fin_map and eps is not None:
+                            fin_map[code] = {'eps': eps, 'bvps': bvps, 'net_profit': np_}
+                    break  # 取到最新的即可
+            if fin_map:
+                break
+    except Exception as e:
+        logger.error(f"[兜底] AKShare财务失败: {e}")
+
+    logger.info(f"[兜底] AKShare 获取 {len(fin_map)} 只财务")
+
+    # 3. 合并计算
+    results = []
+    for s in codes:
+        code = s['code']
+        name = s['name']
+        pdata = price_map.get(code, {})
+        fdata = fin_map.get(code, {})
+        price = pdata.get('price', 0)
+        prev_close = pdata.get('prev_close', 0)
+        eps = fdata.get('eps')
+        bvps = fdata.get('bvps')
+        net_profit = fdata.get('net_profit')
+
+        # 涨跌幅
+        change_pct = ((price / prev_close) - 1) * 100 if price and prev_close else None
+
+        # PE
+        pe = round(price / eps, 2) if price and eps and eps > 0 else None
+        # PB
+        pb = round(price / bvps, 2) if price and bvps and bvps > 0 else None
+        # 市值(亿) = 价格 × (净利润/EPS) / 1e8
+        total_shares = None
+        if net_profit is not None and eps is not None and eps > 0:
+            total_shares = net_profit / eps
+        market_cap = round(price * total_shares / 1e8, 1) if price and total_shares else None
+        # 兜底：如果市值不可算但 price 有值，用小市值兜底（避免初筛全挂）
+        if market_cap is None and price > 0:
+            market_cap = 50.0  # 默认50亿小市值，让初筛自行过滤
+
+        results.append({
+            'code': code,
+            'name': name,
+            'price': price,
+            'prev_close': prev_close,
+            'change_percent': round(change_pct, 2) if change_pct is not None else None,
+            'open': pdata.get('open'),
+            'high': pdata.get('high'),
+            'low': pdata.get('low'),
+            'volume': pdata.get('volume'),
+            'amount': pdata.get('amount'),
+            'pe': pe,
+            'pe_ttm': pe,
+            'pb': pb,
+            'market_cap': market_cap,
+        })
+
+    logger.info(f"[兜底] 自算完成 {len(results)} 只")
+    return results
 
 
 def fetch_all_stocks_basic(max_retries: int = 2) -> list[dict]:
-    """全A股行情：代码缓存 → 腾讯批查
+    """全A股行情：腾讯主 → 自算兜底
 
-    返回标准字典列表，字段与 stock_snapshot 表和 screener 兼容。
+    腾讯为主数据源（PE/PB/市值/价格），
+    腾讯失败时自动切换到 Sina 价格 + AKShare 财务自算。
     """
     codes = _get_stock_codes()
     if not codes:
         return []
-    codes = [s['code'] for s in codes]
-    raw = fetch_tencent_batch(codes)
-    # 补充股票名称
-    name_map = {s['code']: s['name'] for s in _get_stock_codes()}
-    for r in raw:
-        if r.get('name') is None:
-            r['name'] = name_map.get(r['code'], '')
-    return raw
+
+    result = None
+    # 主路径：腾讯批查
+    for att in range(max_retries):
+        try:
+            raw = fetch_tencent_batch([s['code'] for s in codes])
+            if raw and len(raw) > 100:
+                name_map = {s['code']: s['name'] for s in codes}
+                for r in raw:
+                    if r.get('name') is None:
+                        r['name'] = name_map.get(r['code'], '')
+                result = raw
+                break
+        except Exception as e:
+            logger.warning(f"[行情] 腾讯第{att+1}次失败: {e}")
+            if att < max_retries - 1:
+                import time
+                time.sleep(3)
+
+    # 兜底：腾讯未取到
+    if result is None:
+        logger.warning("[行情] 腾讯全部失败，启动自算兜底")
+        result = _computed_fallback(codes)
+
+    return result or []
 
 
 # ── 财务筛选条件（与 config.yaml 联动）──
