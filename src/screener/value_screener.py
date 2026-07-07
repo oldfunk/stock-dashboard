@@ -130,6 +130,31 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     if debt is not None and debt >= 0:
         reasons.append(f"负债率={debt}%（<{max_debt}%）")
 
+    # ── 规则 7：利息覆盖 ≥ 2x ──
+    intcov = stock.get('intcov_5y_avg')
+    if intcov is not None and intcov < 2:
+        return []
+    elif intcov is not None and intcov >= 2:
+        reasons.append(f"5年均利息覆盖={intcov}x")
+
+    # ── 规则 8：5年累计FCF为正 ──
+    fcf_5y = stock.get('fcf_5y_sum')
+    if fcf_5y is not None and fcf_5y <= 0:
+        # 小额负FCF（<1亿）可以豁免（可能是资本开支高峰年）
+        if abs(fcf_5y) > 100_000_000:
+            return []
+        reasons.append(f"5年FCF累计={fcf_5y:.0f}（小额负值豁免）")
+    elif fcf_5y is not None and fcf_5y > 0:
+        fcf_yi = fcf_5y / 1e8
+        reasons.append(f"5年FCF累计={fcf_yi:.1f}亿")
+
+    # ── 规则 9：5年股本稀释 ≤ 20% ──
+    dilution = stock.get('share_dilution_5y')
+    if dilution is not None and dilution > 20:
+        return []
+    elif dilution is not None:
+        reasons.append(f"5年稀释={dilution}%")
+
     # ── 规则 7：市值 ──
     min_mc = screen.get('min_market_cap', 30)
     max_mc = screen.get('max_market_cap', 50000)

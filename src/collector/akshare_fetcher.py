@@ -187,20 +187,20 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     """
     import httpx
     total = len(stocks)
-    logger.info(f"[财务] 获取 {total} 只（东财datacenter API）...")
-    url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
-    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,MGJYXJJE'
+    logger.info(f"[财务] 获取 {total} 只（东财旧版API + 全量字段）...")
+    url = 'https://datacenter.eastmoney.com/securities/api/data/get'
+    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,MGJYXJJE,XSJLL'
 
     done = 0
     for batch_start in range(0, total, batch_size):
         batch = stocks[batch_start:batch_start + batch_size]
-        em_codes = ','.join(f'"{_code_to_em(s["code"])}"' for s in batch)
+        em_codes = ','.join('"' + _code_to_em(s['code']) + '"' for s in batch)
         params = {
-            'reportName': 'RPT_F10_FINANCE_MAINFINADATA',
-            'columns': columns,
-            'filter': f'(SECUCODE in ({em_codes}))',
-            'pageNumber': 1, 'pageSize': batch_size * 2,
-            'sortTypes': '-1', 'sortColumns': 'REPORT_DATE',
+            'type': 'RPT_F10_FINANCE_MAINFINADATA',
+            'sty': columns,
+            'filter': '(SECUCODE in (' + em_codes + '))',
+            'p': 1, 'ps': batch_size * 2,
+            'sr': '-1', 'st': 'REPORT_DATE',
             'source': 'HSF10', 'client': 'PC',
         }
         try:
@@ -274,25 +274,25 @@ def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
     logger.info(f"[历史财务] 需要获取 {len(todo)} 只股票的历史数据...")
 
     collected = {}
-    batch_size = 100  # 东财API最大安全pageSize
-    url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
+    batch_size = 100
+    url = 'https://datacenter.eastmoney.com/securities/api/data/get'
     columns = ('SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,'
                'XSMLL,XSJLL,MGJYXJJE,'
-               'TOTALOPERATEREVETZ,PARENTNETPROFITTZ,PARENTNETPROFIT')
+               'TOTALOPERATEREVETZ,PARENTNETPROFITTZ,PARENTNETPROFIT,'
+               'INTSTCOVRATE,FCFF_FORWARD,TOTAL_SHARE,ROIC,EPSJB')
 
     import httpx
     for batch_start in range(0, len(todo), batch_size):
         batch = todo[batch_start:batch_start + batch_size]
-        em_codes = ','.join(f'"{_code_to_em(s["code"])}"' for s in batch)
+        em_codes = ','.join('"' + _code_to_em(s['code']) + '"' for s in batch)
 
-        # 分2页拿满数据（首批5年+扩展）
         for page in [1, 2]:
             params = {
-                'reportName': 'RPT_F10_FINANCE_MAINFINADATA',
-                'columns': columns,
-                'filter': f'(SECUCODE in ({em_codes}))',
-                'pageNumber': page, 'pageSize': 100,
-                'sortTypes': '-1', 'sortColumns': 'REPORT_DATE',
+                'type': 'RPT_F10_FINANCE_MAINFINADATA',
+                'sty': columns,
+                'filter': '(SECUCODE in (' + em_codes + '))',
+                'p': page, 'ps': 100,
+                'sr': '-1', 'st': 'REPORT_DATE',
                 'source': 'HSF10', 'client': 'PC',
             }
             try:
@@ -317,6 +317,11 @@ def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
                         'revenue_growth': safe_float(row.get('TOTALOPERATEREVETZ')),
                         'profit_growth': safe_float(row.get('PARENTNETPROFITTZ')),
                         'net_profit': safe_float(row.get('PARENTNETPROFIT')),
+                        'interest_coverage': safe_float(row.get('INTSTCOVRATE')),
+                        'fcf': safe_float(row.get('FCFF_FORWARD')),
+                        'total_shares': safe_float(row.get('TOTAL_SHARE')),
+                        'roic': safe_float(row.get('ROIC')),
+                        'eps': safe_float(row.get('EPSJB')),
                     })
                     collected[code] = True
 
@@ -382,6 +387,27 @@ def rebuild_financial_summaries(stocks: list[dict]):
         # 最新负债率
         debt_latest = last5[-1].get('debt_ratio') if last5 else None
 
+        # 利息覆盖倍数 5年均值（年报）
+        intcov_vals = [r['interest_coverage'] for r in last5 if r.get('interest_coverage') is not None]
+        intcov_avg = sum(intcov_vals) / len(intcov_vals) if intcov_vals else None
+
+        # FCF 5年累计（只算年报）
+        fcf_vals = [r['fcf'] for r in last5 if r.get('fcf') is not None and r['report_type'] == 'A']
+        fcf_sum = sum(fcf_vals) if fcf_vals else None
+
+        # 5年股本稀释率（最早到最晚）
+        shares_vals = [r['total_shares'] for r in last5 if r.get('total_shares') is not None]
+        share_dilution = None
+        if len(shares_vals) >= 2:
+            earliest_shares = shares_vals[-1]  # 最早的（排序后）
+            latest_shares = shares_vals[0]      # 最新的
+            if earliest_shares and earliest_shares > 0:
+                share_dilution = round((latest_shares - earliest_shares) / earliest_shares * 100, 2)
+
+        # ROIC 5年均值
+        roic_vals = [r['roic'] for r in last5 if r.get('roic') is not None]
+        roic_avg = sum(roic_vals) / len(roic_vals) if roic_vals else None
+
         # 数据覆盖
         all_dates = [r['report_date'] for r in reports]
         data_years = f"{all_dates[0][:4]}-{all_dates[-1][:4]}" if all_dates else None
@@ -395,7 +421,11 @@ def rebuild_financial_summaries(stocks: list[dict]):
             'ocf_latest': ocf_latest,
             'ocf_positive_years': ocf_positive,
             'debt_ratio_latest': debt_latest,
-            'net_profit_5y_sum': None,  # placeholder
+            'net_profit_5y_sum': None,
+            'intcov_5y_avg': round(intcov_avg, 2) if intcov_avg else None,
+            'fcf_5y_sum': fcf_sum,
+            'share_dilution_5y': share_dilution,
+            'roic_5y_avg': round(roic_avg, 2) if roic_avg else None,
             'data_years': data_years,
         })
         count += 1

@@ -159,6 +159,10 @@ async def index(request: Request):
                     'ocf_latest': fs.get('ocf_latest'),
                     'ocf_positive_years': fs.get('ocf_positive_years'),
                     'ocf_5y_trend': fs.get('ocf_5y_trend'),
+                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
+                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
+                    'share_dilution_5y': fs.get('share_dilution_5y'),
+                    'roic_5y_avg': fs.get('roic_5y_avg'),
                     'data_years': fs.get('data_years'),
                 }
         except Exception:

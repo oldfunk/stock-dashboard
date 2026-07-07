@@ -32,8 +32,14 @@ screener:
   min_gross_margin: 15
   # 经营现金流/股下限：≤0且毛利率<30%+增长<20%时排除（允许高增长投入期）
   min_ocf_per_share: 0
-  # ── 新增：净利率阈值（AI Berkshire规则6：长期净利率<5%排除）──
+  # 净利率 < 5%且毛利率<30%时排除（AI Berkshire规则6）
   min_net_margin: 5
+  # ── 新增：利息覆盖倍数 — AI Berkshire规则3
+  min_interest_coverage: 2
+  # ── 新增：5年累计FCF — AI Berkshire规则2
+  min_fcf_5y: 0
+  # ── 新增：股本稀释上限 — AI Berkshire规则7
+  max_share_dilution: 20
 
 # -------- AI 分析配置 --------
 ai:

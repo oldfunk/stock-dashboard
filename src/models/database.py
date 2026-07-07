@@ -177,6 +177,11 @@ CREATE TABLE IF NOT EXISTS financial_history (
     revenue_growth REAL,               -- 营收同比增长 %
     profit_growth REAL,                -- 净利润同比增长 %
     net_profit REAL,                   -- 归母净利润（元）
+    interest_coverage REAL,            -- 利息覆盖倍数 (INTSTCOVRATE)
+    fcf REAL,                          -- 自由现金流（元, FCFF，年报口径）
+    total_shares REAL,                 -- 总股本
+    roic REAL,                         -- 投入资本回报率 %
+    eps REAL,                          -- 基本每股收益
     data_source TEXT DEFAULT 'eastmoney',
     created_at TEXT NOT NULL,
     UNIQUE(stock_code, report_date)
@@ -196,6 +201,10 @@ CREATE TABLE IF NOT EXISTS financial_summary (
     ocf_positive_years INTEGER,        -- OCF为正的年数
     debt_ratio_latest REAL,            -- 最新负债率
     net_profit_5y_sum REAL,            -- 5年累积归母净利
+    intcov_5y_avg REAL,                -- 5年平均利息覆盖倍数
+    fcf_5y_sum REAL,                   -- 5年累积自由现金流
+    share_dilution_5y REAL,            -- 5年股本稀释率 %
+    roic_5y_avg REAL,                  -- 5年平均ROIC
     data_years TEXT,                    -- 数据覆盖区间如 "2020-2026"
     updated_at TEXT NOT NULL
 );
@@ -223,6 +232,15 @@ def init_database():
         # 向后兼容：为旧表增加新字段（如果不存在）
         _add_column_if_not_exists(conn, 'screening_result', 'gross_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'roic', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'eps', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_summary', 'intcov_5y_avg', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_summary', 'fcf_5y_sum', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_summary', 'share_dilution_5y', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_summary', 'roic_5y_avg', 'REAL')
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
 
@@ -521,15 +539,18 @@ class FinancialHistoryDAO:
                     INSERT OR REPLACE INTO financial_history
                     (stock_code, report_date, report_type, roe, gross_margin, net_margin,
                      ocf_per_share, debt_ratio, revenue_growth, profit_growth,
-                     net_profit, data_source, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     net_profit, interest_coverage, fcf, total_shares, roic, eps,
+                     data_source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     r['stock_code'], r['report_date'],
                     'A' if r['report_date'].endswith('12-31') else 'Q',
                     r.get('roe'), r.get('gross_margin'), r.get('net_margin'),
                     r.get('ocf_per_share'), r.get('debt_ratio'),
                     r.get('revenue_growth'), r.get('profit_growth'),
-                    r.get('net_profit'), 'eastmoney', now
+                    r.get('net_profit'), r.get('interest_coverage'),
+                    r.get('fcf'), r.get('total_shares'), r.get('roic'), r.get('eps'),
+                    'eastmoney', now
                 ))
 
     def get_annual_reports(self, code: str) -> list[dict]:
@@ -592,8 +613,9 @@ class FinancialSummaryDAO:
                 (stock_code, roe_5y_avg, roe_5y_count, gross_margin_5y_avg,
                  net_margin_5y_avg, ocf_5y_trend, ocf_latest,
                  ocf_positive_years, debt_ratio_latest, net_profit_5y_sum,
+                 intcov_5y_avg, fcf_5y_sum, share_dilution_5y, roic_5y_avg,
                  data_years, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 code,
                 summary.get('roe_5y_avg'),
@@ -605,6 +627,10 @@ class FinancialSummaryDAO:
                 summary.get('ocf_positive_years'),
                 summary.get('debt_ratio_latest'),
                 summary.get('net_profit_5y_sum'),
+                summary.get('intcov_5y_avg'),
+                summary.get('fcf_5y_sum'),
+                summary.get('share_dilution_5y'),
+                summary.get('roic_5y_avg'),
                 summary.get('data_years'),
                 now
             ))
