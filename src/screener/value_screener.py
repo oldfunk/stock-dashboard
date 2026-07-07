@@ -331,6 +331,7 @@ class ValueScreener:
                 'pb': c.get('pb'),
                 'roe': c.get('roe'),
                 'gross_margin': c.get('gross_margin'),
+                'net_margin': c.get('net_margin'),
                 'ocf_per_share': c.get('ocf_per_share'),
                 'revenue_growth': c.get('revenue_growth'),
                 'profit_growth': c.get('profit_growth'),

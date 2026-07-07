@@ -452,6 +452,7 @@ class AiAnalyzer:
         current_model = self._resolve_model()
         url = f"{self.api_base}/chat/completions"
         max_retries = len(BACKOFF_SCHEDULE)
+        consecutive_timeouts = 0
 
         for attempt in range(max_retries):
             payload = {
@@ -476,6 +477,7 @@ class AiAnalyzer:
                         logger.warning("[AI分析] 200但响应结构异常: %s (%s), 轮换模型", e, current_model)
                         self._mark_model_dead(current_model)
                         current_model = self._resolve_model()
+                        consecutive_timeouts = 0
                         time.sleep(2)
                         continue
                     if not content or len(content) < 10:
@@ -484,6 +486,7 @@ class AiAnalyzer:
                             len(content), current_model)
                         self._mark_model_dead(current_model)
                         current_model = self._resolve_model()
+                        consecutive_timeouts = 0
                         continue
                     return content, current_model
 
@@ -503,9 +506,18 @@ class AiAnalyzer:
                 time.sleep(BACKOFF_SCHEDULE[attempt])
 
             except httpx.TimeoutException:
+                consecutive_timeouts += 1
                 logger.warning(
-                    "[AI分析] 超时(%s), 退避 %ds", current_model, BACKOFF_SCHEDULE[attempt])
-                time.sleep(BACKOFF_SCHEDULE[attempt])
+                    "[AI分析] 超时(%s) 第%d次, 退避 %ds",
+                    current_model, consecutive_timeouts, BACKOFF_SCHEDULE[attempt])
+                if consecutive_timeouts >= 2:
+                    logger.warning("[AI分析] 连续超时 %d 次, 轮换模型", consecutive_timeouts)
+                    self._mark_model_dead(current_model)
+                    current_model = self._resolve_model()
+                    consecutive_timeouts = 0
+                    time.sleep(2)
+                else:
+                    time.sleep(BACKOFF_SCHEDULE[attempt])
             except httpx.RequestError as e:
                 logger.warning(
                     "[AI分析] 网络错误(%s): %s, 退避 %ds",

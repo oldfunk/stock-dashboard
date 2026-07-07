@@ -103,8 +103,9 @@ CREATE TABLE IF NOT EXISTS screening_result (
     pe REAL,
     pb REAL,
     roe REAL,
-    gross_margin REAL,                -- 毛利率 %（新增）
-    ocf_per_share REAL,               -- 每股经营现金流（新增）
+    gross_margin REAL,                -- 毛利率 %
+    net_margin REAL,                  -- 净利率 %
+    ocf_per_share REAL,               -- 每股经营现金流
     revenue_growth REAL,
     profit_growth REAL,
     debt_ratio REAL,
@@ -232,6 +233,7 @@ def init_database():
         # 向后兼容：为旧表增加新字段（如果不存在）
         _add_column_if_not_exists(conn, 'screening_result', 'gross_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
+        _add_column_if_not_exists(conn, 'screening_result', 'net_margin', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
@@ -329,12 +331,12 @@ class ScreeningResultDAO:
                 conn.execute("""
                     INSERT INTO screening_result
                     (run_id, run_date, code, name, score, pe, pb, roe,
-                     gross_margin, ocf_per_share,
+                     gross_margin, net_margin, ocf_per_share,
                      revenue_growth, profit_growth, debt_ratio, market_cap, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (r['run_id'], r['run_date'], r['code'], r['name'],
                       r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
-                      r.get('gross_margin'), r.get('ocf_per_share'),
+                      r.get('gross_margin'), r.get('net_margin'), r.get('ocf_per_share'),
                       r.get('revenue_growth'), r.get('profit_growth'),
                       r.get('debt_ratio'), r.get('market_cap'), r.get('reason')))
 
