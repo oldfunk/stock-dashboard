@@ -934,6 +934,12 @@
                         </div>
                     </div>
                     <div class="metric-cell">
+                        <div class="label">净利率</div>
+                        <div class="value {{ 'good' if stock.net_margin is not none and stock.net_margin >= 15 else ('warn' if stock.net_margin is not none and stock.net_margin >= 5 else 'bad') }}">
+                            {{ "%.1f"|format(stock.net_margin) if stock.net_margin is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
                         <div class="label">OCF/股</div>
                         <div class="value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else 'bad' }}">
                             {{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}
@@ -944,8 +950,9 @@
                         <div class="label">5年均值 <span class="hist-badge">{{ stock._summary.data_years }}</span></div>
                         <div class="value" style="font-size:11px; line-height:1.6;">
                             ROE: {{ "%.1f"|format(stock._summary.roe_5y_avg) if stock._summary.roe_5y_avg else '--' }}%
-                            {% if stock._summary.net_margin_5y_avg %} | 净利: {{ "%.1f"|format(stock._summary.net_margin_5y_avg) }}%{% endif %}
-                            {% if stock._summary.ocf_latest %} | OCF: {{ "%.2f"|format(stock._summary.ocf_latest) }}{% endif %}
+                            {% if stock._summary.intcov_5y_avg %} | 利息覆盖: {{ "%.1f"|format(stock._summary.intcov_5y_avg) }}x{% endif %}
+                            {% if stock._summary.fcf_5y_sum %} | 5年FCF: {{ "%.1f"|format(stock._summary.fcf_5y_sum / 1e8) }}亿{% endif %}
+                            {% if stock._summary.share_dilution_5y %} | 稀释: {{ "%.1f"|format(stock._summary.share_dilution_5y) }}%{% endif %}
                         </div>
                     </div>
                     {% endif %}
@@ -975,6 +982,12 @@
 
                 <div id="risks-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
                     <div class="ai-text">{{ stock.ai_parsed.reverse_thinking if stock.ai_parsed.reverse_thinking else '无逆向分析数据' }}</div>
+                    {% if stock.mirror_counts %}
+                    <div style="margin-top:8px;padding:8px;background:var(--gold-bg);border-radius:var(--radius-sm);font-size:11px;">
+                        &#128161; 镜子测试：{{ stock.mirror_counts }} 句含转折词
+                        {% if stock.mirror_counts > 2 %}<span style="color:var(--red);font-weight:500;"> ⚠️ 超2句，违反纪律</span>{% endif %}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div id="trade-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
@@ -1149,6 +1162,54 @@
         </div>
 
         <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 净利率 <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：净利润 - 营业收入。反映定价能力和成本控制。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> &middot; <span class="warn">5~15%</span> &middot; <span class="good">&gt; 15% 优秀</span><br>
+                <ul>
+                    <li>高净利率 + 高OCF = 高利润质量</li>
+                    <li>筛选门槛：5年均净利率 &lt; 5% 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 利息覆盖 <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：营业利润 &divide; 利息费用。衡量付息能力。<br>
+                <b>安全区间</b>：<span class="bad">&lt; 2x 危险</span> &middot; <span class="warn">2~5x</span> &middot; <span class="good">&gt; 5x 安全</span><br>
+                <ul>
+                    <li>&lt; 1x = 利润不够付利息</li>
+                    <li>筛选门槛：5年均利息覆盖 &lt; 2x 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> FCF 自由现金流 <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：经营现金流 + 投资现金流。实际可支配现金。<br>
+                <b>判断</b>：<span class="good">正数</span> 造血 &middot; <span class="bad">负数</span> 烧钱<br>
+                <ul>
+                    <li>持续正FCF是巴菲特最看重的指标</li>
+                    <li>筛选门槛：5年FCF累计 &le; 0 且 &gt; 1亿负值 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> ROIC <span style="font-weight:400;color:var(--accent);font-size:11px;">NEW</span></div>
+            <div class="kp-body">
+                <b>含义</b>：税后营业利润 &divide; (总资产 - 现金 - 无息负债)。比ROE更纯粹。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> &middot; <span class="warn">5~10%</span> &middot; <span class="good">&gt; 10%</span><br>
+                <ul>
+                    <li>ROIC &gt; WACC才能创造价值</li>
+                    <li>数据从AKShare利润表采集</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
             <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 综合评分体系</div>
             <div class="kp-body">
                 <b>0~100 分</b>，五大维度加权：<br>
@@ -1173,7 +1234,7 @@
     {% endif %}
 
     <footer class="footer">
-        Stock Dashboard v0.1 &middot; Data via AKShare &middot; Not investment advice
+        Stock Dashboard v2.0 &middot; 数据源: AKShare + 东方财富 + 腾讯行情 &middot; 非投资建议
     </footer>
 </div>
 

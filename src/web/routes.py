@@ -148,6 +148,12 @@ async def index(request: Request):
             parsed_history.append(h)
         stock['analysis_history'] = parsed_history
 
+        # Mirror counts 传递到前端
+        if stock.get('ai_parsed') and isinstance(stock['ai_parsed'], dict):
+            mc = stock['ai_parsed'].get('mirror_counts')
+            if mc is not None:
+                stock['mirror_counts'] = mc
+
         # 注入财务历史汇总（用于前端显示历史趋势）
         try:
             fs = FinancialSummaryDAO().get(code)
