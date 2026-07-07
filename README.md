@@ -15,13 +15,16 @@
   ├─ 实时行情: PE/PB/市值/价格/涨跌
   └─ 大盘指数: 上证/深证/创业板
 
-东财 datacenter (datacenter.eastmoney.com)
-  ├─ 当前财务数据: ROE/毛利率/净利率/OCF/负债率/增长
-  ├─ 历史财务数据: 7年/25期 → financial_history
-  └─ 深度指标: 利息覆盖倍数/FCF/股本/ROIC/EPS
+AKShare（社区维护的数据工具箱 → 东方财富/同花顺底层）
+  ├─ stock_yjbb_em       → 全A股批量财务（1次调用5879只：ROE/毛利率/OCF/EPS/增长率）
+  ├─ stock_financial_abstract_ths → 逐只深度历史（7~20年：净利率/负债率/流动比率/速动比率）
+  ├─ stock_profit_sheet  → 利润表明细（利息费用/总股本/营业利润）
+  └─ stock_cash_flow_sheet → 现金流量表（经营/投资/筹资现金流）
 ```
 
-> 注：东财 API 使用旧版接口 (`api/data/get`)，单次请求即可获取 165 列全量财务数据。无需额外安装 AKShare。
+> **为什么选 AKShare**：社区主力维护的中国金融数据工具箱，数据来源覆盖东方财富、同花顺、新浪、腾讯等多个渠道。底层 API 如果变更，AKShare 会被社区修复后自动更新，无需手动适配。长期数据稳定性优于直连东财 API。
+
+> 注：AKShare 的 `stock_yjbb_em` 一次 HTTP 调用即可获取 ~5800 只 A 股的最新财务数据，效率极高。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用，兼顾速度和全面性。
 
 ## 本地数据仓库
 

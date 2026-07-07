@@ -1,6 +1,5 @@
-"""
-A 股数据采集模块
-数据源：腾讯全量行情API（含PE/PB/市值，通过curl绕过TUN阻断）
+"""A 股数据采集模块
+数据源：AKShare（东方财富/同花顺多数据源，社区维护，长期稳定）
 首次运行时用AKShare获取股票代码表并缓存，
 后续运行直接读缓存+腾讯批查。
 
@@ -43,8 +42,8 @@ def _get_stock_codes() -> list[dict]:
         except Exception:
             pass
 
-    # 缓存不足，用AKShare生成
-    logger.info("[代码表] 缓存不足，从新浪获取股票列表（首次较慢约70s）...")
+    # 缓存不足，用AKShare获取全A股代码表
+    logger.info("[代码表] 缓存不足，从AKShare获取股票列表（首次约70s）...")
     import akshare as ak
     try:
         df = ak.stock_zh_a_spot()
@@ -99,240 +98,364 @@ def fetch_market_index(max_retries: int = 2) -> list[dict]:
             if att < max_retries - 1:
                 time.sleep(3)
             continue
-        idx = parse_tc_indices(raw)
-        if idx:
-            logger.info(f"[采集] 大盘: {len(idx)} 条")
-            return idx
-        logger.warning(f"[采集] 大盘第{att+1}次解析为空")
-        if att < max_retries - 1:
-            time.sleep(3)
+        results = parse_tc_indices(raw)
+        if results:
+            return results
+        logger.warning(f"[指数] 第{att + 1}次重试未取到指数数据")
+    logger.error("[指数] 全部重试失败")
     return []
 
 
-# ── 全A股行情 ──
+def fetch_all_stocks_basic(max_retries: int = 2) -> list[dict]:
+    """全A股行情：代码缓存 → 腾讯批查
 
-def fetch_all_stocks_basic() -> list[dict]:
-    """全A股行情：腾讯批查 + 股票代码缓存"""
-    from src.models.database import StockSnapshotDAO
-    ds = now_cn().strftime("%Y-%m-%d")
-
-    # 1. 获取代码表
-    code_list = _get_stock_codes()
-    if not code_list:
+    返回标准字典列表，字段与 stock_snapshot 表和 screener 兼容。
+    """
+    codes = _get_stock_codes()
+    if not codes:
         return []
-
-    # 2. 腾讯批查行情
-    codes = [c['code'] for c in code_list]
-    quotes = fetch_tencent_batch(codes)
-    qmap = {q['code']: q for q in quotes}
-
-    # 3. 合并
-    records = []
-    for entry in code_list:
-        code = entry['code']
-        q = qmap.get(code, {})
-        name = entry['name']
-        records.append({
-            'code': code, 'name': name.replace(' ', ''),
-            'market': 'A', 'sector': None,
-            'pe': q.get('pe'), 'pb': q.get('pb'), 'ps': None,
-            'market_cap': q.get('market_cap'), 'circulating_cap': None,
-            'roe': None, 'revenue': None, 'revenue_growth': None,
-            'profit': None, 'profit_growth': None, 'debt_ratio': None,
-            'dividend_yield': None, 'current_price': q.get('current_price'),
-            'high_52w': None, 'low_52w': None,
-            'is_st': 1 if ('ST' in name or '*ST' in name) else 0,
-            'list_date': None, 'snapshot_date': ds,
-        })
-
-    with_pe = sum(1 for r in records if r['pe'] is not None)
-    logger.info(f"[采集] 全A股 {len(records)} 只 (有PE: {with_pe})")
-    StockSnapshotDAO().save_batch(records)
-    return records
+    codes = [s['code'] for s in codes]
+    raw = fetch_tencent_batch(codes)
+    # 补充股票名称
+    name_map = {s['code']: s['name'] for s in _get_stock_codes()}
+    for r in raw:
+        if r.get('name') is None:
+            r['name'] = name_map.get(r['code'], '')
+    return raw
 
 
-# ── 初筛 ──
+# ── 财务筛选条件（与 config.yaml 联动）──
 
-def pre_filter_stocks(records: list[dict], config: dict) -> list[dict]:
-    cfg = config.get('screener', {}).get('conditions', {})
+def pre_filter_stocks(stocks: list[dict], config: dict) -> list[dict]:
+    """初筛：基于配置的行筛条件过滤
+
+    主要是 PE/PB/市值 等行情指标，财务指标在后续步骤补充。
+    """
+    screen = config.get('screener', {})
+    conditions = screen.get('conditions', {})
+    min_pe = conditions.get('min_pe', 1)
+    max_pe = conditions.get('max_pe', 20)
+    max_pb = conditions.get('max_pb', 3.5)
+    min_mc = conditions.get('min_market_cap', 30)
+    max_mc = conditions.get('max_market_cap', 50000)
+    exclude_keys = [k.strip() for k in conditions.get('exclude_keywords', 'ST,退').split(',')]
+    min_price = conditions.get('min_price', 0.5)
+
     candidates = []
-    for s in records:
-        if cfg.get('exclude_st', True) and s['is_st']:
+    skip_reasons = defaultdict(int)
+
+    for s in stocks:
+        name = (s.get('name') or '').upper()
+        if any(k.upper() in name for k in exclude_keys):
+            skip_reasons['ST/退市'] += 1
             continue
-        pe = s.get('pe')
-        if pe is None or pe < cfg.get('min_pe', 3) or pe > cfg.get('max_pe', 20):
+
+        pe = safe_float(s.get('pe'))
+        pe_ttm = safe_float(s.get('pe_ttm'))
+        pb = safe_float(s.get('pb'))
+        mc = safe_float(s.get('market_cap'))
+        price = safe_float(s.get('price'))
+
+        if pe is None and pe_ttm is None:
+            skip_reasons['无PE'] += 1
             continue
-        pb = s.get('pb')
-        if pb is not None and pb > cfg.get('max_pb', 3.5):
+        pe_val = pe if pe is not None else pe_ttm
+
+        if mc is None or mc < min_mc or mc > max_mc:
+            skip_reasons['市值'] += 1
             continue
-        mc = s.get('market_cap')
-        if mc is not None and (mc < cfg.get('min_market_cap', 30) or mc > cfg.get('max_market_cap', 50000)):
+        if pb is None or pb > max_pb:
+            skip_reasons['PB'] += 1
             continue
+        if pe_val < min_pe or pe_val > max_pe:
+            skip_reasons['PE'] += 1
+            continue
+        if price is not None and price < min_price:
+            skip_reasons['低价'] += 1
+            continue
+
         candidates.append(s)
-    logger.info(f"[初筛] {len(records)} -> {len(candidates)}")
+
+    logger.info(f"[初筛] {'/'.join(f'{k}={v}' for k, v in skip_reasons.items())}")
+    logger.info(f"[初筛] {len(candidates)} 只通过")
     return candidates
 
 
-# ── 财务补充 ──
+# ── 财务补充（AKShare 核心数据源）──
 
 def _code_to_em(code: str) -> str:
-    """6位代码转东财格式: 600519→600519.SH, 000807→000807.SZ"""
+    """股票代码转东方财富格式"""
     return f"{code}.SH" if code.startswith(('6', '9')) else f"{code}.SZ"
 
 
-def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
-    """用东财 data center API 批量获取财务指标（ROE/负债率/营收增长/利润增长）。
+def _find_latest_yjbb_date(ak_module) -> str:
+    """找到 stock_yjbb_em 最新的可用报告期。"""
+    import pandas as pd
+    for y in [2026, 2025, 2024]:
+        for m in ['0331', '0630', '0930', '1231']:
+            date = f"{y}{m}"
+            try:
+                df = ak_module.stock_yjbb_em(date=date)
+                if df is not None and len(df) > 1000:
+                    return date
+            except Exception:
+                pass
+    return '20260331'
 
+
+def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
+    """用AKShare批量获取财务指标（ROE/毛利率/净利率/OCF/负债率等）。
+
+    - 全A股用 stock_yjbb_em 一次批量调用（~6秒）
+    - 候选股深度数据用 stock_financial_abstract_ths 逐只获取
     原地补充字段后返回同一列表。
     """
-    import httpx
+    import akshare as ak
     total = len(stocks)
-    logger.info(f"[财务] 获取 {total} 只（东财旧版API + 全量字段）...")
-    url = 'https://datacenter.eastmoney.com/securities/api/data/get'
-    columns = 'SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,MGJYXJJE,XSJLL'
+    logger.info(f"[财务] AKShare 采集 {total} 只...")
 
-    done = 0
-    for batch_start in range(0, total, batch_size):
-        batch = stocks[batch_start:batch_start + batch_size]
-        em_codes = ','.join('"' + _code_to_em(s['code']) + '"' for s in batch)
-        params = {
-            'type': 'RPT_F10_FINANCE_MAINFINADATA',
-            'sty': columns,
-            'filter': '(SECUCODE in (' + em_codes + '))',
-            'p': 1, 'ps': batch_size * 2,
-            'sr': '-1', 'st': 'REPORT_DATE',
-            'source': 'HSF10', 'client': 'PC',
-        }
-        try:
-            with httpx.Client(timeout=30) as client:
-                r = client.get(url, params=params)
-                data = r.json()
-            if not data.get('result') or not data['result'].get('data'):
-                logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 无数据: {data.get('message','')}")
-                done += len(batch)
+    # ── 第一步：stock_yjbb_em — 一次调用获取全量基础数据 ──
+    latest_date = _find_latest_yjbb_date(ak)
+    try:
+        all_df = ak.stock_yjbb_em(date=latest_date)
+    except Exception as e:
+        logger.warning(f"[财务] stock_yjbb_em失败({e})，跳过基础字段")
+        all_df = None
+
+    if all_df is not None:
+        by_code = {}
+        for _, r in all_df.iterrows():
+            raw = str(r.get('股票代码', '')).strip().zfill(6)
+            by_code[raw] = r
+
+        for s in stocks:
+            code = s['code']
+            r = by_code.get(code)
+            if r is None:
                 continue
-            # 每只股票取最新年报（12-31）的指标；没有年报才退回季度数据
-            code_map = {s['code']: s for s in batch}
-            latest: dict = defaultdict(dict)
-            for row in data['result']['data']:
-                raw = row['SECUCODE'].split('.')[0]
-                if raw not in code_map:
-                    continue
-                date = (row.get('REPORT_DATE') or '')[:10]
-                is_annual = date.endswith('12-31')
-                prev = latest[raw].get('date', '')
-                if (not prev
-                        or (is_annual and not prev.endswith('12-31'))
-                        or (is_annual == prev.endswith('12-31') and date > prev)):
-                    latest[raw] = {
-                        'date': date,
-                        'roe': safe_float(row.get('ROEJQ')),
-                        'debt_ratio': safe_float(row.get('ZCFZL')),
-                        'revenue_growth': safe_float(row.get('TOTALOPERATEREVETZ')),
-                        'profit_growth': safe_float(row.get('PARENTNETPROFITTZ')),
-                        'gross_margin': safe_float(row.get('XSMLL')),
-                        'ocf_per_share': safe_float(row.get('MGJYXJJE')),
-                        'is_annual': is_annual,
-                    }
-            for code, info in latest.items():
-                s = code_map[code]
-                s['roe'] = info['roe']
-                s['debt_ratio'] = info['debt_ratio']
-                s['revenue_growth'] = info['revenue_growth']
-                s['profit_growth'] = info['profit_growth']
-                s['gross_margin'] = info['gross_margin']
-                s['ocf_per_share'] = info['ocf_per_share']
-        except Exception as e:
-            logger.warning(f"[财务] 批次 {batch_start//batch_size+1} 异常: {e}")
-        done += len(batch)
-        logger.info(f"[财务] {done}/{total}")
+            s['roe'] = safe_float(r.get('净资产收益率'))
+            s['gross_margin'] = safe_float(r.get('销售毛利率'))
+            s['ocf_per_share'] = safe_float(r.get('每股经营现金流量'))
+            s['eps'] = safe_float(r.get('每股收益'))
+            s['revenue_growth'] = safe_float(r.get('营业总收入-同比增长'))
+            s['profit_growth'] = safe_float(r.get('净利润-同比增长'))
+            s['net_profit'] = safe_float(r.get('净利润-净利润'))
+            s['bvps'] = safe_float(r.get('每股净资产'))
 
-    with_roe = sum(1 for s in stocks if s.get('roe') is not None)
+        with_roe = sum(1 for s in stocks if s.get('roe') is not None)
+        logger.info(f"[财务] stock_yjbb_em: {with_roe}/{total} 有ROE")
+
+    # ── 第二步：stock_financial_abstract_ths 逐只深度补充 ──
+    # 补齐：净利率/负债率（stock_yjbb_em 不提供）
+    for idx, s in enumerate(stocks):
+        code = s['code']
+        # stock_yjbb_em 已有大部分字段，跳过已经有净利率/负债率的
+        if s.get('net_margin') is not None and s.get('debt_ratio') is not None:
+            continue
+        try:
+            df = ak.stock_financial_abstract_ths(symbol=code)
+            if df is None or df.empty:
+                continue
+            # 取最新一期数据（第一行）— 已按报告期降序
+            latest = df.iloc[0]
+            net_margin_str = latest.get('销售净利率', '')
+            if net_margin_str and net_margin_str != '-':
+                try:
+                    s['net_margin'] = float(str(net_margin_str).replace('%', ''))
+                except (ValueError, TypeError):
+                    pass
+            debt_str = latest.get('资产负债率', '')
+            if debt_str and debt_str != '-':
+                try:
+                    s['debt_ratio'] = float(str(debt_str).replace('%', ''))
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
+            pass
+        if (idx + 1) % 50 == 0:
+            logger.info(f"[财务] 深度补充 {idx + 1}/{total}")
+
     with_gm = sum(1 for s in stocks if s.get('gross_margin') is not None)
-    with_ocf = sum(1 for s in stocks if s.get('ocf_per_share') is not None)
-    logger.info(f"[财务] ROE: {with_roe}/{total} | 毛利率: {with_gm}/{total} | OCF/股: {with_ocf}/{total}")
+    with_nm = sum(1 for s in stocks if s.get('net_margin') is not None)
+    logger.info(f"[财务] ROE:{with_roe}/{total} 毛利率:{with_gm}/{total} 净利率:{with_nm}/{total}")
     return stocks
 
 
-# ── 财务历史数据采集（本地数据仓库核心）──
+# ── 财务历史数据采集（AKShare 逐只）──
+
+def _parse_pct(value) -> float | None:
+    """解析带%标记的百分比值"""
+    if value is None or value == '-' or value is False:
+        return None
+    try:
+        return float(str(value).replace('%', '').replace(',', ''))
+    except (ValueError, TypeError):
+        return None
+
 
 def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
-    """从东财API拉取回历史财务数据（每只股票7年/25期），存入financial_history。
+    """用AKShare逐只拉取7年历史财务数据，存入financial_history。
 
-    all_stocks: 全A股行情列表（用于确定代码池）
-    返回: {stock_code: True/False} 表示哪些股票获取到数据
+    all_stocks: 候选股列表（筛选过的）
+    返回: {stock_code: True} 表示获取成功的股票
     """
     from src.models.database import FinancialHistoryDAO
+    import akshare as ak
+    import pandas as pd
 
-    # 只处理还没有历史数据的股票
+    # 只处理还没有历史数据的股票（daily increment pattern）
     dao = FinancialHistoryDAO()
     todo = [s for s in all_stocks if not dao.has_code(s['code'])]
     if not todo:
-        logger.info("[历史财务] 全部股票已有历史数据，跳过")
+        logger.info("[历史财务] 全部候选股已有历史数据，跳过")
         return {}
 
-    logger.info(f"[历史财务] 需要获取 {len(todo)} 只股票的历史数据...")
-
+    logger.info(f"[历史财务] AKShare 逐只采集 {len(todo)} 只...")
     collected = {}
-    batch_size = 100
-    url = 'https://datacenter.eastmoney.com/securities/api/data/get'
-    columns = ('SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,'
-               'XSMLL,XSJLL,MGJYXJJE,'
-               'TOTALOPERATEREVETZ,PARENTNETPROFITTZ,PARENTNETPROFIT,'
-               'INTSTCOVRATE,FCFF_FORWARD,TOTAL_SHARE,ROIC,EPSJB')
 
-    import httpx
-    for batch_start in range(0, len(todo), batch_size):
-        batch = todo[batch_start:batch_start + batch_size]
-        em_codes = ','.join('"' + _code_to_em(s['code']) + '"' for s in batch)
-
-        for page in [1, 2]:
-            params = {
-                'type': 'RPT_F10_FINANCE_MAINFINADATA',
-                'sty': columns,
-                'filter': '(SECUCODE in (' + em_codes + '))',
-                'p': page, 'ps': 100,
-                'sr': '-1', 'st': 'REPORT_DATE',
-                'source': 'HSF10', 'client': 'PC',
-            }
+    for idx, s in enumerate(todo):
+        code = s['code']
+        try:
+            # 方法1：stock_financial_abstract_ths — 带净利率/负债率/毛利率的完整历史
             try:
-                with httpx.Client(timeout=30) as client:
-                    r = client.get(url, params=params)
-                    data = r.json()
-                if not data.get('result') or not data['result'].get('data'):
-                    continue
+                df_abs = ak.stock_financial_abstract_ths(symbol=code)
+            except Exception:
+                df_abs = None
 
-                # 处理每行数据
-                records = []
-                for row in data['result']['data']:
-                    code = row['SECUCODE'].split('.')[0]
-                    records.append({
+            # 方法2：stock_profit_sheet — 带利息费用/总股本的利润表
+            try:
+                df_ps = ak.stock_profit_sheet_by_report_em(symbol=code)
+            except Exception:
+                df_ps = None
+
+            # 方法3：stock_cash_flow_sheet — 带经营/投资现金流的现金流量表
+            try:
+                df_cf = ak.stock_cash_flow_sheet_by_report_em(symbol=code)
+            except Exception:
+                df_cf = None
+
+            # 合并数据：以 financial_abstract 为骨架，补充深度字段
+            records = []
+            if df_abs is not None and not df_abs.empty:
+                for _, row in df_abs.iterrows():
+                    rpt_date = str(row.get('报告期', ''))[:10]
+                    if not rpt_date:
+                        continue
+                    rec = {
                         'stock_code': code,
-                        'report_date': (row.get('REPORT_DATE') or '')[:10],
-                        'roe': safe_float(row.get('ROEJQ')),
-                        'gross_margin': safe_float(row.get('XSMLL')),
-                        'net_margin': safe_float(row.get('XSJLL')),
-                        'ocf_per_share': safe_float(row.get('MGJYXJJE')),
-                        'debt_ratio': safe_float(row.get('ZCFZL')),
-                        'revenue_growth': safe_float(row.get('TOTALOPERATEREVETZ')),
-                        'profit_growth': safe_float(row.get('PARENTNETPROFITTZ')),
-                        'net_profit': safe_float(row.get('PARENTNETPROFIT')),
-                        'interest_coverage': safe_float(row.get('INTSTCOVRATE')),
-                        'fcf': safe_float(row.get('FCFF_FORWARD')),
-                        'total_shares': safe_float(row.get('TOTAL_SHARE')),
-                        'roic': safe_float(row.get('ROIC')),
-                        'eps': safe_float(row.get('EPSJB')),
-                    })
-                    collected[code] = True
+                        'report_date': rpt_date,
+                        'roe': _parse_pct(row.get('净资产收益率')),
+                        'gross_margin': _parse_pct(row.get('销售毛利率')),
+                        'net_margin': _parse_pct(row.get('销售净利率')),
+                        'ocf_per_share': safe_float(row.get('每股经营现金流')),
+                        'debt_ratio': _parse_pct(row.get('资产负债率')),
+                        'eps': safe_float(row.get('基本每股收益')),
+                        'net_profit': safe_float(row.get('净利润')),
+                    }
+                    # 解析净利润（可能带"亿"）
+                    np_val = row.get('净利润')
+                    if np_val and isinstance(np_val, str):
+                        if '亿' in np_val:
+                            try:
+                                rec['net_profit'] = float(np_val.replace('亿', '')) * 100_000_000
+                            except (ValueError, TypeError):
+                                pass
+                    # 解析营收增长率和净利增长率
+                    rec['revenue_growth'] = _parse_pct(row.get('营业总收入同比增长率'))
+                    rec['profit_growth'] = _parse_pct(row.get('净利润同比增长率'))
+                    # 解析营业总收入（完整值，来自financial_abstract）
+                    rev = row.get('营业总收入')
+                    if rev and isinstance(rev, str) and '亿' in rev:
+                        try:
+                            rec['total_operate_reve'] = float(rev.replace('亿', '')) * 100_000_000
+                        except (ValueError, TypeError):
+                            pass
+                    records.append(rec)
 
-                dao.batch_save(records)
-                logger.info(f"[历史财务] 批次 {batch_start//batch_size+1} 页{page}: {len(records)} 条")
-            except Exception as e:
-                logger.warning(f"[历史财务] 批次 {batch_start//batch_size+1} 页{page} 异常: {e}")
+            # 从利润表补充利息费用/总股本/FCF
+            if df_ps is not None and not df_ps.empty:
+                ps_by_date = {}
+                for _, row in df_ps.iterrows():
+                    d = (str(row.get('REPORT_DATE', '')))[:10]
+                    if d:
+                        ps_by_date[d] = row
+                for rec in records:
+                    d = rec['report_date']
+                    row_ps = ps_by_date.get(d)
+                    if row_ps is None:
+                        # 找最近的
+                        for ps_d in sorted(ps_by_date.keys(), reverse=True):
+                            if ps_d[:4] == d[:4] or (ps_d[:4] == d[:4] and ps_d[5:7] <= d[5:7]):
+                                row_ps = ps_by_date[ps_d]
+                                break
+                    if row_ps is not None:
+                        # 利息覆盖倍数 = 营业利润 / 利息费用
+                        op = safe_float(row_ps.get('OPERATE_PROFIT'))
+                        ie = safe_float(row_ps.get('INTEREST_EXPENSE'))
+                        if op is not None and ie is not None and ie != 0:
+                            rec['interest_coverage'] = round(op / abs(ie), 2)
+                        rec['total_shares'] = safe_float(row_ps.get('TOTAL_SHARES'))
+                        # 利润表净利润
+                        ps_np = safe_float(row_ps.get('NETPROFIT'))
+                        if ps_np is not None and rec.get('net_profit') is None:
+                            rec['net_profit'] = ps_np
+                        # 营收入（利润表更精确）
+                        ps_rev = safe_float(row_ps.get('OPERATE_INCOME'))
+                        if ps_rev is not None:
+                            rec['total_operate_reve'] = ps_rev
 
-        time.sleep(0.5)
+            # 从现金流量表补充FCF
+            if df_cf is not None and not df_cf.empty:
+                cf_by_date = {}
+                for _, row in df_cf.iterrows():
+                    d = (str(row.get('REPORT_DATE', '')))[:10]
+                    if d:
+                        cf_by_date[d] = row
+                for rec in records:
+                    d = rec['report_date']
+                    row_cf = cf_by_date.get(d)
+                    if row_cf is None:
+                        for cf_d in sorted(cf_by_date.keys(), reverse=True):
+                            if cf_d[:4] == d[:4] or (cf_d[:4] == d[:4] and cf_d[5:7] <= d[5:7]):
+                                row_cf = cf_by_date[cf_d]
+                                break
+                    if row_cf is not None:
+                        ocf = safe_float(row_cf.get('NETCASH_OPERATE'))
+                        capex = safe_float(row_cf.get('NETCASH_INVEST'))
+                        if ocf is not None and capex is not None:
+                            rec['fcf'] = ocf + capex  # capex是负值
+                        elif ocf is not None:
+                            rec['fcf'] = ocf
+                        # OCF/share 补充
+                        cf_ocf = safe_float(row_cf.get('NETCASH_OPERATE'))
+                        shares = rec.get('total_shares')
+                        if cf_ocf is not None and shares and shares > 0:
+                            ocfps = round(cf_ocf / shares, 4)
+                            if rec.get('ocf_per_share') is None:
+                                rec['ocf_per_share'] = ocfps
 
-    logger.info(f"[历史财务] 完成: {len(collected)} 只股票")
+            if records:
+                # 简化：去重（同一个报告期只留一个）
+                seen_dates = set()
+                deduped = []
+                for rec in sorted(records, key=lambda x: x['report_date'], reverse=True):
+                    d = rec['report_date']
+                    if d not in seen_dates:
+                        seen_dates.add(d)
+                        deduped.append(rec)
+
+                dao.batch_save(deduped)
+                collected[code] = True
+                logger.info(f"[历史] {code} {s.get('name','')}: {len(deduped)} 期")
+            else:
+                logger.warning(f"[历史] {code}: 无数据")
+
+        except Exception as e:
+            logger.warning(f"[历史] {code} 异常: {e}")
+
+        time.sleep(0.3)  # AKShare 防限流
+
+    logger.info(f"[历史财务] AKShare 完成: {len(collected)} 只")
     return collected
 
 
@@ -370,7 +493,7 @@ def rebuild_financial_summaries(stocks: list[dict]):
         nm_vals = [r['net_margin'] for r in last5 if r['net_margin'] is not None]
         nm_avg = sum(nm_vals) / len(nm_vals) if nm_vals else None
 
-        # OCF/股趋势：比较最近3年的均值
+        # OCF/股趋势
         ocf_vals = [r['ocf_per_share'] for r in last5 if r['ocf_per_share'] is not None]
         ocf_latest = ocf_vals[-1] if ocf_vals else None
         ocf_positive = sum(1 for v in ocf_vals if v and v > 0) if ocf_vals else 0
@@ -378,16 +501,14 @@ def rebuild_financial_summaries(stocks: list[dict]):
         if len(ocf_vals) >= 3:
             last3 = ocf_vals[-3:]
             if last3[-1] > last3[0] and last3[-1] > last3[1]:
-                ocf_trend = 1  # 增长
+                ocf_trend = 1
             elif last3[-1] < last3[0] and last3[-1] < last3[1]:
-                ocf_trend = -1  # 下降
-            else:
-                ocf_trend = 0  # 波动
+                ocf_trend = -1
 
         # 最新负债率
         debt_latest = last5[-1].get('debt_ratio') if last5 else None
 
-        # 利息覆盖倍数 5年均值（年报）
+        # 利息覆盖倍数 5年均值
         intcov_vals = [r['interest_coverage'] for r in last5 if r.get('interest_coverage') is not None]
         intcov_avg = sum(intcov_vals) / len(intcov_vals) if intcov_vals else None
 
@@ -395,12 +516,12 @@ def rebuild_financial_summaries(stocks: list[dict]):
         fcf_vals = [r['fcf'] for r in last5 if r.get('fcf') is not None and r['report_type'] == 'A']
         fcf_sum = sum(fcf_vals) if fcf_vals else None
 
-        # 5年股本稀释率（最早到最晚）
+        # 5年股本稀释率
         shares_vals = [r['total_shares'] for r in last5 if r.get('total_shares') is not None]
         share_dilution = None
         if len(shares_vals) >= 2:
-            earliest_shares = shares_vals[-1]  # 最早的（排序后）
-            latest_shares = shares_vals[0]      # 最新的
+            earliest_shares = shares_vals[-1]
+            latest_shares = shares_vals[0]
             if earliest_shares and earliest_shares > 0:
                 share_dilution = round((latest_shares - earliest_shares) / earliest_shares * 100, 2)
 
@@ -423,7 +544,7 @@ def rebuild_financial_summaries(stocks: list[dict]):
             'debt_ratio_latest': debt_latest,
             'net_profit_5y_sum': None,
             'intcov_5y_avg': round(intcov_avg, 2) if intcov_avg else None,
-            'fcf_5y_sum': fcf_sum,
+            'fcf_5y_sum': round(fcf_sum, 2) if fcf_sum else None,
             'share_dilution_5y': share_dilution,
             'roic_5y_avg': round(roic_avg, 2) if roic_avg else None,
             'data_years': data_years,
