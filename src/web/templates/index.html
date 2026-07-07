@@ -189,15 +189,16 @@
 
         /* ========== Market Row ========== */
         .market-row {
-            display: flex;
-            gap: 32px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
             padding: 16px 0;
             margin-bottom: 24px;
             border-bottom: 1px solid var(--divider-thin);
         }
 
         .market-item {
-            flex: 1;
+            padding: 10px 0;
         }
 
         .market-name {
@@ -206,11 +207,11 @@
             color: var(--text-tertiary);
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
 
         .market-value {
-            font-size: 26px;
+            font-size: 21px;
             font-weight: 300;
             letter-spacing: -0.02em;
             color: var(--text-primary);
@@ -218,7 +219,7 @@
         }
 
         .market-change {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 400;
             margin-top: 2px;
         }
@@ -305,7 +306,7 @@
         }
 
         .section-title {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
@@ -460,7 +461,7 @@
         }
 
         .ai-panel {
-            font-size: 13px;
+            font-size: 12px;
             line-height: 1.7;
             color: var(--text-secondary);
         }
@@ -546,7 +547,7 @@
         }
 
         .empty-state p {
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-tertiary);
         }
 
@@ -567,7 +568,7 @@
             top: 12px;
         }
         .knowledge-panel h3 {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-primary);
             margin-bottom: 12px;
@@ -701,7 +702,7 @@
             letter-spacing: 0.5px;
         }
         .history-detail .trade-cell .value {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             color: var(--text-primary);
             margin-top: 2px;
@@ -733,10 +734,13 @@
         }
 
         /* ========== Responsive ========== */
+        @media (max-width: 1100px) {
+            .market-row { grid-template-columns: repeat(4, 1fr); }
+        }
+
         @media (max-width: 900px) {
             .app { padding: 16px; }
-            .market-row { gap: 16px; flex-wrap: wrap; }
-            .market-item { flex: 1 1 40%; }
+            .market-row { grid-template-columns: repeat(3, 1fr); gap: 12px; }
             .stock-row { flex-direction: column; }
             .stock-info { flex: none; }
             .stock-metrics { gap: 12px; }
@@ -968,7 +972,7 @@
                 <div class="ai-tabs">
                     <button class="ai-tab active" onclick="switchTab(this, 'analysis-{{ stock.code }}')">Analysis</button>
                     <button class="ai-tab" onclick="switchTab(this, 'strategy-{{ stock.code }}')">Strategy</button>
-                    <button class="ai-tab" onclick="switchTab(this, 'risks-{{ stock.code }}')">⛔ Risks</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'risks-{{ stock.code }}')"> Risks</button>
                     <button class="ai-tab" onclick="switchTab(this, 'trade-{{ stock.code }}')">Trade</button>
                 </div>
 
@@ -984,8 +988,8 @@
                     <div class="ai-text">{{ stock.ai_parsed.reverse_thinking if stock.ai_parsed.reverse_thinking else '无逆向分析数据' }}</div>
                     {% if stock.mirror_counts %}
                     <div style="margin-top:8px;padding:8px;background:var(--gold-bg);border-radius:var(--radius-sm);font-size:11px;">
-                        &#128161; 镜子测试：{{ stock.mirror_counts }} 句含转折词
-                        {% if stock.mirror_counts > 2 %}<span style="color:var(--red);font-weight:500;"> ⚠️ 超2句，违反纪律</span>{% endif %}
+                        镜子测试: {{ stock.mirror_counts }} 句含转折词
+                        {% if stock.mirror_counts > 2 %}<span style="color:var(--red);font-weight:500;"> 超2句, 违反纪律</span>{% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -1044,9 +1048,9 @@
                         <span class="hist-date">{{ h.analysis_date }}</span>
                         <span class="hist-score">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>
                         {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
-                        <span class="hist-status" style="color:var(--color-up);">&#9679; 有分析</span>
+                        <span class="hist-status" style="color:var(--color-up);">有分析</span>
                         {% else %}
-                        <span class="hist-status" style="color:var(--text-tertiary);">&#9675; 已尝试</span>
+                        <span class="hist-status" style="color:var(--text-tertiary);">已尝试</span>
                         {% endif %}
                     </div>
                     {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
