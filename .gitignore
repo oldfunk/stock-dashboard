@@ -37,3 +37,4 @@ config/local.yaml
 
 # Cache
 data/cache/
+stock-dashboard/
