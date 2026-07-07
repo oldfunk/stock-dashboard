@@ -12,25 +12,24 @@
 
 ```
 腾讯行情 (qt.gtimg.cn)
-  ├─ 实时行情: PE/PB/市值/价格/涨跌
-  └─ 大盘指数: 上证/深证/创业板
+  └─ 实时行情: PE/PB/市值/价格/涨跌（仅用于初筛过滤）
 
-AKShare（社区维护的数据工具箱 → 东方财富/同花顺底层）
-  ├─ stock_yjbb_em       → 全A股批量财务（1次调用5879只：ROE/毛利率/OCF/EPS/增长率）
-  ├─ stock_financial_abstract_ths → 逐只深度历史（7~20年：净利率/负债率/流动比率/速动比率）
-  ├─ stock_profit_sheet  → 利润表明细（利息费用/总股本/营业利润）
-  └─ stock_cash_flow_sheet → 现金流量表（经营/投资/筹资现金流）
+AKShare（社区维护的中国金融数据工具箱）
+  ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务: ROE/毛利率/OCF/EPS/增长率
+  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度历史: 净利率/负债率/流动比率
+  ├─ stock_profit_sheet_by_report_em → 利润表明细: 利息费用/总股本
+  └─ stock_cash_flow_sheet_by_report_em → 现金流量表: 经营/投资现金流 → FCF
 ```
 
-> **为什么选 AKShare**：社区主力维护的中国金融数据工具箱，数据来源覆盖东方财富、同花顺、新浪、腾讯等多个渠道。底层 API 如果变更，AKShare 会被社区修复后自动更新，无需手动适配。长期数据稳定性优于直连东财 API。
+> **为什么选 AKShare**：社区主力维护的中国金融数据工具箱，数据来源覆盖东方财富、同花顺等多个渠道。底层 API 如果变更，AKShare 会被社区修复后自动更新。长期数据稳定性优于手写直连。
 
-> 注：AKShare 的 `stock_yjbb_em` 一次 HTTP 调用即可获取 ~5800 只 A 股的最新财务数据，效率极高。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用，兼顾速度和全面性。
+> 注：`stock_yjbb_em` 一次 HTTP 调用即可获取 ~5800 只 A 股的最新财务数据。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用，兼顾速度和全面性。
 
 ## 本地数据仓库
 
 系统在运行中自动积累历史财务数据：
 
-- **financial_history** 表 — 按季度/年度累积东财全量财务数据
+- **financial_history** 表 — 按季度/年度累积 AKShare 全量财务数据
 - **financial_summary** 表 — 从历史数据计算的 5 年衍生指标
 - **增量采集** — 已有数据的股票跳过，只拉新的
 - **自动迁移** — 旧数据库首次启动自动 ALTER TABLE 加列
@@ -64,13 +63,13 @@ AKShare（社区维护的数据工具箱 → 东方财富/同花顺底层）
 
 ```
 每日 15:30（收盘后自动触发）:
-  1. 腾讯API → 全A股行情 → stock_snapshot
-  2. 东财API → 当前财务数据（165列全量）
-  3. 初筛（PE/PB/市值/排除ST）
-  4. 历史财务采集 → 进入 financial_history
+  1. 腾讯行情 → 全A股行情（PE/PB/市值）→ 初筛预过滤
+  2. AKShare stock_yjbb_em → 当前财务（ROE/毛利率/OCF）
+  3. AKShare stock_financial_abstract_ths → 逐只深度补充（净利率/负债率）
+  4. AKShare 利润表+现金流表 → 历史财务采集 → financial_history
   5. 重建 5年汇总 → financial_summary
-  6. 7条门规筛选 → 计算评分 → Top 20
-  7. AI分析（镜子测试+逆向思考）
+  6. 7条门规筛选 → 计算评分 → 候选池
+  7. AI分析（镜子测试+逆向思考）→ Top 20
 ```
 
 可通过 `http://<host>:9527/api/trigger_update` 手动触发流水线。
@@ -78,15 +77,13 @@ AKShare（社区维护的数据工具箱 → 东方财富/同花顺底层）
 ## 安装与运行
 
 ```bash
-git clone https://github.com/your-repo/stock-dashboard.git
+git clone https://github.com/oldfunk/stock-dashboard.git
 cd stock-dashboard
-pip install -r requirements.txt
-python src/orchestrator.py    # 首次运行: 采集+筛选
-python scripts/run_ai_analysis.py  # AI分析
-python src/web/routes.py      # 启动看板
+pip install akshare fastapi uvicorn jinja2 httpx schedule
+python -m src.collector.akshare_fetcher && python -m src.web.routes      # 首次运行: 采集+启动看板
 ```
 
-无需 API Key（腾讯行情 + 东财 datacenter 均为免费公开接口）。
+无需 API Key（腾讯行情 + 东方财富 + 同花顺均为免费公开接口）。
 
 ## 配置
 
@@ -98,7 +95,7 @@ python src/web/routes.py      # 启动看板
 
 ## 技术栈
 
-- **数据采集**: httpx + 腾讯行情API + 东方财富datacenter
+- **数据采集**: httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情API
 - **存储**: SQLite (WAL模式)
 - **AI分析**: 通过通用LLM API (支持OpenAI兼容接口+免费模型池)
 - **Web看板**: FastAPI + Jinja2
@@ -110,5 +107,5 @@ python src/web/routes.py      # 启动看板
 
 1. **自动化** — AI Berkshire 需要人手动跑，本项目全自动
 2. **本地数据仓库** — 逐日累积历史财务数据
-3. **A股适配** — 数据源换为东财/腾讯，规则兼容A股特性
-4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用东财可直接获取的字段
+3. **A股适配** — 数据源换为 AKShare/腾讯，规则兼容A股特性
+4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用 AKShare 可获取的字段
