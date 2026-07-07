@@ -254,6 +254,155 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     return stocks
 
 
+# ── 财务历史数据采集（本地数据仓库核心）──
+
+def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
+    """从东财API拉取回历史财务数据（每只股票7年/25期），存入financial_history。
+
+    all_stocks: 全A股行情列表（用于确定代码池）
+    返回: {stock_code: True/False} 表示哪些股票获取到数据
+    """
+    from src.models.database import FinancialHistoryDAO
+
+    # 只处理还没有历史数据的股票
+    dao = FinancialHistoryDAO()
+    todo = [s for s in all_stocks if not dao.has_code(s['code'])]
+    if not todo:
+        logger.info("[历史财务] 全部股票已有历史数据，跳过")
+        return {}
+
+    logger.info(f"[历史财务] 需要获取 {len(todo)} 只股票的历史数据...")
+
+    collected = {}
+    batch_size = 100  # 东财API最大安全pageSize
+    url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
+    columns = ('SECUCODE,REPORT_DATE,ROEJQ,ZCFZL,'
+               'XSMLL,XSJLL,MGJYXJJE,'
+               'TOTALOPERATEREVETZ,PARENTNETPROFITTZ,PARENTNETPROFIT')
+
+    import httpx
+    for batch_start in range(0, len(todo), batch_size):
+        batch = todo[batch_start:batch_start + batch_size]
+        em_codes = ','.join(f'"{_code_to_em(s["code"])}"' for s in batch)
+
+        # 分2页拿满数据（首批5年+扩展）
+        for page in [1, 2]:
+            params = {
+                'reportName': 'RPT_F10_FINANCE_MAINFINADATA',
+                'columns': columns,
+                'filter': f'(SECUCODE in ({em_codes}))',
+                'pageNumber': page, 'pageSize': 100,
+                'sortTypes': '-1', 'sortColumns': 'REPORT_DATE',
+                'source': 'HSF10', 'client': 'PC',
+            }
+            try:
+                with httpx.Client(timeout=30) as client:
+                    r = client.get(url, params=params)
+                    data = r.json()
+                if not data.get('result') or not data['result'].get('data'):
+                    continue
+
+                # 处理每行数据
+                records = []
+                for row in data['result']['data']:
+                    code = row['SECUCODE'].split('.')[0]
+                    records.append({
+                        'stock_code': code,
+                        'report_date': (row.get('REPORT_DATE') or '')[:10],
+                        'roe': safe_float(row.get('ROEJQ')),
+                        'gross_margin': safe_float(row.get('XSMLL')),
+                        'net_margin': safe_float(row.get('XSJLL')),
+                        'ocf_per_share': safe_float(row.get('MGJYXJJE')),
+                        'debt_ratio': safe_float(row.get('ZCFZL')),
+                        'revenue_growth': safe_float(row.get('TOTALOPERATEREVETZ')),
+                        'profit_growth': safe_float(row.get('PARENTNETPROFITTZ')),
+                        'net_profit': safe_float(row.get('PARENTNETPROFIT')),
+                    })
+                    collected[code] = True
+
+                dao.batch_save(records)
+                logger.info(f"[历史财务] 批次 {batch_start//batch_size+1} 页{page}: {len(records)} 条")
+            except Exception as e:
+                logger.warning(f"[历史财务] 批次 {batch_start//batch_size+1} 页{page} 异常: {e}")
+
+        time.sleep(0.5)
+
+    logger.info(f"[历史财务] 完成: {len(collected)} 只股票")
+    return collected
+
+
+def rebuild_financial_summaries(stocks: list[dict]):
+    """从 financial_history 重建 financial_summary 表（5年均值等）"""
+    from src.models.database import FinancialHistoryDAO, FinancialSummaryDAO
+
+    fh_dao = FinancialHistoryDAO()
+    fs_dao = FinancialSummaryDAO()
+    annual = fh_dao.get_all_annual(min_year=2020)
+
+    # 按股票代码分组
+    by_code = defaultdict(list)
+    for r in annual:
+        by_code[r['stock_code']].append(r)
+
+    count = 0
+    for code, reports in by_code.items():
+        if len(reports) < 2:  # 至少2年年报才有意义
+            continue
+        reports.sort(key=lambda x: x['report_date'])
+
+        # 取最近5年
+        last5 = reports[-5:] if len(reports) >= 5 else reports
+
+        # ROE 5年均值
+        roe_vals = [r['roe'] for r in last5 if r['roe'] is not None]
+        roe_avg = sum(roe_vals) / len(roe_vals) if roe_vals else None
+
+        # 毛利率5年均值
+        gm_vals = [r['gross_margin'] for r in last5 if r['gross_margin'] is not None]
+        gm_avg = sum(gm_vals) / len(gm_vals) if gm_vals else None
+
+        # 净利率5年均值
+        nm_vals = [r['net_margin'] for r in last5 if r['net_margin'] is not None]
+        nm_avg = sum(nm_vals) / len(nm_vals) if nm_vals else None
+
+        # OCF/股趋势：比较最近3年的均值
+        ocf_vals = [r['ocf_per_share'] for r in last5 if r['ocf_per_share'] is not None]
+        ocf_latest = ocf_vals[-1] if ocf_vals else None
+        ocf_positive = sum(1 for v in ocf_vals if v and v > 0) if ocf_vals else 0
+        ocf_trend = 0
+        if len(ocf_vals) >= 3:
+            last3 = ocf_vals[-3:]
+            if last3[-1] > last3[0] and last3[-1] > last3[1]:
+                ocf_trend = 1  # 增长
+            elif last3[-1] < last3[0] and last3[-1] < last3[1]:
+                ocf_trend = -1  # 下降
+            else:
+                ocf_trend = 0  # 波动
+
+        # 最新负债率
+        debt_latest = last5[-1].get('debt_ratio') if last5 else None
+
+        # 数据覆盖
+        all_dates = [r['report_date'] for r in reports]
+        data_years = f"{all_dates[0][:4]}-{all_dates[-1][:4]}" if all_dates else None
+
+        fs_dao.save(code, {
+            'roe_5y_avg': round(roe_avg, 2) if roe_avg else None,
+            'roe_5y_count': len(roe_vals),
+            'gross_margin_5y_avg': round(gm_avg, 2) if gm_avg else None,
+            'net_margin_5y_avg': round(nm_avg, 2) if nm_avg else None,
+            'ocf_5y_trend': ocf_trend,
+            'ocf_latest': ocf_latest,
+            'ocf_positive_years': ocf_positive,
+            'debt_ratio_latest': debt_latest,
+            'net_profit_5y_sum': None,  # placeholder
+            'data_years': data_years,
+        })
+        count += 1
+
+    logger.info(f"[财务汇总] 重建完成: {count} 只")
+
+
 # ── 采集流水线 ──
 
 def run_collect_pipeline(config: dict) -> list[dict]:

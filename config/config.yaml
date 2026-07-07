@@ -28,10 +28,12 @@ screener:
   max_candidates: 20        # 最大候选股票数量
 
   # ── 新增：毛利率与现金流阈值（对应东财指标 XSMLL / MGJYXJJE）──
-  # 毛利率下限：低于此值且ROE<20%时排除（参考AI Berkshire quality-screen）
+  # 毛利率下限：低于此值且ROE<20%时排除（允许薄利多销）
   min_gross_margin: 15
-  # 每股经营现金流：为负且增长率<20%时排除（排除"纸面利润"型公司）
+  # 经营现金流/股下限：≤0且毛利率<30%+增长<20%时排除（允许高增长投入期）
   min_ocf_per_share: 0
+  # ── 新增：净利率阈值（AI Berkshire规则6：长期净利率<5%排除）──
+  min_net_margin: 5
 
 # -------- AI 分析配置 --------
 ai:

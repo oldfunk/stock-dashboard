@@ -1,265 +1,307 @@
-"""
-价值投资量化筛选引擎
-基于格雷厄姆/巴菲特风格的价值投资过滤条件
+"""价值投资量化筛选引擎 — AI Berkshire 完整版
 
-对外只暴露：
-- ValueScreener 类：核心的过滤 + 评分逻辑（无副作用，不写库）
-- run_screener() 函数：编排「评分 → 排序 → 持久化」的入口
+基于 AI Berkshire 的 7条硬性门规 + 3条豁免规则 + 镜子测试预备。
+
+对外暴露：
+- ValueScreener 类：核心过滤 + 评分逻辑（无副作用，不写库）
+- run_screener() 函数：编排「加载历史→过滤→评分→排序→持久化」
 """
 
 import logging
-
-from src.models.database import ScreeningResultDAO, RunLogDAO
+from src.models.database import ScreeningResultDAO, RunLogDAO, FinancialSummaryDAO
 from src.utils import now_cn
 
 logger = logging.getLogger(__name__)
 
 
+# ── AI Berkshire 规则定义 ──
+
+def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
+    """AI Berkshire 7条门规 + 3条豁免 + 季节性OCF容差。
+
+    返回符合的理由列表（空列表 = 不符合，一票否决）。
+    """
+    reasons: list[str] = []
+    screen = cfg.get('screener', {}).get('conditions', {})
+
+    # ── 排除 ST ──
+    if screen.get('exclude_st', True) and stock.get('is_st'):
+        return []
+
+    # ── 规则 0：PE（基础估值过滤）──
+    pe = stock.get('pe')
+    if pe is None:
+        return []
+    max_pe = screen.get('max_pe', 20)
+    min_pe = screen.get('min_pe', 3)
+    if pe < min_pe or pe > max_pe:
+        return []
+    reasons.append(f"PE={pe}（{min_pe}~{max_pe}）")
+
+    # ── 规则 1：ROE ≥ 5%（当前）, 历史均值参考 ──
+    min_roe = screen.get('min_roe', 5)
+    roe = stock.get('roe')
+    if roe is not None and roe < min_roe:
+        return []
+    if roe is not None and roe > 0:
+        reasons.append(f"ROE={roe}%（≥{min_roe}%）")
+
+    # 5年平均ROE（AI Berkshire: 10年平均<8%排除，我们取5年）
+    roe_5y = stock.get('roe_5y_avg')
+    if roe_5y is not None and roe_5y < 8:
+        # 豁免A：上市不足8年且处于高增长期（增长>20%）
+        rev_g = stock.get('revenue_growth') or 0
+        if rev_g < 20:
+            return []
+        reasons.append(f"5年均ROE={roe_5y}%（<8%，豁免：高增长{rev_g}%新期公司）")
+    elif roe_5y is not None:
+        reasons.append(f"5年均ROE={roe_5y}%")
+
+    # ── 规则 2：OCF/NI ≥ 0.7 代理（用OCF/股正数 + 历史OCF为正的年数）──
+    # AI Berkshire: 5年累计FCF为负排除 + OCF/NI < 0.7排除
+    # 代理：OCF/股>0 + 多数年份OCF为正
+    ocf = stock.get('ocf_per_share')
+    ocf_pos_years = stock.get('ocf_positive_years')
+    if ocf is not None:
+        if ocf <= 0:
+            # 豁免B：战略投入期（高毛利率+高营收增长可豁免）
+            gm = stock.get('gross_margin') or 0
+            rev_g = stock.get('revenue_growth') or 0
+            if gm >= 30 and rev_g >= 20:
+                reasons.append(
+                    f"OCF/股={ocf}（≤0，豁免：高毛利率{gm}%+高增长{rev_g}%投入期）")
+            else:
+                return []
+        else:
+            # OCF为正，再看历史多数年份是否也为正
+            if ocf_pos_years is not None and ocf_pos_years < 3 and stock.get('roe_5y_count', 0) >= 4:
+                return []  # 多数年份OCF为负 → 排除
+            reasons.append(f"OCF/股={ocf}（正数）")
+
+    # ── 规则 3：净利率 ≥ 5%（当前 + 5年均值）──
+    min_nm = screen.get('min_net_margin', 5)
+    nm_5y = stock.get('net_margin_5y_avg')
+    # 用当前毛利率近似判断（无当前净利率字段，但有毛利率和5年均净利率）
+    gm_current = stock.get('gross_margin')
+    if nm_5y is not None and nm_5y < min_nm:
+        # 豁免C：主动低利润率模式（毛利率>30%说明产品有差异化，故意压低净利扩张）
+        if gm_current and gm_current >= 30:
+            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免：高毛利率{gm_current}%主动压利）")
+        else:
+            return []
+    elif nm_5y is not None:
+        reasons.append(f"5年均净利率={nm_5y}%")
+
+    # ── 规则 4：毛利率 ≥ 15%（当前）──
+    min_gm = screen.get('min_gross_margin', 15)
+    gross_margin = stock.get('gross_margin')
+    if gross_margin is not None:
+        if gross_margin < min_gm:
+            # 豁免D：高周转薄利模式（ROE>20% 说明资本回报率高，可容忍毛利率低）
+            roe = stock.get('roe') or 0
+            if roe >= 20:
+                reasons.append(
+                    f"毛利率={gross_margin}%（<{min_gm}%，豁免：高ROE={roe}%薄利模式）")
+            else:
+                return []
+        else:
+            reasons.append(f"毛利率={gross_margin}%（≥{min_gm}%）")
+
+    # ── 规则 5：营收增长 ≥ 0 + 净利增长 ≥ 0 ──
+    min_rev = screen.get('min_revenue_growth', 0)
+    rev_growth = stock.get('revenue_growth')
+    if rev_growth is not None and rev_growth < min_rev:
+        return []
+    if rev_growth is not None and rev_growth > 0:
+        reasons.append(f"营收增长={rev_growth}%")
+
+    min_prof = screen.get('min_profit_growth', 0)
+    prof_growth = stock.get('profit_growth')
+    if prof_growth is not None and prof_growth < min_prof:
+        return []
+    if prof_growth is not None and prof_growth > 0:
+        reasons.append(f"净利增长={prof_growth}%")
+
+    # ── 规则 6：负债率 < 65% ──
+    max_debt = screen.get('max_debt_ratio', 65)
+    debt = stock.get('debt_ratio')
+    if debt is not None and debt > max_debt:
+        return []
+    if debt is not None and debt >= 0:
+        reasons.append(f"负债率={debt}%（<{max_debt}%）")
+
+    # ── 规则 7：市值 ──
+    min_mc = screen.get('min_market_cap', 30)
+    max_mc = screen.get('max_market_cap', 50000)
+    mc = stock.get('market_cap')
+    if mc is not None:
+        if mc < min_mc or mc > max_mc:
+            return []
+        reasons.append(f"市值={mc}亿")
+
+    # PB 辅助参考
+    max_pb = screen.get('max_pb', 3.5)
+    pb = stock.get('pb')
+    if pb is not None and pb > max_pb:
+        return []
+    if pb is not None and pb > 0:
+        reasons.append(f"PB={pb}（<{max_pb}）")
+
+    return reasons
+
+
+def _calculate_moat_score(stock: dict) -> float:
+    """AI Berkshire 五维评分 (0-100)。
+
+    权重反映：护城河 > 估值 > 增长 > 财务健康 > 市场验证
+    """
+    weights = {'roe': 0.30, 'pe': 0.20, 'growth': 0.20,
+               'debt': 0.15, 'gm': 0.15}
+    score = 0.0
+
+    # 1) ROE（资本回报率 — 核心护城河指标）
+    roe = stock.get('roe') or 0
+    roe_5y = stock.get('roe_5y_avg') or 0
+    roe_combined = max(roe, roe_5y)  # 取当前和5年均值中较好的
+    if roe_combined >= 30:
+        roe_s = 100
+    elif roe_combined >= 20:
+        roe_s = 85
+    elif roe_combined >= 15:
+        roe_s = 65
+    elif roe_combined >= 12:
+        roe_s = 45
+    elif roe_combined >= 8:
+        roe_s = 25
+    else:
+        roe_s = 0
+    score += roe_s * weights['roe']
+
+    # 2) PE（安全边际 — 越低越高分）
+    pe = stock.get('pe') or 20
+    if pe <= 5:
+        pe_s = 100
+    elif pe <= 8:
+        pe_s = 90
+    elif pe <= 10:
+        pe_s = 76
+    elif pe <= 15:
+        pe_s = 55
+    elif pe <= 20:
+        pe_s = 35
+    else:
+        pe_s = 0
+    score += pe_s * weights['pe']
+
+    # 3) 增长（营收+净利均衡增长）
+    rev_g = stock.get('revenue_growth') or 0
+    prof_g = stock.get('profit_growth') or 0
+    avg_g = (rev_g + prof_g) / 2
+    if avg_g >= 30:
+        g_s = 100
+    elif avg_g >= 20:
+        g_s = 80
+    elif avg_g >= 10:
+        g_s = 60
+    elif avg_g >= 5:
+        g_s = 40
+    else:
+        g_s = 20  # 零增长不扣光（价值股特征）
+    score += g_s * weights['growth']
+
+    # 4) 负债率（财务稳健）
+    debt = stock.get('debt_ratio') or 100
+    if debt <= 20:
+        d_s = 100
+    elif debt <= 35:
+        d_s = 80
+    elif debt <= 50:
+        d_s = 60
+    elif debt <= 65:
+        d_s = 40
+    else:
+        d_s = 0
+    score += d_s * weights['debt']
+
+    # 5) 毛利率（护城河补充 — 定价权）
+    gm = stock.get('gross_margin') or 0
+    gm_5y = stock.get('gross_margin_5y_avg') or 0
+    gm_combined = max(gm, gm_5y)
+    if gm_combined >= 60:
+        gm_s = 100
+    elif gm_combined >= 40:
+        gm_s = 80
+    elif gm_combined >= 30:
+        gm_s = 60
+    elif gm_combined >= 15:
+        gm_s = 40
+    elif gm_combined >= 10:
+        gm_s = 20  # 低毛利但有ROE豁免
+    else:
+        gm_s = 0
+    score += gm_s * weights['gm']
+
+    return round(score, 1)
+
+
+# ── 主类 ──
+
 class ValueScreener:
-    """价值投资筛选器（纯逻辑，无 IO 副作用）。
+    """AI Berkshire 价值投资筛选器（纯逻辑，无 IO 副作用）。
 
-    config 形如::
-
-        {
-            'max_pe': 20, 'min_pe': 3, 'max_pb': 3.5,
-            'min_roe': 5, 'min_revenue_growth': 0, 'min_profit_growth': 0,
-            'max_debt_ratio': 65, 'min_market_cap': 30, 'max_market_cap': 50000,
-            'exclude_st': True, 'max_candidates': 20,
-        }
-
-    默认值与 config/config.yaml 保持一致，避免配置缺失时行为偏离。
+    check_criteria 使用 stock 内嵌入的 5年历史字段（由 score_candidates 预加载）。
     """
 
     def __init__(self, config: dict):
-        self.cfg = config or {}
+        self.cfg = config
 
     def check_criteria(self, stock: dict) -> list[str]:
-        """
-        检查是否符合价值投资标准。
-        返回符合的理由列表（空列表 = 不符合，即被排除）。
-
-        硬性排除规则（一票否决）：
-        - PE 不在 [min_pe, max_pe] 范围内
-        - PB > max_pb
-        - ROE < min_roe
-        - 毛利率 < min_gross_margin（有豁免条款）
-        - 负债率 > max_debt_ratio
-        - 市值不在 [min_market_cap, max_market_cap]
-        - ST/*ST 股票
-        - 经营现金流为负（有豁免条款）
-
-        符合以上全部规则后，才进入评分排序阶段。
-        换言之，这套筛选是"及格线制"而非"排名制"。
-        """
-        reasons: list[str] = []
-        cfg = self.cfg
-
-        # 排除 ST
-        if cfg.get('exclude_st', True) and stock.get('is_st'):
-            return []
-
-        pe = stock.get('pe')
-        if pe is None:
-            return []
-
-        # PE 范围
-        max_pe = cfg.get('max_pe', 20)
-        min_pe = cfg.get('min_pe', 3)
-        if pe < min_pe or pe > max_pe:
-            return []
-        reasons.append(f"PE={pe}（{min_pe}~{max_pe}）")
-
-        # PB
-        max_pb = cfg.get('max_pb', 3.5)
-        pb = stock.get('pb')
-        if pb is not None and pb > max_pb:
-            return []
-        if pb is not None and pb > 0:
-            reasons.append(f"PB={pb}（<{max_pb}）")
-
-        # ROE（默认 5，与 config.yaml 一致）
-        min_roe = cfg.get('min_roe', 5)
-        roe = stock.get('roe')
-        if roe is not None and roe < min_roe:
-            return []
-        if roe is not None and roe > 0:
-            reasons.append(f"ROE={roe}%（≥{min_roe}%）")
-
-        # 营收增长（默认 0，允许稳定型价值股）
-        min_rev_growth = cfg.get('min_revenue_growth', 0)
-        revenue_growth = stock.get('revenue_growth')
-        if revenue_growth is not None and revenue_growth < min_rev_growth:
-            return []
-        if revenue_growth is not None and revenue_growth > 0:
-            reasons.append(f"营收增长={revenue_growth}%")
-
-        # 利润增长（默认 0）
-        min_prof_growth = cfg.get('min_profit_growth', 0)
-        profit_growth = stock.get('profit_growth')
-        if profit_growth is not None and profit_growth < min_prof_growth:
-            return []
-        if profit_growth is not None and profit_growth > 0:
-            reasons.append(f"净利增长={profit_growth}%")
-
-        # 负债率
-        max_debt = cfg.get('max_debt_ratio', 65)
-        debt_ratio = stock.get('debt_ratio')
-        if debt_ratio is not None and debt_ratio > max_debt:
-            return []
-        if debt_ratio is not None and debt_ratio >= 0:
-            reasons.append(f"负债率={debt_ratio}%（<{max_debt}%）")
-
-        # 市值
-        min_mc = cfg.get('min_market_cap', 30)
-        max_mc = cfg.get('max_market_cap', 50000)
-        market_cap = stock.get('market_cap')
-        if market_cap is not None:
-            if market_cap < min_mc or market_cap > max_mc:
-                return []
-            reasons.append(f"市值={market_cap}亿")
-
-        # ── 新增：毛利率 (XSMLL) ──
-        min_gm = cfg.get('min_gross_margin', 15)
-        gross_margin = stock.get('gross_margin')
-        if gross_margin is not None:
-            if gross_margin < min_gm:
-                # 豁免C：高周转薄利模式（如Costco：毛利率12%但ROE>20%）
-                roe = stock.get('roe') or 0
-                if roe >= 20:
-                    reasons.append(
-                        f"毛利率={gross_margin}%（<{min_gm}%，豁免：高ROE={roe}%薄利模式）")
-                else:
-                    return []
-            else:
-                reasons.append(f"毛利率={gross_margin}%（≥{min_gm}%）")
-
-        # ── 新增：经营现金流质量 (MGJYXJJE) ──
-        ocf = stock.get('ocf_per_share')
-        if ocf is not None:
-            if ocf <= 0:
-                # 豁免：战略投入期（高毛利率+高增长可豁免）
-                gm = stock.get('gross_margin') or 0
-                rev_g = stock.get('revenue_growth') or 0
-                if gm >= 30 and rev_g >= 20:
-                    reasons.append(
-                        f"OCF/股={ocf}（≤0，豁免：高毛利率{gm}%+高增长{rev_g}%投入期）")
-                else:
-                    return []
-            else:
-                reasons.append(f"OCF/股={ocf}（正数）")
-
-        return reasons
+        return _check_7_gates(stock, self.cfg)
 
     def calculate_score(self, stock: dict) -> float:
-        """
-        综合评分 (0-100)，加权：
-        - ROE 权重最高（巴菲特最看重）
-        - PE 估值折扣
-        - 增长率
-        - 负债率（越低越好）
-        - PB
-        """
-        score = 0.0
-        weights = {
-            'roe': 0.30,
-            'pe_discount': 0.20,
-            'growth': 0.25,
-            'debt': 0.15,
-            'pb': 0.10,
-        }
-
-        # ROE 评分 (0-100)
-        roe = stock.get('roe') or 0
-        if roe >= 30:
-            roe_score = 100
-        elif roe >= 20:
-            roe_score = 80
-        elif roe >= 15:
-            roe_score = 60
-        elif roe >= 12:
-            roe_score = 40
-        else:
-            roe_score = 0
-        score += roe_score * weights['roe']
-
-        # PE 折扣评分 (0-100) —— PE 越低越有安全边际
-        pe = stock.get('pe') or 20
-        if pe <= 5:
-            pe_score = 100
-        elif pe <= 10:
-            pe_score = 80
-        elif pe <= 15:
-            pe_score = 60
-        elif pe <= 20:
-            pe_score = 40
-        else:
-            pe_score = 0
-        score += pe_score * weights['pe_discount']
-
-        # 增长评分 (0-100)
-        rev_growth = stock.get('revenue_growth') or 0
-        prof_growth = stock.get('profit_growth') or 0
-        avg_growth = (rev_growth + prof_growth) / 2
-        if avg_growth >= 30:
-            growth_score = 100
-        elif avg_growth >= 20:
-            growth_score = 80
-        elif avg_growth >= 10:
-            growth_score = 60
-        elif avg_growth >= 5:
-            growth_score = 40
-        else:
-            growth_score = 0
-        score += growth_score * weights['growth']
-
-        # 负债率评分 (0-100)
-        debt = stock.get('debt_ratio') or 100
-        if debt <= 20:
-            debt_score = 100
-        elif debt <= 35:
-            debt_score = 80
-        elif debt <= 50:
-            debt_score = 60
-        elif debt <= 65:
-            debt_score = 40
-        else:
-            debt_score = 0
-        score += debt_score * weights['debt']
-
-        # PB 评分 (0-100)
-        pb = stock.get('pb') or 10
-        if pb <= 1:
-            pb_score = 100
-        elif pb <= 1.5:
-            pb_score = 80
-        elif pb <= 2:
-            pb_score = 60
-        elif pb <= 3.5:
-            pb_score = 40
-        else:
-            pb_score = 0
-        score += pb_score * weights['pb']
-
-        return score
+        return _calculate_moat_score(stock)
 
     def score_candidates(self, candidates: list[dict],
                          run_id: str, run_date: str) -> list[dict]:
-        """对候选股执行过滤+评分+排序，返回 Top N 结果字典列表（不写库）。
+        """过滤+评分+排序，返回 Top N（不写库）。
 
-        返回的字典字段与 ScreeningResultDAO.save_batch 兼容。
+        自动从 financial_summary 加载 5年历史均值嵌入每个 stock。
         """
+        # 批量加载历史汇总（如果数据库中有的话）
+        codes = [c['code'] for c in candidates]
+        try:
+            summaries = FinancialSummaryDAO().get_batch(codes)
+        except Exception:
+            summaries = {}
+
         scored = []
         for c in candidates:
+            # 嵌入历史数据到 stock dict（无冲突字段）
+            summary = summaries.get(c['code'], {})
+            for k in ('roe_5y_avg', 'roe_5y_count', 'gross_margin_5y_avg',
+                      'net_margin_5y_avg', 'ocf_5y_trend', 'ocf_latest',
+                      'ocf_positive_years', 'debt_ratio_latest', 'data_years'):
+                if summary.get(k) is not None:
+                    c[k] = summary.get(k)
+
             reasons = self.check_criteria(c)
             if not reasons:
                 continue
+
             score = self.calculate_score(c)
+
+            # 数据质量标记
+            data_years = c.get('data_years', '')
+            has_history = bool(data_years)
+            if has_history:
+                reasons.append(f"财务数据覆盖={data_years}")
+
             scored.append({
                 'run_id': run_id,
                 'run_date': run_date,
                 'code': c['code'],
                 'name': c['name'],
-                'score': round(score, 1),
+                'score': score,
                 'pe': c.get('pe'),
                 'pb': c.get('pb'),
                 'roe': c.get('roe'),
@@ -273,23 +315,15 @@ class ValueScreener:
             })
 
         scored.sort(key=lambda x: x['score'], reverse=True)
-        max_candidates = self.cfg.get('max_candidates', 20)
-        return scored[:max_candidates]
+        max_n = self.cfg.get('max_candidates', 20) if isinstance(self.cfg, dict) else 20
+        return scored[:max_n]
 
 
 def run_screener(config: dict, candidates: list[dict],
                  run_id: str = None, run_date: str = None) -> list[dict]:
-    """
-    对候选股评分排序 + 持久化 Top N 到 screening_result。
-
-    Args:
-        config: 完整配置字典（取 config['screener']['conditions']）
-        candidates: 已采集+初筛+财务补充的候选股列表
-        run_id: 运行批次 ID；为 None 时按当前时间生成
-        run_date: 运行日期；为 None 时取今天
-    """
-    conditions = config.get('screener', {}).get('conditions', {})
-    screener = ValueScreener(conditions)
+    """候选股评分排序 + 持久化到筛选结果表。"""
+    screen_cfg = config.get('screener', {}).get('conditions', {})
+    screener = ValueScreener(screen_cfg)
 
     if run_id is None:
         run_id = now_cn().strftime("%Y%m%d_%H%M%S")
@@ -301,10 +335,7 @@ def run_screener(config: dict, candidates: list[dict],
     result_dao = ScreeningResultDAO()
     if top_n:
         result_dao.save_batch(top_n)
-        # 同步 run_log 的筛选数量
         RunLogDAO().update_screened_count(run_id, len(top_n))
 
-    logger.info(
-        f"[筛选] 候选 {len(candidates)} 只 → 通过评分 {len(top_n)} 只"
-    )
+    logger.info(f"[筛选] 候选 {len(candidates)} 只 → 通过评分 {len(top_n)} 只")
     return top_n

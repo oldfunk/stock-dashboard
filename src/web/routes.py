@@ -20,6 +20,8 @@ from src.models.database import (
     StockAnalysisHistoryDAO,
     RunLogDAO,
     PipelineProgressDAO,
+    FinancialHistoryDAO,
+    FinancialSummaryDAO,
 )
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
@@ -129,7 +131,15 @@ async def index(request: Request):
                     if ai_obj.get('investment_strategy'):
                         combined.append(ai_obj['investment_strategy'])
                     if ai_obj.get('trade_strategy'):
-                        combined.append(str(ai_obj['trade_strategy']))
+                        if isinstance(ai_obj['trade_strategy'], dict):
+                            parts = [f"{k}: {v}" for k, v in ai_obj['trade_strategy'].items()]
+                            combined.append('; '.join(parts))
+                        else:
+                            combined.append(str(ai_obj['trade_strategy']))
+                    if ai_obj.get('reverse_thinking'):
+                        combined.append(f"[逆向思考] {ai_obj['reverse_thinking']}")
+                    if ai_obj.get('mirror_counts'):
+                        combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
                     h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
                 except Exception:
                     h['combined_analysis'] = '--'
@@ -137,6 +147,22 @@ async def index(request: Request):
                 h['combined_analysis'] = '--'
             parsed_history.append(h)
         stock['analysis_history'] = parsed_history
+
+        # 注入财务历史汇总（用于前端显示历史趋势）
+        try:
+            fs = FinancialSummaryDAO().get(code)
+            if fs:
+                stock['_summary'] = {
+                    'roe_5y_avg': fs.get('roe_5y_avg'),
+                    'gross_margin_5y_avg': fs.get('gross_margin_5y_avg'),
+                    'net_margin_5y_avg': fs.get('net_margin_5y_avg'),
+                    'ocf_latest': fs.get('ocf_latest'),
+                    'ocf_positive_years': fs.get('ocf_positive_years'),
+                    'ocf_5y_trend': fs.get('ocf_5y_trend'),
+                    'data_years': fs.get('data_years'),
+                }
+        except Exception:
+            pass
 
     refresh = config.get('web', {}).get('refresh_interval', 30)
 

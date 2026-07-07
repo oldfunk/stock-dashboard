@@ -67,6 +67,23 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
         progress.update(run_id, 'done', '无候选股')
         return [], run_id, run_date, total_stocks
 
+    # ── 历史财务数据采集（本地数据仓库）──
+    logger.info("\n[财务历史] 拉取历史财务数据...")
+    progress.update(run_id, 'history', '拉取历史财务数据...')
+    try:
+        from src.collector.akshare_fetcher import (
+            collect_historical_financial_data, rebuild_financial_summaries
+        )
+        # 只收集候选股的历史数据（后续运行全A股增量收集）
+        history_count = collect_historical_financial_data(candidates)
+        if history_count:
+            rebuild_financial_summaries(candidates)
+        else:
+            # 已有数据，直接重建汇总（可能更新了最新年报）
+            rebuild_financial_summaries(candidates)
+    except Exception as e:
+        logger.warning(f"[财务历史] 采集异常（不影响主流程）: {e}")
+
     enriched = sum(1 for c in candidates if c.get('roe') is not None)
     logger.info(f"  Candidates: {len(candidates)}, with ROE data: {enriched}")
 

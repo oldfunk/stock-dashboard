@@ -49,31 +49,34 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 - PE：{pe} | PB：{pb} | ROE：{roe}%
 - 营收增长：{revenue_growth}% | 净利增长：{profit_growth}%
 - 资产负债率：{debt_ratio}% | 市值：{market_cap}亿
-- 毛利率：{gross_margin}%
-- 每股经营现金流：{ocf_per_share}
+- 毛利率：{gross_margin}% | 每股经营现金流：{ocf_per_share}
+- 5年平均ROE：{roe_5y}% | 5年均毛利率：{gm_5y}% | 5年均净利率：{nm_5y}% | OCF趋势：{ocf_trend}
 - 为什么会被筛选出来：{reason}
 
-请你写三段话（写在 analysis 字段里）：
+请你按以下结构写（写在 analysis 字段里）：
 
-第一段：这生意怎么样？
-你能不能一句话说清楚它怎么赚钱？它的护城河是真有还是看着有？财务数据（ROE、毛利率、增长、负债、现金流）在你看来是真是假？你觉得它10年后还在不在？
+【第一部分：镜子测试——5句话纪律】
+你必须用恰好5句话说清楚这只股票。每句话尽可能简短。注意：每句话里每出现一次"但是/然而/不过/除非/如果/只要"这类转折词，就在心里扣1分。累计超过2个，说明你正在给自己找台阶下，违反纪律，请在分析中标出。
+第1句：这门生意的本质（一句话说清它怎么赚钱）
+第2句：护城河（它凭什么不被竞争对手干掉？现在是变强还是变弱？）
+第3句：管理层（你信不信这帮人？他们的利益和股东一致吗？）
+第4句：价格（当前价格相对于它的价值，是便宜还是贵？如果跌20%你还敢买吗？）
+第5句：下行风险（最坏情况下你能亏多少？如果判断错了，你睡得着吗？）
 
-第二段：现在值不值？
-这个价格你觉得贵不贵？PE/PB相对于增长和ROE是什么水平？安全垫够不够厚？如果判断错了你能亏多少？
+【第二部分：深入分析】
+在5句话之后，展开你的推理——财务数据是真是假？增长靠什么驱动？有什么别人没注意到的细节？你的信心在哪？
 
-第三段：你怎么决定？
-诚实地说你的决定是 BUY / HOLD / AVOID 之一（注意：不是每只股票都值得买）。你的信心度是高/中/低？简单说核心理由。
-
-写完三段后，在 reverse_thinking 字段里写一段"逆向思考"——
+【第三部分：逆向思考（reverse_thinking 字段）】
 什么情况下这家公司会死？如果现在看不到风险，说明你还没认真想。至少列出2-3个真实的致死场景。如果确实想不出，就写"目前看不到明确的致命风险"。
 
 写完之后，在 investment_strategy 里写下你的投资策略——仓位建议、持有周期、什么类型的人适合买。
-在 trade_strategy 里填入买卖信号、价格区间、止盈止损。
+在 trade_strategy 里填入买卖信号、价格区间、止盈止损。在 mirror_counts 里记录5句话中的转折词计数。
 
 输出严格为以下JSON格式，不要包含其他内容：
 {{
-    "analysis": "你的三段式笔记正文。用第一人称，自然语气。不用markdown格式。",
+    "analysis": "你的完整笔记（含镜子测试5句话+展开分析）。用第一人称，自然语气。",
     "reverse_thinking": "逆向思考——什么情况下这家公司会死？至少2-3个真实风险场景。",
+    "mirror_counts": "5句话中的转折词计数，每句一个逗号分隔，如 '1,0,1,0,2'。超过2个的句子标出来。",
     "investment_strategy": "投资策略建议。一句话说清仓位和周期。",
     "trade_strategy": {{
         "signal": "BUY 或 HOLD 或 AVOID",
@@ -405,6 +408,10 @@ class AiAnalyzer:
             gross_margin=stock.get('gross_margin', 'N/A'),
             ocf_per_share=stock.get('ocf_per_share', 'N/A'),
             reason=stock.get('reason', ''),
+            roe_5y=stock.get('roe_5y_avg', 'N/A'),
+            gm_5y=stock.get('gross_margin_5y_avg', 'N/A'),
+            nm_5y=stock.get('net_margin_5y_avg', 'N/A'),
+            ocf_trend={0:'波动',1:'增长',-1:'下降'}.get(stock.get('ocf_5y_trend'), '未知'),
         )
 
         content, used_model = self._call_llm(prompt)

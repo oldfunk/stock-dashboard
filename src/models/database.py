@@ -1,5 +1,4 @@
-"""
-股票盯盘看板 - 数据模型与数据库层
+"""Stock Dashboard - 数据模型与数据库层
 SQLite 本地存储，无外部依赖
 """
 
@@ -119,7 +118,7 @@ CREATE TABLE IF NOT EXISTS screening_result (
     eliminated_reason TEXT            -- 排除原因
 );
 
--- AI 分析历史
+-- AI 分析日志
 CREATE TABLE IF NOT EXISTS ai_analysis_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
@@ -163,6 +162,43 @@ CREATE TABLE IF NOT EXISTS stock_analysis_history (
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_history_code_date ON stock_analysis_history(stock_code, analysis_date);
 CREATE INDEX IF NOT EXISTS idx_analysis_history_run ON stock_analysis_history(run_id);
+
+-- 财务历史数据（按季度/年度累积）
+CREATE TABLE IF NOT EXISTS financial_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stock_code TEXT NOT NULL,          -- 股票代码 600519
+    report_date TEXT NOT NULL,         -- 财报日期 YYYY-MM-DD
+    report_type TEXT DEFAULT 'Q',      -- A=年报(12-31), Q=季报
+    roe REAL,                          -- ROE %
+    gross_margin REAL,                 -- 毛利率 %
+    net_margin REAL,                   -- 销售净利率 % (XSJLL)
+    ocf_per_share REAL,                -- 每股经营现金流
+    debt_ratio REAL,                   -- 资产负债率 %
+    revenue_growth REAL,               -- 营收同比增长 %
+    profit_growth REAL,                -- 净利润同比增长 %
+    net_profit REAL,                   -- 归母净利润（元）
+    data_source TEXT DEFAULT 'eastmoney',
+    created_at TEXT NOT NULL,
+    UNIQUE(stock_code, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_financial_history_code ON financial_history(stock_code);
+CREATE INDEX IF NOT EXISTS idx_financial_history_date ON financial_history(report_date);
+
+-- 财务汇总快照（从 financial_history 计算的衍生指标）
+CREATE TABLE IF NOT EXISTS financial_summary (
+    stock_code TEXT PRIMARY KEY,
+    roe_5y_avg REAL,                   -- 5年平均ROE
+    roe_5y_count INTEGER,              -- 参与计算的年数
+    gross_margin_5y_avg REAL,          -- 5年平均毛利率
+    net_margin_5y_avg REAL,            -- 5年平均净利率
+    ocf_5y_trend INTEGER,              -- OCF/股5年趋势: 1=增长, 0=波动, -1=下降
+    ocf_latest REAL,                   -- 最新OCF/股
+    ocf_positive_years INTEGER,        -- OCF为正的年数
+    debt_ratio_latest REAL,            -- 最新负债率
+    net_profit_5y_sum REAL,            -- 5年累积归母净利
+    data_years TEXT,                    -- 数据覆盖区间如 "2020-2026"
+    updated_at TEXT NOT NULL
+);
 
 -- 流水线进度跟踪
 CREATE TABLE IF NOT EXISTS pipeline_progress (
@@ -222,8 +258,6 @@ class MarketIndexDAO:
                     ORDER BY timestamp DESC LIMIT 1
                 """, (index_code,)).fetchall()
             else:
-                # 只返回带 sh/sz 前缀的规范代码（如 sh000001），
-                # 过滤掉旧数据源存入的无前缀代码（如 000001）
                 rows = conn.execute("""
                     SELECT m.* FROM market_index m
                     INNER JOIN (
@@ -320,7 +354,6 @@ class ScreeningResultDAO:
         return row['rid'] if row and row['rid'] else None
 
     def get_results_for_run(self, run_id: str) -> list[dict]:
-        """获取指定批次的筛选结果（按评分降序）"""
         with db_conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM screening_result WHERE run_id = ? ORDER BY score DESC",
@@ -330,7 +363,6 @@ class ScreeningResultDAO:
 
 
 class AiAnalysisLogDAO:
-    """AI 分析日志 DAO"""
     def log(self, run_id: str, code: str, model: str,
             prompt_tokens: int, completion_tokens: int, cost: float):
         with db_conn() as conn:
@@ -362,7 +394,6 @@ class RunLogDAO:
             """, (now_cn().isoformat(), status, total, screened, analyzed, error, run_id))
 
     def update_screened_count(self, run_id: str, screened: int):
-        """更新某次运行的筛选数量"""
         with db_conn() as conn:
             conn.execute(
                 "UPDATE run_log SET screened_count = ? WHERE run_id = ?",
@@ -371,9 +402,9 @@ class RunLogDAO:
 
     def get_latest_run(self) -> Optional[dict]:
         with db_conn() as conn:
-            row = conn.execute("""
-                SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1
-            """).fetchone()
+            row = conn.execute(
+                "SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1"
+            ).fetchone()
         return dict(row) if row else None
 
     def get_latest_completed_run_id(self) -> Optional[str]:
@@ -386,8 +417,6 @@ class RunLogDAO:
 
 
 class PipelineProgressDAO:
-    """流水线进度 DAO"""
-
     def init_run(self, run_id: str, stage: str = 'idle', stage_label: str = '',
                  total: int = 0, ai_total: int = 0):
         now = now_cn().isoformat()
@@ -429,7 +458,6 @@ class PipelineProgressDAO:
         sets.append('updated_at = ?')
         params.append(now_cn().isoformat())
         params.append(run_id)
-
         with db_conn() as conn:
             conn.execute(
                 f"UPDATE pipeline_progress SET {','.join(sets)} WHERE run_id = ?",
@@ -452,8 +480,6 @@ class PipelineProgressDAO:
 
 
 class StockAnalysisHistoryDAO:
-    """股票 AI 分析历史 DAO"""
-
     def save(self, stock_code: str, run_id: str, score: float,
              ai_analysis: str, ai_trade_strategy: str):
         now = now_cn().isoformat()
@@ -481,3 +507,122 @@ class StockAnalysisHistoryDAO:
                 ORDER BY analysis_date DESC, id DESC LIMIT 1
             """, (code,)).fetchone()
         return dict(row) if row else None
+
+
+class FinancialHistoryDAO:
+    """财务历史数据 DAO（时序表 — 按日累积）"""
+
+    def batch_save(self, records: list[dict]):
+        """批量保存财务历史（UPSERT 避免重复）"""
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            for r in records:
+                conn.execute("""
+                    INSERT OR REPLACE INTO financial_history
+                    (stock_code, report_date, report_type, roe, gross_margin, net_margin,
+                     ocf_per_share, debt_ratio, revenue_growth, profit_growth,
+                     net_profit, data_source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    r['stock_code'], r['report_date'],
+                    'A' if r['report_date'].endswith('12-31') else 'Q',
+                    r.get('roe'), r.get('gross_margin'), r.get('net_margin'),
+                    r.get('ocf_per_share'), r.get('debt_ratio'),
+                    r.get('revenue_growth'), r.get('profit_growth'),
+                    r.get('net_profit'), 'eastmoney', now
+                ))
+
+    def get_annual_reports(self, code: str) -> list[dict]:
+        """获取某只股票的年报数据（最新在前）"""
+        with db_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM financial_history
+                WHERE stock_code = ? AND report_type = 'A'
+                ORDER BY report_date DESC
+            """, (code,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_annual(self, min_year: int = 2020) -> list[dict]:
+        """获取所有股票的年报数据"""
+        with db_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM financial_history
+                WHERE report_type = 'A' AND substr(report_date, 1, 4) >= ?
+                ORDER BY stock_code, report_date
+            """, (str(min_year),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_stocks_with_data(self) -> int:
+        """有历史数据的股票数量"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT stock_code) as cnt FROM financial_history"
+            ).fetchone()
+        return row['cnt'] if row else 0
+
+    def get_data_years(self, code: str) -> tuple:
+        """数据覆盖区间"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT MIN(report_date) as min_d, MAX(report_date) as max_d "
+                "FROM financial_history WHERE stock_code = ?", (code,)
+            ).fetchone()
+        if row and row['min_d']:
+            return (row['min_d'][:4], row['max_d'][:4])
+        return (None, None)
+
+    def has_code(self, code: str) -> bool:
+        """是否已有历史数据"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM financial_history WHERE stock_code = ? LIMIT 1",
+                (code,)
+            ).fetchone()
+        return row is not None
+
+
+class FinancialSummaryDAO:
+    """财务汇总快照 DAO"""
+
+    def save(self, code: str, summary: dict):
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO financial_summary
+                (stock_code, roe_5y_avg, roe_5y_count, gross_margin_5y_avg,
+                 net_margin_5y_avg, ocf_5y_trend, ocf_latest,
+                 ocf_positive_years, debt_ratio_latest, net_profit_5y_sum,
+                 data_years, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                code,
+                summary.get('roe_5y_avg'),
+                summary.get('roe_5y_count'),
+                summary.get('gross_margin_5y_avg'),
+                summary.get('net_margin_5y_avg'),
+                summary.get('ocf_5y_trend'),
+                summary.get('ocf_latest'),
+                summary.get('ocf_positive_years'),
+                summary.get('debt_ratio_latest'),
+                summary.get('net_profit_5y_sum'),
+                summary.get('data_years'),
+                now
+            ))
+
+    def get(self, code: str) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM financial_summary WHERE stock_code = ?", (code,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_batch(self, codes: list[str]) -> dict[str, dict]:
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM financial_summary WHERE stock_code IN ({placeholders})",
+                codes
+            ).fetchall()
+        return {r['stock_code']: dict(r) for r in rows}
