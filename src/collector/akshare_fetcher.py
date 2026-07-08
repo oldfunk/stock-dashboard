@@ -657,94 +657,122 @@ def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
 
 
 def rebuild_financial_summaries(stocks: list[dict]):
-    """从 financial_history 重建 financial_summary 表（5年均值等）"""
+    """从 financial_history 重建 financial_summary 表（5年 + 10年均值）。"""
     from src.models.database import FinancialHistoryDAO, FinancialSummaryDAO
 
     fh_dao = FinancialHistoryDAO()
     fs_dao = FinancialSummaryDAO()
-    annual = fh_dao.get_all_annual(min_year=2020)
+    annual = fh_dao.get_all_annual()  # >= 2016, 覆盖10年
 
     # 按股票代码分组
     by_code = defaultdict(list)
     for r in annual:
         by_code[r['stock_code']].append(r)
 
+    def _avg(vals: list) -> float | None:
+        vals = [v for v in vals if v is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    def _std(vals: list) -> float | None:
+        """标准差 — 衡量波动性"""
+        vals = [v for v in vals if v is not None]
+        if len(vals) < 2:
+            return None
+        mean = sum(vals) / len(vals)
+        var = sum((v - mean) ** 2 for v in vals) / len(vals)
+        return var ** 0.5
+
     count = 0
     for code, reports in by_code.items():
-        if len(reports) < 2:  # 至少2年年报才有意义
+        if len(reports) < 2:
             continue
         reports.sort(key=lambda x: x['report_date'])
 
-        # 取最近5年
+        # ── 5年窗口（最近5份年报）──
         last5 = reports[-5:] if len(reports) >= 5 else reports
+        roe_vals_5 = [r['roe'] for r in last5 if r['roe'] is not None]
+        gm_vals_5 = [r['gross_margin'] for r in last5 if r['gross_margin'] is not None]
+        nm_vals_5 = [r['net_margin'] for r in last5 if r['net_margin'] is not None]
+        intcov_vals_5 = [r['interest_coverage'] for r in last5 if r.get('interest_coverage') is not None]
+        fcf_vals_5 = [r['fcf'] for r in last5 if r.get('fcf') is not None and r['report_type'] == 'A']
+        shares_vals_5 = [r['total_shares'] for r in last5 if r.get('total_shares') is not None]
+        ocf_vals_5 = [r['ocf_per_share'] for r in last5 if r['ocf_per_share'] is not None]
+        roic_vals_5 = [r['roic'] for r in last5 if r.get('roic') is not None]
 
-        # ROE 5年均值
-        roe_vals = [r['roe'] for r in last5 if r['roe'] is not None]
-        roe_avg = sum(roe_vals) / len(roe_vals) if roe_vals else None
+        # ── 10年窗口 ──
+        last10 = reports[-10:] if len(reports) >= 10 else reports
+        roe_vals_10 = [r['roe'] for r in last10 if r['roe'] is not None]
+        nm_vals_10 = [r['net_margin'] for r in last10 if r['net_margin'] is not None]
+        intcov_vals_10 = [r['interest_coverage'] for r in last10 if r.get('interest_coverage') is not None]
+        fcf_vals_10 = [r['fcf'] for r in last10 if r.get('fcf') is not None and r['report_type'] == 'A']
+        shares_vals_10 = [r['total_shares'] for r in last10 if r.get('total_shares') is not None]
+        roic_vals_10 = [r['roic'] for r in last10 if r.get('roic') is not None]
 
-        # 毛利率5年均值
-        gm_vals = [r['gross_margin'] for r in last5 if r['gross_margin'] is not None]
-        gm_avg = sum(gm_vals) / len(gm_vals) if gm_vals else None
+        # ROE 波动性（10年标准差，越小越稳）
+        roe_volatility = _std(roe_vals_10)
 
-        # 净利率5年均值
-        nm_vals = [r['net_margin'] for r in last5 if r['net_margin'] is not None]
-        nm_avg = sum(nm_vals) / len(nm_vals) if nm_vals else None
+        # ROE 5年→10年趋势差（正值=改善）
+        roe_5y_avg = _avg(roe_vals_5) or 0
+        roe_10y_avg = _avg(roe_vals_10) or 0
+        roe_improvement = round(roe_5y_avg - roe_10y_avg, 2) if roe_10y_avg else None
 
-        # OCF/股趋势
-        ocf_vals = [r['ocf_per_share'] for r in last5 if r['ocf_per_share'] is not None]
-        ocf_latest = ocf_vals[-1] if ocf_vals else None
-        ocf_positive = sum(1 for v in ocf_vals if v and v > 0) if ocf_vals else 0
+        # FCF 一致性：10年中多少年年报FCF为正
+        fcf_vals_10_annual = [r['fcf'] for r in reports if r.get('fcf') is not None and r['report_type'] == 'A']
+        fcf_positive_years_10 = sum(1 for v in fcf_vals_10_annual if v and v > 0) if fcf_vals_10_annual else 0
+
+        # OCF趋势
+        ocf_latest = ocf_vals_5[-1] if ocf_vals_5 else None
+        ocf_positive = sum(1 for v in ocf_vals_5 if v and v > 0) if ocf_vals_5 else 0
         ocf_trend = 0
-        if len(ocf_vals) >= 3:
-            last3 = ocf_vals[-3:]
+        if len(ocf_vals_5) >= 3:
+            last3 = ocf_vals_5[-3:]
             if last3[-1] > last3[0] and last3[-1] > last3[1]:
                 ocf_trend = 1
             elif last3[-1] < last3[0] and last3[-1] < last3[1]:
                 ocf_trend = -1
 
-        # 最新负债率
-        debt_latest = last5[-1].get('debt_ratio') if last5 else None
-
-        # 利息覆盖倍数 5年均值
-        intcov_vals = [r['interest_coverage'] for r in last5 if r.get('interest_coverage') is not None]
-        intcov_avg = sum(intcov_vals) / len(intcov_vals) if intcov_vals else None
-
-        # FCF 5年累计（只算年报）
-        fcf_vals = [r['fcf'] for r in last5 if r.get('fcf') is not None and r['report_type'] == 'A']
-        fcf_sum = sum(fcf_vals) if fcf_vals else None
-
-        # 5年股本稀释率
-        shares_vals = [r['total_shares'] for r in last5 if r.get('total_shares') is not None]
-        share_dilution = None
-        if len(shares_vals) >= 2:
-            earliest_shares = shares_vals[-1]
-            latest_shares = shares_vals[0]
-            if earliest_shares and earliest_shares > 0:
-                share_dilution = round((latest_shares - earliest_shares) / earliest_shares * 100, 2)
-
-        # ROIC 5年均值
-        roic_vals = [r['roic'] for r in last5 if r.get('roic') is not None]
-        roic_avg = sum(roic_vals) / len(roic_vals) if roic_vals else None
-
-        # 数据覆盖
-        all_dates = [r['report_date'] for r in reports]
-        data_years = f"{all_dates[0][:4]}-{all_dates[-1][:4]}" if all_dates else None
+        # 股本稀释率
+        share_dilution_5y = None
+        if len(shares_vals_5) >= 2:
+            earliest = shares_vals_5[-1]
+            latest = shares_vals_5[0]
+            if earliest and earliest > 0:
+                share_dilution_5y = round((latest - earliest) / earliest * 100, 2)
+        share_dilution_10y = None
+        if len(shares_vals_10) >= 2:
+            earliest = shares_vals_10[-1]
+            latest = shares_vals_10[0]
+            if earliest and earliest > 0:
+                share_dilution_10y = round((latest - earliest) / earliest * 100, 2)
 
         fs_dao.save(code, {
-            'roe_5y_avg': round(roe_avg, 2) if roe_avg else None,
-            'roe_5y_count': len(roe_vals),
-            'gross_margin_5y_avg': round(gm_avg, 2) if gm_avg else None,
-            'net_margin_5y_avg': round(nm_avg, 2) if nm_avg else None,
+            # 5年字段（不变）
+            'roe_5y_avg': round(roe_5y_avg, 2) if roe_5y_avg else None,
+            'roe_5y_count': len(roe_vals_5),
+            'gross_margin_5y_avg': round(_avg(gm_vals_5), 2) if _avg(gm_vals_5) else None,
+            'net_margin_5y_avg': round(_avg(nm_vals_5), 2) if _avg(nm_vals_5) else None,
             'ocf_5y_trend': ocf_trend,
             'ocf_latest': ocf_latest,
             'ocf_positive_years': ocf_positive,
-            'debt_ratio_latest': debt_latest,
+            'debt_ratio_latest': reports[-1].get('debt_ratio') if reports else None,
             'net_profit_5y_sum': None,
-            'intcov_5y_avg': round(intcov_avg, 2) if intcov_avg else None,
-            'fcf_5y_sum': round(fcf_sum, 2) if fcf_sum else None,
-            'share_dilution_5y': share_dilution,
-            'roic_5y_avg': round(roic_avg, 2) if roic_avg else None,
-            'data_years': data_years,
+            'intcov_5y_avg': round(_avg(intcov_vals_5), 2) if _avg(intcov_vals_5) else None,
+            'fcf_5y_sum': round(sum(fcf_vals_5), 2) if fcf_vals_5 else None,
+            'share_dilution_5y': share_dilution_5y,
+            'roic_5y_avg': round(_avg(roic_vals_5), 2) if _avg(roic_vals_5) else None,
+
+            # 10年新增字段
+            'roe_10y_avg': round(roe_10y_avg, 2) if roe_10y_avg else None,
+            'net_margin_10y_avg': round(_avg(nm_vals_10), 2) if _avg(nm_vals_10) else None,
+            'intcov_10y_avg': round(_avg(intcov_vals_10), 2) if _avg(intcov_vals_10) else None,
+            'fcf_10y_sum': round(sum(fcf_vals_10), 2) if fcf_vals_10 else None,
+            'share_dilution_10y': share_dilution_10y,
+            'fcf_positive_years_10': fcf_positive_years_10,
+            'roe_volatility': round(roe_volatility, 2) if roe_volatility else None,
+            'roe_improvement': roe_improvement,
+            'roic_10y_avg': round(_avg(roic_vals_10), 2) if _avg(roic_vals_10) else None,
+
+            'data_years': f"{reports[0]['report_date'][:4]}-{reports[-1]['report_date'][:4]}" if reports else None,
         })
         count += 1
 

@@ -951,12 +951,18 @@
                     </div>
                     {% if stock._summary and stock._summary.data_years %}
                     <div class="metric-cell history-cell">
-                        <div class="label">5年均值 <span class="hist-badge">{{ stock._summary.data_years }}</span></div>
+                        <div class="label">5y/10y 历史 <span class="hist-badge">{{ stock._summary.data_years }}</span></div>
                         <div class="value" style="font-size:11px; line-height:1.6;">
                             ROE: {{ "%.1f"|format(stock._summary.roe_5y_avg) if stock._summary.roe_5y_avg else '--' }}%
+                            {% if stock._summary.roe_10y_avg %} / {{ "%.1f"|format(stock._summary.roe_10y_avg) }}%{% endif %}
+                            {% if stock._summary.roe_improvement %} {% if stock._summary.roe_improvement > 2 %}&#8679;{% else %}&#8594;{% endif %}{{ "%.1f"|format(stock._summary.roe_improvement) }}{% endif %}
                             {% if stock._summary.intcov_5y_avg %} | 利息覆盖: {{ "%.1f"|format(stock._summary.intcov_5y_avg) }}x{% endif %}
-                            {% if stock._summary.fcf_5y_sum %} | 5年FCF: {{ "%.1f"|format(stock._summary.fcf_5y_sum / 1e8) }}亿{% endif %}
-                            {% if stock._summary.share_dilution_5y %} | 稀释: {{ "%.1f"|format(stock._summary.share_dilution_5y) }}%{% endif %}
+                            {% if stock._summary.fcf_5y_sum %} | 5yFCF: {{ "%.1f"|format(stock._summary.fcf_5y_sum / 1e8) }}亿{% endif %}
+                            {% if stock._summary.fcf_10y_sum %} / 10y: {{ "%.1f"|format(stock._summary.fcf_10y_sum / 1e8) }}亿{% endif %}
+                            {% if stock._summary.fcf_positive_years_10 %} | FCF+: {{ stock._summary.fcf_positive_years_10 }}/10{% endif %}
+                            {% if stock._summary.share_dilution_5y %} | 稀释5y: {{ "%.1f"|format(stock._summary.share_dilution_5y) }}%{% endif %}
+                            {% if stock._summary.share_dilution_10y %} / 10y: {{ "%.1f"|format(stock._summary.share_dilution_10y) }}%{% endif %}
+                            {% if stock._summary.roe_volatility %} | 波&sigma;: {{ "%.1f"|format(stock._summary.roe_volatility) }}{% endif %}
                         </div>
                     </div>
                     {% endif %}

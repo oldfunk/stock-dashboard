@@ -206,6 +206,16 @@ CREATE TABLE IF NOT EXISTS financial_summary (
     fcf_5y_sum REAL,                   -- 5年累积自由现金流
     share_dilution_5y REAL,            -- 5年股本稀释率 %
     roic_5y_avg REAL,                  -- 5年平均ROIC
+    -- 10年拓展字段（2026-07-08 新增，用于巴菲特风格10年评估）
+    roe_10y_avg REAL,                  -- 10年平均ROE
+    net_margin_10y_avg REAL,           -- 10年平均净利率
+    intcov_10y_avg REAL,               -- 10年平均利息覆盖
+    fcf_10y_sum REAL,                  -- 10年累积自由现金流
+    share_dilution_10y REAL,           -- 10年股本稀释率 %
+    fcf_positive_years_10 INTEGER,     -- 10年中FCF为正的年数
+    roe_volatility REAL,               -- 10年ROE标准差（越小越稳定）
+    roe_improvement REAL,              -- 5年均ROE - 10年均ROE（正=改善）
+    roic_10y_avg REAL,                 -- 10年平均ROIC
     data_years TEXT,                    -- 数据覆盖区间如 "2020-2026"
     updated_at TEXT NOT NULL
 );
@@ -238,6 +248,12 @@ def init_database():
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'roic', 'REAL')
+        # 2026-07-08 新增10年拓展字段
+        for col in ['roe_10y_avg', 'net_margin_10y_avg', 'intcov_10y_avg',
+                     'fcf_10y_sum', 'share_dilution_10y', 'fcf_positive_years_10',
+                     'roe_volatility', 'roe_improvement', 'roic_10y_avg']:
+            _add_column_if_not_exists(conn, 'financial_summary', col, 'REAL')
+        _add_column_if_not_exists(conn, 'financial_summary', 'fcf_positive_years_10', 'INTEGER')
         _add_column_if_not_exists(conn, 'financial_history', 'eps', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'intcov_5y_avg', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'fcf_5y_sum', 'REAL')
@@ -565,8 +581,8 @@ class FinancialHistoryDAO:
             """, (code,)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_all_annual(self, min_year: int = 2020) -> list[dict]:
-        """获取所有股票的年报数据"""
+    def get_all_annual(self, min_year: int = 2016) -> list[dict]:
+        """获取所有股票的年报数据（默认2016起，覆盖10年）"""
         with db_conn() as conn:
             rows = conn.execute("""
                 SELECT * FROM financial_history
@@ -616,8 +632,12 @@ class FinancialSummaryDAO:
                  net_margin_5y_avg, ocf_5y_trend, ocf_latest,
                  ocf_positive_years, debt_ratio_latest, net_profit_5y_sum,
                  intcov_5y_avg, fcf_5y_sum, share_dilution_5y, roic_5y_avg,
+                 roe_10y_avg, net_margin_10y_avg, intcov_10y_avg,
+                 fcf_10y_sum, share_dilution_10y, fcf_positive_years_10,
+                 roe_volatility, roe_improvement, roic_10y_avg,
                  data_years, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 code,
                 summary.get('roe_5y_avg'),
@@ -633,6 +653,16 @@ class FinancialSummaryDAO:
                 summary.get('fcf_5y_sum'),
                 summary.get('share_dilution_5y'),
                 summary.get('roic_5y_avg'),
+                # 10年新增字段
+                summary.get('roe_10y_avg'),
+                summary.get('net_margin_10y_avg'),
+                summary.get('intcov_10y_avg'),
+                summary.get('fcf_10y_sum'),
+                summary.get('share_dilution_10y'),
+                summary.get('fcf_positive_years_10'),
+                summary.get('roe_volatility'),
+                summary.get('roe_improvement'),
+                summary.get('roic_10y_avg'),
                 summary.get('data_years'),
                 now
             ))

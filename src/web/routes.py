@@ -170,6 +170,16 @@ async def index(request: Request):
                     'share_dilution_5y': fs.get('share_dilution_5y'),
                     'roic_5y_avg': fs.get('roic_5y_avg'),
                     'data_years': fs.get('data_years'),
+                    # 10年拓展字段
+                    'roe_10y_avg': fs.get('roe_10y_avg'),
+                    'net_margin_10y_avg': fs.get('net_margin_10y_avg'),
+                    'intcov_10y_avg': fs.get('intcov_10y_avg'),
+                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
+                    'share_dilution_10y': fs.get('share_dilution_10y'),
+                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
+                    'roe_volatility': fs.get('roe_volatility'),
+                    'roe_improvement': fs.get('roe_improvement'),
+                    'roic_10y_avg': fs.get('roic_10y_avg'),
                 }
         except Exception:
             pass

@@ -266,6 +266,30 @@ def _calculate_moat_score(stock: dict) -> float:
         gm_s = 0
     score += gm_s * weights['gm']
 
+    # ── 6) 10年一致性/趋势加分（巴菲特风格）──
+    # ROE波动性低 → 加分（稳定）
+    volatility = stock.get('roe_volatility')
+    if volatility is not None:
+        if volatility <= 5:
+            score += 5
+        elif volatility <= 10:
+            score += 3
+        elif volatility <= 15:
+            score += 1
+    # ROE改善趋势 → 加分（5年均值 > 10年均值 = 公司在变好）
+    improvement = stock.get('roe_improvement')
+    if improvement is not None and improvement > 2:
+        score += min(5, improvement)  # 最多加5分
+    # FCF一致性：10年中正FCF年份多 → 加分
+    fcf_pos = stock.get('fcf_positive_years_10')
+    if fcf_pos is not None:
+        if fcf_pos >= 8:
+            score += 5  # 90%+年份FCF为正
+        elif fcf_pos >= 6:
+            score += 3
+        elif fcf_pos >= 4:
+            score += 1
+
     return round(score, 1)
 
 
@@ -305,7 +329,11 @@ class ValueScreener:
             summary = summaries.get(c['code'], {})
             for k in ('roe_5y_avg', 'roe_5y_count', 'gross_margin_5y_avg',
                       'net_margin_5y_avg', 'ocf_5y_trend', 'ocf_latest',
-                      'ocf_positive_years', 'debt_ratio_latest', 'data_years'):
+                      'ocf_positive_years', 'debt_ratio_latest', 'data_years',
+                      # 10年拓展字段
+                      'roe_10y_avg', 'net_margin_10y_avg', 'fcf_10y_sum',
+                      'fcf_positive_years_10', 'roe_volatility', 'roe_improvement',
+                      'intcov_10y_avg', 'share_dilution_10y', 'roic_10y_avg'):
                 if summary.get(k) is not None:
                     c[k] = summary.get(k)
 
