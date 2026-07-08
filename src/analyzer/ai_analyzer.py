@@ -38,46 +38,83 @@ DEFAULT_MODEL = "deepseek-v4-flash-free"
 # AI 分析 Prompt 模板 — 投资人笔记风格
 # 不套框架、不写"视角一/二/三"、不用段永平/巴菲特/芒格名字
 # 让 AI 扮演一位有经验的投资人，写出有观点、有温度的个人笔记
-ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在自己的笔记本上记录对一只股票的思考。
-你的语言要像一个人在自言自语地梳理思路——有观点、有态度、有犹豫、有结论。
-不要套路、不要分点编号、不要写"视角一/二/三"、不要提股神名字。
-就像你在跟朋友聊这只股票：先说你看不看好，然后说为什么，再说你最担心什么，最后说你的决定。
+ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在自己的笔记本上记录对一只股票的全面思考。
 
 这只股票的基本面如下：
-- {name}（{code}）
-- 所属行业：{sector}
-- PE：{pe} | PB：{pb} | ROE：{roe}%
+- {name}（{code}）| 行业：{sector}
+- PE：{pe} | PB：{pb} | ROE：{roe}% | 市值：{market_cap}亿
 - 营收增长：{revenue_growth}% | 净利增长：{profit_growth}%
-- 资产负债率：{debt_ratio}% | 市值：{market_cap}亿
-- 毛利率：{gross_margin}% | 每股经营现金流：{ocf_per_share}
-- 5年平均ROE：{roe_5y}% | 5年均毛利率：{gm_5y}% | 5年均净利率：{nm_5y}% | OCF趋势：{ocf_trend}
-- 为什么会被筛选出来：{reason}
+- 资产负债率：{debt_ratio}% | 毛利率：{gross_margin}% | 每股OCF：{ocf_per_share}
+- 筛选原因：{reason}
 
-请你按以下结构写（写在 analysis 字段里）：
+【5年数据】
+- ROE：{roe_5y}% | 毛利率：{gm_5y}% | 净利率：{nm_5y}% | OCF趋势：{ocf_trend}
+- 利息覆盖：{intcov_5y}x | FCF累计：{fcf_5y}亿 | 股本稀释：{dil_5y}% | ROIC：{roic_5y}%
+{fcf_yield_5y}
 
-【第一部分：镜子测试——5句话纪律】
-你必须用恰好5句话说清楚这只股票。每句话尽可能简短。注意：每句话里每出现一次"但是/然而/不过/除非/如果/只要"这类转折词，就在心里扣1分。累计超过2个，说明你正在给自己找台阶下，违反纪律，请在分析中标出。
-第1句：这门生意的本质（一句话说清它怎么赚钱）
-第2句：护城河（它凭什么不被竞争对手干掉？现在是变强还是变弱？）
-第3句：管理层（你信不信这帮人？他们的利益和股东一致吗？）
-第4句：价格（当前价格相对于它的价值，是便宜还是贵？如果跌20%你还敢买吗？）
-第5句：下行风险（最坏情况下你能亏多少？如果判断错了，你睡得着吗？）
+【10年数据】
+- ROE：{roe_10y}% | 净利率：{nm_10y}% | ROIC：{roic_10y}%
+- FCF累计：{fcf_10y}亿 | 10年中FCF为正：{fcf_pos_10}/10年 | 股本稀释：{dil_10y}%
+- ROE标准差（波动）：{roe_vol} | ROE改善（正值=变好）：{roe_impr}
+- {roe_roic_gap_line}
+- FCF收益率：{fcf_yield_10y}
 
-【第二部分：深入分析】
-在5句话之后，展开你的推理——财务数据是真是假？增长靠什么驱动？有什么别人没注意到的细节？你的信心在哪？
+请输出严格的 JSON，不包含其他任何内容。JSON 结构如下：
 
-【第三部分：逆向思考（reverse_thinking 字段）】
-什么情况下这家公司会死？如果现在看不到风险，说明你还没认真想。至少列出2-3个真实的致死场景。如果确实想不出，就写"目前看不到明确的致命风险"。
-
-写完之后，在 investment_strategy 里写下你的投资策略——仓位建议、持有周期、什么类型的人适合买。
-在 trade_strategy 里填入买卖信号、价格区间、止盈止损。在 mirror_counts 里记录5句话中的转折词计数。
-
-输出严格为以下JSON格式，不要包含其他内容：
 {{
-    "analysis": "你的完整笔记（含镜子测试5句话+展开分析）。用第一人称，自然语气。",
-    "reverse_thinking": "逆向思考——什么情况下这家公司会死？至少2-3个真实风险场景。",
-    "mirror_counts": "5句话中的转折词计数，每句一个逗号分隔，如 '1,0,1,0,2'。超过2个的句子标出来。",
-    "investment_strategy": "投资策略建议。一句话说清仓位和周期。",
+    "analysis": "你的完整笔记（分析 + 投资笔记）。用第一人称、自然语气，像在自言自语。",
+
+    "moat_evaluation": [
+        {{
+            "type": "转换成本",
+            "score": 1-5,          /* 1=无 2=弱 3=中等 4=强 5=极强 */
+            "trend": "稳定",
+            "evidence": "..."
+        }},
+        {{
+            "type": "网络效应",
+            "score": 1-5,
+            "trend": "稳定",
+            "evidence": "..."
+        }},
+        {{
+            "type": "无形资产（品牌/专利/许可）",
+            "score": 1-5,
+            "trend": "稳定",
+            "evidence": "..."
+        }},
+        {{
+            "type": "成本优势",
+            "score": 1-5,
+            "trend": "稳定",
+            "evidence": "..."
+        }},
+        {{
+            "type": "有效规模（自然寡头）",
+            "score": 1-5,
+            "trend": "稳定",
+            "evidence": "..."
+        }}
+    ],
+
+    "management_score": {{
+        "capital_allocation": "1-10分",  /* 再投资效率+回购纪律+并购判断 */
+        "shareholder_friendliness": "1-10分",  /* 稀释/回购/分红历史 */
+        "summary": "1-2句话总结管理层质量"
+    }},
+
+    "intrinsic_value": {{
+        "conservative": "保守估值（亿）",
+        "base_case": "基准估值（亿）",
+        "optimistic": "乐观估值（亿）",
+        "margin_of_safety": "安全边际百分比，负值=高估",
+        "method": "方法说明（如 'Owner Earnings × 10倍'）"
+    }},
+
+    "reverse_thinking": "什么情况下这家公司会死？至少2-3个真实的致死场景。如果确实想不出，就写'目前看不到明确的致命风险'。",
+
+    "investment_strategy": "一句话说清仓位建议和持有周期",
+
     "trade_strategy": {{
         "signal": "BUY 或 HOLD 或 AVOID",
         "confidence": "高 或 中 或 低",
@@ -85,8 +122,18 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
         "target_price": "目标价",
         "stop_loss": "止损条件",
         "take_profit": "止盈条件"
-    }}
+    }},
+
+    "mirror_counts": "5句话中的转折词（但是/然而/不过/除非/如果/只要）计数，用逗号分隔，如 '1,0,1,0,2'。超过2个的句子在后面备注（如'2 第3句过多转折'）。"
 }}
+
+【重要指导】
+1. analysis 字段写完整的投资笔记，用口语、有观点、有犹豫。不要套模板、不要分点编号、不要写"视角一/二/三"、不要提巴菲特/段永平/芒格名字。
+2. moat_evaluation 中每项护城河必须给出明确的 score 和 trend。如果判断力不够，score 就打中等（3），不要勉强高分。
+3. management_score 基于你能看到的数字（稀释率、ROIC趋势、资产负债率）。如果你没有确切数据下判断，就如实写"数据不足以判断"并打中等分。
+4. intrinsic_value 用 Owner Earnings ≈ 最近5年平均FCF 作为基准。保守用0增长折现10倍，基准用3%增长折现12倍，乐观用5%增长折现15倍。如果FCF为负或不稳定，如实写"FCF不稳定，估值参考性有限"。
+5. reverse_thinking 必须基于真实的行业/财务风险——如果是垄断国企，风险就不是"被竞争对手干掉"，而是政策风险。
+6. 所有 score 字段从 1（最差）到 5 或 10（最好）。
 """
 
 
@@ -394,6 +441,37 @@ class AiAnalyzer:
             logger.error("[AI分析] 无 API Key，跳过分析")
             return None
 
+        # 计算派生指标
+        mc = stock.get('market_cap', 'N/A')
+        mc_float = float(mc) if mc not in (None, 'N/A') else None
+        fcf_5y = stock.get('fcf_5y_sum')
+        fcf_10y = stock.get('fcf_10y_sum')
+        roe_5y = stock.get('roe_5y_avg')
+        roic_5y = stock.get('roic_5y_avg')
+
+        # FCF 收益率行
+        fcf_yield_5y = ''
+        if fcf_5y and mc_float and mc_float > 0:
+            annual_fcf = fcf_5y / 5
+            yield_pct = annual_fcf / mc_float * 100
+            fcf_yield_5y = f'年均FCF/市值: {yield_pct:.1f}%'
+        # 10年FCF收益率
+        fcf_yield_10y = 'N/A'
+        if fcf_10y and mc_float and mc_float > 0:
+            annual_fcf_10 = fcf_10y / 10
+            yield_pct_10 = annual_fcf_10 / mc_float * 100
+            fcf_yield_10y = f'{yield_pct_10:.1f}%'
+        # ROE - ROIC 差距
+        roe_roic_gap_line = ''
+        if roe_5y is not None and roic_5y is not None and roic_5y > 0:
+            gap = roe_5y - roic_5y
+            if gap > 5:
+                roe_roic_gap_line = f'[注意] ROE比ROIC高{gap:.1f}%（可能靠杠杆撑ROE）'
+            elif gap > 2:
+                roe_roic_gap_line = f'ROE比ROIC高{gap:.1f}%'
+            else:
+                roe_roic_gap_line = f'ROE与ROIC差距{gap:.1f}%（合理）'
+
         prompt = ANALYSIS_PROMPT.format(
             name=stock.get('name', ''),
             code=stock.get('code', ''),
@@ -408,10 +486,27 @@ class AiAnalyzer:
             gross_margin=stock.get('gross_margin', 'N/A'),
             ocf_per_share=stock.get('ocf_per_share', 'N/A'),
             reason=stock.get('reason', ''),
+            # 5年均值
             roe_5y=stock.get('roe_5y_avg', 'N/A'),
             gm_5y=stock.get('gross_margin_5y_avg', 'N/A'),
             nm_5y=stock.get('net_margin_5y_avg', 'N/A'),
             ocf_trend={0:'波动',1:'增长',-1:'下降'}.get(stock.get('ocf_5y_trend'), '未知'),
+            intcov_5y=stock.get('intcov_5y_avg', 'N/A'),
+            fcf_5y=f'{fcf_5y/1e8:.1f}' if fcf_5y else 'N/A',
+            dil_5y=stock.get('share_dilution_5y', 'N/A'),
+            roic_5y=stock.get('roic_5y_avg', 'N/A'),
+            fcf_yield_5y=fcf_yield_5y,
+            # 10年均值
+            roe_10y=stock.get('roe_10y_avg', 'N/A'),
+            nm_10y=stock.get('net_margin_10y_avg', 'N/A'),
+            roic_10y=stock.get('roic_10y_avg', 'N/A'),
+            fcf_10y=f'{fcf_10y/1e8:.1f}' if fcf_10y else 'N/A',
+            fcf_pos_10=stock.get('fcf_positive_years_10', 'N/A'),
+            dil_10y=stock.get('share_dilution_10y', 'N/A'),
+            roe_vol=stock.get('roe_volatility', 'N/A'),
+            roe_impr=stock.get('roe_improvement', 'N/A'),
+            roe_roic_gap_line=roe_roic_gap_line,
+            fcf_yield_10y=fcf_yield_10y,
         )
 
         content, used_model = self._call_llm(prompt)
