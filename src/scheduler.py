@@ -190,5 +190,51 @@ class MarketScheduler:
             run_daily_pipeline(config)
             self._last_daily_date = today
             logger.info("[调度器] 每日流水线完成")
+            
+            # 流水线成功后，启动后台 AI 分析线程（不阻塞调度器）
+            self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
+
+    def _trigger_ai_analysis_async(self, config: dict):
+        """在后台线程中异步触发 AI 分析（全量模式）"""
+        import threading
+        
+        def _run_ai_analysis():
+            try:
+                from src.analyzer.ai_analyzer import analyze_batch
+                from src.models.database import ScreeningResultDAO, RunLogDAO
+                
+                # 获取最新完成的 run_id
+                run_id = RunLogDAO().get_latest_completed_run_id()
+                if not run_id:
+                    logger.warning("[AI分析] 无完成的流水线，跳过")
+                    return
+                
+                stocks = ScreeningResultDAO().get_results_for_run(run_id)
+                if not stocks:
+                    logger.warning("[AI分析] 无筛选结果，跳过")
+                    return
+                
+                # 富集财务历史数据（同 run_ai_analysis.py）
+                from src.models.database import FinancialSummaryDAO
+                fs_dao = FinancialSummaryDAO()
+                for s in stocks:
+                    fs = fs_dao.get(s['code'])
+                    if fs:
+                        for k, v in fs.items():
+                            if k not in ('stock_code', 'updated_at') and v is not None:
+                                s[k] = v
+                
+                logger.info(f"[调度器] 启动 AI 分析 {len(stocks)} 只股票...")
+                analyzed_ok, analyzed_failed = analyze_batch(
+                    stocks, run_id, interval_seconds=60, on_progress=None
+                )
+                logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
+            except Exception as e:
+                logger.warning(f"[调度器] AI 分析异常: {e}")
+        
+        # 后台线程执行，不阻塞主调度循环
+        t = threading.Thread(target=_run_ai_analysis, daemon=True)
+        t.start()
+        logger.info("[调度器] AI 分析已在后台启动")

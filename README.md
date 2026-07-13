@@ -22,16 +22,16 @@ pip install akshare fastapi uvicorn jinja2 httpx python-dotenv schedule
 # 2. 启动 Web 看板（内置调度器，每日 15:30 自动跑流水线）
 python -m src.main serve
 
-# 3. 可选：设置 OS 定时任务，收盘后全量 AI 分析
+# 3. 可选：设置 OS 定时任务（crontab），作为兜底/无需 Web 服务时运行
 # crontab -e 添加：
-# 0 16 * * 1-5 cd /home/debian/stock-dashboard && .venv/bin/python scripts/run_ai_analysis.py --all
+# 30 15 * * 1-5 /home/debian/stock-dashboard/scripts/daily_cron.sh >> /var/log/stock-dashboard-cron.log 2>&1
+# 0 16 * * 1-5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
 ```
 
 Web 看板启动后包含：
-- **内置调度器**（`src/scheduler.py`）— 交易日 15:30 自动触发数据采集 + 量化筛选
+- **内置调度器**（`src/scheduler.py`）— 交易日 15:30 自动触发数据采集 + 量化筛选，**15:31 自动触发 AI 分析**
 - **大盘指数** — 每 30 分钟更新
 - **实时行情** — 交易时段每 5 分钟刷新
-- **AI 分析** — `run_ai_analysis.py` 独立运行，需配合 cron
 
 ### 方式 B：通过 Hermes Agent 管理
 
