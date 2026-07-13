@@ -1,42 +1,97 @@
-# Stock Dashboard — 价值投资选股看板
+# Stock Dashboard — AI/量化驱动的 A 股价值投资选股看板
 
-基于 AI Berkshire 方法论的 A 股价值投资自动化选股系统。
+全自动 A 股价值投资筛选系统，每日收盘后跑完全市场，输出结构化 AI 分析。
 
 ## 核心理念
 
-融合 AI Berkshire 的**7条硬性门规 + 3条豁免规则 + 镜子测试**，结合全自动的量化筛选流水线，每天收盘后自动跑完全市场筛选并给出 AI 分析。
+**不靠排名，只靠及格线。** 基于 AI Berkshire 7条门规的硬性指标过滤，结合 LLM 生成的结构化分析（护城河评估 / 管理层打分 / 内在价值估值 / 买卖策略），每只股票必须通过全部门规才能进入候选池。
 
-**不靠排名，只靠及格线。** 每只股票必须通过全部门规才能进入候选池。
+每只候选股展示：
+- 4个结构化标签页：Analysis / Strategy / Risks / Trade
+- Trade 标签含 Signal(BUY/HOLD/AVOID) + 置信度 + 买入区间 + 目标价 + 止损 + 止盈
+- 历史分析可追溯，每条记录以相同的结构化格式展示
+
+## 运行方式
+
+### 方式 A：纯独立运行（推荐，不需要 Hermes Agent）
+
+```bash
+# 1. 安装依赖
+pip install akshare fastapi uvicorn jinja2 httpx python-dotenv schedule
+
+# 2. 启动 Web 看板（内置调度器，每日 15:30 自动跑流水线）
+python -m src.main serve
+
+# 3. 可选：设置 OS 定时任务，收盘后全量 AI 分析
+# crontab -e 添加：
+# 0 16 * * 1-5 cd /home/debian/stock-dashboard && .venv/bin/python scripts/run_ai_analysis.py --all
+```
+
+Web 看板启动后包含：
+- **内置调度器**（`src/scheduler.py`）— 交易日 15:30 自动触发数据采集 + 量化筛选
+- **大盘指数** — 每 30 分钟更新
+- **实时行情** — 交易时段每 5 分钟刷新
+- **AI 分析** — `run_ai_analysis.py` 独立运行，需配合 cron
+
+### 方式 B：通过 Hermes Agent 管理
+
+Hermes Agent 提供 cron 管理功能，自动执行 AI 分析：
+
+```bash
+# Hermes 会自动执行 AI 分析（工作日 16:00-23:59 每 30 分钟 1 只）
+hermes cron list  # 查看 stock-ai-analysis 任务状态
+```
+
+Hermes 仅用于 cron 编排，核心流水线和 Web 服务完全独立运行。
+
+### 方式 C：全量脚本（流水线 + AI 分析一起跑）
+
+```bash
+bash scripts/stock-ai-slow-feed.sh
+# 等同于：
+#   python3 scripts/run_pipeline.py     # 采集 → 筛选（会重新采集全量数据）
+#   python3 scripts/run_ai_analysis.py --all  # AI 分析全量模式
+```
+
+## 快速启动
+
+```bash
+git clone https://github.com/oldfunk/stock-dashboard.git
+cd stock-dashboard
+pip install akshare fastapi uvicorn jinja2 httpx python-dotenv schedule
+python -m src.main serve
+```
+
+然后浏览器打开 `http://localhost:9527/`。
+
+### AI 分析配置（可选，默认无需配置）
+
+提供 `.env` 文件（可选）：
+
+```env
+STOCK_AI_API_KEY=your_api_key_here    # 仅在使用非免费模型时需要
+STOCK_AI_API_BASE=https://opencode.ai/zen/v1  # 可改为任意 OpenAI 兼容 API
+STOCK_AI_MODEL=deepseek-v4-flash-free  # 免费模型，无需 API Key
+```
+
+**免费模型无需任何 API Key**，自动从 OpenCode Zen 发现可用 free 模型，支持故障轮换。
 
 ## 数据源架构
 
 ```
 腾讯行情 (qt.gtimg.cn)
-  └─ 核心行情: PE/PB/市值/价格/涨跌幅（主数据源，覆盖原A股三大交易所+科创板）
+  └─ 核心行情: PE/PB/市值/价格/涨跌幅（主数据源，覆盖 A 股三大交易所+科创板）
 
 AKShare（社区维护的中国金融数据工具箱）
   ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务：ROE/毛利率/OCF/EPS/增长率
-  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度历史：净利率/负债率/流动比率
+  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度补充：净利率/负债率
   ├─ stock_profit_sheet_by_report_em → 利润表明细：利息费用/总股本
   └─ stock_cash_flow_sheet_by_report_em → 现金流量表：经营/投资现金流 → FCF
 ```
 
-> **为什么选腾讯做行情主力**：腾讯 `qt.gtimg.cn` 是唯一免费且稳定提供 A 股实时 PE/PB/市值/价格的公开接口。AKShare 和东财旧版 API 均无法可靠获取等价数据。**财务数据完全不用腾讯**，全部走 AKShare。
+> **腾讯做行情主力**：唯一免费且稳定提供 A 股实时 PE/PB/市值/价格的公开接口，财务数据完全不用腾讯。**兜底策略**：腾讯失败时自动切换到新浪证券 + AKShare 财务自算。
 
-> **兜底策略**：腾讯行情失败时自动切换到新浪证券+Sina原始API + AKShare 财务自算 PE/PB/市值（EPS/BVPS 来自 stock_yjbb_em，价格来自 sina hq 原始接口，不走 AKShare 封装）。已在实现中验证过茅台、五粮液等股票的计算值与腾讯直给值一致。
-
-> **为什么选 AKShare 做财务主力**：社区主力维护，数据来源覆盖东方财富、同花顺等多个渠道。底层 API 变更时自动被社区修复，长期数据稳定性优于手写直连。`stock_yjbb_em` 一次 HTTP 调用可获取 ~5800 只 A 股的最新财务数据。逐只深度数据和历史数据只在初筛后的候选股（~200 只）上调用。
-
-## 本地数据仓库
-
-系统在运行中自动积累历史财务数据：
-
-- **financial_history** 表 — 按季度/年度累积 AKShare 全量财务数据
-- **financial_summary** 表 — 从历史数据计算的 5 年衍生指标
-- **增量采集** — 已有数据的股票跳过，只拉新的
-- **自动迁移** — 旧数据库首次启动自动 ALTER TABLE 加列
-
-数据每天积累，随着时间推移，本地数据库逐渐拥有完整的 5~10 年历史。
+> **AKShare 做财务主力**：社区维护，数据来源覆盖东方财富、同花顺等，长期数据稳定性优于手写直连。`stock_yjbb_em` 一次 HTTP 调用获取 ~5800 只 A 股最新财务数据，深度数据只在候选股上调用。
 
 ## AI Berkshire 7条门规
 
@@ -50,64 +105,76 @@ AKShare（社区维护的中国金融数据工具箱）
 | 6 | 5年均净利率 < 5% → 排除 | `net_margin_5y_avg` | 高毛利率(≥30%)主动压利 |
 | 7 | 5年稀释 > 20% → 排除 | `share_dilution_5y` | — |
 
-同时叠加：PE(3~20)、PB(≤3.5)、营收/净利增长(≥0)、负债率(<65%)、市值(30~50000亿)、排除ST。
-
-## AI 分析 — 镜子测试
-
-每只候选股会经过 LLM 分析，输出包含：
-
-- **镜子测试** — 用恰好5句话说清：生意本质 / 护城河 / 管理层 / 价格 / 下行风险
-- **转折词计数** — 每句出现"但是/然而/除非/如果/只要"的数量，累计>2即违反纪律
-- **逆向思考** — 至少2-3个致死场景，防止买入确认偏误
-- **投资策略** — 仓位/周期/买卖信号/止盈止损
+叠加筛选：PE(3~20) / PB(≤3.5) / 营收增长≥0 / 净利增长≥0 / 负债率<65% / 市值30~50000亿 / 排除ST。
 
 ## 流水线
 
 ```
-每日 15:30（收盘后自动触发）:
-  1. 腾讯行情 → 全A股行情（PE/PB/市值）→ 初筛预过滤
+交易日 15:30（收盘后自动触发）:
+  1. 腾讯行情 → 全A股行情 → 初筛预过滤
   2. AKShare stock_yjbb_em → 当前财务（ROE/毛利率/OCF）
-  3. AKShare stock_financial_abstract_ths → 逐只深度补充（净利率/负债率）
+  3. AKShare 深度补充（净利率/负债率）
   4. AKShare 利润表+现金流表 → 历史财务采集 → financial_history
-  5. 重建 5年汇总 → financial_summary
-  6. 7条门规筛选 → 计算评分 → 候选池
-  7. AI分析（镜子测试+逆向思考）→ Top 20
+  5. 重建 5年/10年汇总 → financial_summary
+  6. 7条门规筛选 → 评分 → 候选池（≤20只）
+
+交易日 16:00 起（cron 触发，每 30 分钟 1 只）:
+  7. AI 分析 → 护城河 / 管理层 / 估值 / 逆向思考 / 买卖策略
 ```
 
-可通过 `http://<host>:9527/api/trigger_update` 手动触发流水线。
+## 本地数据仓库
 
-## 安装与运行
+系统在运行中自动积累历史财务数据：
 
-```bash
-git clone https://github.com/oldfunk/stock-dashboard.git
-cd stock-dashboard
-pip install akshare fastapi uvicorn jinja2 httpx schedule
-python -m src.collector.akshare_fetcher && python -m src.web.routes      # 首次运行: 采集+启动看板
+- **financial_history** — 按季度/年度累积 AKShare 全量财务数据
+- **financial_summary** — 从历史数据计算的 5年/10年衍生指标（ROE波动/ROE改善/FCF一致性/股本稀释等）
+- **增量采集** — 已有数据的股票跳过，只拉新的
+- **数据覆盖** — 随运行天数自动扩展到 5~10 年区间
+
+数据每天积累，财务指标覆盖年限随时间自然增长，本地数据仓库越来越完整。
+
+## AI 分析输出结构
+
+每只候选股的 AI 分析包含完整的 JSON 结构化字段：
+
+```json
+{
+  "analysis": "投资人笔记风格完整分析",
+  "moat_evaluation": [
+    {"type": "转换成本/网络效应/无形资产/成本优势/有效规模", "score": 1-5, "trend": "稳定", "evidence": "..."}
+  ],
+  "management_score": {"capital_allocation": "1-10", "shareholder_friendliness": "1-10"},
+  "intrinsic_value": {"conservative/base_case/optimistic": "估值(亿)", "margin_of_safety": "安全边际"},
+  "reverse_thinking": "2-3个致死场景",
+  "investment_strategy": "仓位和持有周期建议",
+  "trade_strategy": {"signal": "BUY/HOLD/AVOID", "confidence": "高/中/低", "buy_zone": "...", "target_price": "...", "stop_loss": "...", "take_profit": "..."},
+  "mirror_counts": "转折词计数"
+}
 ```
-
-无需 API Key（腾讯行情 + 东方财富 + 同花顺均为免费公开接口）。
 
 ## 配置
 
 详见 `config/config.yaml`。主要参数：
 
-- `screener.conditions.*` — 7条门规的阈值
-- `schedule.daily_update_time` — 每日自动运行时间
-- `web.port` — 看板端口
+- `screener.conditions.*` — 7条门规的阈值（PE/PB/ROE/增长率/负债率等）
+- `schedule.daily_update_time` — 每日自动运行时间（默认 15:30）
+- `web.port` — 看板端口（默认 9527）
+- `ai.*` — LLM API 配置（默认用 OpenCode Zen 免费模型）
 
 ## 技术栈
 
 - **数据采集**: httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情API
-- **存储**: SQLite (WAL模式)
-- **AI分析**: 通过通用LLM API (支持OpenAI兼容接口+免费模型池)
-- **Web看板**: FastAPI + Jinja2
-- **定时任务**: 内置调度器 (schedule)
+- **存储**: SQLite (WAL 模式)
+- **AI 分析**: OpenAI 兼容 API + OpenCode Zen 免费模型池（自动故障轮换）
+- **Web 看板**: FastAPI + Jinja2
+- **调度**: 内置 Python schedule 库 + OS/Hermes cron
 
 ## 与 AI Berkshire 的关系
 
-本项目的量化筛选规则完全对齐 AI Berkshire 的 `quality-screen.md` 方法论，但做出了以下适配：
+量化筛选规则对齐 AI Berkshire 的 `quality-screen.md`，但做出 A 股适配：
 
-1. **自动化** — AI Berkshire 需要人手动跑，本项目全自动
+1. **自动化** — AI Berkshire 需手动跑，本项目全自动
 2. **本地数据仓库** — 逐日累积历史财务数据
-3. **A股适配** — 数据源换为 AKShare/腾讯，规则兼容A股特性
+3. **A股适配** — 数据源换为 AKShare / 腾讯，规则兼容 A 股特性
 4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用 AKShare 可获取的字段
+5. **结构化分析** — 每只股票输出完整的护城河/管理层/估值/策略 JSON

@@ -26,7 +26,8 @@ load_dotenv(os.path.join(PROJ, '.env'), override=True)
 
 from src.config import load_config
 from src.models.database import (
-    ScreeningResultDAO, StockAnalysisHistoryDAO, RunLogDAO, init_database,
+    ScreeningResultDAO, StockAnalysisHistoryDAO, FinancialSummaryDAO,
+    RunLogDAO, init_database,
 )
 from src.analyzer.ai_analyzer import AiAnalyzer, _save_analysis, _save_failure
 from src.utils import now_cn
@@ -59,6 +60,18 @@ stocks = ScreeningResultDAO().get_results_for_run(run_id)
 if not stocks:
     print("[SKIP] No stocks in latest run")
     sys.exit(1)
+
+# ── 富集财务历史数据（ai_analyzer 的 prompt 需要 5y/10y 字段）──
+print(f"Enriching {len(stocks)} stocks with financial history...")
+_fs_dao = FinancialSummaryDAO()
+for s in stocks:
+    fs = _fs_dao.get(s['code'])
+    if fs:
+        # 把 financial_summary 的字段注入到 stock dict 中
+        for k, v in fs.items():
+            if k not in ('stock_code', 'updated_at') and v is not None:
+                s[k] = v
+print("Enrichment done")
 
 # ── 确定需要分析的股票（每天每只仅一条）──
 today_str = now_cn().strftime('%Y-%m-%d')

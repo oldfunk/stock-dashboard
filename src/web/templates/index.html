@@ -995,7 +995,7 @@
                     {% if stock.mirror_counts %}
                     <div style="margin-top:8px;padding:8px;background:var(--gold-bg);border-radius:var(--radius-sm);font-size:11px;">
                         镜子测试: {{ stock.mirror_counts }} 句含转折词
-                        {% if stock.mirror_counts > 2 %}<span style="color:var(--red);font-weight:500;"> 超2句, 违反纪律</span>{% endif %}
+                        {% if stock.mirror_total > 2 %}<span style="color:var(--red);font-weight:500;"> 超2句, 违反纪律</span>{% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -1060,9 +1060,28 @@
                         {% endif %}
                     </div>
                     {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
-                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail">
-                        <div class="hd-panel open">
-                            <p>{{ h.combined_analysis if h.combined_analysis else '--' }}</p>
+                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail" style="display:none;">
+                        <div class="hd-panel">
+                            <div style="font-size:12px;line-height:1.6;">
+                                <strong>分析</strong><br>{{ h.hist_analysis[:300] }}{% if h.hist_analysis|length > 300 %}…{% endif %}
+                                <br><br>
+                                <strong>策略</strong><br>{{ h.hist_strategy }}
+                                <br><br>
+                                {% if h.hist_trade and h.hist_trade is mapping %}
+                                <strong>信号</strong>
+                                <span style="{% if h.hist_trade.signal == 'BUY' %}color:var(--color-up);font-weight:600;{% elif h.hist_trade.signal == 'AVOID' %}color:var(--red);font-weight:600;{% else %}color:var(--gold);font-weight:600;{% endif %}">
+                                    {{ h.hist_trade.signal }}
+                                </span>
+                                — 置信度: {{ h.hist_trade.confidence }}
+                                &nbsp;|&nbsp; 买入: {{ h.hist_trade.buy_zone }}
+                                &nbsp;|&nbsp; 目标: {{ h.hist_trade.target_price }}
+                                &nbsp;|&nbsp; 止损: {{ h.hist_trade.stop_loss }}
+                                {% endif %}
+                                {% if h.hist_mirror %}
+                                <br><br>
+                                <span style="font-size:11px;color:var(--text-tertiary);">[镜子: {{ h.hist_mirror }}]</span>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endif %}

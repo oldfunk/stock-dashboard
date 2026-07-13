@@ -125,6 +125,7 @@ async def index(request: Request):
             if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
                 try:
                     ai_obj = json.loads(h['ai_analysis'])
+                    # 保留原 combined_analysis 用于兼容
                     combined = []
                     if ai_obj.get('analysis'):
                         combined.append(ai_obj['analysis'])
@@ -141,6 +142,12 @@ async def index(request: Request):
                     if ai_obj.get('mirror_counts'):
                         combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
                     h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
+                    # 新增：结构化字段供模板使用
+                    h['hist_analysis'] = ai_obj.get('analysis', '')
+                    h['hist_strategy'] = ai_obj.get('investment_strategy', '')
+                    h['hist_risk'] = ai_obj.get('reverse_thinking', '')
+                    h['hist_trade'] = ai_obj.get('trade_strategy', {})
+                    h['hist_mirror'] = ai_obj.get('mirror_counts', '')
                 except Exception:
                     h['combined_analysis'] = '--'
             else:
@@ -152,7 +159,17 @@ async def index(request: Request):
         if stock.get('ai_parsed') and isinstance(stock['ai_parsed'], dict):
             mc = stock['ai_parsed'].get('mirror_counts')
             if mc is not None:
-                stock['mirror_counts'] = mc
+                # mc 可能是 "0,1,0,1,1 第N句过多转折" 这样的字符串
+                # 提取数字部分求和，以便模板中做 > 2 的整数比较
+                if isinstance(mc, str):
+                    import re
+                    nums = re.findall(r'\d+', mc.split()[0] if ' ' in mc else mc)
+                    total = sum(int(n) for n in nums) if nums else 0
+                    stock['mirror_counts'] = str(mc)  # 原文保留用于显示
+                    stock['mirror_total'] = total     # 数值用于比较
+                else:
+                    stock['mirror_counts'] = str(mc)
+                    stock['mirror_total'] = int(mc) if mc else 0
 
         # 注入财务历史汇总（用于前端显示历史趋势）
         try:
