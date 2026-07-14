@@ -8,10 +8,6 @@ import logging
 import os
 import sys
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True,
-                    format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
-
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJ)
 os.chdir(PROJ)
@@ -19,6 +15,11 @@ os.chdir(PROJ)
 # 加载 .env（AI API Key 等）
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJ, '.env'), override=True)
+
+# 统一日志配置（必须在其他模块导入前执行）
+from src.logging_config import setup_logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 from src.config import load_config
 from src.models.database import (

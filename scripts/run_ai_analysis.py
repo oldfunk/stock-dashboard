@@ -24,6 +24,10 @@ os.chdir(PROJ)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJ, '.env'), override=True)
 
+# 统一日志配置
+from src.logging_config import setup_logging
+setup_logging()
+
 from src.config import load_config
 from src.models.database import (
     ScreeningResultDAO, StockAnalysisHistoryDAO, FinancialSummaryDAO,

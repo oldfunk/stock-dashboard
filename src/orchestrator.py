@@ -22,11 +22,6 @@ from src.models.database import (
 )
 from src.utils import now_cn
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 # 流水线并发锁：防止调度器与手动触发同时跑
@@ -71,16 +66,17 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
     logger.info("\n[财务历史] 拉取历史财务数据...")
     progress.update(run_id, 'history', '拉取历史财务数据...')
     try:
+        from datetime import datetime
         from src.collector.akshare_fetcher import (
             collect_historical_financial_data, rebuild_financial_summaries
         )
-        # 只收集候选股的历史数据（后续运行全A股增量收集）
-        history_count = collect_historical_financial_data(candidates)
-        if history_count:
-            rebuild_financial_summaries(candidates)
-        else:
-            # 已有数据，直接重建汇总（可能更新了最新年报）
-            rebuild_financial_summaries(candidates)
+        # 周六全量刷新，平日仅补充缺失或报告期过旧的股票
+        is_weekend_full = datetime.now().weekday() == 5
+        history_count = collect_historical_financial_data(
+            candidates, force_full=is_weekend_full
+        )
+        # 无论是否有新增数据，都重建汇总以反映最新财报
+        rebuild_financial_summaries(candidates)
     except Exception as e:
         logger.warning(f"[财务历史] 采集异常（不影响主流程）: {e}")
 

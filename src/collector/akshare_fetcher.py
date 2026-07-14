@@ -400,13 +400,98 @@ def _find_latest_yjbb_date(ak_module) -> str:
     return '20260331'
 
 
+# ── 财务深度补充缓存 ──
+_FINANCIAL_ABSTRACT_CACHE_DIR = os.path.join(
+    os.path.dirname(__file__), '../../data/cache/financial_abstract'
+)
+_FINANCIAL_ABSTRACT_TTL_SECONDS = 7 * 24 * 3600  # 财报季度数据 7 天内不会变
+
+
+def _financial_abstract_cache_path(code: str) -> str:
+    os.makedirs(_FINANCIAL_ABSTRACT_CACHE_DIR, exist_ok=True)
+    return os.path.join(_FINANCIAL_ABSTRACT_CACHE_DIR, f"{code}.json")
+
+
+def _load_financial_abstract_cache(code: str) -> dict | None:
+    """加载股票财务摘要缓存，TTL 内有效则返回。"""
+    path = _financial_abstract_cache_path(code)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        cached_at = data.get('cached_at', 0)
+        if time.time() - cached_at > _FINANCIAL_ABSTRACT_TTL_SECONDS:
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _save_financial_abstract_cache(code: str, report_date: str,
+                                   net_margin: float | None, debt_ratio: float | None):
+    """保存股票财务摘要缓存。"""
+    path = _financial_abstract_cache_path(code)
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'report_date': report_date,
+                'net_margin': net_margin,
+                'debt_ratio': debt_ratio,
+                'cached_at': time.time(),
+            }, f, ensure_ascii=False)
+    except Exception as e:
+        logger.debug(f"[财务缓存] 保存失败 {code}: {e}")
+
+
+def _fetch_single_financial_abstract(s: dict) -> tuple[str, float | None, float | None, str | None]:
+    """单只股票获取同花顺财务摘要，优先读缓存。返回 (code, net_margin, debt_ratio, report_date)。"""
+    code = s['code']
+    # 已有完整字段则跳过
+    if s.get('net_margin') is not None and s.get('debt_ratio') is not None:
+        return code, s.get('net_margin'), s.get('debt_ratio'), None
+
+    # 读缓存
+    cached = _load_financial_abstract_cache(code)
+    if cached:
+        return (code, cached.get('net_margin'), cached.get('debt_ratio'),
+                cached.get('report_date'))
+
+    try:
+        import akshare as ak
+        df = ak.stock_financial_abstract_ths(symbol=code)
+        if df is None or df.empty:
+            return code, None, None, None
+        latest = df.iloc[0]
+        report_date = str(latest.get('报告期', ''))[:10]
+        net_margin, debt_ratio = None, None
+        net_margin_str = latest.get('销售净利率', '')
+        if net_margin_str and net_margin_str != '-':
+            try:
+                net_margin = float(str(net_margin_str).replace('%', ''))
+            except (ValueError, TypeError):
+                pass
+        debt_str = latest.get('资产负债率', '')
+        if debt_str and debt_str != '-':
+            try:
+                debt_ratio = float(str(debt_str).replace('%', ''))
+            except (ValueError, TypeError):
+                pass
+        _save_financial_abstract_cache(code, report_date, net_margin, debt_ratio)
+        return code, net_margin, debt_ratio, report_date
+    except Exception as e:
+        logger.debug(f"[财务] {code} 深度补充失败: {e}")
+        return code, None, None, None
+
+
 def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     """用AKShare批量获取财务指标（ROE/毛利率/净利率/OCF/负债率等）。
 
     - 全A股用 stock_yjbb_em 一次批量调用（~6秒）
-    - 候选股深度数据用 stock_financial_abstract_ths 逐只获取
+    - 候选股深度数据用 stock_financial_abstract_ths 并发获取，并带 7 天本地缓存
     原地补充字段后返回同一列表。
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     import akshare as ak
     total = len(stocks)
     logger.info(f"[财务] AKShare 采集 {total} 只...")
@@ -442,35 +527,31 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
         with_roe = sum(1 for s in stocks if s.get('roe') is not None)
         logger.info(f"[财务] stock_yjbb_em: {with_roe}/{total} 有ROE")
 
-    # ── 第二步：stock_financial_abstract_ths 逐只深度补充 ──
+    # ── 第二步：stock_financial_abstract_ths 并发深度补充 ──
     # 补齐：净利率/负债率（stock_yjbb_em 不提供）
-    for idx, s in enumerate(stocks):
-        code = s['code']
-        # stock_yjbb_em 已有大部分字段，跳过已经有净利率/负债率的
-        if s.get('net_margin') is not None and s.get('debt_ratio') is not None:
-            continue
-        try:
-            df = ak.stock_financial_abstract_ths(symbol=code)
-            if df is None or df.empty:
-                continue
-            # 取最新一期数据（第一行）— 已按报告期降序
-            latest = df.iloc[0]
-            net_margin_str = latest.get('销售净利率', '')
-            if net_margin_str and net_margin_str != '-':
-                try:
-                    s['net_margin'] = float(str(net_margin_str).replace('%', ''))
-                except (ValueError, TypeError):
-                    pass
-            debt_str = latest.get('资产负债率', '')
-            if debt_str and debt_str != '-':
-                try:
-                    s['debt_ratio'] = float(str(debt_str).replace('%', ''))
-                except (ValueError, TypeError):
-                    pass
-        except Exception:
-            pass
-        if (idx + 1) % 50 == 0:
-            logger.info(f"[财务] 深度补充 {idx + 1}/{total}")
+    # AKShare 对同花顺接口有隐性限流，并发控制在 5，每次请求后小睡 0.2s
+    pending = [s for s in stocks
+               if s.get('net_margin') is None or s.get('debt_ratio') is None]
+    fetched = 0
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_code = {
+            executor.submit(_fetch_single_financial_abstract, s): s
+            for s in pending
+        }
+        for future in as_completed(future_to_code):
+            s = future_to_code[future]
+            try:
+                code, net_margin, debt_ratio, _ = future.result()
+                if net_margin is not None:
+                    s['net_margin'] = net_margin
+                if debt_ratio is not None:
+                    s['debt_ratio'] = debt_ratio
+                fetched += 1
+            except Exception as e:
+                logger.debug(f"[财务] {s['code']} 并发获取异常: {e}")
+            if (fetched + 1) % 50 == 0:
+                logger.info(f"[财务] 深度补充 {fetched}/{len(pending)}")
+            time.sleep(0.2)  # 温和限流
 
     with_gm = sum(1 for s in stocks if s.get('gross_margin') is not None)
     with_nm = sum(1 for s in stocks if s.get('net_margin') is not None)
@@ -490,24 +571,50 @@ def _parse_pct(value) -> float | None:
         return None
 
 
-def collect_historical_financial_data(all_stocks: list[dict]) -> dict:
-    """用AKShare逐只拉取7年历史财务数据，存入financial_history。
+def collect_historical_financial_data(all_stocks: list[dict],
+                                      force_full: bool = False,
+                                      incremental_days: int = 60) -> dict:
+    """用AKShare逐只拉取历史财务数据，存入financial_history。
 
     all_stocks: 候选股列表（筛选过的）
+    force_full: 为 True 时全量重新采集所有候选股（适合每周/数据修复）
+    incremental_days: 增量模式下，若最新报告期距今天数超过此阈值则重新采集
     返回: {stock_code: True} 表示获取成功的股票
     """
+    from datetime import datetime, timedelta
     from src.models.database import FinancialHistoryDAO
     import akshare as ak
     import pandas as pd
 
-    # 只处理还没有历史数据的股票（daily increment pattern）
     dao = FinancialHistoryDAO()
-    todo = [s for s in all_stocks if not dao.has_code(s['code'])]
+    today = datetime.now()
+
+    if force_full:
+        todo = all_stocks
+        logger.info("[历史财务] 强制全量采集模式")
+    else:
+        # 每日增量模式：没有历史数据，或最新报告期过旧的股票
+        codes = [s['code'] for s in all_stocks]
+        latest_dates = dao.get_latest_report_dates(codes)
+        todo = []
+        for s in all_stocks:
+            code = s['code']
+            latest = latest_dates.get(code)
+            if not latest:
+                todo.append(s)
+                continue
+            try:
+                latest_dt = datetime.strptime(latest, "%Y-%m-%d")
+                if (today - latest_dt).days > incremental_days:
+                    todo.append(s)
+            except Exception:
+                todo.append(s)
+
     if not todo:
-        logger.info("[历史财务] 全部候选股已有历史数据，跳过")
+        logger.info("[历史财务] 全部候选股已有近期历史数据，跳过")
         return {}
 
-    logger.info(f"[历史财务] AKShare 逐只采集 {len(todo)} 只...")
+    logger.info(f"[历史财务] AKShare 逐只采集 {len(todo)} 只（全量={force_full}）...")
     collected = {}
 
     for idx, s in enumerate(todo):

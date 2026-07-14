@@ -37,8 +37,10 @@ _scheduler = MarketScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时加载 .env / 初始化 DB / 启动调度器；停止时关调度器。"""
+    """应用生命周期：加载 .env / 配置日志 / 初始化 DB / 启动调度器；停止时关调度器。"""
     from dotenv import load_dotenv
+    from src.logging_config import setup_logging
+    setup_logging()
     env_path = Path(__file__).parent.parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)

@@ -11,12 +11,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def run():
     """运行每日选股流程"""
+    from src.logging_config import setup_logging
+    setup_logging()
     from src.orchestrator import main
     main()
 
 
 def serve():
     """启动 Web 服务"""
+    from src.logging_config import setup_logging
+    setup_logging()
     from src.web.routes import run_server
     run_server()
 

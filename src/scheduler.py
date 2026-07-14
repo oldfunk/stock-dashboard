@@ -231,6 +231,8 @@ class MarketScheduler:
                     stocks, run_id, interval_seconds=60, on_progress=None
                 )
                 logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
+                # 回写本次分析的 run_log.analyzed_count，保持运行记录完整
+                RunLogDAO().update_analyzed_count(run_id, analyzed_ok)
             except Exception as e:
                 logger.warning(f"[调度器] AI 分析异常: {e}")
         

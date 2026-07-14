@@ -436,6 +436,13 @@ class RunLogDAO:
                 (screened, run_id)
             )
 
+    def update_analyzed_count(self, run_id: str, analyzed: int):
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE run_log SET analyzed_count = ? WHERE run_id = ?",
+                (analyzed, run_id)
+            )
+
     def get_latest_run(self) -> Optional[dict]:
         with db_conn() as conn:
             row = conn.execute(
@@ -618,6 +625,21 @@ class FinancialHistoryDAO:
                 (code,)
             ).fetchone()
         return row is not None
+
+    def get_latest_report_dates(self, codes: list[str]) -> dict[str, str]:
+        """批量获取每只股票最新的报告期，返回 {code: report_date}。"""
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT stock_code, MAX(report_date) as max_date
+                    FROM financial_history
+                    WHERE stock_code IN ({placeholders})
+                    GROUP BY stock_code""",
+                codes,
+            ).fetchall()
+        return {r['stock_code']: r['max_date'] for r in rows}
 
 
 class FinancialSummaryDAO:
