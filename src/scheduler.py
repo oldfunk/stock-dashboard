@@ -108,7 +108,9 @@ class MarketScheduler:
             except Exception:
                 pass
         self._poll_indices()
+        self._last_index_time = time.time()
         self._poll_stocks(force=True)
+        self._last_stock_time = time.time()
         logger.info("[调度器] 已启动")
 
     def stop(self):
