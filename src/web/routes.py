@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from src.config import load_config
+from src.config import load_config, start_config_watcher, stop_config_watcher
 from src.models.database import (
     init_database,
     MarketIndexDAO,
@@ -22,6 +22,7 @@ from src.models.database import (
     PipelineProgressDAO,
     FinancialHistoryDAO,
     FinancialSummaryDAO,
+    db_conn,
 )
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
@@ -37,7 +38,7 @@ _scheduler = MarketScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：加载 .env / 配置日志 / 初始化 DB / 启动调度器；停止时关调度器。"""
+    """应用生命周期：加载 .env / 配置日志 / 初始化 DB / 启动调度器 / 启动配置监听；停止时关调度器、停配置监听。"""
     from dotenv import load_dotenv
     from src.logging_config import setup_logging
     setup_logging()
@@ -47,11 +48,13 @@ async def lifespan(app: FastAPI):
         logger.info(f"[Web] 加载 .env: {env_path}")
     init_database()
     _scheduler.start()
+    start_config_watcher(interval=2.0)  # 启动配置热重载
     logger.info("[Web] 服务启动完成")
     try:
         yield
     finally:
         _scheduler.stop()
+        stop_config_watcher()
         logger.info("[Web] 服务关闭")
 
 
@@ -341,6 +344,90 @@ async def api_realtime():
             'amount': q.get('amount'),
         })
     return result
+
+
+@app.get("/api/config")
+async def api_config():
+    """返回当前生效的配置（脱敏 API Key 等敏感字段）"""
+    config = load_config()
+    # 脱敏处理
+    safe_config = dict(config)
+    if 'ai' in safe_config:
+        safe_config['ai'] = dict(safe_config['ai'])
+        for key in ['api_key', 'api_base', 'model']:
+            if key in safe_config['ai'] and safe_config['ai'][key]:
+                val = str(safe_config['ai'][key])
+                if len(val) > 8:
+                    safe_config['ai'][key] = val[:4] + '****' + val[-4:]
+                else:
+                    safe_config['ai'][key] = '****'
+    return safe_config
+
+
+@app.get("/api/data-quality")
+async def api_data_quality():
+    """数据质量概览：最新快照日期、ROE覆盖率、财务历史覆盖年数、异常值计数"""
+    from src.models.database import (
+        StockSnapshotDAO, FinancialSummaryDAO, FinancialHistoryDAO
+    )
+    from datetime import datetime, timedelta
+    
+    snapshot_dao = StockSnapshotDAO()
+    fs_dao = FinancialSummaryDAO()
+    fh_dao = FinancialHistoryDAO()
+    
+    # 1. 最新快照日期
+    latest_snapshot_date = snapshot_dao.get_latest_snapshot_date()
+    
+    # 2. ROE 覆盖率（有 ROE 数据的股票占全市场比例）
+    total_stocks = snapshot_dao.count()
+    # 近期快照中有 ROE 的
+    roe_covered = 0
+    if latest_snapshot_date:
+        with db_conn() as conn:
+            row = conn.execute("""
+                SELECT COUNT(*) as cnt FROM stock_snapshot
+                WHERE snapshot_date = ? AND roe IS NOT NULL AND roe > 0
+            """, (latest_snapshot_date,)).fetchone()
+            roe_covered = row['cnt'] if row else 0
+    
+    roe_coverage = round(roe_covered / total_stocks * 100, 1) if total_stocks > 0 else 0
+    
+    # 3. 财务历史覆盖年数（取中位数或平均）
+    try:
+        with db_conn() as conn:
+            row = conn.execute("""
+                SELECT AVG(year_count) as avg_years FROM (
+                    SELECT stock_code, COUNT(DISTINCT substr(report_date, 1, 4)) as year_count
+                    FROM financial_history
+                    GROUP BY stock_code
+                )
+            """).fetchone()
+            avg_hist_years = round(row['avg_years'], 1) if row and row['avg_years'] else 0
+    except Exception:
+        avg_hist_years = 0
+    
+    # 4. 异常值计数（ROE>100%、负市值、PE<0 等）
+    try:
+        with db_conn() as conn:
+            anomalies = conn.execute("""
+                SELECT COUNT(*) as cnt FROM stock_snapshot
+                WHERE snapshot_date = ? AND (
+                    roe > 100 OR market_cap <= 0 OR pe < 0 OR pb < 0 OR debt_ratio > 100
+                )
+            """, (latest_snapshot_date,)).fetchone()
+            anomaly_count = anomalies['cnt'] if anomalies else 0
+    except Exception:
+        anomaly_count = 0
+    
+    return {
+        "latest_snapshot_date": latest_snapshot_date,
+        "total_stocks": total_stocks,
+        "roe_coverage_pct": roe_coverage,
+        "avg_financial_history_years": avg_hist_years,
+        "anomaly_count": anomaly_count,
+        "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 
 @app.post("/api/trigger_update")
