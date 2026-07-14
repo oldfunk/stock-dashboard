@@ -262,6 +262,38 @@ async def api_stocks():
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+    # 附加财务历史汇总（用于前端显示历史趋势）
+    try:
+        fs_dao = FinancialSummaryDAO()
+        for s in stocks:
+            fs = fs_dao.get(s['code'])
+            if fs:
+                s['_summary'] = {
+                    'roe_5y_avg': fs.get('roe_5y_avg'),
+                    'gross_margin_5y_avg': fs.get('gross_margin_5y_avg'),
+                    'net_margin_5y_avg': fs.get('net_margin_5y_avg'),
+                    'ocf_latest': fs.get('ocf_latest'),
+                    'ocf_positive_years': fs.get('ocf_positive_years'),
+                    'ocf_5y_trend': fs.get('ocf_5y_trend'),
+                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
+                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
+                    'share_dilution_5y': fs.get('share_dilution_5y'),
+                    'roic_5y_avg': fs.get('roic_5y_avg'),
+                    'data_years': fs.get('data_years'),
+                    # 10年拓展字段
+                    'roe_10y_avg': fs.get('roe_10y_avg'),
+                    'net_margin_10y_avg': fs.get('net_margin_10y_avg'),
+                    'intcov_10y_avg': fs.get('intcov_10y_avg'),
+                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
+                    'share_dilution_10y': fs.get('share_dilution_10y'),
+                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
+                    'roe_volatility': fs.get('roe_volatility'),
+                    'roe_improvement': fs.get('roe_improvement'),
+                    'roic_10y_avg': fs.get('roic_10y_avg'),
+                }
+    except Exception:
+        pass
+
     # 附加历史记录
     hist_dao = StockAnalysisHistoryDAO()
     for s in stocks:
