@@ -220,7 +220,9 @@ class MarketScheduler:
         def _run_ai_analysis():
             try:
                 from src.analyzer.ai_analyzer import analyze_batch
-                from src.models.database import ScreeningResultDAO, RunLogDAO
+                from src.models.database import (
+                    ScreeningResultDAO, RunLogDAO, PipelineProgressDAO
+                )
                 
                 # 获取最新完成的 run_id
                 run_id = RunLogDAO().get_latest_completed_run_id()
@@ -244,8 +246,17 @@ class MarketScheduler:
                                 s[k] = v
                 
                 logger.info(f"[调度器] 启动 AI 分析 {len(stocks)} 只股票...")
+                
+                # 进度回调：更新 pipeline_progress
+                def on_progress(ai_done: int, ai_failed: int, idx: int):
+                    PipelineProgressDAO().update(
+                        run_id, 
+                        ai_done=ai_done, 
+                        ai_failed=ai_failed
+                    )
+                
                 analyzed_ok, analyzed_failed = analyze_batch(
-                    stocks, run_id, interval_seconds=60, on_progress=None
+                    stocks, run_id, interval_seconds=60, on_progress=on_progress
                 )
                 logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
                 # 回写本次分析的 run_log.analyzed_count，保持运行记录完整
