@@ -88,8 +88,9 @@ class MarketScheduler:
         self.index_interval = 30 * 60       # 大盘轮询间隔（秒）
         self.stock_interval = 5 * 60        # 选股池轮询间隔（秒）
         self.daily_time = dtime(15, 30)     # 每日自动运行时间
-        self._last_index_time = 0.0
-        self._last_stock_time = 0.0
+        # 初始化为当前时间，配合 start() 中的首次立即轮询，避免后台线程启动时重复触发
+        self._last_index_time = time.time()
+        self._last_stock_time = time.time()
         self._last_daily_date = now_cn().date()  # 启动时不触发当日流水线
 
     def start(self):
