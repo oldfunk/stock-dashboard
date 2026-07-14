@@ -15,7 +15,7 @@
 import logging
 import threading
 import time
-from datetime import time as dtime
+from datetime import time as dtime, datetime
 from typing import Optional
 
 from src.utils import now_cn, curl_get, tc_encode, parse_tc_line, split_tc_response
@@ -91,7 +91,21 @@ class MarketScheduler:
         # 初始化为当前时间，配合 start() 中的首次立即轮询，避免后台线程启动时重复触发
         self._last_index_time = time.time()
         self._last_stock_time = time.time()
-        self._last_daily_date = now_cn().date()  # 启动时不触发当日流水线
+        # 启动时从数据库检查今日是否已完成流水线，避免重启后重复触发
+        self._last_daily_date = self._get_last_completed_date()
+
+    def _get_last_completed_date(self):
+        """从数据库获取最新完成运行的日期，用于避免重启后重复触发当日流水线"""
+        try:
+            from src.models.database import RunLogDAO
+            run_id = RunLogDAO().get_latest_completed_run_id()
+            if run_id:
+                # run_id 格式：YYYYMMDD_HHMMSS
+                date_str = run_id.split('_')[0]
+                return datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            pass
+        return None
 
     def start(self):
         if self._thread and self._thread.is_alive():
