@@ -1,6 +1,6 @@
 # Stock Dashboard — AI/量化驱动的 A 股价值投资选股看板
 
-全自动 A 股价值投资筛选系统，每日收盘后跑完全市场，输出结构化 AI 分析。
+全自动 A 股价值投资筛选系统，每日收盘后跑完量化筛选（全市场），AI 分析每周一运行（长线逻辑，基本面周级稳定）。
 
 ## 核心理念
 
@@ -25,11 +25,11 @@ python -m src.main serve
 # 3. 可选：设置 OS 定时任务（crontab），作为兜底/无需 Web 服务时运行
 # crontab -e 添加：
 # 30 15 * * 1-5 /home/debian/stock-dashboard/scripts/daily_cron.sh >> /var/log/stock-dashboard-cron.log 2>&1
-# 0 16 * * 1-5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
+# 0 16 * * 1 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
 ```
 
 Web 看板启动后包含：
-- **内置调度器**（`src/scheduler.py`）— 交易日 15:30 自动触发数据采集 + 量化筛选，**15:31 自动触发 AI 分析**
+- **内置调度器**（`src/scheduler.py`）— 交易日 15:30 自动触发数据采集 + 量化筛选
 - **大盘指数** — 每 30 分钟更新
 - **实时行情** — 交易时段每 5 分钟刷新
 
@@ -38,7 +38,7 @@ Web 看板启动后包含：
 Hermes Agent 提供 cron 管理功能，自动执行 AI 分析：
 
 ```bash
-# Hermes 会自动执行 AI 分析（工作日 16:00-23:59 每 30 分钟 1 只）
+# Hermes 会自动执行 AI 分析（每周一 16:00，长线价值投资以周为节奏）
 hermes cron list  # 查看 stock-ai-analysis 任务状态
 ```
 
@@ -118,7 +118,7 @@ AKShare（社区维护的中国金融数据工具箱）
   5. 重建 5年/10年汇总 → financial_summary
   6. 7条门规筛选 → 评分 → 候选池（≤20只）
 
-交易日 16:00 起（cron 触发，每 30 分钟 1 只）:
+每周一 16:00（cron 触发）:
   7. AI 分析 → 护城河 / 管理层 / 估值 / 逆向思考 / 买卖策略
 ```
 
