@@ -551,6 +551,33 @@
             color: var(--text-tertiary);
         }
 
+        .update-banner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 10px 16px;
+            margin: 0 0 12px 0;
+            background: var(--gold-bg);
+            border: 1px solid var(--gold);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .update-banner button {
+            padding: 4px 14px;
+            border: 1px solid var(--accent);
+            background: transparent;
+            color: var(--accent);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .update-banner button:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
         /* ========== Dashboard Layout (2-column) ========== */
         .dashboard-layout {
             display: flex;
@@ -852,6 +879,12 @@
             </div>
             <div class="progress-stage" id="aiStage"></div>
         </div>
+    </div>
+
+    <!-- 更新通知横幅 -->
+    <div id="updateBanner" class="update-banner" style="display:none;">
+        <span>候选股列表已更新</span>
+        <button onclick="location.reload()">刷新</button>
     </div>
 
     <!-- Stock Results -->
@@ -1275,6 +1308,10 @@
         updateTimestamp();
     }
 
+    // 候选股变化追踪
+    var lastCodes = '';
+    var lastAnalysis = '';
+
     function renderStocks(data) {
         if (!data) return;
 
@@ -1302,6 +1339,18 @@
                     (s.change_percent >= 0 ? '+' : '') + s.change_percent.toFixed(2) + '%</span>';
             }
         });
+
+        // 检测候选股结构变化（新股票/股票消失/新分析完成）
+        var codes = list.map(function(s){ return s.code; }).sort().join(',');
+        var analysis = list.map(function(s){
+            return s.code + ':' + (s.ai_parsed ? '1' : '0');
+        }).sort().join(',');
+        if (lastCodes && (codes !== lastCodes || analysis !== lastAnalysis)) {
+            var banner = document.getElementById('updateBanner');
+            if (banner) banner.style.display = 'flex';
+        }
+        lastCodes = codes;
+        lastAnalysis = analysis;
     }
 
     // Auto-refresh
