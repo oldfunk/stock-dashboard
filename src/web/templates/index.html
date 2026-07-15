@@ -881,12 +881,6 @@
         </div>
     </div>
 
-    <!-- 更新通知横幅 -->
-    <div id="updateBanner" class="update-banner" style="display:none;">
-        <span>候选股列表已更新</span>
-        <button onclick="applyStockUpdate()">刷新</button>
-    </div>
-
     <!-- Stock Results -->
     {% if stocks %}
     <div class="section-header">
@@ -1309,34 +1303,29 @@
     }
 
     // 候选股变化追踪
-    var lastCodes = '';
-    var lastAnalysis = '';
-    var pendingHtml = null;  // 最新的全量 _html，用户点刷新时替换 stockList
-
-    function applyStockUpdate() {
-        var banner = document.getElementById('updateBanner');
-        var listEl = document.getElementById('stockList');
-        if (!banner || !listEl || !pendingHtml) return;
-        listEl.innerHTML = pendingHtml;
-        banner.style.display = 'none';
-        pendingHtml = null;
-        // 更新 lastCodes/lastAnalysis 同步，防止立刻再弹
-        var list = listEl.querySelectorAll('.stock-card');
-        var codes = [];
-        Array.prototype.forEach.call(list, function(card) {
-            if (card.dataset.code) codes.push(card.dataset.code);
-        });
-        lastCodes = codes.sort().join(',');
-        lastAnalysis = '';  // 重置分析状态，下次轮询自然重建
-        // 更新数量显示
-        var header = document.querySelector('.section-count');
-        if (header) header.textContent = codes.length + ' 只';
-    }
+    var lastRunId = null;
 
     function renderStocks(data) {
-        if (!data) return;
+        var listEl = document.getElementById('stockList');
+        if (!listEl || !data) return;
 
-        // 兼容新格式（{stocks: [...]}）和旧格式（直接数组）
+        // 检测是否有 HTML 标记（来自 /api/stocks）
+        if (data._html) {
+            // run_id 变化 → 新流水线完成 → 全量刷新
+            if (data._run_id && data._run_id !== lastRunId) {
+                if (lastRunId !== null) {
+                    lastRunId = data._run_id;
+                    window.location.reload();
+                    return;
+                }
+                lastRunId = data._run_id;
+            }
+            // 无 run_id 变化 → 只替换股票列表内容
+            listEl.innerHTML = data._html;
+            return;
+        }
+
+        // 兼容旧格式：只更新价格（fallback）
         var list = data.stocks || data;
         if (!list || list.length === 0) return;
 
@@ -1360,19 +1349,6 @@
                     (s.change_percent >= 0 ? '+' : '') + s.change_percent.toFixed(2) + '%</span>';
             }
         });
-
-        // 检测候选股结构变化（新股票/股票消失/新分析完成）
-        var codes = list.map(function(s){ return s.code; }).sort().join(',');
-        var analysis = list.map(function(s){
-            return s.code + ':' + (s.ai_parsed ? '1' : '0');
-        }).sort().join(',');
-        if (lastCodes && (codes !== lastCodes || analysis !== lastAnalysis)) {
-            var banner = document.getElementById('updateBanner');
-            if (banner) banner.style.display = 'flex';
-            if (data._html) pendingHtml = data._html;
-        }
-        lastCodes = codes;
-        lastAnalysis = analysis;
     }
 
     // Auto-refresh
