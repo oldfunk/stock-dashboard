@@ -207,9 +207,10 @@ class MarketScheduler:
             run_daily_pipeline(config)
             self._last_daily_date = today
             logger.info("[调度器] 每日流水线完成")
-            
-            # 流水线成功后，启动后台 AI 分析线程（不阻塞调度器）
-            self._trigger_ai_analysis_async(config)
+
+            # 流水线成功后，仅在周五触发 AI 分析（周频分析由 cron 独立控制）
+            if now.weekday() == 4:  # Friday
+                self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
