@@ -2,7 +2,7 @@
 # OS crontab 兜底脚本 — 如果 Web 服务挂了，cron 也能跑完整流水线
 # 安装：crontab -e
 # 30 15 * * 1-5 /home/debian/stock-dashboard/scripts/daily_cron.sh >> /var/log/stock-dashboard-cron.log 2>&1
-# 0 16 * * 1-5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
+# 0 16 * * 5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
 
 set -e
 cd "$(dirname "$0")/.."
