@@ -1267,8 +1267,6 @@
         }
     }
 
-    var lastRunId = null;
-
     function refreshDashboard() {
         fetchJSON('/api/indices').then(renderIndices).catch(function(){});
         fetchJSON('/api/status').then(renderStatus).catch(function(){});
@@ -1280,37 +1278,17 @@
     function renderStocks(data) {
         if (!data) return;
 
-        // 新格式：{ stocks: [...], _html: '...', _run_id: '...' }
-        if (data.stocks !== undefined) {
-            var listEl = document.getElementById('stockList');
-            if (!listEl) return;
+        // 兼容新格式（{stocks: [...]}）和旧格式（直接数组）
+        var list = data.stocks || data;
+        if (!list || list.length === 0) return;
 
-            // run_id 变化 → 新流水线完成 → 全量刷新
-            if (data._run_id && data._run_id !== lastRunId) {
-                console.log('[Dashboard] run_id changed:', lastRunId, '->', data._run_id);
-                lastRunId = data._run_id;
-                window.location.reload();
-                return;
-            }
-
-            // 有 HTML 则全量替换
-            if (data._html) {
-                listEl.innerHTML = data._html;
-            }
-
-            // 更新股票计数
-            var header = document.querySelector('.section-count');
-            if (header && data._count != null) {
-                header.textContent = data._count + ' 只';
-            }
-            return;
-        }
-
-        // 旧格式：直接是数组（price-only fallback）
-        if (data.length === 0) return;
+        // 更新候选股数量
+        var count = data._count != null ? data._count : list.length;
         var header = document.querySelector('.section-count');
-        if (header) header.textContent = data.length + ' 只';
-        data.forEach(function(s) {
+        if (header) header.textContent = count + ' 只';
+
+        // 逐字段更新价格（不刷新全列表）
+        list.forEach(function(s) {
             var priceEl = document.getElementById('price-' + s.code);
             var chgEl = document.getElementById('chg-' + s.code);
             if (!priceEl) return;
