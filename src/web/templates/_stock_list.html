@@ -1,0 +1,228 @@
+{% for stock in stocks %}
+        <div class="stock-card">
+            <div class="stock-row">
+                <div class="stock-info">
+                    <div class="stock-code">{{ stock.code }}</div>
+                    <div class="stock-name">{{ stock.name }}</div>
+                    <span class="stock-score">{{ stock.score }}</span>
+                </div>
+
+                <div class="stock-metrics">
+                    <div class="metric-cell">
+                        <div class="label">现价</div>
+                        {% if stock.current_price is not none %}
+                        <div class="value" id="price-{{ stock.code }}" style="font-weight:500;">
+                            {{ "%.2f"|format(stock.current_price) }}
+                        </div>
+                        {% else %}
+                        <div class="value" id="price-{{ stock.code }}" style="font-weight:500;">--</div>
+                        {% endif %}
+                        <div class="price-change" id="chg-{{ stock.code }}" style="font-size:11px;margin-top:-1px;">
+                            {% if stock.change_percent is not none %}
+                            <span style="color:{{ 'var(--color-up)' if stock.change_percent >= 0 else 'var(--color-down)' }}">
+                                {{ "%+.2f"|format(stock.change_percent) }}%
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">市盈率</div>
+                        <div class="value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">
+                            {{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">市净率</div>
+                        <div class="value {{ 'good' if stock.pb is not none and stock.pb < 2 else ('warn' if stock.pb is not none and stock.pb < 3.5 else '') }}">
+                            {{ "%.2f"|format(stock.pb) if stock.pb is not none else '--' }}
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">ROE</div>
+                        <div class="value {{ 'good' if stock.roe is not none and stock.roe >= 15 else 'warn' }}">
+                            {{ "%.1f"|format(stock.roe) if stock.roe is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">负债率</div>
+                        <div class="value {{ 'good' if stock.debt_ratio is not none and stock.debt_ratio < 40 else 'warn' }}">
+                            {{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">营收增长</div>
+                        <div class="value {{ 'good' if stock.revenue_growth is not none and stock.revenue_growth >= 10 else 'warn' }}">
+                            {{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">利润增长</div>
+                        <div class="value {{ 'good' if stock.profit_growth is not none and stock.profit_growth >= 10 else 'warn' }}">
+                            {{ "%.1f"|format(stock.profit_growth) if stock.profit_growth is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">市值</div>
+                        <div class="value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}亿</div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">毛利率</div>
+                        <div class="value {{ 'good' if stock.gross_margin is not none and stock.gross_margin >= 30 else ('warn' if stock.gross_margin is not none and stock.gross_margin >= 15 else 'bad') }}">
+                            {{ "%.1f"|format(stock.gross_margin) if stock.gross_margin is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">净利率</div>
+                        <div class="value {{ 'good' if stock.net_margin is not none and stock.net_margin >= 15 else ('warn' if stock.net_margin is not none and stock.net_margin >= 5 else 'bad') }}">
+                            {{ "%.1f"|format(stock.net_margin) if stock.net_margin is not none else '--' }}%
+                        </div>
+                    </div>
+                    <div class="metric-cell">
+                        <div class="label">OCF/股</div>
+                        <div class="value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else 'bad' }}">
+                            {{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}
+                        </div>
+                    </div>
+                    {% if stock._summary and stock._summary.data_years %}
+                    <div class="metric-cell history-cell">
+                        <div class="label">5y/10y 历史 <span class="hist-badge">{{ stock._summary.data_years }}</span></div>
+                        <div class="value" style="font-size:11px; line-height:1.6;">
+                            ROE: {{ "%.1f"|format(stock._summary.roe_5y_avg) if stock._summary.roe_5y_avg else '--' }}%
+                            {% if stock._summary.roe_10y_avg %} / {{ "%.1f"|format(stock._summary.roe_10y_avg) }}%{% endif %}
+                            {% if stock._summary.roe_improvement %} {% if stock._summary.roe_improvement > 2 %}&#8679;{% else %}&#8594;{% endif %}{{ "%.1f"|format(stock._summary.roe_improvement) }}{% endif %}
+                            {% if stock._summary.intcov_5y_avg %} | 利息覆盖: {{ "%.1f"|format(stock._summary.intcov_5y_avg) }}x{% endif %}
+                            {% if stock._summary.fcf_5y_sum %} | 5yFCF: {{ "%.1f"|format(stock._summary.fcf_5y_sum / 1e8) }}亿{% endif %}
+                            {% if stock._summary.fcf_10y_sum %} / 10y: {{ "%.1f"|format(stock._summary.fcf_10y_sum / 1e8) }}亿{% endif %}
+                            {% if stock._summary.fcf_positive_years_10 %} | FCF+: {{ stock._summary.fcf_positive_years_10 }}/10{% endif %}
+                            {% if stock._summary.share_dilution_5y %} | 稀释5y: {{ "%.1f"|format(stock._summary.share_dilution_5y) }}%{% endif %}
+                            {% if stock._summary.share_dilution_10y %} / 10y: {{ "%.1f"|format(stock._summary.share_dilution_10y) }}%{% endif %}
+                            {% if stock._summary.roe_volatility %} | 波&sigma;: {{ "%.1f"|format(stock._summary.roe_volatility) }}{% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if stock.reason %}
+            <div class="stock-reason">{{ stock.reason }}</div>
+            {% endif %}
+
+            {% if stock.ai_parsed %}
+            <div class="ai-section">
+                <div class="ai-tabs">
+                    <button class="ai-tab" onclick="switchTab(this, 'analysis-{{ stock.code }}')">分析</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'strategy-{{ stock.code }}')">策略</button>
+                    <button class="ai-tab" onclick="switchTab(this, 'risks-{{ stock.code }}')">风险</button>
+                    <button class="ai-tab active" onclick="switchTab(this, 'trade-{{ stock.code }}')">交易</button>
+                </div>
+
+                <div id="analysis-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
+                    <div class="ai-text">{{ stock.ai_parsed.analysis }}</div>
+                </div>
+
+                <div id="strategy-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
+                    <div class="ai-text">{{ stock.ai_parsed.investment_strategy }}</div>
+                </div>
+
+                <div id="risks-{{ stock.code }}" class="ai-panel tab-content" style="display:none;">
+                    <div class="ai-text">{{ stock.ai_parsed.reverse_thinking if stock.ai_parsed.reverse_thinking else '无逆向分析数据' }}</div>
+                    {% if stock.mirror_counts %}
+                    <div style="margin-top:8px;padding:8px;background:var(--gold-bg);border-radius:var(--radius-sm);font-size:11px;">
+                        镜子测试: {{ stock.mirror_counts }} 句含转折词
+                        {% if stock.mirror_total > 2 %}<span style="color:var(--red);font-weight:500;"> 超2句, 违反纪律</span>{% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div id="trade-{{ stock.code }}" class="ai-panel tab-content" style="display:block;">
+                    {% if stock.trade_parsed %}
+                    <div class="trade-grid">
+                        <div class="trade-cell trade-signal">
+                            <div class="label">信号</div>
+                            {% set signal = stock.trade_parsed.signal|upper if stock.trade_parsed.signal else '--' %}
+                            {% if signal == 'BUY' %}
+                            <div class="value signal-buy">买入</div>
+                            {% elif signal == 'HOLD' %}
+                            <div class="value signal-hold">持有</div>
+                            {% elif signal == 'AVOID' %}
+                            <div class="value signal-avoid">回避</div>
+                            {% else %}
+                            <div class="value">{{ signal }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">置信度</div>
+                            <div class="value">{{ stock.trade_parsed.confidence if stock.trade_parsed.confidence else '--' }}</div>
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">买入区间</div>
+                            <div class="value">{{ stock.trade_parsed.buy_zone }}</div>
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">目标价</div>
+                            <div class="value">{{ stock.trade_parsed.target_price }}</div>
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">止损</div>
+                            <div class="value">{{ stock.trade_parsed.stop_loss }}</div>
+                        </div>
+                        <div class="trade-cell">
+                            <div class="label">止盈</div>
+                            <div class="value">{{ stock.trade_parsed.take_profit }}</div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if stock.analysis_history and stock.analysis_history|length > 0 %}
+            <div class="history-bar">
+                <button class="history-toggle" onclick="toggleHistory('{{ stock.code }}')">
+                    &#128214; 历史分析 ({{ stock.analysis_history|length }}次)
+                </button>
+                <div id="hist-{{ stock.code }}" class="history-list" style="display:none;">
+                    {% for h in stock.analysis_history %}
+                    <div>
+                    <div class="history-item" onclick="toggleHistDetail('{{ stock.code }}-{{ loop.index0 }}')">
+                        <span class="hist-date">{{ h.analysis_date }}</span>
+                        <span class="hist-score">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>
+                        {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                        <span class="hist-status" style="color:var(--color-up);">有分析</span>
+                        {% else %}
+                        <span class="hist-status" style="color:var(--text-tertiary);">已尝试</span>
+                        {% endif %}
+                    </div>
+                    {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail" style="display:none;">
+                        <div class="hd-panel">
+                            <div style="font-size:12px;line-height:1.6;">
+                                <strong>分析</strong><br>{{ h.hist_analysis[:300] }}{% if h.hist_analysis|length > 300 %}…{% endif %}
+                                <br><br>
+                                <strong>策略</strong><br>{{ h.hist_strategy }}
+                                <br><br>
+                                {% if h.hist_trade and h.hist_trade is mapping %}
+                                <strong>信号</strong>
+                                <span style="{% if h.hist_trade.signal == 'BUY' %}color:var(--color-up);font-weight:600;{% elif h.hist_trade.signal == 'AVOID' %}color:var(--red);font-weight:600;{% else %}color:var(--gold);font-weight:600;{% endif %}">
+                                    {% if h.hist_trade.signal == 'BUY' %}买入{% elif h.hist_trade.signal == 'HOLD' %}持有{% elif h.hist_trade.signal == 'AVOID' %}回避{% else %}{{ h.hist_trade.signal }}{% endif %}
+                                </span>
+                                — 置信度: {{ h.hist_trade.confidence }}
+                                &nbsp;|&nbsp; 买入: {{ h.hist_trade.buy_zone }}
+                                &nbsp;|&nbsp; 目标: {{ h.hist_trade.target_price }}
+                                &nbsp;|&nbsp; 止损: {{ h.hist_trade.stop_loss }}
+                                {% endif %}
+                                {% if h.hist_mirror %}
+                                <br><br>
+                                <span style="font-size:11px;color:var(--text-tertiary);">[镜子: {{ h.hist_mirror }}]</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+{% endfor %}

@@ -508,6 +508,16 @@ class AiAnalyzer:
             roe_roic_gap_line=roe_roic_gap_line,
             fcf_yield_10y=fcf_yield_10y,
         )
+        # 注入历史分析摘要（仅当有历史记录时追加）
+        history_summary = _build_history_summary(stock.get('code', ''))
+        if history_summary:
+            prompt += (
+                "\n\n" + history_summary +
+                "\n\n在本次分析中，关注以下问题："
+                "\n1. 你过往的判断是否仍然成立？哪些条件变了？"
+                "\n2. 过去哪次判断被市场验证了、哪次被打脸了？"
+                "\n3. 本次结论相比之前是否有转变？为什么？"
+            )
 
         content, used_model = self._call_llm(prompt)
         if not content:
@@ -665,6 +675,51 @@ class AiAnalyzer:
 
 
 # ── 批量分析 ──
+
+def _build_history_summary(stock_code: str, limit: int = 3) -> str:
+    """从 stock_analysis_history 提取历史关键行摘要。
+    
+    每条压缩为一行：日期 + Signal(置信度) | 核心判断第一句
+    目标 ~150 tokens，避免 prompt 膨胀。
+    """
+    import json
+    from src.models.database import StockAnalysisHistoryDAO
+
+    records = StockAnalysisHistoryDAO().get_history(stock_code, limit=limit)
+    if not records:
+        return ""
+
+    lines = []
+    for r in records:
+        date = (r.get('analysis_date') or '')[:10]
+        trade_str = r.get('ai_trade_strategy', '{}')
+        try:
+            trade = json.loads(trade_str) if isinstance(trade_str, str) else trade_str
+        except (json.JSONDecodeError, TypeError):
+            trade = {}
+        signal = trade.get('signal', '--')
+        confidence = trade.get('confidence', '')
+
+        # 从 ai_analysis 提取第一句作为核心判断
+        analysis = r.get('ai_analysis', '')
+        core = ''
+        try:
+            parsed = json.loads(analysis) if isinstance(analysis, str) else analysis
+            if isinstance(parsed, dict):
+                text = str(parsed.get('analysis', ''))
+            else:
+                text = str(analysis)
+            core = text.strip().split('\n')[0][:80] if text else ''
+        except (json.JSONDecodeError, TypeError, IndexError):
+            pass
+
+        conf_str = f"({confidence})" if confidence else ""
+        lines.append(f"  {date} {signal}{conf_str} | {core}")
+
+    if not lines:
+        return ""
+    return "【过往分析记录】\n" + "\n".join(lines)
+
 
 def _save_analysis(stock: dict, result: dict, run_id: str):
     """把 AI 分析结果写入 screening_result 与 stock_analysis_history。"""

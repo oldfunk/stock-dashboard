@@ -6,89 +6,76 @@
     <title>{{ page_title }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* ========== Design Tokens ========== */
         :root {
             --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 
-            --bg: #ffffff;
-            --bg-alt: #fafafa;
-            --bg-muted: #f5f5f5;
-            --bg-border: #e8e8e8;
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --bg-hover: #e8eaed;
 
-            --fg: #1a1a1a;
-            --fg-muted: #666666;
-            --fg-subtle: #999999;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
 
-            --accent: #1a1a1a;
-            --accent-hover: #333333;
-            --accent-muted: #f0f0f0;
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --accent-soft: #e8f0fe;
 
-            --green: #166534;
-            --green-bg: #f0fdf4;
-            --red: #991b1b;
-            --red-bg: #fef2f2;
-            --amber: #92400e;
-            --amber-bg: #fffbeb;
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+            --color-warn: var(--gold);
 
+            /* Color scheme: 红涨绿跌 (cn, default) */
             --color-up: var(--red);
             --color-up-bg: var(--red-bg);
             --color-down: var(--green);
             --color-down-bg: var(--green-bg);
 
-            --border: #e5e5e5;
-            --border-light: #f0f0f0;
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
 
             --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
-            --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
-            --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
-
-            --radius: 6px;
-            --radius-lg: 8px;
-
-            --transition: 150ms ease;
-
-            --sidebar-w: 280px;
-            --header-h: 56px;
-            --gap: 12px;
+            --radius: 8px;
+            --radius-sm: 4px;
         }
 
         [data-theme="dark"] {
-            --bg: #0f0f0f;
-            --bg-alt: #171717;
-            --bg-muted: #1f1f1f;
-            --bg-border: #2a2a2a;
+            --bg-primary: #1a1c1e;
+            --bg-secondary: #202124;
+            --bg-tertiary: #282a2d;
+            --bg-hover: #303134;
 
-            --fg: #fafafa;
-            --fg-muted: #a3a3a3;
-            --fg-subtle: #737373;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --text-tertiary: #5f6368;
 
-            --accent: #e5e5e5;
-            --accent-hover: #d4d4d4;
-            --accent-muted: #262626;
+            --accent: #8ab4f8;
+            --accent-hover: #aecbfa;
+            --accent-soft: #1a3a5c;
 
-            --green: #4ade80;
-            --green-bg: #14532d;
-            --red: #f87171;
-            --red-bg: #7f1d1d;
-            --amber: #fbbf24;
-            --amber-bg: #78350f;
+            --green: #81c995;
+            --green-bg: #1e3527;
+            --red: #f28b82;
+            --red-bg: #3c2022;
+            --gold: #fdd663;
+            --gold-bg: #3d2e00;
 
-            --color-up: var(--green);
-            --color-up-bg: var(--green-bg);
-            --color-down: var(--red);
-            --color-down-bg: var(--red-bg);
+            --divider: #3c4043;
+            --divider-thin: #303134;
 
-            --border: #2a2a2a;
-            --border-light: #1f1f1f;
-
-            --shadow: 0 1px 3px rgba(0,0,0,0.3);
-            --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-            --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+            --shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
 
+        /* Color scheme: 绿涨红跌 (Western) */
         [data-color-scheme="us"] {
             --color-up: var(--green);
             --color-up-bg: var(--green-bg);
@@ -96,427 +83,1253 @@
             --color-down-bg: var(--red-bg);
         }
 
-        /* ========== Reset ========== */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        html, body { height: 100%; }
+        /* ========== Base ========== */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-            font-size: 13px;
-            line-height: 1.55;
-            background: var(--bg);
-            color: var(--fg);
+            font-family: var(--font-sans);
+            font-weight: 400;
+            font-size: 14px;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            overflow: hidden;
+            transition: background 0.2s, color 0.2s;
         }
 
         /* ========== Layout ========== */
         .app {
-            display: grid;
-            grid-template-rows: 56px 1fr;
-            grid-template-columns: 1fr;
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px 32px;
         }
 
+        /* ========== Header ========== */
         .header {
-            grid-row: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 24px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 16px;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+
+        .header-subtitle {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
+        }
+
+        .header-right {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 0 16px;
-            background: var(--bg);
-            border-bottom: 1px solid var(--bg-border);
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            gap: 12px;
         }
 
-        .header-left { display: flex; align-items: center; gap: 12px; }
-        .header-title { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
-        .header-sub { font-size: 10px; font-weight: 400; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.06em; }
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
 
-        .header-right { display: flex; align-items: center; gap: 8px; }
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
 
-        .live-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 500; color: var(--green); text-transform: uppercase; letter-spacing: 0.06em; }
-        .live-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--green); animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
 
-        .icon-btn { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: transparent; border: none; border-radius: 4px; color: var(--fg-muted); cursor: pointer; transition: background 120ms, color 120ms; }
-        .icon-btn:hover { background: var(--bg-muted); color: var(--fg); }
-        .icon-btn svg { width: 16px; height: 16px; }
+        .theme-toggle {
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1;
+            transition: background 0.15s, color 0.15s;
+        }
 
-        .main { grid-row: 2; display: grid; grid-template-columns: 1fr 280px; grid-template-rows: 1fr; height: calc(100vh - 56px); overflow: hidden; }
-        @media (max-width: 1000px) { .main { grid-template-columns: 1fr; } }
+        .theme-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
 
-        .dashboard { grid-column: 1; overflow-y: auto; padding: 12px 16px 12px 20px; background: var(--bg); }
+        .last-updated {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-weight: 400;
+        }
 
         /* ========== Market Row ========== */
-        .market-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--bg-border); }
-        .market-item { background: var(--bg); border: 1px solid var(--bg-border); border-radius: 6px; padding: 8px 10px; }
-        .market-name { font-size: 9px; font-weight: 500; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
-        .market-value { font-size: 16px; font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-        .market-change { font-size: 10px; font-weight: 500; margin-top: 2px; }
+        .market-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+            padding: 16px 0;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+
+        .market-item {
+            padding: 10px 0;
+        }
+
+        .market-name {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 2px;
+        }
+
+        .market-value {
+            font-size: 21px;
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        .market-change {
+            font-size: 12px;
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
         .market-change.up { color: var(--color-up); }
         .market-change.down { color: var(--color-down); }
 
-        /* ========== Module Grid ========== */
-        .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-        @media (max-width: 900px) { .module-grid { grid-template-columns: 1fr; } }
+        .price-change .up { color: var(--color-up); font-size: 11px; }
+        .price-change .down { color: var(--color-down); font-size: 11px; }
 
-        /* ========== Module Card ========== */
-        .module { background: var(--bg); border: 1px solid var(--bg-border); border-radius: 8px; overflow: hidden; transition: box-shadow 150ms, border-color 150ms; }
-        .module:hover { box-shadow: var(--shadow-md); border-color: var(--border); }
+        /* ========== Status Bar ========== */
+        .status-bar {
+            display: flex;
+            gap: 24px;
+            padding: 10px 0;
+            margin-bottom: 24px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--divider-thin);
+        }
 
-        .module-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--bg-muted); border-bottom: 1px solid var(--bg-border); cursor: pointer; user-select: none; }
-        .module-header:hover { background: var(--bg-border); }
-        .module-title { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; color: var(--fg); }
-        .module-title .icon { font-size: 13px; color: var(--fg-muted); }
-        .module-actions { display: flex; align-items: center; gap: 2px; }
-        .collapse-btn { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 3px; color: var(--fg-subtle); cursor: pointer; transition: transform 120ms, color 120ms; }
-        .module.collapsed .collapse-btn { transform: rotate(-90deg); }
-        .collapse-btn:hover { color: var(--fg); background: var(--bg-border); }
-        .signal-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 100px; font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
-        .signal-badge.buy { background: var(--color-up-bg); color: var(--color-up); }
-        .signal-badge.hold { background: var(--amber-bg); color: var(--amber); }
-        .signal-badge.avoid { background: var(--color-down-bg); color: var(--color-down); }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
 
-        .module-body { padding: 10px 12px; transition: max-height 200ms ease, opacity 150ms, padding 150ms; overflow: hidden; }
-        .module.collapsed .module-body { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; pointer-events: none; }
+        .status-label {
+            color: var(--text-tertiary);
+            font-weight: 400;
+        }
 
-        /* ========== Trade Module (Priority) ========== */
-        .trade-module { grid-column: 1 / -1; }
-        .trade-module .module-header { background: var(--accent-muted); }
-        .trade-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
-        .trade-cell { background: var(--bg-muted); border: 1px solid var(--bg-border); border-radius: 6px; padding: 10px; }
-        .trade-cell .label { font-size: 9px; font-weight: 500; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
-        .trade-cell .value { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.4; color: var(--fg); }
-        .trade-cell.signal .value { font-size: 13px; font-weight: 600; }
+        .status-value {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
 
-        /* ========== Stock Card ========== */
-        .stock-card { background: var(--bg); border: 1px solid var(--bg-border); border-radius: 8px; overflow: hidden; transition: box-shadow 150ms, border-color 150ms, transform 120ms; }
-        .stock-card:hover { box-shadow: var(--shadow-md); border-color: var(--border); transform: translateY(-1px); }
+        /* ========== Progress Bars ========== */
+        .progress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .progress-bar {
+            margin-bottom: 0;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        .progress-label { font-weight: 500; color: var(--text-primary); }
+        .progress-count { color: var(--text-secondary); }
+        .progress-track {
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--green), #34a853);
+            border-radius: 3px;
+            transition: width 1s ease;
+        }
+        .progress-stage {
+            margin-top: 4px;
+            color: var(--text-tertiary);
+            font-size: 11px;
+        }
 
-        .stock-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--bg-muted); border-bottom: 1px solid var(--bg-border); }
-        .stock-identity { min-width: 0; }
-        .stock-code { font-size: 9px; font-weight: 500; color: var(--fg-subtle); letter-spacing: 0.04em; margin-bottom: 1px; }
-        .stock-name { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.3; }
-        .stock-score { display: inline-flex; align-items: center; padding: 1px 6px; background: var(--bg); border-radius: 100px; font-size: 10px; font-weight: 500; color: var(--fg-muted); margin-top: 4px; }
-        .stock-price { display: flex; flex-direction: column; gap: 1px; min-width: 70px; text-align: right; }
-        .price-current { font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
-        .price-change { font-size: 10px; font-weight: 500; }
-        .price-change.up { color: var(--color-up); }
-        .price-change.down { color: var(--color-down); }
+        /* ========== Section Header ========== */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0 8px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
 
-        .stock-metrics { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 1px; }
-        .metric { min-width: 60px; flex: 1 1 60px; }
-        .metric-label { font-size: 8px; font-weight: 500; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 1px; }
-        .metric-value { font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--fg); line-height: 1.3; }
-        .metric-value.good { color: var(--green); }
-        .metric-value.warn { color: var(--amber); }
-        .metric-value.bad { color: var(--red); }
-        .stock-price { display: flex; flex-direction: column; gap: 1px; min-width: 70px; text-align: right; }
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
 
-        .stock-body { padding: 8px 12px; }
-        .stock-reason { font-size: 10px; color: var(--fg-subtle); line-height: 1.5; padding-top: 8px; border-top: 1px solid var(--bg-border); margin-top: 6px; }
+        .section-count {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
+        }
 
-        /* ========== Collapsible Sections ========== */
-        .analysis-sections { margin-top: 8px; border-top: 1px solid var(--bg-border); padding-top: 8px; }
-        .section-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; background: var(--bg-muted); border: 1px solid var(--bg-border); border-radius: 6px; font-size: 11px; font-weight: 400; color: var(--fg-muted); cursor: pointer; transition: background 100ms; }
-        .section-toggle:hover { background: var(--bg-border); }
-        .section-toggle .arrow { font-size: 9px; transition: transform 100ms, color 100ms; color: var(--fg-subtle); }
-        .section-toggle.open .arrow { transform: rotate(90deg); color: var(--fg); }
-        .section-content { padding: 8px 0 2px; overflow: hidden; transition: max-height 200ms ease, opacity 150ms, padding 150ms; }
-        .section-content.collapsed { max-height: 0; opacity: 0; padding: 0; pointer-events: none; }
-        .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
-        .section-item { background: var(--bg-muted); border: 1px solid var(--bg-border); border-radius: 6px; padding: 8px 10px; }
-        .section-item .label { font-size: 9px; font-weight: 500; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
-        .section-item .value { font-size: 11px; font-weight: 400; color: var(--fg); line-height: 1.4; }
-        .trade-section .section-toggle { background: var(--accent-muted); color: var(--accent); }
+        /* ========== Stock Cards ========== */
+        .stock-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
 
-        /* ========== Sidebar ========== */
-        .sidebar { grid-column: 2; background: var(--bg); border-left: 1px solid var(--bg-border); overflow-y: auto; padding: 12px; position: sticky; top: 56px; height: calc(100vh - 56px); }
-        @media (max-width: 1000px) { .sidebar { display: none; } }
+        .stock-card {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            transition: background 0.15s;
+        }
 
-        .sidebar-section { margin-bottom: 14px; }
-        .sidebar-title { font-size: 10px; font-weight: 500; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--bg-border); }
+        .stock-card:hover {
+            background: var(--bg-hover);
+        }
 
-        .progress-module { background: var(--bg-muted); border: 1px solid var(--bg-border); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
-        .progress-label { display: flex; justify-content: space-between; font-size: 10px; font-weight: 400; color: var(--fg-muted); margin-bottom: 4px; }
-        .progress-track { height: 4px; background: var(--bg-border); border-radius: 2px; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 200ms ease; }
-        .progress-count { font-size: 9px; color: var(--fg-subtle); margin-top: 3px; text-align: right; }
+        .stock-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+        }
 
-        .live-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 9px; font-weight: 500; color: var(--green); text-transform: uppercase; letter-spacing: 0.06em; }
-        .live-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--green); animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .stock-info {
+            flex: 0 0 180px;
+        }
 
-        /* ========== Knowledge Panel ========== */
+        .stock-code {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            letter-spacing: 0.02em;
+            margin-bottom: 1px;
+        }
+
+        .stock-name {
+            font-size: 17px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+            line-height: 1.3;
+        }
+
+        .stock-score {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            display: inline-block;
+            margin-top: 4px;
+        }
+
+        .stock-metrics {
+            flex: 1;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding-top: 2px;
+        }
+
+        .metric-cell {
+            min-width: 56px;
+        }
+
+        .metric-cell .label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .metric-cell .value {
+            font-size: 15px;
+            font-weight: 400;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+            margin-top: 1px;
+        }
+
+        .metric-cell .value.good { color: var(--green); }
+        .metric-cell .value.warn { color: var(--gold); }
+        .metric-cell .value.bad { color: var(--red); }
+        .hist-badge {
+            display: inline-block;
+            font-size: 9px;
+            background: var(--accent);
+            color: var(--bg);
+            padding: 0 4px;
+            border-radius: 3px;
+            margin-left: 2px;
+        }
+        .history-cell .value { font-size: 11px !important; white-space: nowrap; }
+
+        .stock-reason {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        /* ========== AI Section ========== */
+        .ai-section {
+            margin-top: 8px;
+            padding-top: 10px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        .ai-tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .ai-tab {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 3px 0;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        .ai-tab:hover {
+            color: var(--text-secondary);
+        }
+
+        .ai-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .ai-panel {
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        .ai-panel p {
+            margin-bottom: 6px;
+        }
+
+        .ai-panel strong {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .ai-text {
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }
+
+        .trade-signal {
+            grid-column: span 2;
+        }
+        .signal-buy {
+            color: var(--color-up) !important;
+            font-weight: 600;
+            font-size: 14px !important;
+        }
+        .signal-hold {
+            color: var(--color-warn) !important;
+            font-weight: 600;
+            font-size: 14px !important;
+        }
+        .signal-avoid {
+            color: var(--color-down) !important;
+            font-weight: 600;
+            font-size: 14px !important;
+        }
+
+        .trade-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 9px;
+        }
+
+        .trade-cell {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+        }
+
+        .trade-cell .label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 3px;
+        }
+
+        .trade-cell .value {
+            font-size: 12px;
+            color: var(--text-primary);
+            line-height: 1.4;
+        }
+
+        /* ========== Empty State ========== */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        .empty-state .icon {
+            font-size: 32px;
+            color: var(--text-tertiary);
+            margin-bottom: 12px;
+        }
+
+        .empty-state h2 {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .empty-state p {
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        /* ========== Dashboard Layout (2-column) ========== */
+        .dashboard-layout {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+        .dashboard-main { flex: 1; min-width: 0; }
+        .knowledge-panel {
+            width: 320px;
+            flex-shrink: 0;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px;
+            position: sticky;
+            top: 12px;
+        }
+        .knowledge-panel h3 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
         .kp-section { margin-bottom: 10px; }
-        .kp-title { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 400; color: var(--fg-muted); cursor: pointer; user-select: none; }
-        .kp-title .arrow { font-size: 8px; transition: transform 100ms; color: var(--fg-subtle); }
+        .kp-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+        .kp-title:hover { opacity: 0.8; }
+        .kp-title .arrow { font-size: 10px; transition: transform 0.15s; }
         .kp-title.open .arrow { transform: rotate(90deg); }
-        .kp-body { display: none; margin-top: 4px; font-size: 11px; line-height: 1.55; color: var(--fg-muted); }
+        .kp-body {
+            display: none;
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
         .kp-body.open { display: block; }
-        .kp-body .good { color: var(--green); font-weight: 400; }
-        .kp-body .warn { color: var(--amber); font-weight: 400; }
-        .kp-body .bad { color: var(--red); font-weight: 400; }
-        .kp-body ul { margin: 3px 0; padding-left: 14px; }
-        .kp-body li { margin-bottom: 1px; }
+        .kp-body .good { color: var(--green); font-weight: 500; }
+        .kp-body .warn { color: var(--gold); font-weight: 500; }
+        .kp-body .bad { color: var(--red); font-weight: 500; }
+        .kp-body ul { margin: 4px 0; padding-left: 16px; }
+        .kp-body li { margin-bottom: 2px; }
+        @media (max-width: 900px) {
+            .dashboard-layout { flex-direction: column; }
+            .knowledge-panel { width: 100%; position: static; }
+        }
 
-        /* ========== Scrollbar ========== */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; border: 2px solid var(--bg); }
-        ::-webkit-scrollbar-thumb:hover { background: var(--fg-subtle); }
+        /* ========== History Bar ========== */
+        .history-bar {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--divider-thin);
+        }
 
-        /* ========== Animations ========== */
-        @keyframes slideIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        .module { animation: slideIn 200ms ease-out both; }
-        .module:nth-child(1) { animation-delay: 0ms; }
-        .module:nth-child(2) { animation-delay: 20ms; }
-        .module:nth-child(3) { animation-delay: 40ms; }
-        .module:nth-child(4) { animation-delay: 60ms; }
-        .module:nth-child(5) { animation-delay: 80ms; }
+        .history-toggle {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 2px 0;
+            transition: color 0.15s;
+        }
+
+        .history-toggle:hover {
+            color: var(--text-secondary);
+        }
+
+        .history-list {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .history-item {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 3px 6px;
+            border-radius: var(--radius-sm);
+            transition: background 0.1s;
+        }
+        .history-item:hover { background: var(--bg-hover); }
+
+        .history-detail {
+            display: none;
+            margin: 4px 0 6px 0;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+        .history-detail.open { display: block; }
+        .history-detail .hd-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .history-detail .hd-tab {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .history-detail .hd-tab:hover { color: var(--text-secondary); }
+        .history-detail .hd-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .history-detail .hd-panel { display: none; }
+        .history-detail .hd-panel.open { display: block; }
+        .history-detail .trade-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .history-detail .trade-cell {
+            background: var(--bg-secondary);
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+        }
+        .history-detail .trade-cell .label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .history-detail .trade-cell .value {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+
+        .hist-date {
+            font-weight: 500;
+            color: var(--text-primary);
+            min-width: 80px;
+        }
+
+        .hist-score {
+            color: var(--text-tertiary);
+            min-width: 60px;
+        }
+
+        .hist-status {
+            font-size: 10px;
+        }
+
+        /* ========== Footer ========== */
+        .footer {
+            text-align: center;
+            padding: 24px 0 12px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            border-top: 1px solid var(--divider-thin);
+            margin-top: 32px;
+        }
 
         /* ========== Responsive ========== */
-        @media (max-width: 1200px) { :root { --sidebar-w: 240px; } }
-        @media (max-width: 1000px) { .main { grid-template-columns: 1fr; } .sidebar { display: none; } }
-        @media (max-width: 700px) {
-            .header { padding: 0 12px; }
-            .dashboard { padding: 10px; }
-            .trade-grid { grid-template-columns: 1fr 1fr; }
-        }
-        @media (max-width: 500px) {
-            .trade-grid { grid-template-columns: 1fr; }
-            .market-row { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 1100px) {
+            .market-row { grid-template-columns: repeat(4, 1fr); }
         }
 
-        /* ========== Loading Shimmer ========== */
-        .shimmer { background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-border) 50%, var(--bg-muted) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        @media (max-width: 900px) {
+            .app { padding: 16px; }
+            .market-row { grid-template-columns: repeat(3, 1fr); gap: 12px; }
+            .stock-row { flex-direction: column; }
+            .stock-info { flex: none; }
+            .stock-metrics { gap: 12px; }
+            .trade-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+            .market-item { flex: 1 1 100%; }
+            .status-bar { flex-wrap: wrap; gap: 8px; }
+            .header-title { font-size: 15px; }
+        }
+
+        /* ========== Loading shimmer ========== */
+        .shimmer {
+            width: 100%;
+            height: 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+        }
     </style>
 </head>
 <body>
 <div class="app" id="app">
+    <!-- Header -->
     <header class="header">
         <div class="header-left">
             <h1 class="header-title">{{ page_title }}</h1>
-            <span class="header-sub">Value Investing Dashboard</span>
+            <span class="header-subtitle">A股价值投资</span>
         </div>
         <div class="header-right">
-            <div class="live-badge"><span class="live-dot"></span><span>Live</span></div>
+            <div class="live-indicator">
+                <span class="live-dot"></span>
+                <span>实时</span>
+            </div>
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
-            <button class="icon-btn" onclick="toggleTheme()" id="themeToggle" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-            </button>
-            <button class="icon-btn" onclick="toggleColorScheme()" id="colorToggle" title="Toggle color scheme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            </button>
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
+            <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
     </header>
 
-    <main class="main">
-        <section class="dashboard" id="dashboard">
-            <div class="market-row" id="marketRow">
-                {% if indices %}
-                {% for idx in indices %}
-                <div class="market-item">
-                    <div class="market-name">{{ idx.index_name }}</div>
-                    <div class="market-value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
-                    <div class="market-change {{ 'up' if idx.change_percent is not none and idx.change_percent >= 0 else 'down' }}">{{ "%+.2f"|format(idx.change_percent) if idx.change_percent is not none else '--' }}%</div>
-                </div>
-                {% endfor %}
-                {% else %}
-                <div class="market-item"><div class="market-name">Loading</div><div class="market-value">--</div><div class="market-change">--</div></div>
-                {% endif %}
+    <!-- Market Indices -->
+    <div class="market-row" id="marketRow">
+        {% if indices %}
+        {% for idx in indices %}
+        <div class="market-item">
+            <div class="market-name">{{ idx.index_name }}</div>
+            <div class="market-value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
+            <div class="market-change {{ 'up' if idx.change_percent is not none and idx.change_percent >= 0 else 'down' }}">
+                {{ "%+.2f"|format(idx.change_percent) if idx.change_percent is not none else '--' }}%
             </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="market-item">
+            <div class="market-name">加载中</div>
+            <div class="market-value">--</div>
+            <div class="market-change">--</div>
+        </div>
+        {% endif %}
+    </div>
 
-            {% if stocks %}
-            <div class="module-grid" id="stockGrid">
-                {% for stock in stocks %}
-                <article class="module stock-card" id="stock-{{ stock.code }}">
-                    <header class="stock-header">
-                        <div class="stock-identity">
-                            <div class="stock-code">{{ stock.code }}</div>
-                            <div class="stock-name">{{ stock.name }}</div>
-                            <span class="stock-score">{{ stock.score }}</span>
-                        </div>
-                        <div class="stock-price">
-                            <div class="price-current" id="price-{{ stock.code }}">{{ "%.2f"|format(stock.current_price) if stock.current_price is not none else '--' }}</div>
-                            <div class="price-change {{ 'up' if stock.change_percent is not none and stock.change_percent >= 0 else 'down' }}" id="chg-{{ stock.code }}">
-                                {% if stock.change_percent is not none %}{{ "%+.2f"|format(stock.change_percent) }}%{% endif %}
-                            </div>
-                        </div>
-                    </header>
+    <!-- Status Bar -->
+    <div class="status-bar" id="statusBar">
+        {% if run_log %}
+        <div class="status-item">
+            <span class="status-label">上次运行</span>
+            <span class="status-value">{{ run_log.start_time[:16] if run_log.start_time else '--' }}</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">状态</span>
+            <span class="status-value" style="color: var(--green);">
+                {{ run_log.status }}
+            </span>
+        </div>
+        {% if run_log.total_stocks %}
+        <div class="status-item">
+            <span class="status-label">全市场</span>
+            <span class="status-value">{{ run_log.total_stocks }} 只</span>
+        </div>
+        {% endif %}
+        {% if run_log.screened_count %}
+        <div class="status-item">
+            <span class="status-label">候选</span>
+            <span class="status-value">{{ run_log.screened_count }}</span>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
 
-                    <div class="stock-body">
-                        <div class="stock-metrics">
-                            <div class="metric"><div class="metric-label">PE</div><div class="metric-value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">{{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}</div></div>
-                            <div class="metric"><div class="metric-label">PB</div><div class="metric-value {{ 'good' if stock.pb is not none and stock.pb < 2 else ('warn' if stock.pb is not none and stock.pb < 3.5 else '') }}">{{ "%.2f"|format(stock.pb) if stock.pb is not none else '--' }}</div></div>
-                            <div class="metric"><div class="metric-label">ROE</div><div class="metric-value {{ 'good' if stock.roe is not none and stock.roe >= 15 else 'warn' }}">{{ "%.1f"|format(stock.roe) if stock.roe is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">Debt</div><div class="metric-value {{ 'good' if stock.debt_ratio is not none and stock.debt_ratio < 40 else 'warn' }}">{{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">Rev Growth</div><div class="metric-value {{ 'good' if stock.revenue_growth is not none and stock.revenue_growth >= 10 else 'warn' }}">{{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">Profit Growth</div><div class="metric-value {{ 'good' if stock.profit_growth is not none and stock.profit_growth >= 10 else 'warn' }}">{{ "%.1f"|format(stock.profit_growth) if stock.profit_growth is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">Market Cap</div><div class="metric-value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}B</div></div>
-                            <div class="metric"><div class="metric-label">Gross Margin</div><div class="metric-value {{ 'good' if stock.gross_margin is not none and stock.gross_margin >= 30 else ('warn' if stock.gross_margin is not none and stock.gross_margin >= 15 else 'bad') }}">{{ "%.1f"|format(stock.gross_margin) if stock.gross_margin is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">Net Margin</div><div class="metric-value {{ 'good' if stock.net_margin is not none and stock.net_margin >= 15 else ('warn' if stock.net_margin is not none and stock.net_margin >= 5 else 'bad') }}">{{ "%.1f"|format(stock.net_margin) if stock.net_margin is not none else '--' }}%</div></div>
-                            <div class="metric"><div class="metric-label">OCF/Share</div><div class="metric-value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else 'bad' }}">{{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}</div></div>
-                        </div>
-
-                        {% if stock.reason %}
-                        <div class="stock-reason">{{ stock.reason }}</div>
-                        {% endif %}
-
-                        {% if stock.ai_parsed %}
-                        <div class="analysis-sections">
-                            <!-- Trade Section (Priority) -->
-                            <div class="section trade-section" id="tradeSection-{{ stock.code }}">
-                                <button class="section-toggle open" onclick="toggleSection(this, 'tradeBody-{{ stock.code }}')"><span>💰 Trade Signal</span><span class="arrow">▼</span></button>
-                                <div class="section-content" id="tradeBody-{{ stock.code }}">
-                                    {% if stock.trade_parsed %}
-                                    <div class="section-grid trade-grid">
-                                        <div class="section-item trade-cell signal"><div class="label">Signal</div>{% set signal = stock.trade_parsed.signal|upper if stock.trade_parsed.signal else '--' %}<div class="value signal-{{ signal|lower }}">{{ signal }}</div></div>
-                                        <div class="section-item trade-cell"><div class="label">Confidence</div><div class="value">{{ stock.trade_parsed.confidence if stock.trade_parsed.confidence else '--' }}</div></div>
-                                        <div class="section-item trade-cell"><div class="label">Buy Zone</div><div class="value">{{ stock.trade_parsed.buy_zone }}</div></div>
-                                        <div class="section-item trade-cell"><div class="label">Target</div><div class="value">{{ stock.trade_parsed.target_price }}</div></div>
-                                        <div class="section-item trade-cell"><div class="label">Stop Loss</div><div class="value">{{ stock.trade_parsed.stop_loss }}</div></div>
-                                        <div class="section-item trade-cell"><div class="label">Take Profit</div><div class="value">{{ stock.trade_parsed.take_profit }}</div></div>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-
-                            <!-- Analysis -->
-                            <div class="section" id="analysisSection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'analysisBody-{{ stock.code }}')"><span>Analysis</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="analysisBody-{{ stock.code }}"><div class="ai-text" style="font-size:12px;line-height:1.7;white-space:pre-wrap;">{{ stock.ai_parsed.analysis }}</div></div>
-                            </div>
-
-                            <!-- Strategy -->
-                            <div class="section" id="strategySection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'strategyBody-{{ stock.code }}')"><span>Strategy</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="strategyBody-{{ stock.code }}"><div class="ai-text" style="font-size:12px;line-height:1.7;white-space:pre-wrap;">{{ stock.ai_parsed.investment_strategy }}</div></div>
-                            </div>
-
-                            <!-- Risks -->
-                            <div class="section" id="risksSection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'risksBody-{{ stock.code }}')"><span>Risks</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="risksBody-{{ stock.code }}"><div class="ai-text" style="font-size:12px;line-height:1.7;white-space:pre-wrap;">{{ stock.ai_parsed.reverse_thinking if stock.ai_parsed.reverse_thinking else 'No risk data' }}</div>
-                                {% if stock.mirror_counts %}<div style="margin-top:8px;padding:8px;background:var(--amber-bg);border-radius:6px;font-size:11px;">镜子测试: {{ stock.mirror_counts }} 句含转折词{% if stock.mirror_total > 2 %}<span style="color:var(--red);font-weight:500;"> 超2句, 违反纪律</span>{% endif %}</div>{% endif %}</div>
-                            </div>
-
-                            <!-- Moat -->
-                            {% if stock.ai_parsed.moat_evaluation %}
-                            <div class="section" id="moatSection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'moatBody-{{ stock.code }}')"><span>Moat Evaluation</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="moatBody-{{ stock.code }}"><div class="section-grid">{% for moat in stock.ai_parsed.moat_evaluation %}<div class="section-item"><div class="label">{{ moat.type }}</div><div class="value">{{ moat.score }}/5 · {{ moat.trend }}</div><div style="font-size:10px;color:var(--fg-subtle);margin-top:3px;">{{ moat.evidence }}</div></div>{% endfor %}</div></div>
-                            </div>
-                            {% endif %}
-
-                            <!-- Management -->
-                            {% if stock.ai_parsed.management_score %}
-                            <div class="section" id="mgmtSection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'mgmtBody-{{ stock.code }}')"><span>Management</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="mgmtBody-{{ stock.code }}"><div class="section-grid"><div class="section-item"><div class="label">Capital Allocation</div><div class="value">{{ stock.ai_parsed.management_score.capital_allocation }}/10</div></div><div class="section-item"><div class="label">Shareholder Friendliness</div><div class="value">{{ stock.ai_parsed.management_score.shareholder_friendliness }}/10</div></div><div class="section-item" style="grid-column:1/-1;"><div class="label">Summary</div><div class="value" style="font-size:11px;">{{ stock.ai_parsed.management_score.summary }}</div></div></div></div>
-                            </div>
-                            {% endif %}
-
-                            <!-- Intrinsic Value -->
-                            {% if stock.ai_parsed.intrinsic_value %}
-                            <div class="section" id="valueSection-{{ stock.code }}">
-                                <button class="section-toggle" onclick="toggleSection(this, 'valueBody-{{ stock.code }}')"><span>Intrinsic Value</span><span class="arrow">▶</span></button>
-                                <div class="section-content collapsed" id="valueBody-{{ stock.code }}"><div class="section-grid"><div class="section-item"><div class="label">Conservative</div><div class="value">{{ stock.ai_parsed.intrinsic_value.conservative }}</div></div><div class="section-item"><div class="label">Base Case</div><div class="value">{{ stock.ai_parsed.intrinsic_value.base_case }}</div></div><div class="section-item"><div class="label">Optimistic</div><div class="value">{{ stock.ai_parsed.intrinsic_value.optimistic }}</div></div><div class="section-item"><div class="label">Margin of Safety</div><div class="value {{ 'good' if stock.ai_parsed.intrinsic_value.margin_of_safety and stock.ai_parsed.intrinsic_value.margin_of_safety|float > 0 else 'bad' }}">{{ stock.ai_parsed.intrinsic_value.margin_of_safety }}</div></div><div class="section-item" style="grid-column:1/-1;"><div class="label">Method</div><div class="value" style="font-size:10px;">{{ stock.ai_parsed.intrinsic_value.method }}</div></div></div></div>
-                            </div>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-
-                        {% if stock.analysis_history and stock.analysis_history|length > 0 %}
-                        <div class="section" id="histSection-{{ stock.code }}">
-                            <button class="section-toggle" onclick="toggleSection(this, 'histBody-{{ stock.code }}')"><span>History ({{ stock.analysis_history|length }})</span><span class="arrow">▶</span></button>
-                            <div class="section-content collapsed" id="histBody-{{ stock.code }}"><div style="display:flex;flex-direction:column;gap:4px;">{% for h in stock.analysis_history %}<div class="history-item" style="display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--bg-muted);border:1px solid var(--bg-border);border-radius:6px;font-size:10px;color:var(--fg-muted);cursor:pointer;" onclick="toggleHistDetail('{{ stock.code }}-{{ loop.index0 }}')"><span class="hist-date" style="font-weight:500;color:var(--fg);min-width:80px;">{{ h.analysis_date }}</span><span class="hist-score" style="min-width:60px;">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>{% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}<span style="color:var(--color-up);">有分析</span>{% else %}<span style="color:var(--fg-subtle);">已尝试</span>{% endif %}</div>{% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}<div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail" style="display:none;padding:10px 12px;background:var(--bg-muted);border:1px solid var(--bg-border);border-radius:6px;font-size:12px;line-height:1.65;color:var(--fg-muted);margin:4px 0 8px 0;"><strong>分析</strong><br>{{ h.hist_analysis[:300] }}{% if h.hist_analysis|length > 300 %}…{% endif %}<br><br><strong>策略</strong><br>{{ h.hist_strategy }}<br><br>{% if h.hist_trade and h.hist_trade is mapping %}<strong>信号</strong><span style="{% if h.hist_trade.signal == 'BUY' %}color:var(--color-up);font-weight:600;{% elif h.hist_trade.signal == 'AVOID' %}color:var(--red);font-weight:600;{% else %}color:var(--amber);font-weight:600;{% endif %}">{{ h.hist_trade.signal }}</span> — 置信度: {{ h.hist_trade.confidence }} &nbsp;|&nbsp; 买入: {{ h.hist_trade.buy_zone }} &nbsp;|&nbsp; 目标: {{ h.hist_trade.target_price }} &nbsp;|&nbsp; 止损: {{ h.hist_trade.stop_loss }}{% endif %}{% if h.hist_mirror %}<br><br><span style="font-size:10px;color:var(--fg-subtle);">[镜子: {{ h.hist_mirror }}]</span>{% endif %}</div>{% endif %}</div>{% endfor %}</div></div>{% endif %}
-                    </div>
-                    {% endfor %}
-                </div>
+    <!-- Pipeline Progress Bars -->
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar" id="dataProgress" style="display:none;">
+            <div class="progress-header">
+                <span class="progress-label">数据采集与筛选</span>
+                <span class="progress-count" id="dataCount"></span>
             </div>
-            {% else %}
-            <div class="empty-state" style="text-align:center;padding:80px 20px;"><div class="icon" style="font-size:32px;color:var(--fg-subtle);margin-bottom:12px;">●</div><h2 style="font-size:16px;font-weight:500;color:var(--fg-muted);margin-bottom:6px;">No screening results yet</h2><p style="font-size:12px;color:var(--fg-subtle);">The daily screening pipeline runs at 15:30 on trading days.<br>Results will appear here automatically once available.</p></div>
-            {% endif %}
-        </section>
-
-        <aside class="sidebar" id="sidebar">
-            <div class="sidebar-section">
-                <div class="sidebar-title">Pipeline Progress</div>
-                <div class="progress-module" id="dataProgress" style="display:none;"><div class="progress-label"><span>数据采集与筛选</span><span id="dataCount"></span></div><div class="progress-track"><div class="progress-fill" id="dataFill" style="width:0%"></div></div><div class="progress-count" id="dataStage"></div></div>
-                <div class="progress-module" id="aiProgress" style="display:none;"><div class="progress-label"><span>AI智能分析</span><span id="aiCount"></span></div><div class="progress-track"><div class="progress-fill" id="aiFill" style="width:0%"></div></div><div class="progress-count" id="aiStage"></div></div>
+            <div class="progress-track">
+                <div class="progress-fill" id="dataFill" style="width:0%"></div>
             </div>
-
-            <div class="sidebar-section">
-                <div class="sidebar-title">价值投资指标指南</div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> PE 市盈率</div><div class="kp-body"><b>含义</b>：股价 ÷ 每股收益。反映回本年限。<br><b>A股价值区间</b>：<span class="good">3~10 低估</span> · <span class="warn">10~20 合理</span> · <span class="bad">>20 偏贵</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> PB 市净率</div><div class="kp-body"><b>含义</b>：股价 ÷ 每股净资产。低于 1 表示"打折买资产"。<br><b>价值区间</b>：<span class="good">< 1.0 破净</span> · <span class="warn">1.0~2.0 合理</span> · <span class="bad">> 3.5 偏贵</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> ROE 净资产收益率</div><div class="kp-body"><b>含义</b>：净利润 ÷ 净资产。衡量股东资本回报效率。<b>巴菲特最看重的指标。</b><br><b>价值区间</b>：<span class="bad">< 5%</span> · <span class="warn">5~10%</span> · <span class="good">10~20% 优秀</span> · <span style="color:var(--accent);">> 20% 卓越</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 资产负债率</div><div class="kp-body"><b>含义</b>：总负债 ÷ 总资产。<br><b>价值区间</b>：<span class="good">< 35% 低杠杆</span> · <span class="warn">35~50% 适中</span> · <span class="bad">> 65% 高风险</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 营收/利润增长率</div><div class="kp-body"><b>含义</b>：同比增长百分比。<br><b>价值区间</b>：<span class="bad">< 0% 衰退</span> · <span class="warn">0~10% 平稳</span> · <span class="good">> 10% 成长</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 毛利率 <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：(营收-成本)÷营收。<br><b>价值区间</b>：<span class="bad">< 15% 无定价权</span> · <span class="warn">15~30% 一般</span> · <span class="good">> 30% 有护城河</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> OCF/股 <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：经营现金流 ÷ 总股本。<br><b>判断</b>：<span class="good">正数</span>有支撑 · <span class="bad">负数</span>警惕纸面利润</div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 净利率 <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：净利润 ÷ 营收。<br><b>价值区间</b>：<span class="bad">< 5%</span> · <span class="warn">5~15%</span> · <span class="good">> 15% 优秀</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 利息覆盖 <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：营业利润 ÷ 利息费用。<br><b>安全区间</b>：<span class="bad">< 2x 危险</span> · <span class="warn">2~5x</span> · <span class="good">> 5x 安全</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> FCF 自由现金流 <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：经营现金流+投资现金流。<br><b>判断</b>：<span class="good">正数</span>造血 · <span class="bad">负数</span>烧钱</div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> ROIC <span style="font-weight:400;color:var(--accent);font-size:10px;">NEW</span></div><div class="kp-body"><b>含义</b>：税后营业利润 ÷ 投入资本。<br><b>价值区间</b>：<span class="bad">< 5%</span> · <span class="warn">5~10%</span> · <span class="good">> 10%</span></div></div>
-                <div class="kp-section"><div class="kp-title" onclick="toggleKP(this)"><span class="arrow">▶</span> 综合评分体系</div><div class="kp-body"><b>0~100 分</b>，五大维度加权：<ul><li><b>ROE 30%</b> — 回报效率</li><li><b>增长 25%</b> — 营收+利润</li><li><b>PE 20%</b> — 估值安全边际</li><li><b>负债 15%</b> — 财务风险</li><li><b>PB 10%</b> — 资产折价</li></ul><span class="good">60+ 优秀</span> · <span class="warn">40~60 良好</span> · <span class="bad">< 40 一般</span></div></div>
+            <div class="progress-stage" id="dataStage"></div>
+        </div>
+        <div class="progress-bar" id="aiProgress" style="display:none;">
+            <div class="progress-header">
+                <span class="progress-label">AI智能分析</span>
+                <span class="progress-count" id="aiCount"></span>
             </div>
-        </aside>
-    </main>
+            <div class="progress-track">
+                <div class="progress-fill" id="aiFill" style="width:0%"></div>
+            </div>
+            <div class="progress-stage" id="aiStage"></div>
+        </div>
+    </div>
 
-    <footer style="grid-row:3;padding:12px;text-align:center;font-size:11px;color:var(--fg-subtle);border-top:1px solid var(--bg-border);background:var(--bg);">Stock Dashboard v2.1 · 数据源: AKShare + 东方财富 + 腾讯行情 · 非投资建议</footer>
+    <!-- Stock Results -->
+    {% if stocks %}
+    <div class="section-header">
+        <span class="section-title">选股结果</span>
+        <span class="section-count">{{ stocks|length }} 只</span>
+    </div>
+
+    <div class="dashboard-layout">
+    <div class="dashboard-main">
+    <div class="stock-list" id="stockList">
+        {% include '_stock_list.html' %}
+    </div>
+    </div><!-- /dashboard-main -->
+
+    <!-- Knowledge Panel -->
+    <aside class="knowledge-panel">
+        <h3>价值投资指标指南</h3>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> PE 市盈率</div>
+            <div class="kp-body">
+                <b>含义</b>：股价 ÷ 每股收益。反映回本年限。<br>
+                <b>A股价值区间</b>：<span class="good">3~10 低估</span> · <span class="warn">10~20 合理</span> · <span class="bad">&gt;20 偏贵</span><br>
+                <ul>
+                    <li>PE &lt; 0 = 亏损，不适用本指标</li>
+                    <li>周期股（铝、煤炭）PE 低时反而是卖点</li>
+                    <li>本看板排除 PE &lt; 3（微利）和 PE &gt; 20（偏贵）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> PB 市净率</div>
+            <div class="kp-body">
+                <b>含义</b>：股价 ÷ 每股净资产。低于 1 表示"打折买资产"。<br>
+                <b>价值区间</b>：<span class="good">&lt; 1.0 破净</span> · <span class="warn">1.0~2.0 合理</span> · <span class="bad">&gt; 3.5 偏贵</span><br>
+                <ul>
+                    <li>轻资产公司（互联网）PB 天然偏高</li>
+                    <li>银行/地产破净很常见，不代表低估</li>
+                    <li>本看板上限 PB ≤ 3.5</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> ROE 净资产收益率</div>
+            <div class="kp-body">
+                <b>含义</b>：净利润 ÷ 净资产。衡量股东资本的回报效率。<b>巴菲特最看重的指标。</b><br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> · <span class="warn">5~10%</span> · <span class="good">10~20% 优秀</span> · <span class="good" style="color:var(--accent);">&gt; 20% 卓越</span><br>
+                <ul>
+                    <li>连续 5 年 ROE &gt; 15% 是优质公司标志</li>
+                    <li>本看板使用东财加权 ROE（ROEJQ），比摊薄 ROE 更保守</li>
+                    <li>筛选门槛 ROE ≥ 5%（适配 A 股整体水平）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 资产负债率</div>
+            <div class="kp-body">
+                <b>含义</b>：总负债 ÷ 总资产。反映财务杠杆和风险水平。<br>
+                <b>价值区间</b>：<span class="good">&lt; 35% 低杠杆</span> · <span class="warn">35~50% 适中</span> · <span class="bad">&gt; 65% 高风险</span><br>
+                <ul>
+                    <li>银行业的负债率天然很高（80%+），不适用此标准</li>
+                    <li>负债率 &lt; 20% 的公司安全边际最高</li>
+                    <li>本看板上限 65%</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 营收/利润增长率</div>
+            <div class="kp-body">
+                <b>含义</b>：同比（YoY）增长百分比。反映公司成长性。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 0% 衰退</span> · <span class="warn">0~10% 平稳</span> · <span class="good">&gt; 10% 成长</span><br>
+                <ul>
+                    <li>价值投资不追求高增长，稳定也有价值</li>
+                    <li>营收增长但利润不增长 → 可能是增收不增利</li>
+                    <li>本看板不要求正增长（允许稳定型价值股）</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 毛利率 <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：（营业收入 - 营业成本）÷ 营业收入。反映定价权和生意质量。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 15% 无定价权</span> · <span class="warn">15~30% 一般</span> · <span class="good">&gt; 30% 有护城河</span><br>
+                <ul>
+                    <li>高毛利率不代表好生意（需要结合ROE和现金流）</li>
+                    <li>Costco 毛利率约 12% 但 ROE 25%+，是薄利高周转的例外</li>
+                    <li>筛选门槛：毛利率 ≥ 15%，低于此值且 ROE &lt; 20% 则排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> OCF/股 <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：经营活动现金流净额 ÷ 总股本。衡量利润的"含金量"。<br>
+                <b>判断</b>：<span class="good">正数</span> — 利润有真金白银支撑 · <span class="bad">负数或为零</span> — 警惕"纸面利润"<br>
+                <ul>
+                    <li>利润 + 经营现金流同时增长 → 高质量的成长</li>
+                    <li>利润持续增长但经营现金流为负 → 警惕应收账款恶化</li>
+                    <li>筛选门槛：经营现金流为负且毛利率 &lt; 30% 或增长 &lt; 20% 则排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 净利率 <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：净利润 - 营业收入。反映定价能力和成本控制。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> &middot; <span class="warn">5~15%</span> &middot; <span class="good">&gt; 15% 优秀</span><br>
+                <ul>
+                    <li>高净利率 + 高OCF = 高利润质量</li>
+                    <li>筛选门槛：5年均净利率 &lt; 5% 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 利息覆盖 <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：营业利润 &divide; 利息费用。衡量付息能力。<br>
+                <b>安全区间</b>：<span class="bad">&lt; 2x 危险</span> &middot; <span class="warn">2~5x</span> &middot; <span class="good">&gt; 5x 安全</span><br>
+                <ul>
+                    <li>&lt; 1x = 利润不够付利息</li>
+                    <li>筛选门槛：5年均利息覆盖 &lt; 2x 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> FCF 自由现金流 <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：经营现金流 + 投资现金流。实际可支配现金。<br>
+                <b>判断</b>：<span class="good">正数</span> 造血 &middot; <span class="bad">负数</span> 烧钱<br>
+                <ul>
+                    <li>持续正FCF是巴菲特最看重的指标</li>
+                    <li>筛选门槛：5年FCF累计 &le; 0 且 &gt; 1亿负值 排除</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> ROIC <span style="font-weight:400;color:var(--accent);font-size:11px;">新</span></div>
+            <div class="kp-body">
+                <b>含义</b>：税后营业利润 &divide; (总资产 - 现金 - 无息负债)。比ROE更纯粹。<br>
+                <b>价值区间</b>：<span class="bad">&lt; 5%</span> &middot; <span class="warn">5~10%</span> &middot; <span class="good">&gt; 10%</span><br>
+                <ul>
+                    <li>ROIC &gt; WACC才能创造价值</li>
+                    <li>数据从AKShare利润表采集</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="kp-section">
+            <div class="kp-title" onclick="toggleKP(this)"><span class="arrow">&#9654;</span> 综合评分体系</div>
+            <div class="kp-body">
+                <b>0~100 分</b>，五大维度加权：<br>
+                <ul>
+                    <li><b>ROE 30%</b> — 回报效率（核心）</li>
+                    <li><b>增长 25%</b> — 营收+利润增长</li>
+                    <li><b>PE 20%</b> — 估值安全边际</li>
+                    <li><b>负债 15%</b> — 财务风险</li>
+                    <li><b>PB 10%</b> — 资产折价</li>
+                </ul>
+                <span class="good">60+ 优秀</span> · <span class="warn">40~60 良好</span> · <span class="bad">&lt; 40 一般</span>
+            </div>
+        </div>
+    </aside>
+    </div><!-- /dashboard-layout -->
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">&#9678;</div>
+        <h2>暂无筛选结果</h2>
+        <p>交易日下午15:30自动运行筛选流水线，<br>结果将在此处自动显示。</p>
+    </div>
+    {% endif %}
+
+    <footer class="footer">
+        Stock Dashboard v2.0 &middot; 数据源: AKShare + 东方财富 + 腾讯行情 &middot; 非投资建议
+    </footer>
 </div>
 
 <script>
-    // Theme
-    const themeToggle=document.getElementById('themeToggle');
-    function getPreferredTheme(){const s=localStorage.getItem('stock-dashboard-theme');if(s)return s;return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
-    function setTheme(t){document.documentElement.setAttribute('data-theme',t);localStorage.setItem('stock-dashboard-theme',t);}
-    function toggleTheme(){const c=document.documentElement.getAttribute('data-theme');setTheme(c==='dark'?'light':'dark');}
-    // Color Scheme
-    const colorToggle=document.getElementById('colorToggle');
-    function getPreferredColorScheme(){const s=localStorage.getItem('stock-dashboard-color');if(s)return s;return 'cn';}
-    function setColorScheme(s){document.documentElement.setAttribute('data-color-scheme',s);localStorage.setItem('stock-dashboard-color',s);}
-    function toggleColorScheme(){const c=document.documentElement.getAttribute('data-color-scheme')||'cn';setColorScheme(c==='cn'?'us':'cn');}
-    setTheme(getPreferredTheme());setColorScheme(getPreferredColorScheme());
+    // ========== Dark Mode ==========
+    const themeToggle = document.getElementById('themeToggle');
 
-    // Section Toggle
-    function toggleSection(btn, bodyId){
-        const body=document.getElementById(bodyId);
-        btn.classList.toggle('open');
-        body.classList.toggle('collapsed');
+    function getPreferredTheme() {
+        const stored = localStorage.getItem('stock-dashboard-theme');
+        if (stored) return stored;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
 
-    // History Detail Toggle
-    function toggleHistDetail(id){
-        const el=document.getElementById('hd-'+id);
-        if(el) el.classList.toggle('open');
+    function setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('stock-dashboard-theme', theme);
+        themeToggle.innerHTML = theme === 'dark' ? '&#9728;' : '&#9681;';
     }
 
-    // Knowledge Panel Toggle
-    function toggleKP(titleEl){
-        const body=titleEl.nextElementSibling;
+    function toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getPreferredTheme());
+
+    // ========== Color Scheme (红涨绿跌 / 绿涨红跌) ==========
+    const colorToggle = document.getElementById('colorToggle');
+
+    function getPreferredColorScheme() {
+        const stored = localStorage.getItem('stock-dashboard-color');
+        if (stored) return stored;
+        return 'cn'; // default: 红涨绿跌
+    }
+
+    function setColorScheme(scheme) {
+        document.documentElement.setAttribute('data-color-scheme', scheme);
+        localStorage.setItem('stock-dashboard-color', scheme);
+        colorToggle.innerHTML = scheme === 'cn' ? '红涨' : '绿涨';
+        colorToggle.title = scheme === 'cn'
+            ? '当前：红涨绿跌（A股），点击切换为绿涨红跌'
+            : '当前：绿涨红跌（美股），点击切换为红涨绿跌';
+    }
+
+    function toggleColorScheme() {
+        const current = document.documentElement.getAttribute('data-color-scheme') || 'cn';
+        setColorScheme(current === 'cn' ? 'us' : 'cn');
+    }
+
+    setColorScheme(getPreferredColorScheme());
+
+    // ========== History Toggle ==========
+    function toggleHistory(code) {
+        var el = document.getElementById('hist-' + code);
+        if (el) {
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
+
+    // ========== History Detail Toggle ==========
+    function toggleHistDetail(id) {
+        var el = document.getElementById('hd-' + id);
+        if (el) {
+            el.classList.toggle('open');
+        }
+    }
+
+    // ========== History Detail Tab Switch ==========
+    function switchHistTab(btn, targetId) {
+        var detail = btn.closest('.history-detail');
+        detail.querySelectorAll('.hd-panel').forEach(function(el) {
+            el.classList.remove('open');
+        });
+        detail.querySelectorAll('.hd-tab').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById(targetId).classList.add('open');
+        btn.classList.add('active');
+    }
+
+    // ========== Knowledge Panel Toggle ==========
+    function toggleKP(titleEl) {
+        var body = titleEl.nextElementSibling;
         titleEl.classList.toggle('open');
         body.classList.toggle('open');
     }
 
-    // Auto-Refresh
-    const REFRESH_INTERVAL=30000;
-    function updateTimestamp(){const el=document.getElementById('lastUpdated');if(el)el.textContent=new Date().toLocaleString('zh-CN',{hour12:false});}
-    function fetchJSON(url){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('GET',url,true);xhr.onload=()=>{if(xhr.status===200){try{resolve(JSON.parse(xhr.responseText));}catch(e){reject(e);}}else{reject(new Error('Status '+xhr.status));}};xhr.onerror=reject;xhr.send();});}
-    function renderIndices(indices){const row=document.getElementById('marketRow');if(!row||!indices||!indices.length)return;row.innerHTML=indices.map(i=>{const cls=i.change_percent!=null&&i.change_percent>=0?'up':'down';const val=i.current_value!=null?i.current_value.toFixed(2):'--';const chg=i.change_percent!=null?(i.change_percent>=0?'+':'')+i.change_percent.toFixed(2)+'%':'--';return'<div class="market-item"><div class="market-name">'+(i.index_name||'Index')+'</div><div class="market-value">'+val+'</div><div class="market-change '+cls+'">'+chg+'</div></div>';}).join('');}
-    function renderStatus(run){const bar=document.getElementById('statusBar');if(!bar)return;if(!run||run.status==='no_runs'){bar.innerHTML='<div class="status-item"><span class="status-label">Waiting for data</span></div>';return;}var parts=[];if(run.start_time)parts.push('<div class="status-item"><span class="status-label">Last run</span><span class="status-value">'+run.start_time.slice(0,16)+'</span></div>');parts.push('<div class="status-item"><span class="status-label">Status</span><span class="status-value" style="color:var(--green);">'+run.status+'</span></div>');if(run.total_stocks)parts.push('<div class="status-item"><span class="status-label">Market</span><span class="status-value">'+run.total_stocks+' stocks</span></div>');if(run.screened_count)parts.push('<div class="status-item"><span class="status-label">Candidates</span><span class="status-value">'+run.screened_count+'</span></div>');bar.innerHTML=parts.join('');if(run.progress)renderProgress(run.progress);}
-    function renderProgress(p){const dataEl=document.getElementById('dataProgress');const aiEl=document.getElementById('aiProgress');if(!dataEl||!aiEl)return;var visible=false;if(p&&p.stage!=='idle'&&p.stage!=='done'){dataEl.style.display='block';aiEl.style.display='block';visible=true;var totalStock=p.total_stocks||0;document.getElementById('dataCount').textContent=totalStock+'/'+totalStock;document.getElementById('dataFill').style.width='100%';document.getElementById('dataStage').textContent='全A股 '+totalStock+'只 ✓';var aiTotal=p.ai_total||0;var aiDone=p.ai_done||0;var aiFailed=p.ai_failed||0;if(aiTotal>0){var aiPct=Math.round(aiDone/aiTotal*100);document.getElementById('aiCount').textContent=aiDone+'/'+aiTotal+' (失败'+aiFailed+')';document.getElementById('aiFill').style.width=aiPct+'%';document.getElementById('aiStage').textContent='已分析 '+aiDone+'/'+aiTotal;}else{document.getElementById('aiCount').textContent='待启动...';document.getElementById('aiFill').style.width='0%';document.getElementById('aiStage').textContent='等待中——数据完成自动开始';}}else if(p&&p.stage==='done'){dataEl.style.display='block';aiEl.style.display='block';var ts=p.total_stocks||0;document.getElementById('dataCount').textContent=ts+'/'+ts;document.getElementById('dataFill').style.width='100%';document.getElementById('dataStage').textContent='全部完成';var d=p.ai_done||0;var t=p.ai_total||1;document.getElementById('aiCount').textContent=d+'/'+t;document.getElementById('aiFill').style.width=Math.round(d/t*100)+'%';document.getElementById('aiStage').textContent='AI完成 '+d+'/'+t;}if(!visible){dataEl.style.display='none';aiEl.style.display='none';}}
-    function refreshDashboard(){fetchJSON('/api/indices').then(renderIndices).catch(()=>{});fetchJSON('/api/status').then(renderStatus).catch(()=>{});fetchJSON('/api/stocks').then(renderStocks).catch(()=>{});fetchJSON('/api/progress').then(renderProgress).catch(()=>{});updateTimestamp();}
-    function renderStocks(stocks){if(!stocks||!stocks.length)return;var header=document.querySelector('.section-count');if(header)header.textContent=stocks.length+' candidates';stocks.forEach(s=>{var priceEl=document.getElementById('price-'+s.code);var chgEl=document.getElementById('chg-'+s.code);if(!priceEl)return;if(s.current_price!=null)priceEl.textContent=s.current_price.toFixed(2);if(chgEl&&s.change_percent!=null){var cls=s.change_percent>=0?'up':'down';var arrow=s.change_percent>=0?'▲':'▼';chgEl.innerHTML='<span class="'+cls+'">'+arrow+' '+(s.change_percent>=0?'+':'')+s.change_percent.toFixed(2)+'%</span>';}});}
-    refreshDashboard();setInterval(refreshDashboard,30000);setInterval(updateTimestamp,10000);
+    // ========== Tab Switching ==========
+    function switchTab(btn, targetId) {
+        const section = btn.closest('.ai-section');
+        section.querySelectorAll('.tab-content').forEach(function(el) {
+            el.style.display = 'none';
+        });
+        section.querySelectorAll('.ai-tab').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById(targetId).style.display = 'block';
+        btn.classList.add('active');
+    }
+
+    // ========== Auto-Refresh via JSON API ==========
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+
+    function updateTimestamp() {
+        var el = document.getElementById('lastUpdated');
+        if (el) {
+            el.textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+        }
+    }
+
+    function fetchJSON(url) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url, true);
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch(e) { reject(e); }
+                } else {
+                    reject(new Error('Status ' + xhr.status));
+                }
+            };
+            xhr.onerror = reject;
+            xhr.send();
+        });
+    }
+
+    function renderIndices(indices) {
+        var row = document.getElementById('marketRow');
+        if (!row || !indices || indices.length === 0) return;
+        row.innerHTML = indices.map(function(idx) {
+            var cls = idx.change_percent !== null && idx.change_percent >= 0 ? 'up' : 'down';
+            var val = idx.current_value != null ? idx.current_value.toFixed(2) : '--';
+            var chg = idx.change_percent != null ? (idx.change_percent >= 0 ? '+' : '') + idx.change_percent.toFixed(2) + '%' : '--';
+            return '<div class="market-item">' +
+                '<div class="market-name">' + (idx.index_name || 'Index') + '</div>' +
+                '<div class="market-value">' + val + '</div>' +
+                '<div class="market-change ' + cls + '">' + chg + '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    function renderStatus(run) {
+        var bar = document.getElementById('statusBar');
+        if (!bar) return;
+        if (!run || run.status === 'no_runs') {
+            bar.innerHTML = '<div class="status-item"><span class="status-label">等待数据</span></div>';
+            return;
+        }
+        var parts = [];
+        if (run.start_time) parts.push(
+            '<div class="status-item"><span class="status-label">上次运行</span><span class="status-value">' +
+            run.start_time.slice(0, 16) + '</span></div>');
+        parts.push(
+            '<div class="status-item"><span class="status-label">状态</span><span class="status-value" style="color:var(--green);">' +
+            run.status + '</span></div>');
+        if (run.total_stocks) parts.push(
+            '<div class="status-item"><span class="status-label">全市场</span><span class="status-value">' +
+            run.total_stocks + ' 只</span></div>');
+        if (run.screened_count) parts.push(
+            '<div class="status-item"><span class="status-label">候选</span><span class="status-value">' +
+            run.screened_count + '</span></div>');
+        bar.innerHTML = parts.join('');
+        // Also render progress from status response
+        if (run.progress) renderProgress(run.progress);
+    }
+
+    function renderProgress(p) {
+        var dataEl = document.getElementById('dataProgress');
+        var aiEl = document.getElementById('aiProgress');
+        if (!dataEl || !aiEl) return;
+
+        var visible = false;
+
+        if (p && p.stage !== 'idle' && p.stage !== 'done') {
+            dataEl.style.display = 'block';
+            aiEl.style.display = 'block';
+            visible = true;
+
+            // 数据采集条：total_stocks=全A股总数(5527),
+            // 只要过了采集阶段就100%（processed_stocks保持5527）
+            var totalStock = p.total_stocks || 0;
+            var collected = totalStock;  // 过了采集阶段 = 全部采集完成
+            var processed = p.processed_stocks || 0;
+            var dataPct = totalStock > 0 ? 100 : 0;
+            document.getElementById('dataCount').textContent = collected + '/' + totalStock;
+            document.getElementById('dataFill').style.width = dataPct + '%';
+            if (processed > 0 && processed < totalStock) {
+                document.getElementById('dataStage').textContent =
+                    '全A股 ' + totalStock + '只 ✓  候选 ' + processed + '只';  // 候选数 < 全A股数
+            } else {
+                document.getElementById('dataStage').textContent =
+                    '全A股 ' + totalStock + '只 ✓';
+            }
+
+            // AI 条
+            var aiTotal = p.ai_total || 0;
+            var aiDone = p.ai_done || 0;
+            var aiFailed = p.ai_failed || 0;
+            if (aiTotal > 0) {
+                var aiPct = Math.round(aiDone / aiTotal * 100);
+                document.getElementById('aiCount').textContent = aiDone + '/' + aiTotal + ' (失败' + aiFailed + ')';
+                document.getElementById('aiFill').style.width = aiPct + '%';
+                document.getElementById('aiStage').textContent =
+                    '已分析 ' + aiDone + '/' + aiTotal;
+            } else {
+                document.getElementById('aiCount').textContent = '待启动...';
+                document.getElementById('aiFill').style.width = '0%';
+                document.getElementById('aiStage').textContent = '等待中——数据完成自动开始';
+            }
+        } else if (p && p.stage === 'done') {
+            dataEl.style.display = 'block';
+            aiEl.style.display = 'block';
+            var ts = p.total_stocks || 0;
+            document.getElementById('dataCount').textContent = ts + '/' + ts;
+            document.getElementById('dataFill').style.width = '100%';
+            document.getElementById('dataStage').textContent = '全部完成';
+            var d = p.ai_done || 0;
+            var t = p.ai_total || 1;
+            document.getElementById('aiCount').textContent = d + '/' + t;
+            document.getElementById('aiFill').style.width = Math.round(d/t*100) + '%';
+            document.getElementById('aiStage').textContent = 'AI完成 ' + d + '/' + t;
+        }
+
+        if (!visible) {
+            dataEl.style.display = 'none';
+            aiEl.style.display = 'none';
+        }
+    }
+
+    var lastRunId = null;
+
+    function refreshDashboard() {
+        fetchJSON('/api/indices').then(renderIndices).catch(function(){});
+        fetchJSON('/api/status').then(renderStatus).catch(function(){});
+        fetchJSON('/api/stocks').then(renderStocks).catch(function(){});
+        fetchJSON('/api/progress').then(renderProgress).catch(function(){});
+        updateTimestamp();
+    }
+
+    function renderStocks(data) {
+        if (!data) return;
+
+        // 新格式：{ stocks: [...], _html: '...', _run_id: '...' }
+        if (data.stocks !== undefined) {
+            var listEl = document.getElementById('stockList');
+            if (!listEl) return;
+
+            // run_id 变化 → 新流水线完成 → 全量刷新
+            if (data._run_id && data._run_id !== lastRunId) {
+                console.log('[Dashboard] run_id changed:', lastRunId, '->', data._run_id);
+                lastRunId = data._run_id;
+                window.location.reload();
+                return;
+            }
+
+            // 有 HTML 则全量替换
+            if (data._html) {
+                listEl.innerHTML = data._html;
+            }
+
+            // 更新股票计数
+            var header = document.querySelector('.section-count');
+            if (header && data._count != null) {
+                header.textContent = data._count + ' 只';
+            }
+            return;
+        }
+
+        // 旧格式：直接是数组（price-only fallback）
+        if (data.length === 0) return;
+        var header = document.querySelector('.section-count');
+        if (header) header.textContent = data.length + ' 只';
+        data.forEach(function(s) {
+            var priceEl = document.getElementById('price-' + s.code);
+            var chgEl = document.getElementById('chg-' + s.code);
+            if (!priceEl) return;
+            if (s.current_price != null) {
+                priceEl.textContent = s.current_price.toFixed(2);
+            }
+            if (chgEl && s.change_percent != null) {
+                var cls = s.change_percent >= 0 ? 'up' : 'down';
+                var arrow = s.change_percent >= 0 ? '&#9650;' : '&#9660;';
+                chgEl.innerHTML = '<span class="' + cls + '">' + arrow + ' ' +
+                    (s.change_percent >= 0 ? '+' : '') + s.change_percent.toFixed(2) + '%</span>';
+            }
+        });
+    }
+
+    // Auto-refresh
+    refreshDashboard();
+    setInterval(refreshDashboard, REFRESH_INTERVAL);
+    setInterval(updateTimestamp, 10000);
 </script>
 </body>
 </html>

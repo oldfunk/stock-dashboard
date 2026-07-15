@@ -262,6 +262,18 @@ async def api_stocks():
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # 添加 ai_parsed 和 trade_parsed 供前端使用
+        if s.get('ai_analysis'):
+            try:
+                s['ai_parsed'] = s['ai_analysis']
+            except (json.JSONDecodeError, TypeError):
+                s['ai_parsed'] = None
+        if s.get('ai_trade_strategy'):
+            try:
+                s['trade_parsed'] = s['ai_trade_strategy']
+            except (json.JSONDecodeError, TypeError):
+                s['trade_parsed'] = None
+
     # 附加财务历史汇总（用于前端显示历史趋势）
     try:
         fs_dao = FinancialSummaryDAO()
@@ -298,25 +310,58 @@ async def api_stocks():
     hist_dao = StockAnalysisHistoryDAO()
     for s in stocks:
         history = hist_dao.get_history(s['code'], limit=5)
+        parsed_history = []
         for h in history:
             if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
                 try:
                     ai_obj = json.loads(h['ai_analysis'])
-                    parts = []
+                    # 保留原 combined_analysis 用于兼容
+                    combined = []
                     if ai_obj.get('analysis'):
-                        parts.append(ai_obj['analysis'])
+                        combined.append(ai_obj['analysis'])
                     if ai_obj.get('investment_strategy'):
-                        parts.append(ai_obj['investment_strategy'])
+                        combined.append(ai_obj['investment_strategy'])
                     if ai_obj.get('trade_strategy'):
-                        parts.append(str(ai_obj['trade_strategy']))
-                    h['combined_analysis'] = '\n\n'.join(parts) if parts else '--'
+                        if isinstance(ai_obj['trade_strategy'], dict):
+                            parts = [f"{k}: {v}" for k, v in ai_obj['trade_strategy'].items()]
+                            combined.append('; '.join(parts))
+                        else:
+                            combined.append(str(ai_obj['trade_strategy']))
+                    if ai_obj.get('reverse_thinking'):
+                        combined.append(f"[逆向思考] {ai_obj['reverse_thinking']}")
+                    if ai_obj.get('mirror_counts'):
+                        combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
+                    h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
+                    # 结构化字段供 _stock_list.html 模板使用
+                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
+                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
+                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
+                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
                 except Exception:
                     h['combined_analysis'] = '--'
             else:
                 h['combined_analysis'] = '--'
-        s['analysis_history'] = history
+            parsed_history.append(h)
+        s['analysis_history'] = parsed_history
 
-    return [dict(s) for s in stocks]
+    # 渲染 _stock_list.html 用于前端全量替换
+    try:
+        stocks_html = templates.get_template('_stock_list.html').render(
+            stocks=stocks,
+            request=None,
+        )
+    except Exception:
+        stocks_html = ''
+
+    run = RunLogDAO().get_latest_run()
+    run_id = str(run['run_id']) if run else None
+
+    return {
+        "stocks": [dict(s) for s in stocks],
+        "_html": stocks_html,
+        "_run_id": run_id,
+        "_count": len(stocks),
+    }
 
 
 @app.get("/api/history/{code}")

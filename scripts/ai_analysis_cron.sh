@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 独立 AI 分析 cron 脚本
+# 周度 AI 分析 cron 脚本（价值投资：周级节奏，每周一 16:00）
 # 安装：crontab -e
-# 0 16 * * 1-5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
+# 0 16 * * 1 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
 
 set -e
 cd "$(dirname "$0")/.."

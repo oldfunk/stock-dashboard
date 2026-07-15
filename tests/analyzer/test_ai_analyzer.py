@@ -150,5 +150,52 @@ class TestParseAIResponse:
         assert result['analysis'] == "test"
 
 
+class TestBuildHistorySummary:
+    """Tests for history summary extraction."""
+
+    def test_no_history_returns_empty(self):
+        """无历史记录时返回空字符串"""
+        from src.analyzer.ai_analyzer import _build_history_summary
+        result = _build_history_summary("NEVER_EXISTS_999999", limit=3)
+        assert result == ""
+
+    def test_real_stock_returns_proper_format(self):
+        """实际有历史记录的股票返回格式正确"""
+        from src.analyzer.ai_analyzer import _build_history_summary
+        from src.models.database import StockAnalysisHistoryDAO, db_conn
+        import json
+
+        # 插入一条临时测试记录
+        code = "TEST_HIST_0001"
+        dao = StockAnalysisHistoryDAO()
+        dao.save(
+            code, "test_run_1", 80,
+            json.dumps({"analysis": "公司roe稳定15%+，负债率持续下降，估值合理。"}),
+            json.dumps({"signal": "BUY", "confidence": "高"})
+        )
+        dao.save(
+            code, "test_run_2", 75,
+            json.dumps({"analysis": "roe略有下降但仍在安全区，保持持有。"}),
+            json.dumps({"signal": "HOLD", "confidence": "中"})
+        )
+
+        result = _build_history_summary(code, limit=2)
+
+        # 清理测试数据
+        with db_conn() as conn:
+            conn.execute(
+                "DELETE FROM stock_analysis_history WHERE stock_code = ?",
+                (code,)
+            )
+
+        assert "【过往分析记录】" in result
+        assert "BUY" in result
+        assert "HOLD" in result
+        # 每行应该包含日期（格式 YYYY-MM-DD）
+        assert "20" in result[:30]  # 日期在开头附近
+        # 长度控制
+        assert len(result) < 500
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
