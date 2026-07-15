@@ -1,5 +1,5 @@
 {% for stock in stocks %}
-        <div class="stock-card">
+        <div class="stock-card" data-code="{{ stock.code }}">
             <div class="stock-row">
                 <div class="stock-info">
                     <div class="stock-code">{{ stock.code }}</div>

@@ -884,7 +884,7 @@
     <!-- 更新通知横幅 -->
     <div id="updateBanner" class="update-banner" style="display:none;">
         <span>候选股列表已更新</span>
-        <button onclick="location.reload()">刷新</button>
+        <button onclick="applyStockUpdate()">刷新</button>
     </div>
 
     <!-- Stock Results -->
@@ -1311,6 +1311,27 @@
     // 候选股变化追踪
     var lastCodes = '';
     var lastAnalysis = '';
+    var pendingHtml = null;  // 最新的全量 _html，用户点刷新时替换 stockList
+
+    function applyStockUpdate() {
+        var banner = document.getElementById('updateBanner');
+        var listEl = document.getElementById('stockList');
+        if (!banner || !listEl || !pendingHtml) return;
+        listEl.innerHTML = pendingHtml;
+        banner.style.display = 'none';
+        pendingHtml = null;
+        // 更新 lastCodes/lastAnalysis 同步，防止立刻再弹
+        var list = listEl.querySelectorAll('.stock-card');
+        var codes = [];
+        Array.prototype.forEach.call(list, function(card) {
+            if (card.dataset.code) codes.push(card.dataset.code);
+        });
+        lastCodes = codes.sort().join(',');
+        lastAnalysis = '';  // 重置分析状态，下次轮询自然重建
+        // 更新数量显示
+        var header = document.querySelector('.section-count');
+        if (header) header.textContent = codes.length + ' 只';
+    }
 
     function renderStocks(data) {
         if (!data) return;
@@ -1348,6 +1369,7 @@
         if (lastCodes && (codes !== lastCodes || analysis !== lastAnalysis)) {
             var banner = document.getElementById('updateBanner');
             if (banner) banner.style.display = 'flex';
+            if (data._html) pendingHtml = data._html;
         }
         lastCodes = codes;
         lastAnalysis = analysis;
