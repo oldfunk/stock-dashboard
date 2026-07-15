@@ -32,6 +32,110 @@ from src.utils import now_cn
 
 logger = logging.getLogger(__name__)
 
+
+def _enrich_stocks(stocks: list[dict]) -> None:
+    """给候选股列表补充解析后的 AI 分析字段、财务历史、分析历史（原地修改）。
+
+    将原本在 index 和 /api/stocks 两个路由中重复的 enrichment 逻辑统一到此函数。
+    """
+    hist_dao = StockAnalysisHistoryDAO()
+    fs_dao = FinancialSummaryDAO()
+    import re
+
+    for s in stocks:
+        code = s['code']
+
+        # 1. 解析 AI 分析 JSON 字符串为 dict
+        if s.get('ai_analysis') and isinstance(s['ai_analysis'], str):
+            try:
+                s['ai_parsed'] = json.loads(s['ai_analysis'])
+            except (json.JSONDecodeError, TypeError):
+                s['ai_parsed'] = None
+        else:
+            s['ai_parsed'] = s.get('ai_analysis') or None
+
+        if s.get('ai_trade_strategy') and isinstance(s['ai_trade_strategy'], str):
+            try:
+                s['trade_parsed'] = json.loads(s['ai_trade_strategy'])
+            except (json.JSONDecodeError, TypeError):
+                s['trade_parsed'] = None
+        else:
+            s['trade_parsed'] = s.get('ai_trade_strategy') or None
+
+        # 2. 历史分析摘要（用于分析历史展开面板）
+        history = hist_dao.get_history(code, limit=5)
+        parsed_history = []
+        for h in history:
+            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
+                try:
+                    ai_obj = json.loads(h['ai_analysis'])
+                    combined = []
+                    if ai_obj.get('analysis'):
+                        combined.append(ai_obj['analysis'])
+                    if ai_obj.get('investment_strategy'):
+                        combined.append(ai_obj['investment_strategy'])
+                    if ai_obj.get('trade_strategy'):
+                        if isinstance(ai_obj['trade_strategy'], dict):
+                            parts = [f"{k}: {v}" for k, v in ai_obj['trade_strategy'].items()]
+                            combined.append('; '.join(parts))
+                        else:
+                            combined.append(str(ai_obj['trade_strategy']))
+                    if ai_obj.get('reverse_thinking'):
+                        combined.append(f"[逆向思考] {ai_obj['reverse_thinking']}")
+                    if ai_obj.get('mirror_counts'):
+                        combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
+                    h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
+                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
+                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
+                    h['hist_risk'] = ai_obj.get('reverse_thinking', '') or ''
+                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
+                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
+                except Exception:
+                    h['combined_analysis'] = '--'
+            else:
+                h['combined_analysis'] = '--'
+            parsed_history.append(h)
+        s['analysis_history'] = parsed_history
+
+        # 3. Mirror counts 传递到前端显示
+        if s.get('ai_parsed') and isinstance(s['ai_parsed'], dict):
+            mc = s['ai_parsed'].get('mirror_counts')
+            if mc is not None:
+                if isinstance(mc, str):
+                    nums = re.findall(r'\d+', mc.split()[0] if ' ' in mc else mc)
+                    total = sum(int(n) for n in nums) if nums else 0
+                    s['mirror_counts'] = str(mc)
+                    s['mirror_total'] = total
+
+        # 4. 财务历史汇总（用于知识面板）
+        try:
+            fs = fs_dao.get(code)
+            if fs:
+                s['_summary'] = {
+                    'roe_5y_avg': fs.get('roe_5y_avg'),
+                    'gross_margin_5y_avg': fs.get('gross_margin_5y_avg'),
+                    'net_margin_5y_avg': fs.get('net_margin_5y_avg'),
+                    'ocf_latest': fs.get('ocf_latest'),
+                    'ocf_positive_years': fs.get('ocf_positive_years'),
+                    'ocf_5y_trend': fs.get('ocf_5y_trend'),
+                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
+                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
+                    'share_dilution_5y': fs.get('share_dilution_5y'),
+                    'roic_5y_avg': fs.get('roic_5y_avg'),
+                    'data_years': fs.get('data_years'),
+                    'roe_10y_avg': fs.get('roe_10y_avg'),
+                    'net_margin_10y_avg': fs.get('net_margin_10y_avg'),
+                    'intcov_10y_avg': fs.get('intcov_10y_avg'),
+                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
+                    'share_dilution_10y': fs.get('share_dilution_10y'),
+                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
+                    'roe_volatility': fs.get('roe_volatility'),
+                    'roe_improvement': fs.get('roe_improvement'),
+                    'roic_10y_avg': fs.get('roic_10y_avg'),
+                }
+        except Exception:
+            pass
+
 # 全局调度器
 _scheduler = MarketScheduler()
 
@@ -108,103 +212,8 @@ async def index(request: Request):
     # 获取运行状态
     run_log = RunLogDAO().get_latest_run()
 
-    # 解析 AI 分析 JSON 并附加历史记录
-    history_dao = StockAnalysisHistoryDAO()
-    for stock in stocks:
-        code = stock['code']
-        if stock.get('ai_analysis'):
-            try:
-                stock['ai_parsed'] = json.loads(stock['ai_analysis'])
-            except (json.JSONDecodeError, TypeError):
-                stock['ai_parsed'] = None
-        if stock.get('ai_trade_strategy'):
-            try:
-                stock['trade_parsed'] = json.loads(stock['ai_trade_strategy'])
-            except (json.JSONDecodeError, TypeError):
-                stock['trade_parsed'] = None
-
-        # 附加历史分析摘要
-        history = history_dao.get_history(code, limit=5)
-        parsed_history = []
-        for h in history:
-            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
-                try:
-                    ai_obj = json.loads(h['ai_analysis'])
-                    # 保留原 combined_analysis 用于兼容
-                    combined = []
-                    if ai_obj.get('analysis'):
-                        combined.append(ai_obj['analysis'])
-                    if ai_obj.get('investment_strategy'):
-                        combined.append(ai_obj['investment_strategy'])
-                    if ai_obj.get('trade_strategy'):
-                        if isinstance(ai_obj['trade_strategy'], dict):
-                            parts = [f"{k}: {v}" for k, v in ai_obj['trade_strategy'].items()]
-                            combined.append('; '.join(parts))
-                        else:
-                            combined.append(str(ai_obj['trade_strategy']))
-                    if ai_obj.get('reverse_thinking'):
-                        combined.append(f"[逆向思考] {ai_obj['reverse_thinking']}")
-                    if ai_obj.get('mirror_counts'):
-                        combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
-                    h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
-                    # 新增：结构化字段供模板使用
-                    h['hist_analysis'] = ai_obj.get('analysis', '')
-                    h['hist_strategy'] = ai_obj.get('investment_strategy', '')
-                    h['hist_risk'] = ai_obj.get('reverse_thinking', '')
-                    h['hist_trade'] = ai_obj.get('trade_strategy', {})
-                    h['hist_mirror'] = ai_obj.get('mirror_counts', '')
-                except Exception:
-                    h['combined_analysis'] = '--'
-            else:
-                h['combined_analysis'] = '--'
-            parsed_history.append(h)
-        stock['analysis_history'] = parsed_history
-
-        # Mirror counts 传递到前端
-        if stock.get('ai_parsed') and isinstance(stock['ai_parsed'], dict):
-            mc = stock['ai_parsed'].get('mirror_counts')
-            if mc is not None:
-                # mc 可能是 "0,1,0,1,1 第N句过多转折" 这样的字符串
-                # 提取数字部分求和，以便模板中做 > 2 的整数比较
-                if isinstance(mc, str):
-                    import re
-                    nums = re.findall(r'\d+', mc.split()[0] if ' ' in mc else mc)
-                    total = sum(int(n) for n in nums) if nums else 0
-                    stock['mirror_counts'] = str(mc)  # 原文保留用于显示
-                    stock['mirror_total'] = total     # 数值用于比较
-                else:
-                    stock['mirror_counts'] = str(mc)
-                    stock['mirror_total'] = int(mc) if mc else 0
-
-        # 注入财务历史汇总（用于前端显示历史趋势）
-        try:
-            fs = FinancialSummaryDAO().get(code)
-            if fs:
-                stock['_summary'] = {
-                    'roe_5y_avg': fs.get('roe_5y_avg'),
-                    'gross_margin_5y_avg': fs.get('gross_margin_5y_avg'),
-                    'net_margin_5y_avg': fs.get('net_margin_5y_avg'),
-                    'ocf_latest': fs.get('ocf_latest'),
-                    'ocf_positive_years': fs.get('ocf_positive_years'),
-                    'ocf_5y_trend': fs.get('ocf_5y_trend'),
-                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
-                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
-                    'share_dilution_5y': fs.get('share_dilution_5y'),
-                    'roic_5y_avg': fs.get('roic_5y_avg'),
-                    'data_years': fs.get('data_years'),
-                    # 10年拓展字段
-                    'roe_10y_avg': fs.get('roe_10y_avg'),
-                    'net_margin_10y_avg': fs.get('net_margin_10y_avg'),
-                    'intcov_10y_avg': fs.get('intcov_10y_avg'),
-                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
-                    'share_dilution_10y': fs.get('share_dilution_10y'),
-                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
-                    'roe_volatility': fs.get('roe_volatility'),
-                    'roe_improvement': fs.get('roe_improvement'),
-                    'roic_10y_avg': fs.get('roic_10y_avg'),
-                }
-        except Exception:
-            pass
+    # 解析 AI 分析 JSON + 历史 + 财务汇总
+    _enrich_stocks(stocks)
 
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
@@ -255,94 +264,8 @@ async def api_stocks():
             s['change_percent'] = None
             s['change_amount'] = None
 
-        for key in ['ai_analysis', 'ai_trade_strategy']:
-            if s.get(key):
-                try:
-                    s[key] = json.loads(s[key])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-        # 添加 ai_parsed 和 trade_parsed 供前端使用
-        if s.get('ai_analysis'):
-            try:
-                s['ai_parsed'] = s['ai_analysis']
-            except (json.JSONDecodeError, TypeError):
-                s['ai_parsed'] = None
-        if s.get('ai_trade_strategy'):
-            try:
-                s['trade_parsed'] = s['ai_trade_strategy']
-            except (json.JSONDecodeError, TypeError):
-                s['trade_parsed'] = None
-
-    # 附加财务历史汇总（用于前端显示历史趋势）
-    try:
-        fs_dao = FinancialSummaryDAO()
-        for s in stocks:
-            fs = fs_dao.get(s['code'])
-            if fs:
-                s['_summary'] = {
-                    'roe_5y_avg': fs.get('roe_5y_avg'),
-                    'gross_margin_5y_avg': fs.get('gross_margin_5y_avg'),
-                    'net_margin_5y_avg': fs.get('net_margin_5y_avg'),
-                    'ocf_latest': fs.get('ocf_latest'),
-                    'ocf_positive_years': fs.get('ocf_positive_years'),
-                    'ocf_5y_trend': fs.get('ocf_5y_trend'),
-                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
-                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
-                    'share_dilution_5y': fs.get('share_dilution_5y'),
-                    'roic_5y_avg': fs.get('roic_5y_avg'),
-                    'data_years': fs.get('data_years'),
-                    # 10年拓展字段
-                    'roe_10y_avg': fs.get('roe_10y_avg'),
-                    'net_margin_10y_avg': fs.get('net_margin_10y_avg'),
-                    'intcov_10y_avg': fs.get('intcov_10y_avg'),
-                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
-                    'share_dilution_10y': fs.get('share_dilution_10y'),
-                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
-                    'roe_volatility': fs.get('roe_volatility'),
-                    'roe_improvement': fs.get('roe_improvement'),
-                    'roic_10y_avg': fs.get('roic_10y_avg'),
-                }
-    except Exception:
-        pass
-
-    # 附加历史记录
-    hist_dao = StockAnalysisHistoryDAO()
-    for s in stocks:
-        history = hist_dao.get_history(s['code'], limit=5)
-        parsed_history = []
-        for h in history:
-            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
-                try:
-                    ai_obj = json.loads(h['ai_analysis'])
-                    # 保留原 combined_analysis 用于兼容
-                    combined = []
-                    if ai_obj.get('analysis'):
-                        combined.append(ai_obj['analysis'])
-                    if ai_obj.get('investment_strategy'):
-                        combined.append(ai_obj['investment_strategy'])
-                    if ai_obj.get('trade_strategy'):
-                        if isinstance(ai_obj['trade_strategy'], dict):
-                            parts = [f"{k}: {v}" for k, v in ai_obj['trade_strategy'].items()]
-                            combined.append('; '.join(parts))
-                        else:
-                            combined.append(str(ai_obj['trade_strategy']))
-                    if ai_obj.get('reverse_thinking'):
-                        combined.append(f"[逆向思考] {ai_obj['reverse_thinking']}")
-                    if ai_obj.get('mirror_counts'):
-                        combined.append(f"[镜子测试] 转折词计数: {ai_obj['mirror_counts']}")
-                    h['combined_analysis'] = '\n\n'.join(combined) if combined else '--'
-                    # 结构化字段供 _stock_list.html 模板使用
-                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
-                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
-                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
-                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
-                except Exception:
-                    h['combined_analysis'] = '--'
-            else:
-                h['combined_analysis'] = '--'
-            parsed_history.append(h)
-        s['analysis_history'] = parsed_history
+    # 解析 AI 分析 JSON + 历史 + 财务汇总
+    _enrich_stocks(stocks)
 
     # 渲染 _stock_list.html 用于前端全量替换
     try:
