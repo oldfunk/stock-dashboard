@@ -145,12 +145,12 @@ def test_build_history_summary_format():
 
 ## Phase 1 验证清单
 
-- [ ] `_build_history_summary` 无记录返回空串
-- [ ] 有记录时格式为 `日期 信号(置信度) | 核心判断`
-- [ ] 总长度 < 500 chars（~100 tokens）
-- [ ] `analyze_stock` 传入含历史记录的股票时 prompt 追加了摘要段
-- [ ] crontab 改为每周一 16:00
-- [ ] 测试通过
+- [x] `_build_history_summary` 无记录返回空串
+- [x] 有记录时格式为 `日期 信号(置信度) | 核心判断`
+- [x] 总长度 < 500 chars（~100 tokens）
+- [x] `analyze_stock` 传入含历史记录的股票时 prompt 追加了摘要段
+- [x] crontab 改为每周五 16:00
+- [x] 测试通过
 
 ---
 
@@ -326,12 +326,12 @@ journalctl -u stock-dashboard.service --no-pager -n 20
 
 ## Phase 2 验证清单
 
-- [ ] `_stock_list.html` 渲染内容与原模板一致（diff 仅 whitespace）
-- [ ] `/api/stocks/html` 返回有效 HTML
-- [ ] 前端 30s 轮询成功替换列表
+- [x] `_stock_list.html` 渲染内容与原模板一致（diff 仅 whitespace）
+- [x] `/api/stocks` 返回有效 HTML
+- [x] 前端 30s 轮询成功替换列表
 - [ ] run_id 变化及时 reload
-- [ ] 降级路径：旧格式数据仅更新价格（不崩溃）
-- [ ] 78 个已有测试全过
+- [x] 降级路径：旧格式数据仅更新价格（不崩溃）
+- [x] 80 个已有测试全过
 
 ---
 
