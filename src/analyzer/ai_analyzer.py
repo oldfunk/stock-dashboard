@@ -430,6 +430,8 @@ class AiAnalyzer:
                 "[AI分析] 未设置 API Key（STOCK_AI_API_KEY / OPENAI_API_KEY），"
                 "且模型 %s 不是已知免费模型", self.model
             )
+        # 最近一次调用的 token 用量（由 _call_llm 写入，供 analyze_batch 记录日志）
+        self._last_usage: Optional[dict] = None
 
     @property
     def configured(self) -> bool:
@@ -519,7 +521,8 @@ class AiAnalyzer:
                 "\n3. 本次结论相比之前是否有转变？为什么？"
             )
 
-        content, used_model = self._call_llm(prompt)
+        content, used_model, usage = self._call_llm(prompt)
+        self._last_usage = usage  # 供调用方写入 ai_analysis_log
         if not content:
             return None
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
@@ -541,10 +544,11 @@ class AiAnalyzer:
         if self._pool:
             self._pool.mark_dead(model)
 
-    def _call_llm(self, prompt: str) -> tuple[Optional[str], Optional[str]]:
+    def _call_llm(self, prompt: str) -> tuple[Optional[str], Optional[str], Optional[dict]]:
         """调用 LLM API，使用 BACKOFF_SCHEDULE 做 20 次退避重试。
 
-        返回 (content, used_model)，失败时 content 为 None。
+        返回 (content, used_model, usage)，失败时 content/usage 为 None。
+        usage 形如 {'prompt_tokens': int, 'completion_tokens': int, 'model': str}。
         当 enable_pool=True 时，模型会在连续故障时自动轮换。
         """
         headers = {
@@ -577,7 +581,9 @@ class AiAnalyzer:
 
                 if resp.status_code == 200:
                     try:
-                        content = resp.json()['choices'][0]['message']['content']
+                        data = resp.json()
+                        content = data['choices'][0]['message']['content']
+                        _usage_raw = data.get('usage') or {}
                     except (KeyError, IndexError, ValueError) as e:
                         logger.warning("[AI分析] 200但响应结构异常: %s (%s), 轮换模型", e, current_model)
                         self._mark_model_dead(current_model)
@@ -593,7 +599,16 @@ class AiAnalyzer:
                         current_model = self._resolve_model()
                         consecutive_timeouts = 0
                         continue
-                    return content, current_model
+                    # 提取 token 用量（用于写入 ai_analysis_log）
+                    try:
+                        usage = {
+                            'prompt_tokens': int(_usage_raw.get('prompt_tokens', 0) or 0),
+                            'completion_tokens': int(_usage_raw.get('completion_tokens', 0) or 0),
+                            'model': current_model,
+                        }
+                    except Exception:
+                        usage = None
+                    return content, current_model, usage
 
                 # ── 非 200 状态码 ──
                 should_rotate = self._is_fatal_model_error(resp)
@@ -634,7 +649,7 @@ class AiAnalyzer:
                 time.sleep(BACKOFF_SCHEDULE[attempt])
 
         logger.error("[AI分析] 已达最大重试次数 %s，放弃 (末模型=%s)", max_retries, current_model)
-        return None, current_model
+        return None, current_model, None
 
     @staticmethod
     def _is_fatal_model_error(resp: httpx.Response) -> bool:
@@ -776,6 +791,9 @@ def analyze_batch(stocks: list[dict], run_id: str,
     analyzed_ok = 0
     analyzed_failed = 0
 
+    from src.models.database import AiAnalysisLogDAO
+    log_dao = AiAnalysisLogDAO()
+
     for idx, stock in enumerate(stocks):
         code, name = stock.get('code'), stock.get('name')
         logger.info(f"[AI分析] ({idx+1}/{total}) {code} {name}...")
@@ -783,8 +801,28 @@ def analyze_batch(stocks: list[dict], run_id: str,
             on_progress(analyzed_ok, analyzed_failed, idx)
 
         result = analyzer.analyze_stock(stock)
+
+        # 单只失败：间隔 30s 重试 1 次（_call_llm 内部已有 20 次退避+模型轮换，
+        # 这里仅做一次外层兜底，避免单只股票的偶发 prompt/解析问题拖累整批）
+        if result is None and idx < total - 1:
+            logger.info(f"[AI分析] {code} 首次失败，30s 后重试 1 次...")
+            time.sleep(30)
+            result = analyzer.analyze_stock(stock)
+
         if result:
             _save_analysis(stock, result, run_id)
+            # 写入 token 用量日志（免费模型 cost=0）
+            try:
+                usage = getattr(analyzer, '_last_usage', None) or {}
+                log_dao.log(
+                    run_id, code,
+                    usage.get('model', analyzer.model),
+                    usage.get('prompt_tokens', 0),
+                    usage.get('completion_tokens', 0),
+                    0.0,
+                )
+            except Exception as e:
+                logger.debug(f"[AI分析] 写 ai_analysis_log 失败（不影响主流程）: {e}")
             analyzed_ok += 1
             logger.info(f"  ✅ {analyzed_ok}/{total}")
         else:

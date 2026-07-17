@@ -376,8 +376,9 @@ class ValueScreener:
 def run_screener(config: dict, candidates: list[dict],
                  run_id: str = None, run_date: str = None) -> list[dict]:
     """候选股评分排序 + 持久化到筛选结果表。"""
-    screen_cfg = config.get('screener', {}).get('conditions', {})
-    screener = ValueScreener(screen_cfg)
+    # 注意：ValueScreener / _check_7_gates 内部会再取一层 screener.conditions，
+    #      因此这里必须传完整 config，否则 config.yaml 的阈值会全部失效（走代码默认值）
+    screener = ValueScreener(config)
 
     if run_id is None:
         run_id = now_cn().strftime("%Y%m%d_%H%M%S")

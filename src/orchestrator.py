@@ -138,6 +138,16 @@ def run_daily_pipeline(config: dict = None) -> bool:
             return True  # 流程本身跑完，只是无结果
 
         RunLogDAO().complete_run(run_id, total_stocks, len(top_stocks), 0)
+
+        # 清理过期大盘数据（保留 30 天 + 每日每指数最后一条），避免 market_index 无限增长
+        try:
+            from src.models.database import MarketIndexDAO
+            deleted = MarketIndexDAO().cleanup_old(keep_days=30)
+            if deleted:
+                logger.info(f"[清理] market_index 删除 {deleted} 条过期记录（>30天）")
+        except Exception as e:
+            logger.warning(f"[清理] market_index 清理失败（不影响主流程）: {e}")
+
         logger.info(f"\n{'=' * 55}")
         logger.info("Pipeline complete")
         logger.info(f"  Market: {total_stocks} stocks")

@@ -33,18 +33,7 @@ Web 看板启动后包含：
 - **大盘指数** — 每 30 分钟更新
 - **实时行情** — 交易时段每 5 分钟刷新
 
-### 方式 B：通过 Hermes Agent 管理
-
-Hermes Agent 提供 cron 管理功能，自动执行 AI 分析：
-
-```bash
-# Hermes 会自动执行 AI 分析（每周五 16:00，收盘后分析周末看结果）
-hermes cron list  # 查看 stock-ai-analysis 任务状态
-```
-
-Hermes 仅用于 cron 编排，核心流水线和 Web 服务完全独立运行。
-
-### 方式 C：全量脚本（流水线 + AI 分析一起跑）
+### 方式 B：全量脚本（流水线 + AI 分析一起跑）
 
 ```bash
 bash scripts/stock-ai-slow-feed.sh
@@ -52,6 +41,39 @@ bash scripts/stock-ai-slow-feed.sh
 #   python3 scripts/run_pipeline.py     # 采集 → 筛选（会重新采集全量数据）
 #   python3 scripts/run_ai_analysis.py --all  # AI 分析全量模式
 ```
+
+### 方式 C：补跑失败的 AI 分析
+
+每周五 AI 分析后，个别股票可能因模型限流/解析失败而漏分析。`scripts/retry_ai.py`
+会自动定位失败股票并补跑，无需手改 run_id：
+
+```bash
+# 默认：补跑最新 run 中 ai_analysis 为空的股票
+python3 scripts/retry_ai.py
+
+# 指定某个 run 补跑
+python3 scripts/retry_ai.py --run-id=20260715_153012
+
+# 扫所有 run 里的失败记录
+python3 scripts/retry_ai.py --all-failed
+
+# 只列出待补跑股票，不实际调用（确认清单用）
+python3 scripts/retry_ai.py --dry-run
+```
+
+### 部署：systemd 常驻（生产推荐）
+
+项目在树莓派等小设备上推荐用 systemd 常驻运行，内置调度器会自动完成每日流水线
+与周五 AI 分析，无需额外配置 OS cron。服务异常退出会自动重启：
+
+```bash
+# /etc/systemd/system/stock-dashboard.service
+# ExecStart=/home/pi/stock-dashboard/.venv/bin/python -m src.main serve
+sudo systemctl enable --now stock-dashboard
+```
+
+> `scripts/daily_cron.sh` / `ai_analysis_cron.sh` 仍保留，作为 Web 服务未运行时的
+> OS cron 兜底（可选安装，非必需）。
 
 ## 快速启动
 
@@ -118,8 +140,9 @@ AKShare（社区维护的中国金融数据工具箱）
   5. 重建 5年/10年汇总 → financial_summary
   6. 7条门规筛选 → 评分 → 候选池（≤20只）
 
-每周五 16:00（cron 触发）:
+每周五（流水线完成后自动触发）:
   7. AI 分析 → 护城河 / 管理层 / 估值 / 逆向思考 / 买卖策略
+  注：AI 分析在每日流水线成功后，仅周五触发；失败股票可用 scripts/retry_ai.py 补跑
 ```
 
 ## 本地数据仓库
@@ -167,7 +190,7 @@ AKShare（社区维护的中国金融数据工具箱）
 - **存储**: SQLite (WAL 模式)
 - **AI 分析**: OpenAI 兼容 API + OpenCode Zen 免费模型池（自动故障轮换）
 - **Web 看板**: FastAPI + Jinja2
-- **调度**: 内置 Python schedule 库 + OS/Hermes cron
+- **调度**: 内置调度器（`src/scheduler.py`，daemon 线程）+ systemd 常驻；OS cron 脚本可选兜底
 
 ## 与 AI Berkshire 的关系
 

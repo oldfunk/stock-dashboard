@@ -307,6 +307,30 @@ class MarketIndexDAO:
         return [dict(r) for r in rows]
 
 
+    def cleanup_old(self, keep_days: int = 30) -> int:
+        """清理 keep_days 天前的大盘数据，但保留每日每指数最后一条（用于历史回溯）。
+
+        返回删除的行数。30 分钟轮询下，每指数每日约 16 条，保留 30 天 ≈ 480 条/指数。
+        """
+        from src.utils import now_cn
+        from datetime import timedelta
+        cutoff = (now_cn() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+        with db_conn() as conn:
+            # 删除 keep_days 前的记录，但保留每个 (index_code, date) 最新一条
+            # 用 NOT IN 子查询保留每日最后一条
+            conn.execute("""
+                DELETE FROM market_index
+                WHERE date < ?
+                  AND id NOT IN (
+                    SELECT MAX(id) FROM market_index
+                    WHERE date < ?
+                    GROUP BY index_code, date
+                  )
+            """, (cutoff, cutoff))
+            deleted = conn.total_changes
+        return deleted
+
+
 class StockSnapshotDAO:
     def save_batch(self, records: list[dict]):
         with db_conn() as conn:

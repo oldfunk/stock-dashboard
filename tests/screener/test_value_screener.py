@@ -368,7 +368,7 @@ class TestValueScreenerIntegration:
         return stocks
 
     def test_score_candidates_sorts_desc(self):
-        screener = ValueScreener(self._config()['screener']['conditions'])
+        screener = ValueScreener(self._config())
         candidates = self._candidates(5)
         # Mock FinancialSummaryDAO.get_batch to return empty
         import src.screener.value_screener as vs_module
@@ -384,7 +384,7 @@ class TestValueScreenerIntegration:
         assert scores == sorted(scores, reverse=True)
 
     def test_score_candidates_respects_max_n(self):
-        screener = ValueScreener(self._config()['screener']['conditions'])
+        screener = ValueScreener(self._config())
         candidates = self._candidates(10)
         import src.screener.value_screener as vs_module
         original_get_batch = vs_module.FinancialSummaryDAO.get_batch
