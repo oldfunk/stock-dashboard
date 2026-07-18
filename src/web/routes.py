@@ -513,14 +513,38 @@ async def api_watchlist():
 
 @app.post("/api/watchlist/{code}")
 async def api_watchlist_add(code: str):
-    """加入钉选（从 stock_snapshot 取名称）"""
+    """加入钉选（从 stock_snapshot 取名称；若财务字段缺失则后台 enrich）
+
+    被预过滤剔除的股票（如 PE 超范围）从未被 enrich，财务字段全空。
+    钉选时检测 ROE 是否为空，空则后台异步拉取并回写，不阻塞响应。
+    """
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT name FROM stock_snapshot WHERE code = ?", (code,)
+            "SELECT name, roe FROM stock_snapshot WHERE code = ?", (code,)
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="股票不存在")
     WatchlistDAO().add(code, row['name'])
+
+    # 若 ROE 为空，后台异步 enrich（不阻塞当前请求）
+    if row['roe'] is None:
+        import threading
+        def _enrich_bg():
+            try:
+                from src.collector.akshare_fetcher import enrich_financial_data, fetch_tencent_batch
+                from src.models.database import StockSnapshotDAO
+                quotes = fetch_tencent_batch([code])
+                if quotes:
+                    enrich_financial_data(quotes)
+                    today = now_cn().strftime("%Y-%m-%d")
+                    for q in quotes:
+                        q['snapshot_date'] = q.get('snapshot_date') or today
+                    StockSnapshotDAO().save_batch(quotes)
+                    logger.info(f"[Watchlist] 后台 enrich 完成: {code}")
+            except Exception as e:
+                logger.warning(f"[Watchlist] 后台 enrich 失败 {code}: {e}")
+        threading.Thread(target=_enrich_bg, daemon=True).start()
+
     return {"ok": True, "code": code, "name": row['name']}
 
 

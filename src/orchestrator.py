@@ -56,6 +56,40 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
                     f'采集完成 {total_stocks} 只',
                     processed=total_stocks, total=total_stocks)
 
+    # ── 回写候选股财务数据到 stock_snapshot（供搜索/钉选显示）──
+    # 之前 enrich 出的 ROE/营收/利润增长等数据只活在内存里用于筛 Top20，
+    # 从未回写 stock_snapshot，导致全市场财务字段全 NULL。
+    if candidates:
+        today = now_cn().strftime("%Y-%m-%d")
+        for c in candidates:
+            if not c.get('snapshot_date'):
+                c['snapshot_date'] = today
+        try:
+            StockSnapshotDAO().save_batch(candidates)
+            logger.info(f"[Snapshot] 回写 {len(candidates)} 只候选股财务数据")
+        except Exception as e:
+            logger.warning(f"[Snapshot] 候选股回写失败（不影响主流程）: {e}")
+
+        # ── watchlist 里不在 candidates 的股票单独 enrich 并回写 ──
+        # 解决钉选了被预过滤剔除的股票（如 PE 超范围）无财务数据的问题
+        try:
+            from src.models.database import WatchlistDAO
+            from src.collector.akshare_fetcher import enrich_financial_data, fetch_tencent_batch
+            candidate_codes = {c['code'] for c in candidates}
+            watched_missing = [code for code in WatchlistDAO().get_watched_codes()
+                               if code not in candidate_codes]
+            if watched_missing:
+                quotes = fetch_tencent_batch(watched_missing)
+                if quotes:
+                    enrich_financial_data(quotes)
+                    for q in quotes:
+                        if not q.get('snapshot_date'):
+                            q['snapshot_date'] = today
+                    StockSnapshotDAO().save_batch(quotes)
+                    logger.info(f"[Snapshot] watchlist 补充 enrich {len(quotes)} 只")
+        except Exception as e:
+            logger.warning(f"[Snapshot] watchlist enrich 失败（不影响主流程）: {e}")
+
     if not candidates:
         logger.warning("No candidates from pipeline")
         RunLogDAO().complete_run(run_id, total_stocks, 0, 0, "no candidates")

@@ -765,8 +765,9 @@ class WatchlistDAO:
         """返回所有钉选股票（按加入时间倒序，含 stock_snapshot 的最新行情作 fallback）"""
         with db_conn() as conn:
             rows = conn.execute(
-                "SELECT w.*, s.pe, s.pb, s.roe, s.debt_ratio, "
-                "s.current_price as snapshot_price "
+                "SELECT w.*, s.pe, s.pb, s.roe, s.revenue_growth, "
+                "s.profit_growth, s.debt_ratio, s.dividend_yield, "
+                "s.market_cap, s.current_price as snapshot_price "
                 "FROM watchlist w "
                 "LEFT JOIN stock_snapshot s ON w.code = s.code "
                 "ORDER BY w.added_at DESC"

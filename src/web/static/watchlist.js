@@ -63,7 +63,10 @@ function loadWatchlist() {
                 if (s.pe != null) metricsHtml += '<div class="metric-cell"><div class="label">PE</div><div class="value">' + s.pe.toFixed(1) + '</div></div>';
                 if (s.roe != null) metricsHtml += '<div class="metric-cell"><div class="label">ROE</div><div class="value">' + s.roe.toFixed(1) + '%</div></div>';
                 if (s.pb != null) metricsHtml += '<div class="metric-cell"><div class="label">PB</div><div class="value">' + s.pb.toFixed(2) + '</div></div>';
+                if (s.revenue_growth != null) metricsHtml += '<div class="metric-cell"><div class="label">营收增</div><div class="value">' + s.revenue_growth.toFixed(1) + '%</div></div>';
+                if (s.profit_growth != null) metricsHtml += '<div class="metric-cell"><div class="label">利润增</div><div class="value">' + s.profit_growth.toFixed(1) + '%</div></div>';
                 if (s.debt_ratio != null) metricsHtml += '<div class="metric-cell"><div class="label">负债率</div><div class="value">' + s.debt_ratio.toFixed(1) + '%</div></div>';
+                if (s.market_cap != null) metricsHtml += '<div class="metric-cell"><div class="label">市值</div><div class="value">' + s.market_cap.toFixed(0) + '亿</div></div>';
                 return '<div class="stock-card" data-code="' + s.code + '">' +
                     '<div class="stock-row">' +
                     '<div class="stock-info">' +
