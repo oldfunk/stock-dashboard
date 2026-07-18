@@ -148,6 +148,22 @@ def run_daily_pipeline(config: dict = None) -> bool:
         except Exception as e:
             logger.warning(f"[清理] market_index 清理失败（不影响主流程）: {e}")
 
+        # 更新 watchlist 钉选股票的行情（从腾讯实时接口拉一次）
+        try:
+            from src.models.database import WatchlistDAO
+            from src.scheduler import fetch_stock_realtime
+            watch_codes = list(WatchlistDAO().get_watched_codes())
+            if watch_codes:
+                quotes = fetch_stock_realtime(watch_codes)
+                if quotes:
+                    wdao = WatchlistDAO()
+                    for code, q in quotes.items():
+                        if q.get('current_price') is not None:
+                            wdao.update_price(code, q['current_price'])
+                    logger.info(f"[Watchlist] 更新 {len(quotes)} 只钉选股票行情")
+        except Exception as e:
+            logger.warning(f"[Watchlist] 行情更新失败（不影响主流程）: {e}")
+
         logger.info(f"\n{'=' * 55}")
         logger.info("Pipeline complete")
         logger.info(f"  Market: {total_stocks} stocks")

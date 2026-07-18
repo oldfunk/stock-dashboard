@@ -22,8 +22,10 @@ from src.models.database import (
     PipelineProgressDAO,
     FinancialHistoryDAO,
     FinancialSummaryDAO,
+    WatchlistDAO,
     db_conn,
 )
+from fastapi import HTTPException
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
     _active_codes, _cache_lock, _realtime_cache,
@@ -40,10 +42,12 @@ def _enrich_stocks(stocks: list[dict]) -> None:
     """
     hist_dao = StockAnalysisHistoryDAO()
     fs_dao = FinancialSummaryDAO()
+    watched_set = WatchlistDAO().get_watched_codes()
     import re
 
     for s in stocks:
         code = s['code']
+        s['watched'] = code in watched_set
 
         # 1. 解析 AI 分析 JSON 字符串为 dict
         if s.get('ai_analysis') and isinstance(s['ai_analysis'], str):
@@ -439,6 +443,92 @@ async def trigger_update():
     thread = threading.Thread(target=run_daily_pipeline, args=(config,), daemon=True)
     thread.start()
     return {"status": "started", "message": "更新流程已启动，请在日志中查看进度"}
+
+
+# ── 搜索 + 钉选 ──────────────────────────────────────────────
+
+@app.get("/api/search")
+async def api_search(q: str = ""):
+    """搜索股票（code 或名称模糊匹配，搜全 A 股 stock_snapshot）。
+
+    返回每只股票的基础行情 + 是否在最新榜单 + 最近 AI 信号 + 是否已钉选。
+    """
+    q = (q or "").strip()
+    if not q:
+        return []
+    pattern = f"%{q}%"
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.code, s.name, s.pe, s.pb, s.roe, s.market_cap,
+                   s.current_price, s.revenue_growth, s.profit_growth,
+                   s.debt_ratio,
+                   EXISTS(SELECT 1 FROM screening_result sr
+                          WHERE sr.code = s.code
+                          AND sr.run_id = (SELECT MAX(run_id) FROM screening_result)) as in_list,
+                   (SELECT sah.ai_trade_strategy FROM stock_analysis_history sah
+                    WHERE sah.stock_code = s.code
+                    ORDER BY sah.created_at DESC LIMIT 1) as last_trade_strategy,
+                   (SELECT sah.score FROM stock_analysis_history sah
+                    WHERE sah.stock_code = s.code
+                    ORDER BY sah.created_at DESC LIMIT 1) as last_score
+            FROM stock_snapshot s
+            WHERE s.code LIKE ? OR s.name LIKE ?
+            LIMIT 20
+            """,
+            (pattern, pattern)
+        ).fetchall()
+    watched = WatchlistDAO().get_watched_codes()
+    results = []
+    for r in rows:
+        item = dict(r)
+        item['watched'] = item['code'] in watched
+        # 解析最近一次交易信号
+        item['last_signal'] = None
+        if item.get('last_trade_strategy'):
+            try:
+                ts = json.loads(item['last_trade_strategy'])
+                item['last_signal'] = ts.get('signal')
+            except Exception:
+                pass
+        results.append(item)
+    return results
+
+
+@app.get("/api/watchlist")
+async def api_watchlist():
+    """钉选列表（带最新行情与最近 AI 信号）"""
+    items = WatchlistDAO().list_all()
+    # 合并实时行情缓存；无实时行情时用 stock_snapshot 的价格作 fallback
+    realtime = get_realtime_cache()
+    for item in items:
+        code = item['code']
+        if code in realtime:
+            item['current_price'] = realtime[code].get('current_price')
+            item['change_percent'] = realtime[code].get('change_percent')
+        elif item.get('snapshot_price') is not None:
+            item['current_price'] = item['snapshot_price']
+    return items
+
+
+@app.post("/api/watchlist/{code}")
+async def api_watchlist_add(code: str):
+    """加入钉选（从 stock_snapshot 取名称）"""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT name FROM stock_snapshot WHERE code = ?", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="股票不存在")
+    WatchlistDAO().add(code, row['name'])
+    return {"ok": True, "code": code, "name": row['name']}
+
+
+@app.delete("/api/watchlist/{code}")
+async def api_watchlist_remove(code: str):
+    """取消钉选"""
+    WatchlistDAO().remove(code)
+    return {"ok": True, "code": code}
 
 
 def run_server():

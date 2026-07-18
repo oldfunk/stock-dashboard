@@ -240,6 +240,18 @@ def init_database():
     """初始化数据库，创建表结构"""
     with db_conn() as conn:
         conn.executescript(SCHEMA_SQL)
+        # 2026-07-18 新增：watchlist 钉选表（用户主动钉选的股票，不受 Top20 限制）
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS watchlist (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                note TEXT,
+                latest_price REAL,
+                last_signal TEXT,
+                last_updated TEXT
+            )
+        ''')
         # 向后兼容：为旧表增加新字段（如果不存在）
         _add_column_if_not_exists(conn, 'screening_result', 'gross_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
@@ -730,3 +742,62 @@ class FinancialSummaryDAO:
                 codes
             ).fetchall()
         return {r['stock_code']: dict(r) for r in rows}
+
+class WatchlistDAO:
+    """用户钉选的股票（不受每日 Top20 限制，用于长期跟踪已关注的标的）"""
+
+    def add(self, code: str, name: str, note: str = None) -> bool:
+        """加入钉选（已存在则忽略）"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO watchlist (code, name, added_at, note) VALUES (?, ?, ?, ?)",
+                (code, name, now_cn().isoformat(), note)
+            )
+            return cur.rowcount > 0
+
+    def remove(self, code: str) -> bool:
+        """取消钉选"""
+        with db_conn() as conn:
+            cur = conn.execute("DELETE FROM watchlist WHERE code = ?", (code,))
+            return cur.rowcount > 0
+
+    def list_all(self) -> list[dict]:
+        """返回所有钉选股票（按加入时间倒序，含 stock_snapshot 的最新行情作 fallback）"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT w.*, s.pe, s.pb, s.roe, s.debt_ratio, "
+                "s.current_price as snapshot_price "
+                "FROM watchlist w "
+                "LEFT JOIN stock_snapshot s ON w.code = s.code "
+                "ORDER BY w.added_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_watched(self, code: str) -> bool:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM watchlist WHERE code = ?", (code,)
+            ).fetchone()
+        return row is not None
+
+    def get_watched_codes(self) -> set:
+        """返回所有已钉选的 code 集合（供批量查询用）"""
+        with db_conn() as conn:
+            rows = conn.execute("SELECT code FROM watchlist").fetchall()
+        return {r[0] for r in rows}
+
+    def update_price(self, code: str, price: float):
+        """更新最新价（调度器每日拉行情后调用）"""
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE watchlist SET latest_price = ?, last_updated = ? WHERE code = ?",
+                (price, now_cn().isoformat(), code)
+            )
+
+    def update_signal(self, code: str, signal: str):
+        """更新最近一次 AI 信号"""
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE watchlist SET last_signal = ?, last_updated = ? WHERE code = ?",
+                (signal, now_cn().isoformat(), code)
+            )

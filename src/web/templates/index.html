@@ -296,6 +296,31 @@
         }
 
         /* ========== Section Header ========== */
+        /* 搜索 + 钉选 */
+        .view-tabs { display: flex; gap: 4px; }
+        .view-tab { padding: 4px 12px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: var(--radius-sm); font-size: 13px; }
+        .view-tab.active { background: var(--accent); color: #fff; }
+        .search-box { position: relative; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+        .search-box input { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; width: 180px; }
+        .search-box button { padding: 4px 10px; border: none; background: var(--accent); color: #fff; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+        .search-results { position: absolute; top: 100%; right: 0; width: 380px; max-height: 400px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; }
+        .search-item { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+        .search-item:hover { background: rgba(255,255,255,0.05); }
+        .search-empty { padding: 16px; text-align: center; color: var(--text-tertiary); }
+        .si-info { flex: 1; }
+        .si-code { font-weight: 600; color: var(--accent); }
+        .si-metrics { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+        .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin-left: 4px; }
+        .badge-list { background: var(--accent); color: #fff; }
+        .badge-signal { background: rgba(255,193,7,0.2); color: #ffc107; }
+        .badge-watched { background: var(--color-up); color: #fff; }
+        .watch-btn { padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; margin-left: 6px; }
+        .watch-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .watch-btn.watched { background: var(--color-up); color: #fff; border-color: var(--color-up); }
+        .signal-buy { color: var(--color-up); font-weight: 600; }
+        .signal-hold { color: #ffc107; font-weight: 600; }
+        .signal-avoid { color: var(--red); font-weight: 600; }
+
         .section-header {
             display: flex;
             justify-content: space-between;
@@ -884,8 +909,16 @@
     <!-- Stock Results -->
     {% if stocks %}
     <div class="section-header">
-        <span class="section-title">选股结果</span>
+        <div class="view-tabs">
+            <button class="view-tab active" onclick="switchView('candidates', event)">候选池</button>
+            <button class="view-tab" onclick="switchView('watchlist', event)">我的钉选 <span id="watchCount"></span></button>
+        </div>
         <span class="section-count">{{ stocks|length }} 只</span>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索代码/名称..." />
+            <button onclick="searchStocks()">搜索</button>
+            <div id="searchResults" class="search-results" style="display:none;"></div>
+        </div>
     </div>
 
     <div class="dashboard-layout">
@@ -893,6 +926,7 @@
     <div class="stock-list" id="stockList">
         {% include '_stock_list.html' %}
     </div>
+    <div class="stock-list" id="watchlistContainer" style="display:none;"></div>
     </div><!-- /dashboard-main -->
 
     <!-- Knowledge Panel -->
@@ -1356,5 +1390,6 @@
     setInterval(refreshDashboard, REFRESH_INTERVAL);
     setInterval(updateTimestamp, 10000);
 </script>
+<script src="/static/watchlist.js"></script>
 </body>
 </html>

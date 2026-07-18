@@ -5,6 +5,9 @@
                     <div class="stock-code">{{ stock.code }}</div>
                     <div class="stock-name">{{ stock.name }}</div>
                     <span class="stock-score">{{ stock.score }}</span>
+                    <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
+                            onclick="toggleWatch('{{ stock.code }}', this)"
+                            title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
                 </div>
 
                 <div class="stock-metrics">
