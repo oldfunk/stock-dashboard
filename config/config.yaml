@@ -64,3 +64,14 @@ schedule:
   daily_update_time: "15:30"
   # 大盘数据更新间隔（分钟）
   market_index_interval: 30
+
+# -------- AI 观察池复盘配置 --------
+ai_review:
+  enabled: true                    # 是否启用周六 AI 复盘
+  candidate_pool_weeks: 4          # 候选池回看周数（从 screening_result 取）
+  watchlist_size: 5                # 观察池固定容量
+  hard_rules:
+    signal_avoid: true             # Signal=AVOID 强制调出
+    roe_below: 5                   # ROE 低于此值强制调出
+    price_above_buyzone_pct: 20    # 越出买入区上限百分比
+    roe_collapse_pp: 10            # ROE 同比下降 pp
