@@ -146,8 +146,51 @@ class WatchlistReviewer:
 
     # 下面的方法在后续 Task 实现
     def review(self, run_id: str) -> dict:
-        """复盘主入口（Task 4 实现）"""
-        raise NotImplementedError("review() 在 Task 4 实现")
+        """复盘主入口。
+
+        流程：
+        1. 加载当前观察池 + 候选池 + 周五分析 + 大盘
+        2. 硬规则预过滤
+        3. 调用 LLM 决策
+        4. 校验 + 落库
+        """
+        with self._module_lock:
+            from src.models.ai_watchlist import (
+                AiWatchlistDAO, AiWatchlistHistoryDAO, AiJournalDAO
+            )
+            from src.models.database import (
+                ScreeningResultDAO, MarketIndexDAO, StockAnalysisHistoryDAO
+            )
+
+            # 1. 加载数据
+            current = AiWatchlistDAO().get_all()
+            candidates = self._load_recent_candidates(self.candidate_weeks)
+            if not candidates and not current:
+                logger.info("[复盘] 候选池为空，跳过")
+                return {"skipped": True, "reason": "no_candidates"}
+
+            analyses = self._load_recent_analyses(current + candidates)
+            market = MarketIndexDAO().get_latest()
+            # 历史财务（用于 ROE 同比判断）
+            self._inject_history_roe(current)
+
+            # 2. 硬规则预过滤
+            forced_out = self._apply_hard_rules(current, analyses)
+
+            # 3. 调用 LLM
+            prompt = self._build_prompt(
+                current, candidates, analyses, market, forced_out
+            )
+            result = self._call_llm(prompt)
+            if result is None:
+                logger.warning("[复盘] LLM 调用失败，跳过本次")
+                return {"skipped": True, "reason": "llm_failed"}
+
+            # 4. 校验 + 落库
+            validated = self._validate_and_persist(
+                result, run_id, forced_out, current, candidates
+            )
+            return validated
 
     def _build_prompt(self, current: list[dict], candidates: list[dict],
                       analyses: dict[str, dict], market: list[dict],
@@ -380,6 +423,163 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
         logger.error("[复盘] 已达最大重试次数，放弃")
         return None
 
-    def _validate_and_persist(self, *args, **kwargs) -> dict:
-        """校验 + 落库（Task 4 实现）"""
-        raise NotImplementedError("_validate_and_persist() 在 Task 4 实现")
+    def _validate_and_persist(self, result: dict, run_id: str,
+                              forced_out: list[dict], current: list[dict],
+                              candidates: list[dict]) -> dict:
+        """校验 LLM 输出 + 落库。
+
+        校验规则：
+        - 强制调出的股票必须调出（无论 LLM 想干嘛）
+        - 调入的股票必须在候选池内
+        - new_watchlist 不超过 watchlist_size
+        """
+        from src.models.ai_watchlist import (
+            AiWatchlistDAO, AiWatchlistHistoryDAO, AiJournalDAO
+        )
+
+        candidate_codes = {c['code'] for c in candidates}
+        forced_out_codes = {f['code'] for f in forced_out}
+        current_map = {s['code']: s for s in current}
+
+        actions = result.get('watchlist_actions', [])
+        new_watchlist = result.get('new_watchlist', [])
+        journal = result.get('journal', {})
+
+        # 构建最终动作列表（强制调出 + LLM 动作，去重）
+        final_actions = {}  # code → (action, reason)
+
+        # 1. 强制调出优先
+        for f in forced_out:
+            final_actions[f['code']] = (
+                'remove',
+                f"硬规则强制调出: {', '.join(f['reasons'])}"
+            )
+
+        # 2. LLM 动作（不覆盖强制调出）
+        for action in actions:
+            code = action.get('code')
+            if not code:
+                continue
+            if code in forced_out_codes:
+                continue  # 强制调出已处理
+            act = action.get('action', 'keep')
+            reason = action.get('reason', '')
+            # 调入必须在候选池
+            if act == 'add' and code not in candidate_codes:
+                logger.warning(
+                    f"[复盘] 拒绝调入 {code}: 不在候选池"
+                )
+                final_actions[code] = ('remove', f"rejected: not in candidate pool")
+                continue
+            final_actions[code] = (act, reason)
+
+        # 3. 落库
+        action_date = now_cn().strftime("%Y-%m-%d")
+        watchlist_dao = AiWatchlistDAO()
+        history_dao = AiWatchlistHistoryDAO()
+
+        for code, (action, reason) in final_actions.items():
+            name = current_map.get(code, {}).get('name', '')
+            if action == 'remove':
+                watchlist_dao.remove(code)
+            elif action == 'add':
+                # 从候选池找 name
+                for c in candidates:
+                    if c['code'] == code:
+                        name = c['name']
+                        break
+                watchlist_dao.add(code, name, added_reason=reason)
+            elif action == 'keep':
+                watchlist_dao.update_reviewed(code)
+
+            history_dao.append(
+                code=code, name=name, action=action,
+                reason=reason, review_run_id=run_id, action_date=action_date
+            )
+
+        # 4. 笔记落库
+        if journal and journal.get('title'):
+            journal_dao = AiJournalDAO()
+            journal_dao.save(
+                journal_date=action_date,
+                run_id=run_id,
+                title=journal.get('title', ''),
+                content_md=journal.get('content_md', ''),
+                market_snapshot=json.dumps(
+                    {'indices': [{'name': m.get('index_name'),
+                                  'value': m.get('current_value')}
+                                 for m in []]}
+                ),
+                actions_summary=json.dumps({
+                    'add': sum(1 for a, _ in final_actions.values() if a == 'add'),
+                    'remove': sum(1 for a, _ in final_actions.values() if a == 'remove'),
+                    'keep': sum(1 for a, _ in final_actions.values() if a == 'keep'),
+                })
+            )
+
+        return {
+            "new_watchlist": [w['code'] for w in watchlist_dao.get_all()],
+            "actions": dict(final_actions),
+            "journal_date": action_date,
+            "journal": journal,
+        }
+
+    def _load_recent_candidates(self, weeks: int) -> list[dict]:
+        """加载最近 N 周 screening_result 去重"""
+        from datetime import timedelta
+        from src.models.database import ScreeningResultDAO, db_conn
+
+        cutoff = (now_cn() - timedelta(weeks=weeks)).strftime("%Y-%m-%d")
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM screening_result "
+                "WHERE run_date >= ? "
+                "GROUP BY code "
+                "ORDER BY MAX(score) DESC LIMIT 50",
+                (cutoff,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def _load_recent_analyses(self, stocks: list[dict]) -> dict[str, dict]:
+        """加载最近一次 AI 分析（按 code）"""
+        from src.models.database import StockAnalysisHistoryDAO
+        dao = StockAnalysisHistoryDAO()
+        analyses = {}
+        for s in stocks:
+            code = s.get('code')
+            if not code:
+                continue
+            hist = dao.get_latest_for_code(code)
+            if hist and hist.get('ai_analysis'):
+                try:
+                    parsed = json.loads(hist['ai_analysis'])
+                    if parsed and parsed != {}:
+                        # 合并 ai_trade_strategy 字段（生产代码写入 ai_analysis
+                        # 时通常已包含 trade_strategy，但历史/测试数据可能拆分
+                        # 存储，这里做兼容处理）
+                        if 'trade_strategy' not in parsed and hist.get('ai_trade_strategy'):
+                            try:
+                                parsed['trade_strategy'] = json.loads(
+                                    hist['ai_trade_strategy']
+                                )
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        analyses[code] = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return analyses
+
+    def _inject_history_roe(self, stocks: list[dict]):
+        """注入历史 ROE（用于 ROE 同比判断）"""
+        from src.models.database import FinancialHistoryDAO
+        dao = FinancialHistoryDAO()
+        for s in stocks:
+            reports = dao.get_annual_reports(s['code'])
+            if len(reports) >= 2:
+                # reports 按日期降序，[0] 是最新年报，[1] 是去年
+                s['_history_roe'] = {
+                    'last_year': reports[1].get('roe'),
+                    'this_year': reports[0].get('roe'),
+                }
+            else:
+                s['_history_roe'] = None

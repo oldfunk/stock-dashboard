@@ -227,3 +227,178 @@ def test_call_llm_parses_valid_json(monkeypatch):
     assert result is not None
     assert "watchlist_actions" in result
     assert result["journal"]["title"] == "测试"
+
+
+def test_review_initial_mode_persists_5_stocks(monkeypatch, tmp_path):
+    """首次启动：观察池为空 → AI 选 5 只 → 落库"""
+    import os
+    from src.models import database as db_mod
+    # 用临时数据库
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+    # 预置 screening_result（候选池数据源）
+    from src.models.database import ScreeningResultDAO
+    ScreeningResultDAO().save_batch([
+        {"run_id": "r1", "run_date": "2026-07-15", "code": "600519",
+         "name": "贵州茅台", "score": 85, "pe": 30, "pb": 10,
+         "roe": 30, "gross_margin": 90, "net_margin": 50,
+         "ocf_per_share": 50, "revenue_growth": 15, "profit_growth": 20,
+         "debt_ratio": 20, "market_cap": 2000, "reason": "测试"},
+    ])
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "watchlist_size": 5,
+                      "hard_rules": {}},
+        "ai": {"api_base": "https://example.com", "model": "test-free"}
+    })
+
+    # mock LLM 返回
+    def fake_call_llm(prompt):
+        return {
+            "watchlist_actions": [
+                {"code": "600519", "action": "add", "reason": "ROE 30%+"}
+            ],
+            "new_watchlist": ["600519"],
+            "journal": {
+                "title": "首次复盘",
+                "content_md": "# 首次复盘\n初始化观察池"
+            }
+        }
+    monkeypatch.setattr(reviewer, "_call_llm", fake_call_llm)
+
+    result = reviewer.review("run_test_001")
+
+    from src.models.ai_watchlist import AiWatchlistDAO, AiJournalDAO
+    watchlist = AiWatchlistDAO().get_all()
+    assert len(watchlist) == 1
+    assert watchlist[0]['code'] == "600519"
+    assert watchlist[0]['added_reason'] == "ROE 30%+"
+
+    journal = AiJournalDAO().get_latest()
+    assert journal is not None
+    assert journal['title'] == "首次复盘"
+    assert journal['run_id'] == "run_test_001"
+
+    # 返回值结构
+    assert "new_watchlist" in result
+    assert "journal" in result
+    assert result["new_watchlist"] == ["600519"]
+
+
+def test_review_rejects_candidate_not_in_pool(monkeypatch, tmp_path):
+    """LLM 调入未在候选池的股票 → 拒绝调入"""
+    from src.models import database as db_mod
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+    from src.models.database import ScreeningResultDAO
+    from src.models.ai_watchlist import AiWatchlistDAO
+    ScreeningResultDAO().save_batch([
+        {"run_id": "r1", "run_date": "2026-07-15", "code": "600519",
+         "name": "贵州茅台", "score": 85, "pe": 30, "pb": 10, "roe": 30,
+         "gross_margin": 90, "net_margin": 50, "ocf_per_share": 50,
+         "revenue_growth": 15, "profit_growth": 20, "debt_ratio": 20,
+         "market_cap": 2000, "reason": "测试"},
+    ])
+    # 预置当前观察池
+    AiWatchlistDAO().add("600519", "贵州茅台", "测试")
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "hard_rules": {}},
+        "ai": {}
+    })
+
+    # LLM 尝试调入不在候选池的 999999
+    def fake_call_llm(prompt):
+        return {
+            "watchlist_actions": [
+                {"code": "600519", "action": "keep", "reason": "稳定"},
+                {"code": "999999", "action": "add", "reason": "未知股"}
+            ],
+            "new_watchlist": ["600519", "999999"],
+            "journal": {"title": "T", "content_md": "C"}
+        }
+    monkeypatch.setattr(reviewer, "_call_llm", fake_call_llm)
+
+    result = reviewer.review("run_test_002")
+
+    # 999999 被拒绝
+    watchlist = AiWatchlistDAO().get_all()
+    codes = {w['code'] for w in watchlist}
+    assert "999999" not in codes
+    assert "600519" in codes
+
+
+def test_review_forced_out_overrides_llm(monkeypatch, tmp_path):
+    """硬规则强制调出的股票，即使 LLM 想保留，也必须调出"""
+    from src.models import database as db_mod
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+    from src.models.database import ScreeningResultDAO
+    from src.models.ai_watchlist import AiWatchlistDAO
+    ScreeningResultDAO().save_batch([
+        {"run_id": "r1", "run_date": "2026-07-15", "code": "600519",
+         "name": "贵州茅台", "score": 85, "pe": 30, "pb": 10, "roe": 30,
+         "gross_margin": 90, "net_margin": 50, "ocf_per_share": 50,
+         "revenue_growth": 15, "profit_growth": 20, "debt_ratio": 20,
+         "market_cap": 2000, "reason": "测试"},
+    ])
+    # 当前观察池有一只恶化的股票 002415
+    AiWatchlistDAO().add("002415", "海康威视", "测试")
+    # 预置它的周五 AI 分析（Signal=AVOID）
+    from src.models.database import StockAnalysisHistoryDAO
+    StockAnalysisHistoryDAO().save(
+        "002415", "r1", 70.0,
+        json.dumps({"analysis": "测试"}),
+        json.dumps({"signal": "AVOID"})
+    )
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "hard_rules": {
+            "signal_avoid": True, "roe_below": 5,
+            "price_above_buyzone_pct": 20, "roe_collapse_pp": 10,
+        }},
+        "ai": {}
+    })
+
+    # LLM 想保留 002415（违反硬规则）
+    def fake_call_llm(prompt):
+        return {
+            "watchlist_actions": [
+                {"code": "002415", "action": "keep", "reason": "稳定"}
+            ],
+            "new_watchlist": ["002415"],
+            "journal": {"title": "T", "content_md": "C"}
+        }
+    monkeypatch.setattr(reviewer, "_call_llm", fake_call_llm)
+
+    result = reviewer.review("run_test_003")
+
+    # 002415 被强制调出
+    watchlist = AiWatchlistDAO().get_all()
+    codes = {w['code'] for w in watchlist}
+    assert "002415" not in codes
+
+
+def test_review_skips_when_no_candidates(monkeypatch, tmp_path):
+    """候选池为空 → 跳过复盘"""
+    from src.models import database as db_mod
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "hard_rules": {}},
+        "ai": {}
+    })
+    call_count = [0]
+    def fake_call_llm(prompt):
+        call_count[0] += 1
+        return {}
+    monkeypatch.setattr(reviewer, "_call_llm", fake_call_llm)
+
+    result = reviewer.review("run_test_004")
+    assert call_count[0] == 0  # 没调用 LLM
+    assert result.get("skipped") is True
