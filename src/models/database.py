@@ -233,6 +233,43 @@ CREATE TABLE IF NOT EXISTS pipeline_progress (
     started_at TEXT,
     updated_at TEXT
 );
+
+-- AI 观察池（当前 5 只状态）
+CREATE TABLE IF NOT EXISTS ai_watchlist (
+    code            TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    added_at        TEXT NOT NULL,
+    added_reason    TEXT,
+    ai_confidence   TEXT,
+    last_reviewed   TEXT,
+    review_count    INTEGER DEFAULT 1
+);
+
+-- AI 观察池历史调整记录
+CREATE TABLE IF NOT EXISTS ai_watchlist_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT NOT NULL,
+    name            TEXT,
+    action          TEXT NOT NULL,
+    action_date    TEXT NOT NULL,
+    reason          TEXT,
+    review_run_id   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_history_code ON ai_watchlist_history(code);
+CREATE INDEX IF NOT EXISTS idx_watchlist_history_date ON ai_watchlist_history(action_date);
+
+-- AI 投资笔记
+CREATE TABLE IF NOT EXISTS ai_journal (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    journal_date    TEXT NOT NULL UNIQUE,
+    run_id          TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    content_md      TEXT NOT NULL,
+    market_snapshot TEXT,
+    actions_summary TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_date ON ai_journal(journal_date);
 """
 
 
