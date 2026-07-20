@@ -93,6 +93,8 @@ class MarketScheduler:
         self._last_stock_time = time.time()
         # 启动时从数据库检查今日是否已完成流水线，避免重启后重复触发
         self._last_daily_date = self._get_last_completed_date()
+        # 周六复盘状态（避免重启后重复触发）
+        self._last_review_date = self._get_last_review_date()
 
     def _get_last_completed_date(self):
         """从数据库获取最新完成运行的日期，用于避免重启后重复触发当日流水线"""
@@ -103,6 +105,19 @@ class MarketScheduler:
                 # run_id 格式：YYYYMMDD_HHMMSS
                 date_str = run_id.split('_')[0]
                 return datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            pass
+        return None
+
+    def _get_last_review_date(self):
+        """从 ai_journal 表获取最新复盘日期，避免重启后重复触发"""
+        try:
+            from src.models.ai_watchlist import AiJournalDAO
+            latest = AiJournalDAO().get_latest()
+            if latest:
+                return datetime.strptime(
+                    latest['journal_date'], "%Y-%m-%d"
+                ).date()
         except Exception:
             pass
         return None
@@ -149,6 +164,9 @@ class MarketScheduler:
 
                 # 每日收盘流水线（交易日 15:30 后触发一次）
                 self._check_daily_pipeline()
+
+                # 每周六 00:00 触发 AI 观察池复盘
+                self._check_weekly_review()
 
             except Exception as e:
                 logger.warning(f"[调度器] 运行异常: {e}")
@@ -213,6 +231,57 @@ class MarketScheduler:
                 self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
+
+    def _check_weekly_review(self):
+        """检查是否需要触发周六 AI 复盘
+
+        周六任意时刻进程还活着且当天没跑过就触发一次。
+        _last_review_date 在 _run_review 成功后才设置，
+        避免失败重试时被错误跳过。
+        """
+        now = now_cn()
+        if now.weekday() != 5:  # 周六
+            return
+        if self._last_review_date == now.date():
+            return
+        threading.Thread(target=self._run_review, daemon=True).start()
+
+    def _run_review(self):
+        """后台跑复盘，不阻塞主调度循环"""
+        try:
+            from src.analyzer.watchlist_reviewer import WatchlistReviewer
+            from src.models.database import RunLogDAO
+            from src.config import load_config
+
+            config = load_config()
+            ai_review_cfg = config.get('ai_review', {})
+            if not ai_review_cfg.get('enabled', True):
+                logger.info("[复盘] ai_review.enabled=False, 跳过")
+                return
+
+            run_id = now_cn().strftime("%Y%m%d_%H%M%S") + "_review"
+            RunLogDAO().start_run(run_id)
+            logger.info(f"[复盘] 启动周六复盘 run_id={run_id}")
+
+            reviewer = WatchlistReviewer(config)
+            result = reviewer.review(run_id)
+
+            if result.get('skipped'):
+                logger.info(f"[复盘] 跳过: {result.get('reason')}")
+                RunLogDAO().complete_run(
+                    run_id, 0, 0, 0, f"skipped: {result.get('reason')}"
+                )
+            else:
+                new_count = len(result.get('new_watchlist', []))
+                RunLogDAO().complete_run(
+                    run_id, 0, new_count, 0, "review done"
+                )
+                logger.info(f"[复盘] 完成，观察池 {new_count} 只")
+
+            # 只在成功后才标记当日已完成
+            self._last_review_date = now_cn().date()
+        except Exception as e:
+            logger.warning(f"[复盘] 异常: {e}", exc_info=True)
 
     def _trigger_ai_analysis_async(self, config: dict):
         """在后台线程中异步触发 AI 分析（全量模式）"""
