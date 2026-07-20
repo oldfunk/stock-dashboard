@@ -1,18 +1,22 @@
 // 搜索 + 钉选功能 (watchlist.js)
 
-// 视图切换：候选池 / 我的钉选
-function switchView(view, evt) {
-    var tabs = document.querySelectorAll('.view-tab');
-    tabs.forEach(function(t) { t.classList.remove('active'); });
-    if (evt && evt.target) evt.target.classList.add('active');
-    var stockList = document.getElementById('stockList');
+// 视图切换：AI 观察池 / 钉选股票
+function switchView(view, event) {
+    // 切换 tab 高亮
+    document.querySelectorAll('.view-tab').forEach(function(el) {
+        el.classList.remove('active');
+    });
+    if (event && event.target) {
+        event.target.closest('.view-tab').classList.add('active');
+    }
+    var aiContainer = document.getElementById('watchlistAiContainer');
     var watchlist = document.getElementById('watchlistContainer');
-    if (!stockList || !watchlist) return;
-    if (view === 'candidates') {
-        stockList.style.display = '';
+    if (!aiContainer || !watchlist) return;
+    if (view === 'watchlist-ai') {
+        aiContainer.style.display = '';
         watchlist.style.display = 'none';
-    } else {
-        stockList.style.display = 'none';
+    } else if (view === 'watchlist') {
+        aiContainer.style.display = 'none';
         watchlist.style.display = '';
         loadWatchlist();
     }

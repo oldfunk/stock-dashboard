@@ -178,6 +178,18 @@ templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(templates_dir))
 
+import markdown as _markdown
+
+
+def _markdown_to_html(text: str) -> str:
+    """Jinja2 过滤器：Markdown → HTML"""
+    if not text:
+        return ''
+    return _markdown.markdown(text, extensions=['extra', 'codehilite'])
+
+
+templates.env.filters['markdown_to_html'] = _markdown_to_html
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -222,6 +234,29 @@ async def index(request: Request):
     # 解析 AI 分析 JSON + 历史 + 财务汇总
     _enrich_stocks(stocks)
 
+    # 获取 AI 观察池 + 合并实时行情 + 最近 AI Signal
+    ai_watchlist = AiWatchlistDAO().get_all()
+    realtime = get_realtime_cache()
+    hist_dao = StockAnalysisHistoryDAO()
+    for item in ai_watchlist:
+        code = item['code']
+        if code in realtime:
+            item['current_price'] = realtime[code].get('current_price')
+            item['change_percent'] = realtime[code].get('change_percent')
+        # 取最近 Signal
+        latest_hist = hist_dao.get_latest_for_code(code)
+        if latest_hist and latest_hist.get('ai_trade_strategy'):
+            try:
+                trade = json.loads(latest_hist['ai_trade_strategy'])
+                item['signal'] = trade.get('signal')
+            except (json.JSONDecodeError, TypeError):
+                item['signal'] = None
+        else:
+            item['signal'] = None
+
+    # 获取最新笔记摘要
+    ai_journal_latest = AiJournalDAO().get_latest()
+
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
@@ -231,6 +266,8 @@ async def index(request: Request):
         "stocks": stocks,
         "run_log": run_log,
         "refresh_interval": refresh,
+        "ai_watchlist": ai_watchlist,
+        "ai_journal_latest": ai_journal_latest,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 

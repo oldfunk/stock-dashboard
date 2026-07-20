@@ -812,6 +812,108 @@
             background: var(--bg-tertiary);
             border-radius: var(--radius-sm);
         }
+
+        /* ========== AI Watchlist Grid ========== */
+        .watchlist-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .watchlist-card {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px;
+            transition: background 0.15s;
+            border: 1px solid var(--divider-thin);
+        }
+        .watchlist-card:hover { background: var(--bg-hover); }
+        .wl-card-header { margin-bottom: 12px; }
+        .wl-stock-code {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            letter-spacing: 0.02em;
+        }
+        .wl-stock-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 1px;
+        }
+        .wl-card-body { margin-bottom: 12px; }
+        .wl-price {
+            font-size: 20px;
+            font-weight: 400;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+        .wl-change { font-size: 11px; margin-top: 2px; }
+        .wl-card-footer {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider-thin);
+        }
+        .wl-signal {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+        .wl-signal-buy { background: var(--color-up); color: #fff; }
+        .wl-signal-hold {
+            background: transparent;
+            border: 1px solid var(--text-tertiary);
+            color: var(--text-secondary);
+        }
+        .wl-signal-avoid {
+            background: transparent;
+            border: 1px dashed var(--red);
+            color: var(--red);
+        }
+        .wl-signal-none { color: var(--text-tertiary); }
+        .wl-confidence {
+            font-size: 10px;
+            color: var(--text-tertiary);
+        }
+        .wl-weeks {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-left: auto;
+        }
+        .wl-reason {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider-thin);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        @media (max-width: 1200px) {
+            .watchlist-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .watchlist-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        /* ========== Journal Link ========== */
+        .journal-link {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+        }
+        .journal-link a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .journal-link a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -910,10 +1012,10 @@
     {% if stocks %}
     <div class="section-header">
         <div class="view-tabs">
-            <button class="view-tab active" onclick="switchView('candidates', event)">候选池</button>
-            <button class="view-tab" onclick="switchView('watchlist', event)">我的钉选 <span id="watchCount"></span></button>
+            <button class="view-tab active" onclick="switchView('watchlist-ai', event)">AI 观察池</button>
+            <button class="view-tab" onclick="switchView('watchlist', event)">钉选股票 <span id="watchCount"></span></button>
         </div>
-        <span class="section-count">{{ stocks|length }} 只</span>
+        <span class="section-count" id="aiWatchCount">{{ ai_watchlist|length if ai_watchlist else 0 }} 只</span>
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="搜索代码/名称..." />
             <button onclick="searchStocks()">搜索</button>
@@ -923,8 +1025,16 @@
 
     <div class="dashboard-layout">
     <div class="dashboard-main">
-    <div class="stock-list" id="stockList">
-        {% include '_stock_list.html' %}
+    <div id="watchlistAiContainer">
+        {% with watchlist = ai_watchlist %}
+        {% include '_watchlist_card.html' %}
+        {% endwith %}
+        {% if ai_journal_latest %}
+        <div class="journal-link">
+            <strong>本周笔记:</strong> {{ ai_journal_latest.title }}
+            &mdash; <a href="/journal">查看全文 &rarr;</a>
+        </div>
+        {% endif %}
     </div>
     <div class="stock-list" id="watchlistContainer" style="display:none;"></div>
     </div><!-- /dashboard-main -->

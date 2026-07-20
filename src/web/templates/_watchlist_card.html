@@ -1,0 +1,51 @@
+{% if watchlist %}
+<div class="watchlist-grid">
+    {% for stock in watchlist %}
+    <div class="watchlist-card" data-code="{{ stock.code }}">
+        <div class="wl-card-header">
+            <div class="wl-stock-code">{{ stock.code }}</div>
+            <div class="wl-stock-name">{{ stock.name }}</div>
+        </div>
+        <div class="wl-card-body">
+            {% if stock.current_price is not none %}
+            <div class="wl-price" id="wl-price-{{ stock.code }}">
+                ¥{{ "%.2f"|format(stock.current_price) }}
+            </div>
+            {% else %}
+            <div class="wl-price" id="wl-price-{{ stock.code }}">--</div>
+            {% endif %}
+            <div class="wl-change" id="wl-chg-{{ stock.code }}">
+                {% if stock.change_percent is not none %}
+                <span style="color:{{ 'var(--color-up)' if stock.change_percent >= 0 else 'var(--color-down)' }}">
+                    {{ "%+.2f"|format(stock.change_percent) }}%
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="wl-card-footer">
+            {% set signal = stock.signal|upper if stock.signal else '--' %}
+            {% if signal == 'BUY' %}
+            <span class="wl-signal wl-signal-buy">买入</span>
+            {% elif signal == 'HOLD' %}
+            <span class="wl-signal wl-signal-hold">持有</span>
+            {% elif signal == 'AVOID' %}
+            <span class="wl-signal wl-signal-avoid">回避</span>
+            {% else %}
+            <span class="wl-signal wl-signal-none">{{ signal }}</span>
+            {% endif %}
+            <span class="wl-confidence">{{ stock.ai_confidence or '--' }}</span>
+            <span class="wl-weeks">在池{{ stock.review_count or 1 }}周</span>
+        </div>
+        <div class="wl-reason" title="{{ stock.added_reason or '' }}">
+            {{ stock.added_reason or '' }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="icon">&#9678;</div>
+    <h2>观察池为空</h2>
+    <p>周六 00:00 AI 自动复盘后，将在此处展示 5 只观察股。</p>
+</div>
+{% endif %}
