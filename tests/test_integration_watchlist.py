@@ -21,13 +21,11 @@ def app_client(tmp_path, monkeypatch):
 
 
 def test_full_flow_empty_db(app_client):
-    """空数据库：首页不崩溃，/journal 显示无笔记，/api/ai-watchlist 返回 []
-
-    注：index.html 的 watchlist 区段被 {% if stocks %} 包裹，
-    完全空 DB 时不渲染 "观察池为空" 文案；此处只验证 200 + 不报错。
-    """
+    """空数据库：首页显示 AI 观察池 tab + 空状态，/journal 显示无笔记，/api/ai-watchlist 返回 []"""
     resp = app_client.get("/")
     assert resp.status_code == 200
+    assert "AI 观察池" in resp.text
+    assert "观察池为空" in resp.text
 
     resp = app_client.get("/journal")
     assert resp.status_code == 200

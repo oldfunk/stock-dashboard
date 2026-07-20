@@ -1009,7 +1009,6 @@
     </div>
 
     <!-- Stock Results -->
-    {% if stocks %}
     <div class="section-header">
         <div class="view-tabs">
             <button class="view-tab active" onclick="switchView('watchlist-ai', event)">AI 观察池</button>
@@ -1198,13 +1197,6 @@
         </div>
     </aside>
     </div><!-- /dashboard-layout -->
-    {% else %}
-    <div class="empty-state">
-        <div class="icon">&#9678;</div>
-        <h2>暂无筛选结果</h2>
-        <p>交易日下午15:30自动运行筛选流水线，<br>结果将在此处自动显示。</p>
-    </div>
-    {% endif %}
 
     <footer class="footer">
         Stock Dashboard v2.0 &middot; 量化筛选每日运行 · AI分析每周五 16:00 &middot; 数据源: AKShare + 东方财富 + 腾讯行情 &middot; 非投资建议
@@ -1446,53 +1438,20 @@
         updateTimestamp();
     }
 
-    // 候选股变化追踪
+    // 流水线变化追踪（新流水线完成时自动 reload，刷新 AI 观察池）
     var lastRunId = null;
 
     function renderStocks(data) {
-        var listEl = document.getElementById('stockList');
-        if (!listEl || !data) return;
-
-        // 检测是否有 HTML 标记（来自 /api/stocks）
-        if (data._html) {
-            // run_id 变化 → 新流水线完成 → 全量刷新
-            if (data._run_id && data._run_id !== lastRunId) {
-                if (lastRunId !== null) {
-                    lastRunId = data._run_id;
-                    window.location.reload();
-                    return;
-                }
+        if (!data) return;
+        // 检测 run_id 变化 → 新流水线完成 → 全量刷新
+        if (data._run_id && data._run_id !== lastRunId) {
+            if (lastRunId !== null) {
                 lastRunId = data._run_id;
+                window.location.reload();
+                return;
             }
-            // 无 run_id 变化 → 只替换股票列表内容
-            listEl.innerHTML = data._html;
-            return;
+            lastRunId = data._run_id;
         }
-
-        // 兼容旧格式：只更新价格（fallback）
-        var list = data.stocks || data;
-        if (!list || list.length === 0) return;
-
-        // 更新候选股数量
-        var count = data._count != null ? data._count : list.length;
-        var header = document.querySelector('.section-count');
-        if (header) header.textContent = count + ' 只';
-
-        // 逐字段更新价格（不刷新全列表）
-        list.forEach(function(s) {
-            var priceEl = document.getElementById('price-' + s.code);
-            var chgEl = document.getElementById('chg-' + s.code);
-            if (!priceEl) return;
-            if (s.current_price != null) {
-                priceEl.textContent = s.current_price.toFixed(2);
-            }
-            if (chgEl && s.change_percent != null) {
-                var cls = s.change_percent >= 0 ? 'up' : 'down';
-                var arrow = s.change_percent >= 0 ? '&#9650;' : '&#9660;';
-                chgEl.innerHTML = '<span class="' + cls + '">' + arrow + ' ' +
-                    (s.change_percent >= 0 ? '+' : '') + s.change_percent.toFixed(2) + '%</span>';
-            }
-        });
     }
 
     // Auto-refresh
