@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ page_title }} · 投资笔记</title>
+</head>
+<body>
+    <h1>{{ journal.title if journal else '暂无笔记' }}</h1>
+    {% if journal %}
+    <div>{{ journal.content_md }}</div>
+    {% endif %}
+</body>
+</html>

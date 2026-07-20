@@ -25,6 +25,9 @@ from src.models.database import (
     WatchlistDAO,
     db_conn,
 )
+from src.models.ai_watchlist import (
+    AiWatchlistDAO, AiWatchlistHistoryDAO, AiJournalDAO
+)
 from fastapi import HTTPException
 from src.scheduler import (
     MarketScheduler, set_active_codes, get_realtime_cache, fetch_stock_realtime,
@@ -553,6 +556,84 @@ async def api_watchlist_remove(code: str):
     """取消钉选"""
     WatchlistDAO().remove(code)
     return {"ok": True, "code": code}
+
+
+# ── AI 观察池 + 投资笔记 ──────────────────────────────────────
+
+@app.get("/api/ai-watchlist")
+async def api_ai_watchlist():
+    """当前 AI 观察池（最多 5 只）"""
+    items = AiWatchlistDAO().get_all()
+    # 合并实时行情
+    realtime = get_realtime_cache()
+    for item in items:
+        code = item['code']
+        if code in realtime:
+            item['current_price'] = realtime[code].get('current_price')
+            item['change_percent'] = realtime[code].get('change_percent')
+    return items
+
+
+@app.get("/api/ai-watchlist/history")
+async def api_ai_watchlist_history():
+    """观察池调整历史"""
+    return AiWatchlistHistoryDAO().list_recent(limit=50)
+
+
+@app.get("/journal", response_class=HTMLResponse)
+async def journal_page(request: Request):
+    """投资笔记页（默认显示最新一篇）"""
+    latest = AiJournalDAO().get_latest()
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "journal.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal": latest,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/journal/{journal_date}", response_class=HTMLResponse)
+async def journal_by_date(request: Request, journal_date: str):
+    """指定日期笔记页"""
+    journal = AiJournalDAO().get_by_date(journal_date)
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "journal.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal": journal,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/api/journal/latest")
+async def api_journal_latest():
+    """最新笔记 JSON"""
+    journal = AiJournalDAO().get_latest()
+    if not journal:
+        raise HTTPException(status_code=404, detail="无笔记")
+    return journal
+
+
+@app.get("/api/journal/list")
+async def api_journal_list():
+    """笔记列表（轻量，仅 date + title）"""
+    return AiJournalDAO().list_all()
+
+
+@app.get("/api/journal/{journal_date}")
+async def api_journal_by_date(journal_date: str):
+    """指定日期笔记 JSON"""
+    journal = AiJournalDAO().get_by_date(journal_date)
+    if not journal:
+        raise HTTPException(status_code=404, detail="该日期无笔记")
+    return journal
 
 
 def run_server():
