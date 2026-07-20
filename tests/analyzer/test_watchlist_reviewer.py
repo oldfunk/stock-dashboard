@@ -3,6 +3,8 @@
 4 条硬规则各自触发条件 + 不触发情况。
 """
 
+import json
+
 import pytest
 
 from src.analyzer.watchlist_reviewer import (
@@ -126,3 +128,102 @@ def test_apply_hard_rules_collects_all_triggers():
     # 触发原因列表不为空
     reasons = next(f['reasons'] for f in forced_out if f['code'] == '002415')
     assert len(reasons) >= 2  # 至少触发 2 条
+
+
+def test_build_prompt_contains_required_sections():
+    """prompt 必须包含角色 / 规则 / 当前观察池 / 候选池 / 大盘 / JSON schema"""
+    reviewer = WatchlistReviewer({
+        "ai_review": {"hard_rules": {
+            "signal_avoid": True, "roe_below": 5,
+            "price_above_buyzone_pct": 20, "roe_collapse_pp": 10,
+        }, "watchlist_size": 5}
+    })
+    current = [
+        {"code": "600519", "name": "贵州茅台", "roe": 30.0,
+         "added_reason": "ROE 持续 30%+", "ai_confidence": "高",
+         "review_count": 3},
+        {"code": "000792", "name": "盐湖股份", "roe": 15.0,
+         "added_reason": "低估值", "ai_confidence": "中",
+         "review_count": 1},
+    ]
+    candidates = [
+        {"code": "002415", "name": "海康威视", "roe": 20.0, "score": 75.0},
+        {"code": "300750", "name": "宁德时代", "roe": 18.0, "score": 70.0},
+    ]
+    analyses = {
+        "600519": {"trade_strategy": {"signal": "HOLD", "buy_zone": "1500-1700"}},
+        "000792": {"trade_strategy": {"signal": "BUY", "buy_zone": "15-20"}},
+    }
+    market = [{"index_name": "上证综指", "current_value": 3174.0,
+               "change_percent": 0.5}]
+    forced_out = [
+        {"code": "000792", "name": "盐湖股份", "reasons": ["signal_avoid"]}
+    ]
+
+    prompt = reviewer._build_prompt(
+        current, candidates, analyses, market, forced_out
+    )
+
+    # 必需内容检查
+    assert "价值投资基金经理" in prompt  # 角色
+    assert "600519" in prompt  # 当前观察池
+    assert "002415" in prompt  # 候选池
+    assert "上证综指" in prompt  # 大盘
+    assert "000792" in prompt  # 强制调出
+    assert "watchlist_actions" in prompt  # JSON schema
+    assert "new_watchlist" in prompt
+    assert "journal" in prompt
+    assert "5" in prompt  # watchlist_size
+
+
+def test_build_prompt_initial_mode():
+    """首次启动（当前观察池为空）→ prompt 切换为初始化模式"""
+    reviewer = WatchlistReviewer({"ai_review": {"hard_rules": {}}})
+    candidates = [
+        {"code": "600519", "name": "贵州茅台", "roe": 30.0, "score": 80.0},
+    ]
+    prompt = reviewer._build_prompt(
+        current=[], candidates=candidates, analyses={},
+        market=[], forced_out=[]
+    )
+    assert "初始化" in prompt
+    assert "从候选池选 5 只" in prompt
+
+
+def test_call_llm_parses_valid_json(monkeypatch):
+    """_call_llm 正常返回 JSON 时能解析"""
+    reviewer = WatchlistReviewer({"ai_review": {}, "ai": {
+        "api_base": "https://example.com/v1", "model": "test-free"
+    }})
+
+    class FakeResponse:
+        status_code = 200
+        def json(self):
+            return {
+                "choices": [{"message": {"content": json.dumps({
+                    "watchlist_actions": [],
+                    "new_watchlist": [],
+                    "journal": {"title": "测试", "content_md": "# 测试"}
+                })}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50}
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def post(self, url, headers=None, json=None):
+            return FakeResponse()
+
+    import httpx
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    # 跳过 FreeModelPool acquire，直接返回 model 名
+    monkeypatch.setattr(reviewer, "_resolve_model", lambda: "test-free")
+
+    result = reviewer._call_llm("test prompt")
+    assert result is not None
+    assert "watchlist_actions" in result
+    assert result["journal"]["title"] == "测试"
