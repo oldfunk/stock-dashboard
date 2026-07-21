@@ -272,6 +272,41 @@ async def index(request: Request):
     })
 
 
+@app.get("/candidates", response_class=HTMLResponse)
+async def candidates(request: Request):
+    """候选股总览页 — 显示完整筛选结果（不再限于 Top 20）"""
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+
+    # 获取最新筛选结果
+    result_dao = ScreeningResultDAO()
+    stocks = result_dao.get_latest_results()
+
+    # 合并实时行情
+    realtime = get_realtime_cache()
+    for stock in stocks:
+        code = stock['code']
+        if code in realtime:
+            rt = realtime[code]
+            stock['current_price'] = rt.get('current_price')
+            stock['change_percent'] = rt.get('change_percent')
+            stock['change_amount'] = rt.get('change_amount')
+        else:
+            stock['current_price'] = None
+            stock['change_percent'] = None
+            stock['change_amount'] = None
+
+    # 解析 AI 分析 JSON + 历史 + 财务汇总
+    _enrich_stocks(stocks)
+
+    return templates.TemplateResponse(request, "candidates.html", {
+        "request": request,
+        "page_title": page_title,
+        "stocks": stocks,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
 @app.get("/api/indices")
 async def api_indices():
     """大盘数据 API"""

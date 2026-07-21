@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-color-scheme="cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} - 候选股总览</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ========== Design Tokens (与 index.html 一致) ========== */
+        :root {
+            --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --bg-hover: #e8eaed;
+
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --accent-soft: #e8f0fe;
+
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+            --color-warn: var(--gold);
+
+            --color-up: var(--red);
+            --color-up-bg: var(--red-bg);
+            --color-down: var(--green);
+            --color-down-bg: var(--green-bg);
+
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
+
+            --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+            --radius: 8px;
+            --radius-sm: 4px;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #1a1c1e;
+            --bg-secondary: #202124;
+            --bg-tertiary: #282a2d;
+            --bg-hover: #303134;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --text-tertiary: #5f6368;
+            --accent: #8ab4f8;
+            --accent-hover: #aecbfa;
+            --accent-soft: #1a3a5c;
+            --green: #81c995;
+            --green-bg: #1e3527;
+            --red: #f28b82;
+            --red-bg: #3c2022;
+            --gold: #fdd663;
+            --gold-bg: #3d2e00;
+            --divider: #3c4043;
+            --divider-thin: #303134;
+            --shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        [data-color-scheme="us"] {
+            --color-up: var(--green);
+            --color-up-bg: var(--green-bg);
+            --color-down: var(--red);
+            --color-down-bg: var(--red-bg);
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            font-weight: 400;
+            font-size: 14px;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .app {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px 32px;
+        }
+
+        /* ========== Header ========== */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 24px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 16px;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+
+        .header-subtitle {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .back-link {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--divider);
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .back-link:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .theme-toggle {
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .last-updated {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            font-weight: 400;
+        }
+
+        /* ========== Section Header ========== */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .section-count {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-tertiary);
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            font-family: var(--font-sans);
+            font-size: 13px;
+            padding: 6px 10px;
+            border: 1px solid var(--divider);
+            border-radius: var(--radius-sm);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            width: 200px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .search-box input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-box button {
+            font-family: var(--font-sans);
+            font-size: 13px;
+            padding: 6px 12px;
+            margin-left: 4px;
+            border: none;
+            background: var(--accent);
+            color: #fff;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .search-box button:hover {
+            background: var(--accent-hover);
+        }
+
+        .search-results {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            width: 320px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--divider);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            z-index: 10;
+        }
+
+        /* ========== Stock Cards ========== */
+        .stock-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .stock-card {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            transition: background 0.15s;
+        }
+
+        .stock-card:hover {
+            background: var(--bg-hover);
+        }
+
+        .stock-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 24px;
+        }
+
+        .stock-info {
+            flex-shrink: 0;
+            min-width: 160px;
+        }
+
+        .stock-code {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .stock-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+
+        .stock-score {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent);
+            background: var(--accent-soft);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            margin-top: 6px;
+        }
+
+        .stock-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 12px 16px;
+            flex: 1;
+        }
+
+        .metric-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .metric-cell .label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .metric-cell .value {
+            font-size: 13px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .metric-cell .value.good { color: var(--green); }
+        .metric-cell .value.warn { color: var(--gold); }
+        .metric-cell .value.bad { color: var(--red); }
+
+        .watch-btn {
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 3px 10px;
+            border: 1px solid var(--divider);
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.15s;
+        }
+
+        .watch-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .watch-btn.watched {
+            background: var(--accent-soft);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        /* ========== AI Section ========== */
+        .ai-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        .ai-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .ai-tab {
+            font-family: var(--font-sans);
+            font-size: 11px;
+            padding: 3px 10px;
+            border: none;
+            background: transparent;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+        }
+
+        .ai-tab.active {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .ai-panel {
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        .ai-text {
+            white-space: pre-wrap;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        /* ========== Trade Grid ========== */
+        .trade-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 8px;
+        }
+
+        .trade-cell {
+            background: var(--bg-tertiary);
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+        }
+
+        .trade-signal {
+            background: var(--accent-soft);
+        }
+
+        .signal-buy { color: var(--color-up); font-weight: 600; }
+        .signal-hold { color: var(--gold); font-weight: 600; }
+        .signal-avoid { color: var(--color-down); font-weight: 600; }
+
+        /* ========== History Bar ========== */
+        .history-bar {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        .history-toggle {
+            font-family: var(--font-sans);
+            font-size: 11px;
+            color: var(--text-tertiary);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px 0;
+        }
+
+        .history-toggle:hover {
+            color: var(--text-secondary);
+        }
+
+        .history-list {
+            margin-top: 8px;
+            padding-left: 12px;
+            border-left: 2px solid var(--divider);
+        }
+
+        .history-item {
+            display: flex;
+            gap: 12px;
+            padding: 4px 0;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        /* ========== Empty State ========== */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-tertiary);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.4;
+        }
+
+        .empty-state h2 {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state p {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        /* ========== Footer ========== */
+        .footer {
+            margin-top: 40px;
+            padding-top: 16px;
+            border-top: 1px solid var(--divider-thin);
+            font-size: 11px;
+            color: var(--text-tertiary);
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .app { padding: 16px; }
+            .stock-row { flex-direction: column; gap: 12px; }
+            .stock-metrics { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+<div class="app" id="app">
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <h1 class="header-title">{{ page_title }}</h1>
+            <span class="header-subtitle">候选股总览</span>
+        </div>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated">{{ now }}</span>
+            <a href="/" class="back-link">&larr; 返回看板</a>
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
+            <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
+        </div>
+    </header>
+
+    <!-- Section Header -->
+    <div class="section-header">
+        <div>
+            <span class="section-title">最新筛选结果</span>
+            <span class="section-count" style="margin-left:12px;">{{ stocks|length }} 只</span>
+        </div>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索代码/名称..." />
+            <button onclick="searchStocks()">搜索</button>
+            <div id="searchResults" class="search-results" style="display:none;"></div>
+        </div>
+    </div>
+
+    <!-- Stock List -->
+    {% if stocks %}
+    <div class="stock-list">
+        {% include '_stock_list.html' %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">&#9678;</div>
+        <h2>暂无筛选结果</h2>
+        <p>交易日下午15:30自动运行筛选流水线，<br>结果将在此处自动显示。</p>
+    </div>
+    {% endif %}
+
+    <footer class="footer">
+        <p>数据源：AKShare + 腾讯行情 · 仅供学习研究，不构成投资建议</p>
+    </footer>
+</div>
+
+<script>
+    // ========== Dark Mode ==========
+    const themeToggle = document.getElementById('themeToggle');
+
+    function getPreferredTheme() {
+        const stored = localStorage.getItem('stock-dashboard-theme');
+        if (stored) return stored;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('stock-dashboard-theme', theme);
+        themeToggle.innerHTML = theme === 'dark' ? '&#9728;' : '&#9681;';
+    }
+
+    function toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
+    }
+
+    setTheme(getPreferredTheme());
+
+    // ========== Color Scheme ==========
+    const colorToggle = document.getElementById('colorToggle');
+
+    function getPreferredColorScheme() {
+        const stored = localStorage.getItem('stock-dashboard-color');
+        if (stored) return stored;
+        return 'cn';
+    }
+
+    function setColorScheme(scheme) {
+        document.documentElement.setAttribute('data-color-scheme', scheme);
+        localStorage.setItem('stock-dashboard-color', scheme);
+        colorToggle.innerHTML = scheme === 'cn' ? '红涨' : '绿涨';
+        colorToggle.title = scheme === 'cn'
+            ? '当前：红涨绿跌（A股），点击切换为绿涨红跌'
+            : '当前：绿涨红跌（美股），点击切换为红涨绿跌';
+    }
+
+    function toggleColorScheme() {
+        const current = document.documentElement.getAttribute('data-color-scheme') || 'cn';
+        setColorScheme(current === 'cn' ? 'us' : 'cn');
+    }
+
+    setColorScheme(getPreferredColorScheme());
+
+    // ========== History Toggle ==========
+    function toggleHistory(code) {
+        var el = document.getElementById('hist-' + code);
+        if (el) {
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
+
+    function toggleHistDetail(id) {
+        var el = document.getElementById('hd-' + id);
+        if (el) {
+            el.classList.toggle('open');
+        }
+    }
+
+    function switchTab(btn, targetId) {
+        const section = btn.closest('.ai-section');
+        section.querySelectorAll('.tab-content').forEach(function(el) {
+            el.style.display = 'none';
+        });
+        section.querySelectorAll('.ai-tab').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById(targetId).style.display = 'block';
+        btn.classList.add('active');
+    }
+
+    function updateTimestamp() {
+        var el = document.getElementById('lastUpdated');
+        if (el) {
+            el.textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+        }
+    }
+
+    updateTimestamp();
+    setInterval(updateTimestamp, 10000);
+</script>
+<script src="/static/watchlist.js"></script>
+</body>
+</html>

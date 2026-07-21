@@ -187,6 +187,20 @@
             font-weight: 400;
         }
 
+        .nav-link {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 6px 10px;
+            border-radius: var(--radius-sm);
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .nav-link:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
         /* ========== Market Row ========== */
         .market-row {
             display: grid;
@@ -930,6 +944,8 @@
                 <span>实时</span>
             </div>
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
+            <a href="/candidates" class="nav-link">候选股总览 &rarr;</a>
+            <a href="/journal" class="nav-link">投资笔记</a>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
             <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
@@ -1035,7 +1051,11 @@
         </div>
         {% endif %}
     </div>
-    <div class="stock-list" id="watchlistContainer" style="display:none;"></div>
+    <div class="stock-list" id="watchlistContainer" style="display:none;">
+        <div style="padding:40px;text-align:center;color:var(--text-tertiary);">
+            加载钉选中...
+        </div>
+    </div>
     </div><!-- /dashboard-main -->
 
     <!-- Knowledge Panel -->
