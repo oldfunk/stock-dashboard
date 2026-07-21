@@ -52,30 +52,23 @@ def _enrich_stocks(stocks: list[dict]) -> None:
         code = s['code']
         s['watched'] = code in watched_set
 
-        # 1. 解析 AI 分析 JSON 字符串为 dict
-        if s.get('ai_analysis') and isinstance(s['ai_analysis'], str):
-            try:
-                s['ai_parsed'] = json.loads(s['ai_analysis'])
-            except (json.JSONDecodeError, TypeError):
-                s['ai_parsed'] = None
-        else:
-            s['ai_parsed'] = s.get('ai_analysis') or None
-
-        if s.get('ai_trade_strategy') and isinstance(s['ai_trade_strategy'], str):
-            try:
-                s['trade_parsed'] = json.loads(s['ai_trade_strategy'])
-            except (json.JSONDecodeError, TypeError):
-                s['trade_parsed'] = None
-        else:
-            s['trade_parsed'] = s.get('ai_trade_strategy') or None
-
-        # 2. 历史分析摘要（用于分析历史展开面板）
+        # 2. 历史分析摘要（先查，最新一条用于回退填空）
         history = hist_dao.get_history(code, limit=5)
+        latest_hist_ai = None  # 用于回退的最新历史 ai_analysis
+        latest_hist_trade = None  # 用于回退的最新历史 ai_trade_strategy
         parsed_history = []
         for h in history:
             if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
                 try:
                     ai_obj = json.loads(h['ai_analysis'])
+                    # 第一条（最新）保留原始 JSON 给回退用
+                    if latest_hist_ai is None:
+                        latest_hist_ai = ai_obj
+                    if latest_hist_trade is None and h.get('ai_trade_strategy'):
+                        try:
+                            latest_hist_trade = json.loads(h['ai_trade_strategy']) if isinstance(h['ai_trade_strategy'], str) else h['ai_trade_strategy']
+                        except (json.JSONDecodeError, TypeError):
+                            pass
                     combined = []
                     if ai_obj.get('analysis'):
                         combined.append(ai_obj['analysis'])
@@ -103,6 +96,23 @@ def _enrich_stocks(stocks: list[dict]) -> None:
                 h['combined_analysis'] = '--'
             parsed_history.append(h)
         s['analysis_history'] = parsed_history
+
+        # 1. 解析 AI 分析 JSON 字符串为 dict；若当前 screening_result 无 AI 分析，回退到最新历史
+        if s.get('ai_analysis') and isinstance(s['ai_analysis'], str):
+            try:
+                s['ai_parsed'] = json.loads(s['ai_analysis'])
+            except (json.JSONDecodeError, TypeError):
+                s['ai_parsed'] = latest_hist_ai
+        else:
+            s['ai_parsed'] = s.get('ai_analysis') or latest_hist_ai
+
+        if s.get('ai_trade_strategy') and isinstance(s['ai_trade_strategy'], str):
+            try:
+                s['trade_parsed'] = json.loads(s['ai_trade_strategy'])
+            except (json.JSONDecodeError, TypeError):
+                s['trade_parsed'] = latest_hist_trade
+        else:
+            s['trade_parsed'] = s.get('ai_trade_strategy') or latest_hist_trade
 
         # 3. Mirror counts 传递到前端显示
         if s.get('ai_parsed') and isinstance(s['ai_parsed'], dict):
