@@ -40,3 +40,6 @@ data/cache/
 stock-dashboard/
 # empty ghost db
 data/stock_dashboard.db
+
+# Brainstorming visual companion sessions
+.superpowers/
