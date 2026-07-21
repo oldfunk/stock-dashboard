@@ -250,6 +250,9 @@ async def index(request: Request):
     hist_dao = StockAnalysisHistoryDAO()
     for item in ai_watchlist:
         code = item['code']
+        # 实时行情：默认 None，命中缓存才填值（避免模板访问未定义字段报 500）
+        item['current_price'] = None
+        item['change_percent'] = None
         if code in realtime:
             item['current_price'] = realtime[code].get('current_price')
             item['change_percent'] = realtime[code].get('change_percent')
