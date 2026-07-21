@@ -624,6 +624,40 @@ class StockAnalysisHistoryDAO:
             """, (code,)).fetchone()
         return dict(row) if row else None
 
+    def get_all_latest(self, days: Optional[int] = None) -> list[dict]:
+        """获取所有分析过的股票的最新一条记录（按 code 去重）。
+
+        Args:
+            days: 可选，只返回最近 N 天内有分析的股票（按 analysis_date 过滤）
+
+        Returns:
+            list[dict]，每条包含 stock_code 的最新 analysis_date / score / ai_analysis / ai_trade_strategy。
+            注意：不包含 screening_result 的字段（如 pe / pb / roe），需在调用处合并。
+        """
+        with db_conn() as conn:
+            if days is not None:
+                rows = conn.execute("""
+                    SELECT h.* FROM stock_analysis_history h
+                    INNER JOIN (
+                        SELECT stock_code, MAX(id) AS max_id
+                        FROM stock_analysis_history
+                        WHERE analysis_date >= date('now', ?)
+                        GROUP BY stock_code
+                    ) latest ON h.id = latest.max_id
+                    ORDER BY h.analysis_date DESC, h.stock_code
+                """, (f'-{days} days',)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT h.* FROM stock_analysis_history h
+                    INNER JOIN (
+                        SELECT stock_code, MAX(id) AS max_id
+                        FROM stock_analysis_history
+                        GROUP BY stock_code
+                    ) latest ON h.id = latest.max_id
+                    ORDER BY h.analysis_date DESC, h.stock_code
+                """).fetchall()
+        return [dict(r) for r in rows]
+
 
 class FinancialHistoryDAO:
     """财务历史数据 DAO（时序表 — 按日累积）"""

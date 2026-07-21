@@ -624,7 +624,7 @@
     <header class="header">
         <div class="header-left">
             <h1 class="header-title">{{ page_title }}</h1>
-            <span class="header-subtitle">候选股总览</span>
+            <span class="header-subtitle">短期交易区 · 全部历史分析过的股票</span>
         </div>
         <div class="header-right">
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
@@ -637,7 +637,7 @@
     <!-- Section Header -->
     <div class="section-header">
         <div>
-            <span class="section-title">最新筛选结果</span>
+            <span class="section-title">{% if days_filter %}最近 {{ days_filter }} 天分析过的股票{% else %}全部历史分析过的股票{% endif %}</span>
             <span class="section-count" style="margin-left:12px;">{{ stocks|length }} 只</span>
         </div>
         <div class="search-box">
@@ -655,8 +655,8 @@
     {% else %}
     <div class="empty-state">
         <div class="icon">&#9678;</div>
-        <h2>暂无筛选结果</h2>
-        <p>交易日下午15:30自动运行筛选流水线，<br>结果将在此处自动显示。</p>
+        <h2>暂无分析记录</h2>
+        <p>交易日下午15:30自动运行筛选流水线，<br>分析过的股票会累积显示在此处。</p>
     </div>
     {% endif %}
 

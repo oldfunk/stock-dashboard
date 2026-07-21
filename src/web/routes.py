@@ -284,15 +284,45 @@ async def index(request: Request):
 
 @app.get("/candidates", response_class=HTMLResponse)
 async def candidates(request: Request):
-    """候选股总览页 — 显示完整筛选结果（不再限于 Top 20）"""
+    """候选股总览页 — 显示最新筛选结果 + 所有历史分析过的股票
+
+    数据源合并：
+    1. screening_result 最新一轮（含完整财务字段）
+    2. stock_analysis_history 中不在最新结果里的股票（按 code 去重取最新一条）
+
+    用户可在 URL 加 ?days=N 过滤只看最近 N 天内分析过的股票。
+    """
+    # 可选：?days=N 只显示最近 N 天内分析过的股票
+    days_param = request.query_params.get("days")
+    days = int(days_param) if days_param and days_param.isdigit() else None
+
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
 
-    # 获取最新筛选结果
+    # 1. 最新筛选结果（screening_result，含完整 pe/pb/roe 等财务字段）
     result_dao = ScreeningResultDAO()
     stocks = result_dao.get_latest_results()
+    codes_in_results = {s['code'] for s in stocks}
 
-    # 合并实时行情
+    # 2. 历史分析过但不在最新筛选结果里的股票（补充进列表）
+    hist_dao = StockAnalysisHistoryDAO()
+    history_latest = hist_dao.get_all_latest(days=days)
+    for h in history_latest:
+        if h['stock_code'] not in codes_in_results:
+            stocks.append({
+                'code': h['stock_code'],
+                'name': '',  # 历史表无 name 字段，留给 enrich 阶段从 screening_result 补
+                'score': h.get('score') or 0,
+                'ai_analysis': h.get('ai_analysis') or '',
+                'ai_trade_strategy': h.get('ai_trade_strategy') or '',
+                # 财务字段缺失，由 _enrich_stocks 的实时行情 + history 回退填空
+                'pe': None, 'pb': None, 'roe': None, 'debt_ratio': None,
+                'revenue_growth': None, 'profit_growth': None, 'market_cap': None,
+                'gross_margin': None, 'net_margin': None, 'ocf_per_share': None,
+                'reason': None,
+            })
+
+    # 3. 合并实时行情
     realtime = get_realtime_cache()
     for stock in stocks:
         code = stock['code']
@@ -306,13 +336,17 @@ async def candidates(request: Request):
             stock['change_percent'] = None
             stock['change_amount'] = None
 
-    # 解析 AI 分析 JSON + 历史 + 财务汇总
+    # 4. 解析 AI 分析 JSON + 历史 + 财务汇总（_enrich_stocks 会自动从历史回退填空）
     _enrich_stocks(stocks)
+
+    # 5. 排序：score 降序（高分在前），score 相同按 code 升序
+    stocks.sort(key=lambda s: (-(s.get('score') or 0), s['code']))
 
     return templates.TemplateResponse(request, "candidates.html", {
         "request": request,
         "page_title": page_title,
         "stocks": stocks,
+        "days_filter": days,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
