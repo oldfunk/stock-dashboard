@@ -1012,16 +1012,6 @@
             </div>
             <div class="progress-stage" id="dataStage"></div>
         </div>
-        <div class="progress-bar" id="aiProgress" style="display:none;">
-            <div class="progress-header">
-                <span class="progress-label">AI智能分析</span>
-                <span class="progress-count" id="aiCount"></span>
-            </div>
-            <div class="progress-track">
-                <div class="progress-fill" id="aiFill" style="width:0%"></div>
-            </div>
-            <div class="progress-stage" id="aiStage"></div>
-        </div>
     </div>
 
     <!-- Stock Results -->
@@ -1389,15 +1379,10 @@
 
     function renderProgress(p) {
         var dataEl = document.getElementById('dataProgress');
-        var aiEl = document.getElementById('aiProgress');
-        if (!dataEl || !aiEl) return;
-
-        var visible = false;
+        if (!dataEl) return;
 
         if (p && p.stage !== 'idle' && p.stage !== 'done') {
             dataEl.style.display = 'block';
-            aiEl.style.display = 'block';
-            visible = true;
 
             // 数据采集条：total_stocks=全A股总数(5527),
             // 只要过了采集阶段就100%（processed_stocks保持5527）
@@ -1409,44 +1394,19 @@
             document.getElementById('dataFill').style.width = dataPct + '%';
             if (processed > 0 && processed < totalStock) {
                 document.getElementById('dataStage').textContent =
-                    '全A股 ' + totalStock + '只 ✓  候选 ' + processed + '只';  // 候选数 < 全A股数
+                    '全A股 ' + totalStock + '只 ✓  候选 ' + processed + '只';
             } else {
                 document.getElementById('dataStage').textContent =
                     '全A股 ' + totalStock + '只 ✓';
             }
-
-            // AI 条
-            var aiTotal = p.ai_total || 0;
-            var aiDone = p.ai_done || 0;
-            var aiFailed = p.ai_failed || 0;
-            if (aiTotal > 0) {
-                var aiPct = Math.round(aiDone / aiTotal * 100);
-                document.getElementById('aiCount').textContent = aiDone + '/' + aiTotal + ' (失败' + aiFailed + ')';
-                document.getElementById('aiFill').style.width = aiPct + '%';
-                document.getElementById('aiStage').textContent =
-                    '已分析 ' + aiDone + '/' + aiTotal;
-            } else {
-                document.getElementById('aiCount').textContent = '待启动...';
-                document.getElementById('aiFill').style.width = '0%';
-                document.getElementById('aiStage').textContent = '等待中——数据完成自动开始';
-            }
         } else if (p && p.stage === 'done') {
             dataEl.style.display = 'block';
-            aiEl.style.display = 'block';
             var ts = p.total_stocks || 0;
             document.getElementById('dataCount').textContent = ts + '/' + ts;
             document.getElementById('dataFill').style.width = '100%';
             document.getElementById('dataStage').textContent = '全部完成';
-            var d = p.ai_done || 0;
-            var t = p.ai_total || 1;
-            document.getElementById('aiCount').textContent = d + '/' + t;
-            document.getElementById('aiFill').style.width = Math.round(d/t*100) + '%';
-            document.getElementById('aiStage').textContent = 'AI完成 ' + d + '/' + t;
-        }
-
-        if (!visible) {
+        } else {
             dataEl.style.display = 'none';
-            aiEl.style.display = 'none';
         }
     }
 
