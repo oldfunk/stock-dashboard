@@ -830,7 +830,7 @@
         /* ========== AI Watchlist Grid ========== */
         .watchlist-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 12px;
             margin-bottom: 16px;
         }
@@ -1028,8 +1028,7 @@
         </div>
     </div>
 
-    <div class="dashboard-layout">
-    <div class="dashboard-main">
+    <!-- AI 观察池卡片（全宽，不受 dashboard-layout 约束） -->
     <div id="watchlistAiContainer">
         {% with watchlist = ai_watchlist %}
         {% include '_watchlist_card.html' %}
@@ -1041,6 +1040,9 @@
         </div>
         {% endif %}
     </div>
+
+    <div class="dashboard-layout">
+    <div class="dashboard-main">
     <div class="stock-list" id="watchlistContainer" style="display:none;">
         <div style="padding:40px;text-align:center;color:var(--text-tertiary);">
             加载钉选中...

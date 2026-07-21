@@ -23,7 +23,7 @@
             </div>
         </div>
         <div class="wl-card-footer">
-            {% set signal = stock.signal|upper if stock.signal else '--' %}
+            {% set signal = stock.signal|upper if stock.signal else '' %}
             {% if signal == 'BUY' %}
             <span class="wl-signal wl-signal-buy">买入</span>
             {% elif signal == 'HOLD' %}
@@ -31,9 +31,9 @@
             {% elif signal == 'AVOID' %}
             <span class="wl-signal wl-signal-avoid">回避</span>
             {% else %}
-            <span class="wl-signal wl-signal-none">{{ signal }}</span>
+            <span class="wl-signal wl-signal-none" title="尚未生成交易信号">待分析</span>
             {% endif %}
-            <span class="wl-confidence">{{ stock.ai_confidence or '--' }}</span>
+            <span class="wl-confidence" title="AI 信心强度">{{ stock.ai_confidence or '初入池' }}</span>
             <span class="wl-weeks">在池{{ stock.review_count or 1 }}周</span>
         </div>
         <div class="wl-reason" title="{{ stock.added_reason or '' }}">
