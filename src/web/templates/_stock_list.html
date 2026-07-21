@@ -197,8 +197,8 @@
                         {% endif %}
                     </div>
                     {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
-                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail" style="display:none;">
-                        <div class="hd-panel">
+                    <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail">
+                        <div class="hd-panel open">
                             <div style="font-size:12px;line-height:1.6;">
                                 <strong>分析</strong><br>{{ h.hist_analysis[:300] }}{% if h.hist_analysis|length > 300 %}…{% endif %}
                                 <br><br>
