@@ -144,6 +144,159 @@
         <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ "%.2f"|format(snapshot.dividend_yield) if snapshot.dividend_yield is not none else '--' }}%</span></div>
     </section>
 
+    {% if ai_parsed %}
+
+    <!-- 3. 投资人笔记 -->
+    {% if ai_parsed.analysis %}
+    <section class="sd-section sd-note">
+        <h2 class="sd-section-title">投资人笔记</h2>
+        <div class="sd-note-body">
+            {% for paragraph in ai_parsed.analysis.split('\n') if paragraph.strip() %}
+            <p>{{ paragraph.strip() }}</p>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 4. 护城河评估 -->
+    {% if ai_parsed.moat_evaluation %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">护城河评估</h2>
+        <div class="sd-moat-list">
+            {% for m in ai_parsed.moat_evaluation %}
+            <div class="sd-moat-row">
+                <div class="sd-moat-name">{{ m.name|default('--') }}</div>
+                <div class="sd-moat-score">
+                    {% for i in range(5) %}
+                    {% if i < (m.score|default(0)|int) %}●{% else %}○{% endif %}
+                    {% endfor %}
+                </div>
+                <div class="sd-moat-trend">{{ m.trend|default('--') }}</div>
+                <div class="sd-moat-evidence">{{ m.evidence|default('') }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 5. 管理层评分 -->
+    {% if ai_parsed.management_score %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">管理层评分</h2>
+        <div class="sd-mgmt">
+            <div class="sd-mgmt-row">
+                <span class="label">资本配置能力</span>
+                <span class="value">{{ ai_parsed.management_score.capital_allocation|default('--') }}/10</span>
+            </div>
+            <div class="sd-mgmt-row">
+                <span class="label">股东友好度</span>
+                <span class="value">{{ ai_parsed.management_score.shareholder_friendly|default('--') }}/10</span>
+            </div>
+            {% if ai_parsed.management_score.summary %}
+            <p class="sd-mgmt-summary">{{ ai_parsed.management_score.summary }}</p>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 6. 内在价值 + 安全边际 -->
+    {% if ai_parsed.intrinsic_value %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">内在价值与安全边际</h2>
+        <div class="sd-value-table">
+            <div class="sd-value-row">
+                <span class="label">保守估值</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.conservative|default('--') }} 亿</span>
+            </div>
+            <div class="sd-value-row highlight">
+                <span class="label">基准估值</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.base|default('--') }} 亿</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">乐观估值</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.optimistic|default('--') }} 亿</span>
+            </div>
+            {% if ai_parsed.intrinsic_value.safety_margin is not none %}
+            <div class="sd-value-row">
+                <span class="label">安全边际</span>
+                <span class="value {{ 'pos' if ai_parsed.intrinsic_value.safety_margin >= 0 else 'neg' }}">
+                    {{ "%+.1f"|format(ai_parsed.intrinsic_value.safety_margin) }}%
+                </span>
+            </div>
+            {% endif %}
+            {% if ai_parsed.intrinsic_value.method %}
+            <div class="sd-value-row">
+                <span class="label">方法</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.method }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 7. 交易策略 -->
+    {% if trade_parsed %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">交易策略</h2>
+        <div class="sd-trade">
+            {% if trade_parsed.signal %}
+            <div class="sd-trade-signal">
+                <span class="label">Signal</span>
+                {% set sig = trade_parsed.signal|upper %}
+                <span class="signal-badge signal-{{ sig|lower }}">{{ sig }}</span>
+                {% if trade_parsed.confidence %}
+                <span class="confidence">置信度: {{ trade_parsed.confidence }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if trade_parsed.buy_range %}
+            <div class="sd-trade-row">
+                <span class="label">买入区间</span>
+                <span class="value">{{ trade_parsed.buy_range }}</span>
+            </div>
+            {% endif %}
+            {% if trade_parsed.target_price %}
+            <div class="sd-trade-row">
+                <span class="label">目标价</span>
+                <span class="value">{{ trade_parsed.target_price }}</span>
+            </div>
+            {% endif %}
+            {% if trade_parsed.stop_loss %}
+            <div class="sd-trade-row">
+                <span class="label">止损价</span>
+                <span class="value">{{ trade_parsed.stop_loss }}</span>
+            </div>
+            {% endif %}
+            {% if trade_parsed.holding_period %}
+            <div class="sd-trade-row">
+                <span class="label">持有周期</span>
+                <span class="value">{{ trade_parsed.holding_period }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 8. 逆向思考 -->
+    {% if ai_parsed.reverse_thinking %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">逆向思考 — 什么情况下这家公司会死？</h2>
+        <div class="sd-reverse">
+            {% if ai_parsed.reverse_thinking is iterable and ai_parsed.reverse_thinking is not string %}
+            <ol>
+                {% for scenario in ai_parsed.reverse_thinking %}
+                <li>{{ scenario }}</li>
+                {% endfor %}
+            </ol>
+            {% else %}
+            <p>{{ ai_parsed.reverse_thinking }}</p>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% endif %}{# end if ai_parsed #}
+
     <!-- 后续章节在后续 Task 中添加 -->
 </div>
 </body>
