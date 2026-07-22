@@ -426,7 +426,118 @@
     </section>
     {% endif %}
 
-    <!-- 后续章节在后续 Task 中添加 -->
+    <!-- 10. 技术分析扩展位（预留，后期填 K 线图 / 技术指标 / 资金流向 / F10 等） -->
+    <section class="sd-section sd-placeholder" id="technical-analysis" data-placeholder>
+        <!-- 后期参考东方财富、同花顺陆续补全：K 线图 / MACD / KDJ / RSI / 资金流向 / 龙虎榜 / 行业对比 / F10 -->
+    </section>
+
+    <!-- 11. 历次 AI 分析时间线 -->
+    <section class="sd-section">
+        <h2 class="sd-section-title">历次 AI 分析时间线</h2>
+        {% if analysis_history %}
+        {# 评分趋势 SVG 折线图（无依赖，纯 Jinja 生成） #}
+        {% set ns = namespace(points=[]) %}
+        {% set scores = [] %}
+        {% for h in analysis_history %}
+            {% if h.score is not none %}
+                {% set _ = scores.append(h.score) %}
+            {% endif %}
+        {% endfor %}
+        {% set max_score = (scores|max) if scores else 100 %}
+        {% set min_score = (scores|min) if scores else 0 %}
+        {% set score_range = (max_score - min_score) if max_score != min_score else 1 %}
+        {% set svg_w = 600 %}
+        {% set svg_h = 120 %}
+        {% set pad = 20 %}
+        {% set plot_w = svg_w - 2 * pad %}
+        {% set plot_h = svg_h - 2 * pad %}
+        {% set n = analysis_history|length %}
+        {% if n >= 2 %}
+        <div class="sd-score-chart">
+            <svg width="{{ svg_w }}" height="{{ svg_h }}" viewBox="0 0 {{ svg_w }} {{ svg_h }}">
+                <line x1="{{ pad }}" y1="{{ svg_h - pad }}" x2="{{ svg_w - pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
+                <line x1="{{ pad }}" y1="{{ pad }}" x2="{{ pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
+                {% for h in analysis_history|reverse %}
+                {% set i = loop.index0 %}
+                {% set x = pad + (plot_w * i / (n - 1)) if n > 1 else pad + plot_w / 2 %}
+                {% set y = svg_h - pad - (plot_h * (h.score - min_score) / score_range) if h.score is not none else svg_h - pad %}
+                {% set _ = ns.points.append(x ~ ',' ~ y) %}
+                <circle cx="{{ x }}" cy="{{ y }}" r="4" fill="var(--color-up)">
+                    <title>{{ h.analysis_date }} | 评分 {{ h.score }} | Signal {{ h.signal|default('--') }}</title>
+                </circle>
+                {% endfor %}
+                <polyline points="{{ ns.points|join(' ') }}" fill="none" stroke="var(--color-up)" stroke-width="2"/>
+            </svg>
+        </div>
+        {% endif %}
+
+        <div class="sd-timeline">
+            {% for h in analysis_history %}
+            <div class="sd-timeline-item">
+                <div class="sd-timeline-date">{{ h.analysis_date }}</div>
+                <div class="sd-timeline-score">评分 {{ h.score|default('--') }}</div>
+                {% if h.ai_analysis %}
+                {% set ai_obj = h.ai_analysis|from_json %}
+                <div class="sd-timeline-note">
+                    {{ ai_obj.analysis|default(h.ai_analysis)|truncate(120) }}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="sd-empty">暂无 AI 分析历史</p>
+        {% endif %}
+    </section>
+
+    <!-- 12. 在池状态 -->
+    {% if in_watchlist %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">在池状态</h2>
+        <div class="sd-watchlist-info">
+            <div class="sd-wl-row">
+                <span class="label">当前状态</span>
+                <span class="value pos">✓ 在池（在池 {{ in_watchlist.review_count|default(1) }} 周）</span>
+            </div>
+            <div class="sd-wl-row">
+                <span class="label">调入日期</span>
+                <span class="value">{{ in_watchlist.added_at }}</span>
+            </div>
+            {% if in_watchlist.added_reason %}
+            <div class="sd-wl-row">
+                <span class="label">调入理由</span>
+                <span class="value">{{ in_watchlist.added_reason }}</span>
+            </div>
+            {% endif %}
+            {% if in_watchlist.ai_confidence %}
+            <div class="sd-wl-row">
+                <span class="label">AI 置信度</span>
+                <span class="value">{{ in_watchlist.ai_confidence }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if watchlist_history %}
+        <div class="sd-wl-history">
+            <h3>调入调出历史</h3>
+            <table class="sd-wl-history-table">
+                <thead>
+                    <tr><th>日期</th><th>动作</th><th>原因</th></tr>
+                </thead>
+                <tbody>
+                    {% for wh in watchlist_history %}
+                    <tr>
+                        <td>{{ wh.action_date }}</td>
+                        <td>{{ wh.action }}</td>
+                        <td>{{ wh.reason|default('') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
 </div>
 </body>
 </html>

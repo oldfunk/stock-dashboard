@@ -200,6 +200,19 @@ def _markdown_to_html(text: str) -> str:
 
 templates.env.filters['markdown_to_html'] = _markdown_to_html
 
+
+def _from_json(text):
+    """Jinja2 过滤器：JSON 字符串 → dict"""
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+templates.env.filters['from_json'] = _from_json
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
