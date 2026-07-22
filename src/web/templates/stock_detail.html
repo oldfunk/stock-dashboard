@@ -297,6 +297,135 @@
 
     {% endif %}{# end if ai_parsed #}
 
+    <!-- 9. 动态财务历史 -->
+    {% if annual_reports %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">动态财务历史</h2>
+        {% if financial_summary and financial_summary.data_years %}
+        <div class="sd-fin-summary">数据覆盖区间：{{ financial_summary.data_years }}</div>
+        {% endif %}
+
+        <table class="sd-fin-table">
+            <thead>
+                <tr>
+                    <th>指标</th>
+                    {% for r in annual_reports %}
+                    <th>{{ r.report_date[:4] }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="metric-name">ROE %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.1f"|format(r.roe) if r.roe is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">毛利率 %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.1f"|format(r.gross_margin) if r.gross_margin is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">净利率 %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.1f"|format(r.net_margin) if r.net_margin is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">营收增长 %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%+.1f"|format(r.revenue_growth) if r.revenue_growth is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">利润增长 %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%+.1f"|format(r.profit_growth) if r.profit_growth is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">OCF/股</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.2f"|format(r.ocf_per_share) if r.ocf_per_share is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">FCF（亿）</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.2f"|format(r.fcf / 1e8) if r.fcf is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="metric-name">ROIC %</td>
+                    {% for r in annual_reports %}
+                    <td>{{ "%.1f"|format(r.roic) if r.roic is not none else '--' }}</td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+
+        {% if financial_summary %}
+        <div class="sd-fin-derived">
+            <h3>衍生汇总指标</h3>
+            <div class="sd-derived-grid">
+                {% if financial_summary.roe_5y_avg is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">ROE 5年均</span>
+                    <span class="value">{{ "%.1f"|format(financial_summary.roe_5y_avg) }}%</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.roe_10y_avg is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">ROE 10年均</span>
+                    <span class="value">{{ "%.1f"|format(financial_summary.roe_10y_avg) }}%</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.roe_volatility is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">ROE 波动率</span>
+                    <span class="value">{{ "%.2f"|format(financial_summary.roe_volatility) }}</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.roe_improvement is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">ROE 改善</span>
+                    <span class="value {{ 'pos' if financial_summary.roe_improvement >= 0 else 'neg' }}">
+                        {{ "%+.2f"|format(financial_summary.roe_improvement) }}
+                    </span>
+                </div>
+                {% endif %}
+                {% if financial_summary.fcf_5y_sum is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">FCF 5年累计</span>
+                    <span class="value">{{ "%.2f"|format(financial_summary.fcf_5y_sum / 1e8) }}亿</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.fcf_10y_sum is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">FCF 10年累计</span>
+                    <span class="value">{{ "%.2f"|format(financial_summary.fcf_10y_sum / 1e8) }}亿</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.share_dilution_5y is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">5年股本稀释</span>
+                    <span class="value">{{ "%+.2f"|format(financial_summary.share_dilution_5y) }}%</span>
+                </div>
+                {% endif %}
+                {% if financial_summary.roic_5y_avg is not none %}
+                <div class="sd-derived-cell">
+                    <span class="label">ROIC 5年均</span>
+                    <span class="value">{{ "%.1f"|format(financial_summary.roic_5y_avg) }}%</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <!-- 后续章节在后续 Task 中添加 -->
 </div>
 </body>
