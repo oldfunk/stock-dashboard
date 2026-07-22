@@ -412,6 +412,14 @@ class StockSnapshotDAO:
             row = conn.execute("SELECT COUNT(*) as cnt FROM stock_snapshot").fetchone()
         return row['cnt']
 
+    def get_by_code(self, code: str) -> Optional[dict]:
+        """按股票代码查最新快照（单条）"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM stock_snapshot WHERE code = ?", (code,)
+            ).fetchone()
+        return dict(row) if row else None
+
 
 class ScreeningResultDAO:
     def save_batch(self, records: list[dict]):
