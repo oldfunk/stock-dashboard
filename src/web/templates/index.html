@@ -103,6 +103,7 @@
             max-width: 1440px;
             margin: 0 auto;
             padding: 24px 32px;
+            overflow-x: hidden;
         }
 
         /* ========== Header ========== */
@@ -420,14 +421,23 @@
 
         .stock-metrics {
             flex: 1;
+            min-width: 0;
             display: flex;
             gap: 20px;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            overflow-x: auto;
             padding-top: 2px;
+            padding-bottom: 4px;
+            scrollbar-width: thin;
         }
+        .stock-metrics::-webkit-scrollbar { height: 6px; }
+        .stock-metrics::-webkit-scrollbar-track { background: transparent; }
+        .stock-metrics::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
+        .stock-metrics::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
         .metric-cell {
             min-width: 56px;
+            flex-shrink: 0;
         }
 
         .metric-cell .label {
@@ -458,7 +468,6 @@
             border-radius: 3px;
             margin-left: 2px;
         }
-        .history-cell { flex: 1 0 100%; overflow-x: auto; margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--divider-thin); }
         .history-cell .value { font-size: 11px !important; white-space: nowrap; }
 
         .stock-reason {
@@ -845,6 +854,8 @@
             padding: 16px;
             transition: background 0.15s;
             border: 1px solid var(--divider-thin);
+            min-width: 0;
+            overflow: hidden;
         }
         .watchlist-card:hover { background: var(--bg-hover); }
         .wl-card-header { margin-bottom: 12px; }
