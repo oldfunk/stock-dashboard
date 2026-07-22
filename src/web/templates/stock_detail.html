@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-color-scheme="cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ snapshot.name }} {{ code }} - 单股详情</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ========== Design Tokens（与 index.html 一致） ========== */
+        :root {
+            --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --bg-hover: #e8eaed;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --accent-soft: #e8f0fe;
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+            --color-warn: var(--gold);
+            --color-up: var(--red);
+            --color-up-bg: var(--red-bg);
+            --color-down: var(--green);
+            --color-down-bg: var(--green-bg);
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+            --radius: 8px;
+            --radius-sm: 4px;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-sans);
+            font-weight: 400;
+            font-size: 14px;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ========== 单股详情页布局 ========== */
+        .stock-detail-page {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px 20px 60px;
+        }
+        .back-link { margin-bottom: 16px; }
+        .back-link a { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+        .back-link a:hover { color: var(--text-primary); }
+
+        .sd-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 24px;
+        }
+        .sd-title h1 { display: inline-block; font-size: 28px; margin: 0; font-weight: 600; }
+        .sd-code { margin-left: 12px; color: var(--text-tertiary); font-size: 14px; }
+        .sd-sector { margin-left: 8px; color: var(--text-tertiary); font-size: 13px; }
+        .sd-price { text-align: right; }
+        .sd-price-value { font-size: 24px; font-weight: 600; }
+        .sd-price-change { margin-left: 12px; font-size: 14px; }
+        .sd-price-change.up { color: var(--color-up); }
+        .sd-price-change.down { color: var(--color-down); }
+
+        .sd-snapshot-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px 32px;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            margin-bottom: 32px;
+            box-shadow: var(--shadow);
+        }
+        .sd-metric { display: flex; flex-direction: column; gap: 2px; }
+        .sd-metric .label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+        .sd-metric .value { font-size: 18px; font-weight: 500; }
+
+        .sd-section { margin-bottom: 40px; }
+        .sd-section-title {
+            font-size: 18px;
+            margin: 0 0 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+<div class="stock-detail-page">
+    <div class="back-link">
+        <a href="/">← 返回看板</a>
+    </div>
+
+    <!-- 1. Header -->
+    <header class="sd-header">
+        <div class="sd-title">
+            <h1>{{ snapshot.name }}</h1>
+            <span class="sd-code">{{ code }}</span>
+            <span class="sd-sector">{{ snapshot.sector or '--' }}</span>
+        </div>
+        <div class="sd-price">
+            {% if realtime.get("current_price") is not none %}
+            <span class="sd-price-value">¥{{ "%.2f"|format(realtime["current_price"]) }}</span>
+            {% elif snapshot.current_price %}
+            <span class="sd-price-value">¥{{ "%.2f"|format(snapshot.current_price) }}</span>
+            {% else %}
+            <span class="sd-price-value">--</span>
+            {% endif %}
+            {% if realtime.get("change_percent") is not none %}
+            <span class="sd-price-change {{ 'up' if realtime['change_percent'] >= 0 else 'down' }}">
+                {{ "%+.2f"|format(realtime["change_percent"]) }}%
+            </span>
+            {% endif %}
+        </div>
+    </header>
+
+    <!-- 2. 关键指标快照条 -->
+    <section class="sd-snapshot-bar">
+        <div class="sd-metric"><span class="label">PE</span><span class="value">{{ "%.1f"|format(snapshot.pe) if snapshot.pe is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">PB</span><span class="value">{{ "%.2f"|format(snapshot.pb) if snapshot.pb is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">ROE</span><span class="value">{{ "%.1f"|format(snapshot.roe) if snapshot.roe is not none else '--' }}%</span></div>
+        <div class="sd-metric"><span class="label">营收增</span><span class="value">{{ "%+.1f"|format(snapshot.revenue_growth) if snapshot.revenue_growth is not none else '--' }}%</span></div>
+        <div class="sd-metric"><span class="label">利润增</span><span class="value">{{ "%+.1f"|format(snapshot.profit_growth) if snapshot.profit_growth is not none else '--' }}%</span></div>
+        <div class="sd-metric"><span class="label">市值</span><span class="value">{{ "%.0f"|format(snapshot.market_cap) if snapshot.market_cap is not none else '--' }}亿</span></div>
+        <div class="sd-metric"><span class="label">负债率</span><span class="value">{{ "%.1f"|format(snapshot.debt_ratio) if snapshot.debt_ratio is not none else '--' }}%</span></div>
+        <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ "%.2f"|format(snapshot.dividend_yield) if snapshot.dividend_yield is not none else '--' }}%</span></div>
+    </section>
+
+    <!-- 后续章节在后续 Task 中添加 -->
+</div>
+</body>
+</html>

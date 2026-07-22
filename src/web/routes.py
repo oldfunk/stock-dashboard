@@ -354,6 +354,89 @@ async def candidates(request: Request):
     })
 
 
+@app.get("/stock/{code}", response_class=HTMLResponse)
+async def stock_detail(request: Request, code: str):
+    """单股详情页 — 单栏叙事流
+
+    展示单只股票的全部信息：关键指标快照 → AI 投资笔记 →
+    护城河/管理层/内在价值/交易策略/逆向思考 → 动态财务历史 →
+    历次 AI 分析时间线 → 在池状态。
+
+    无 AI 分析时降级为纯数据版（财务 + 行业 + 估值）。
+    """
+    import re
+    # 格式校验：6 位数字
+    if not re.match(r"^\d{6}$", code):
+        raise HTTPException(status_code=404, detail="Invalid code")
+
+    from src.models.database import (
+        StockSnapshotDAO, StockAnalysisHistoryDAO,
+        FinancialHistoryDAO, FinancialSummaryDAO,
+    )
+    from src.models.ai_watchlist import (
+        AiWatchlistDAO, AiWatchlistHistoryDAO
+    )
+
+    # 1. 基础快照 — 没有则 404
+    snapshot = StockSnapshotDAO().get_by_code(code)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    # 2. 实时行情缓存
+    realtime = get_realtime_cache()
+    realtime_data = realtime.get(code, {})
+
+    # 3. 最新 AI 分析（如无则为 None，模板相应隐藏章节）
+    latest_analysis = StockAnalysisHistoryDAO().get_latest_for_code(code)
+    ai_parsed = None
+    if latest_analysis and latest_analysis.get("ai_analysis"):
+        try:
+            ai_parsed = json.loads(latest_analysis["ai_analysis"])
+        except (json.JSONDecodeError, TypeError):
+            ai_parsed = None
+
+    # 4. 最新交易策略
+    trade_parsed = None
+    if latest_analysis and latest_analysis.get("ai_trade_strategy"):
+        try:
+            trade_parsed = json.loads(latest_analysis["ai_trade_strategy"])
+        except (json.JSONDecodeError, TypeError):
+            trade_parsed = None
+
+    # 5. 历次 AI 分析时间线（按日期倒序）
+    analysis_history = StockAnalysisHistoryDAO().get_history(code, limit=20)
+
+    # 6. 动态财务历史（年报，最新在前）
+    annual_reports = FinancialHistoryDAO().get_annual_reports(code)
+    financial_summary = FinancialSummaryDAO().get(code)
+
+    # 7. 在池状态（如在池）
+    in_watchlist = AiWatchlistDAO().get_by_code(code)
+    watchlist_history = []
+    if in_watchlist:
+        watchlist_history = AiWatchlistHistoryDAO().list_by_code(code)
+
+    config = load_config()
+    page_title = config.get("web", {}).get("page_title", "价值投资选股看板")
+
+    return templates.TemplateResponse(request, "stock_detail.html", {
+        "request": request,
+        "page_title": page_title,
+        "code": code,
+        "snapshot": snapshot,
+        "realtime": realtime_data,
+        "latest_analysis": latest_analysis,
+        "ai_parsed": ai_parsed,
+        "trade_parsed": trade_parsed,
+        "analysis_history": analysis_history,
+        "annual_reports": annual_reports,
+        "financial_summary": financial_summary,
+        "in_watchlist": in_watchlist,
+        "watchlist_history": watchlist_history,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
 @app.get("/api/indices")
 async def api_indices():
     """大盘数据 API"""
