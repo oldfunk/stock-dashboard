@@ -57,6 +57,7 @@
             max-width: 900px;
             margin: 0 auto;
             padding: 24px 20px 60px;
+            overflow-x: hidden;
         }
         .back-link { margin-bottom: 16px; }
         .back-link a { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
@@ -158,13 +159,38 @@
 
         /* ========== 动态财务历史样式 ========== */
         .sd-fin-summary { color: var(--text-tertiary); font-size: 12px; margin-bottom: 12px; }
-        .sd-fin-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }
+        .sd-fin-scroll {
+            overflow-x: auto;
+            margin-bottom: 16px;
+            border: 1px solid var(--divider-thin);
+            border-radius: var(--radius-sm);
+            -webkit-overflow-scrolling: touch;
+        }
+        .sd-fin-scroll::-webkit-scrollbar { height: 8px; }
+        .sd-fin-scroll::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+        .sd-fin-scroll::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 4px; }
+        .sd-fin-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+        .sd-fin-table {
+            border-collapse: collapse;
+            font-size: 13px;
+            width: max-content;
+            min-width: 100%;
+        }
         .sd-fin-table th, .sd-fin-table td {
             padding: 8px 12px;
             text-align: right;
             border-bottom: 1px solid var(--divider-thin);
+            white-space: nowrap;
         }
-        .sd-fin-table th:first-child, .sd-fin-table td:first-child { text-align: left; }
+        .sd-fin-table th:first-child, .sd-fin-table td:first-child {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            background: var(--bg-secondary);
+            z-index: 1;
+            box-shadow: 2px 0 4px rgba(0,0,0,0.04);
+        }
+        .sd-fin-table thead th:first-child { background: var(--bg-tertiary); }
         .sd-fin-table th { color: var(--text-tertiary); font-weight: 500; }
         .sd-fin-table .metric-name { color: var(--text-secondary); font-weight: 500; }
 
@@ -422,6 +448,7 @@
         <div class="sd-fin-summary">数据覆盖区间：{{ financial_summary.data_years }}</div>
         {% endif %}
 
+        <div class="sd-fin-scroll">
         <table class="sd-fin-table">
             <thead>
                 <tr>
@@ -482,6 +509,7 @@
                 </tr>
             </tbody>
         </table>
+        </div>
 
         {% if financial_summary %}
         <div class="sd-fin-derived">
