@@ -283,7 +283,7 @@
         <div class="sd-moat-list">
             {% for m in ai_parsed.moat_evaluation %}
             <div class="sd-moat-row">
-                <div class="sd-moat-name">{{ m.name|default('--') }}</div>
+                <div class="sd-moat-name">{{ m.type|default('--') }}</div>
                 <div class="sd-moat-score">
                     {% for i in range(5) %}
                     {% if i < (m.score|default(0)|int) %}●{% else %}○{% endif %}
@@ -308,7 +308,7 @@
             </div>
             <div class="sd-mgmt-row">
                 <span class="label">股东友好度</span>
-                <span class="value">{{ ai_parsed.management_score.shareholder_friendly|default('--') }}/10</span>
+                <span class="value">{{ ai_parsed.management_score.shareholder_friendliness|default('--') }}/10</span>
             </div>
             {% if ai_parsed.management_score.summary %}
             <p class="sd-mgmt-summary">{{ ai_parsed.management_score.summary }}</p>
@@ -324,22 +324,21 @@
         <div class="sd-value-table">
             <div class="sd-value-row">
                 <span class="label">保守估值</span>
-                <span class="value">{{ ai_parsed.intrinsic_value.conservative|default('--') }} 亿</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.conservative|default('--') }}</span>
             </div>
             <div class="sd-value-row highlight">
                 <span class="label">基准估值</span>
-                <span class="value">{{ ai_parsed.intrinsic_value.base|default('--') }} 亿</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.base_case|default('--') }}</span>
             </div>
             <div class="sd-value-row">
                 <span class="label">乐观估值</span>
-                <span class="value">{{ ai_parsed.intrinsic_value.optimistic|default('--') }} 亿</span>
+                <span class="value">{{ ai_parsed.intrinsic_value.optimistic|default('--') }}</span>
             </div>
-            {% if ai_parsed.intrinsic_value.safety_margin is not none %}
+            {% set mos = ai_parsed.intrinsic_value.margin_of_safety %}
+            {% if mos is defined and mos %}
             <div class="sd-value-row">
                 <span class="label">安全边际</span>
-                <span class="value {{ 'pos' if ai_parsed.intrinsic_value.safety_margin >= 0 else 'neg' }}">
-                    {{ "%+.1f"|format(ai_parsed.intrinsic_value.safety_margin) }}%
-                </span>
+                <span class="value {{ 'neg' if '-' in mos|string and mos|string != '--' else 'pos' }}">{{ mos }}</span>
             </div>
             {% endif %}
             {% if ai_parsed.intrinsic_value.method %}
@@ -367,10 +366,10 @@
                 {% endif %}
             </div>
             {% endif %}
-            {% if trade_parsed.buy_range %}
+            {% if trade_parsed.buy_zone %}
             <div class="sd-trade-row">
                 <span class="label">买入区间</span>
-                <span class="value">{{ trade_parsed.buy_range }}</span>
+                <span class="value">{{ trade_parsed.buy_zone }}</span>
             </div>
             {% endif %}
             {% if trade_parsed.target_price %}
