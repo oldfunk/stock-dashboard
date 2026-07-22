@@ -101,6 +101,124 @@
             border-bottom: 1px solid var(--divider-thin);
             font-weight: 600;
         }
+
+        /* ========== AI 分析章节样式 ========== */
+        .sd-note-body { padding-left: 16px; border-left: 3px solid var(--color-up); }
+        .sd-note-body p { margin: 0 0 12px; line-height: 1.7; }
+
+        .sd-moat-list { display: flex; flex-direction: column; gap: 0; }
+        .sd-moat-row {
+            display: grid;
+            grid-template-columns: 120px 100px 80px 1fr;
+            gap: 16px;
+            padding: 8px 0;
+            border-bottom: 1px dashed var(--divider-thin);
+            align-items: center;
+        }
+        .sd-moat-name { font-weight: 500; }
+        .sd-moat-score { color: var(--color-up); letter-spacing: 2px; font-size: 16px; }
+        .sd-moat-trend { color: var(--text-secondary); font-size: 13px; }
+        .sd-moat-evidence { color: var(--text-secondary); font-size: 13px; }
+
+        .sd-mgmt { display: flex; flex-direction: column; gap: 8px; }
+        .sd-mgmt-row { display: flex; justify-content: space-between; padding: 6px 0; }
+        .sd-mgmt-row .label { color: var(--text-secondary); }
+        .sd-mgmt-row .value { font-weight: 500; }
+        .sd-mgmt-summary { color: var(--text-secondary); font-size: 13px; margin-top: 8px; line-height: 1.6; }
+
+        .sd-value-table { display: flex; flex-direction: column; gap: 0; }
+        .sd-value-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--divider-thin); }
+        .sd-value-row.highlight { background: var(--bg-hover); padding: 8px 12px; border-radius: var(--radius-sm); border-bottom: none; }
+        .sd-value-row .label { color: var(--text-secondary); }
+        .sd-value-row .value { font-weight: 500; }
+        .sd-value-row .value.pos { color: var(--color-up); }
+        .sd-value-row .value.neg { color: var(--color-down); }
+
+        .sd-trade { display: flex; flex-direction: column; gap: 0; }
+        .sd-trade-signal { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+        .sd-trade-signal .label { color: var(--text-secondary); font-size: 13px; }
+        .signal-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .signal-buy { background: var(--red-bg); color: var(--red); }
+        .signal-hold { background: var(--gold-bg); color: var(--gold); }
+        .signal-avoid { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .sd-trade .confidence { color: var(--text-secondary); font-size: 13px; }
+        .sd-trade-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--divider-thin); }
+        .sd-trade-row .label { color: var(--text-secondary); }
+        .sd-trade-row .value { font-weight: 500; }
+
+        .sd-reverse ol { padding-left: 20px; }
+        .sd-reverse li { margin-bottom: 8px; line-height: 1.7; color: var(--text-secondary); }
+        .sd-reverse p { line-height: 1.7; color: var(--text-secondary); }
+
+        /* ========== 动态财务历史样式 ========== */
+        .sd-fin-summary { color: var(--text-tertiary); font-size: 12px; margin-bottom: 12px; }
+        .sd-fin-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }
+        .sd-fin-table th, .sd-fin-table td {
+            padding: 8px 12px;
+            text-align: right;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .sd-fin-table th:first-child, .sd-fin-table td:first-child { text-align: left; }
+        .sd-fin-table th { color: var(--text-tertiary); font-weight: 500; }
+        .sd-fin-table .metric-name { color: var(--text-secondary); font-weight: 500; }
+
+        .sd-fin-derived { padding: 16px 20px; background: var(--bg-secondary); border-radius: var(--radius); }
+        .sd-fin-derived h3 { font-size: 14px; margin: 0 0 12px; color: var(--text-secondary); font-weight: 500; }
+        .sd-derived-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+        .sd-derived-cell { display: flex; flex-direction: column; gap: 2px; }
+        .sd-derived-cell .label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+        .sd-derived-cell .value { font-size: 16px; font-weight: 500; }
+        .sd-derived-cell .value.pos { color: var(--color-up); }
+        .sd-derived-cell .value.neg { color: var(--color-down); }
+
+        /* ========== 技术分析扩展位 ========== */
+        .sd-placeholder {
+            padding: 32px;
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 13px;
+            border: 1px dashed var(--divider);
+            border-radius: var(--radius);
+        }
+
+        /* ========== 时间线样式 ========== */
+        .sd-score-chart { margin-bottom: 16px; }
+        .sd-score-chart svg { max-width: 100%; height: auto; }
+        .sd-timeline { display: flex; flex-direction: column; gap: 0; }
+        .sd-timeline-item {
+            display: grid;
+            grid-template-columns: 100px 80px 1fr;
+            gap: 16px;
+            padding: 10px 0;
+            border-bottom: 1px dashed var(--divider-thin);
+            align-items: start;
+        }
+        .sd-timeline-date { color: var(--text-tertiary); font-size: 13px; }
+        .sd-timeline-score { font-weight: 500; }
+        .sd-timeline-note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+        .sd-empty { color: var(--text-tertiary); font-style: italic; padding: 16px 0; }
+
+        /* ========== 在池状态样式 ========== */
+        .sd-watchlist-info { padding: 16px 20px; background: var(--bg-secondary); border-radius: var(--radius); margin-bottom: 16px; }
+        .sd-wl-row { display: flex; justify-content: space-between; padding: 6px 0; }
+        .sd-wl-row .label { color: var(--text-secondary); }
+        .sd-wl-row .value { font-weight: 500; }
+        .sd-wl-row .value.pos { color: var(--color-up); }
+        .sd-wl-history h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text-secondary); font-weight: 500; }
+        .sd-wl-history-table { width: 100%; border-collapse: collapse; }
+        .sd-wl-history-table th, .sd-wl-history-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--divider-thin);
+            font-size: 13px;
+        }
+        .sd-wl-history-table th { color: var(--text-tertiary); font-weight: 500; }
     </style>
 </head>
 <body>
