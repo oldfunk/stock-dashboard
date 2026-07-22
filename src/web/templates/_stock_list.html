@@ -1,13 +1,14 @@
 {% for stock in stocks %}
-        <div class="stock-card" data-code="{{ stock.code }}">
+        <div class="stock-card clickable" data-code="{{ stock.code }}"
+             onclick="location.href='/stock/{{ stock.code }}'">
             <div class="stock-row">
                 <div class="stock-info">
                     <div class="stock-code">{{ stock.code }}</div>
                     <div class="stock-name">{{ stock.name }}</div>
                     <span class="stock-score">{{ stock.score }}</span>
                     <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
-                            onclick="toggleWatch('{{ stock.code }}', this)"
-                            title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
+                    onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
+                    title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
                 </div>
 
                 <div class="stock-metrics">
