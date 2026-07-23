@@ -226,11 +226,44 @@ class MarketScheduler:
             self._last_daily_date = today
             logger.info("[调度器] 每日流水线完成")
 
+            # 流水线后追加 K 线数据拉取
+            self._fetch_kline_daily()
+
             # 流水线成功后，仅在周五触发 AI 分析（周频分析由 cron 独立控制）
             if now.weekday() == 4:  # Friday
                 self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
+
+    def _fetch_kline_daily(self):
+        """每日拉取观察池+候选股的K线数据（增量更新）"""
+        from src.models.database import KlineDAO
+        from src.collector.akshare_fetcher import fetch_kline_data
+        from src.models.ai_watchlist import AiWatchlistDAO
+        from src.models.database import ScreeningResultDAO
+
+        # 合并需要拉取的代码：观察池 + 候选股 Top25
+        watchlist = AiWatchlistDAO().get_all()
+        codes = {w['code'] for w in watchlist}
+        try:
+            candidates = ScreeningResultDAO().get_latest_results(limit=25)
+            codes.update(c['code'] for c in candidates)
+        except Exception:
+            pass
+
+        if not codes:
+            logger.info("[调度器] K线拉取：无待拉取股票")
+            return
+
+        dao = KlineDAO()
+        success = 0
+        for code in codes:
+            latest = dao.get_latest_date(code)
+            records = fetch_kline_data(code, start_date=latest)
+            if records:
+                dao.upsert_many(code, records)
+                success += 1
+        logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功")
 
     def _check_weekly_review(self):
         """检查是否需要触发周六 AI 复盘
