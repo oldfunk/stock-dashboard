@@ -1,5 +1,11 @@
 // 搜索 + 钉选功能 (watchlist.js)
 
+// 生成东方财富个股详情 URL（6/9 开头→sh，其余→sz）
+function emStockUrl(code) {
+    var prefix = (code.charAt(0) === '6' || code.charAt(0) === '9') ? 'sh' : 'sz';
+    return 'https://quote.eastmoney.com/' + prefix + code + '.html';
+}
+
 // 视图切换：AI 观察池 / 钉选股票
 function switchView(view, event) {
     // 切换 tab 高亮
@@ -139,15 +145,16 @@ function searchStocks() {
                 var mcStr = s.market_cap != null ? s.market_cap.toFixed(0) + '亿' : '--';
                 var btnClass = s.watched ? 'watch-btn watched' : 'watch-btn';
                 var btnText = s.watched ? '已钉' : '钉选';
-                return '<div class="search-item">' +
+                return '<div class="search-item clickable" title="在东方财富查看" onclick="window.open(emStockUrl(\'' + s.code + '\'), \'_blank\')">' +
                     '<div class="si-info"><span class="si-code">' + s.code + '</span> ' + s.name + ' ' + badges + '</div>' +
                     '<div class="si-metrics">PE ' + peStr + ' | ROE ' + roeStr + ' | 市值 ' + mcStr + '</div>' +
                     '<button class="' + btnClass + '" data-scode="' + s.code + '">' + btnText + '</button>' +
                     '</div>';
             }).join('');
-            // 绑定钉选按钮
+            // 绑定钉选按钮（stopPropagation 防止触发外层跳转）
             el.querySelectorAll('[data-scode]').forEach(function(btn) {
-                btn.addEventListener('click', function() {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
                     toggleWatch(btn.getAttribute('data-scode'), btn);
                 });
             });
