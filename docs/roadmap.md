@@ -1,7 +1,7 @@
 # 单股详情页迭代路线
 
 > 起始：2026-07-22 · 最近重写：2026-07-23
-> 基线：单股详情页 12 章节已上线（AI 笔记 + 动态财务历史横向滚动 + 时间线 + 在池状态），第 10 章节行情图表用 iframe 嵌入东方财富。
+> 基线：单股详情页 12 章节已上线（AI 笔记 + 动态财务历史横向滚动 + 时间线 + 在池状态），第 10 章节行情图表用 klinecharts 自研 K 线 + AI 交易信号标注。主页大盘点击弹出指数 K 线模态框。K 线统一空心样式（candle_stroke）。
 
 ## 已有数据底座
 
@@ -12,23 +12,24 @@
 - 利润表（`stock_profit_sheet_by_report_em`）
 - 现金流表（`stock_cash_flow_sheet_by_report_em`）
 
-## 外部资源策略
+## 行情图表策略
 
-行情类内容**不再自研**，统一通过 iframe 嵌入东方财富：
-- **K 线图 / 技术指标 / 资金流向 / F10** → iframe `quote.eastmoney.com/{sh|sz}{code}.html`
-- 优势：专业级全套功能，零维护，自动跟随东财升级
-- 代价：样式不可控，页面较重，移动端体验有限
+行情类内容**自研 klinecharts**（不再 iframe 嵌入第三方网站）：
+- **个股 K 线**（详情页第 10 章节）：klinecharts + 日/周/月切换 + 技术指标（MA/VOL/MACD/KDJ/RSI）+ AI 交易信号标注
+- **大盘指数 K 线**（主页）：点击大盘项弹出模态框，实时拉取指数日K（akshare `stock_zh_index_daily`，不缓存）
+- **K 线样式**：统一 `candle_stroke` 空心蜡烛图（中国习惯：阳线空心红边框、阴线实心绿）
+- klinecharts@9.8.12 本地引用（205KB），CDN 被 ORB 阻止必须本地化
 
-**站内聚焦东方财富没有的独有价值**：AI 笔记、评分体系、筛选策略、时间线。
+**站内独有价值**：AI 笔记、评分体系、筛选策略、时间线、AI 交易信号标注。
 
 ## 设计模式约束（已固化到 project_memory）
 
 - **宽表格**：横向滚动容器 + `width: max-content` + 第一列 `position: sticky` + `white-space: nowrap` + 父容器 `overflow-x: hidden`
 - **多卡片 grid**：卡片 `min-width: 0; overflow: hidden` 防止撑开列宽
 - **LLM JSON 字段**：写模板前必须查 DB 确认实际字段名
-- **零依赖优先**：评分趋势用纯 SVG 生成，不引入前端库（除非确有必要）
+- **零依赖优先**：评分趋势用纯 SVG 生成，不引入前端库（除非确有必要，klinecharts 除外）
 - **pi 性能**：数据定时缓存，非实时拉取；复杂渲染评估 CPU/内存负载
-- **iframe 嵌入**：HTTP 页面可嵌入 HTTPS 站点（无 X-Frame-Options 限制），用 `referrerpolicy="no-referrer"`
+- **klinecharts 渲染**：`init()` 后容器必须可见且尺寸非零，否则 canvas 尺寸为 0 无法绘制（loadKline 只切换 loading/empty 状态，不隐藏 chart 容器）
 
 ---
 
@@ -55,9 +56,10 @@
 - 迭代：评分卡片点击展开，显示五大维度子分数 + 加权公式 + 与行业平均对比
 - 依赖：现有评分逻辑
 
-### ④ 时间线交互
+### ④ 时间线交互 ✅
 - 当前：历次 AI 分析时间线纯文本
 - 迭代：点击展开历史分析全文、评分变化曲线、关键事件标注（财报发布/分红/警示）
+- **状态**：已实施点击展开 + Signal 标签 + 评分变化标注（↑↓ 箭头 + 差值），commit f93b456
 
 ---
 
@@ -111,4 +113,5 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 | 2026-07-23 | 非观察池股票点击跳转东方财富行情页 | 4851d24 |
 | 2026-07-23 | **废弃自研 K 线，改 iframe 嵌入东方财富** | a0ae6ba |
 | 2026-07-23 | P1② 时间线交互增强 + 修复 market_snapshot bug | f93b456 |
-| 2026-07-23 | **恢复 klinecharts 自研 + AI 交易信号标注** | 待 commit |
+| 2026-07-23 | **恢复 klinecharts 自研 + AI 交易信号标注** | bd07242 |
+| 2026-07-23 | 主页大盘改为自研 K 线弹窗 + 空心 K 线样式 | 8a2e610 |
