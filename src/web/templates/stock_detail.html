@@ -231,15 +231,50 @@
         .sd-timeline { display: flex; flex-direction: column; gap: 0; }
         .sd-timeline-item {
             display: grid;
-            grid-template-columns: 100px 80px 1fr;
-            gap: 16px;
+            grid-template-columns: 100px 70px 60px 1fr;
+            gap: 12px;
             padding: 10px 0;
             border-bottom: 1px dashed var(--divider-thin);
             align-items: start;
         }
         .sd-timeline-date { color: var(--text-tertiary); font-size: 13px; }
-        .sd-timeline-score { font-weight: 500; }
-        .sd-timeline-note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+        .sd-timeline-score { font-weight: 500; display: flex; align-items: center; gap: 4px; }
+        .sd-score-delta { font-size: 11px; font-weight: 400; }
+        .sd-score-delta.up { color: var(--color-up); }
+        .sd-score-delta.down { color: var(--color-down); }
+        .sd-score-delta.flat { color: var(--text-tertiary); }
+        .sd-signal-tag {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            text-align: center;
+        }
+        .sd-signal-buy { background: rgba(76,175,80,0.2); color: var(--color-up); }
+        .sd-signal-hold { background: rgba(255,193,7,0.2); color: #ffc107; }
+        .sd-signal-avoid { background: rgba(244,67,54,0.2); color: var(--color-down); }
+        .sd-signal-none { background: var(--divider-thin); color: var(--text-tertiary); }
+        .sd-timeline-note {
+            color: var(--text-secondary); font-size: 13px; line-height: 1.6;
+            cursor: pointer;
+        }
+        .sd-timeline-note:hover { color: var(--text-primary); }
+        .sd-timeline-detail {
+            display: none;
+            grid-column: 4;
+            margin-top: 8px;
+            padding: 12px;
+            background: var(--bg-tertiary, rgba(0,0,0,0.03));
+            border-radius: var(--radius-sm, 4px);
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+        .sd-timeline-detail.open { display: block; }
+        .sd-timeline-detail p { margin: 0 0 8px 0; }
+        .sd-timeline-detail .label { color: var(--text-tertiary); font-weight: 500; margin-right: 4px; }
+        .sd-timeline-toggle { color: var(--accent); font-size: 11px; }
         .sd-empty { color: var(--text-tertiary); font-style: italic; padding: 16px 0; }
 
         /* ========== 在池状态样式 ========== */
@@ -642,15 +677,57 @@
 
         <div class="sd-timeline">
             {% for h in analysis_history %}
+            {% set ai_obj = h.ai_analysis|from_json if h.ai_analysis else {} %}
+            {% set trade_obj = h.ai_trade_strategy|from_json if h.ai_trade_strategy else {} %}
+            {% set signal = (trade_obj.signal|upper) if trade_obj.get('signal') else '' %}
+            {% set prev = analysis_history[loop.index0 + 1] if loop.index0 < (analysis_history|length - 1) else none %}
+            {% set delta = (h.score - prev.score) if h.score and prev and prev.score else none %}
             <div class="sd-timeline-item">
                 <div class="sd-timeline-date">{{ h.analysis_date }}</div>
-                <div class="sd-timeline-score">评分 {{ h.score|default('--') }}</div>
-                {% if h.ai_analysis %}
-                {% set ai_obj = h.ai_analysis|from_json %}
-                <div class="sd-timeline-note">
-                    {{ ai_obj.analysis|default(h.ai_analysis)|truncate(120) }}
+                <div class="sd-timeline-score">
+                    {{ h.score|default('--') }}
+                    {% if delta is not none %}
+                    {% set delta_cls = 'up' if delta > 0 else ('down' if delta < 0 else 'flat') %}
+                    {% set delta_sym = '↑' if delta > 0 else ('↓' if delta < 0 else '→') %}
+                    <span class="sd-score-delta {{ delta_cls }}">{{ delta_sym }}{{ delta|abs|round(1) }}</span>
+                    {% endif %}
                 </div>
-                {% endif %}
+                <div>
+                    {% if signal == 'BUY' %}
+                    <span class="sd-signal-tag sd-signal-buy">买入</span>
+                    {% elif signal == 'HOLD' %}
+                    <span class="sd-signal-tag sd-signal-hold">持有</span>
+                    {% elif signal == 'AVOID' %}
+                    <span class="sd-signal-tag sd-signal-avoid">回避</span>
+                    {% else %}
+                    <span class="sd-signal-tag sd-signal-none">--</span>
+                    {% endif %}
+                </div>
+                <div class="sd-timeline-note" onclick="this.nextElementSibling.classList.toggle('open')">
+                    {{ ai_obj.analysis|default(h.ai_analysis)|truncate(120) }}
+                    <span class="sd-timeline-toggle">[展开]</span>
+                </div>
+                <div class="sd-timeline-detail">
+                    {% if ai_obj.analysis %}
+                    <p><span class="label">投资人笔记：</span>{{ ai_obj.analysis }}</p>
+                    {% endif %}
+                    {% if ai_obj.moat_evaluation %}
+                    <p><span class="label">护城河：</span>{{ ai_obj.moat_evaluation }}</p>
+                    {% endif %}
+                    {% if trade_obj.signal or trade_obj.buy_zone or trade_obj.target_price %}
+                    <p>
+                        <span class="label">交易策略：</span>
+                        {{ trade_obj.signal|default('--') }}
+                        {% if trade_obj.buy_zone %} | 买入区间 {{ trade_obj.buy_zone }}{% endif %}
+                        {% if trade_obj.target_price %} | 目标价 {{ trade_obj.target_price }}{% endif %}
+                        {% if trade_obj.stop_loss %} | 止损 {{ trade_obj.stop_loss }}{% endif %}
+                        {% if trade_obj.holding_period %} | 持有期 {{ trade_obj.holding_period }}{% endif %}
+                    </p>
+                    {% endif %}
+                    {% if ai_obj.intrinsic_value and ai_obj.intrinsic_value.method %}
+                    <p><span class="label">估值方法：</span>{{ ai_obj.intrinsic_value.method }}</p>
+                    {% endif %}
+                </div>
             </div>
             {% endfor %}
         </div>

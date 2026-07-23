@@ -499,6 +499,13 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
 
         # 4. 笔记落库
         if journal and journal.get('title'):
+            market = MarketIndexDAO().get_latest()
+            # 构造调入调出详情（code + reason）
+            action_details = {
+                a: [{'code': c, 'reason': r}
+                    for c, (act, r) in final_actions.items() if act == a]
+                for a in ('add', 'remove', 'keep')
+            }
             journal_dao = AiJournalDAO()
             journal_dao.save(
                 journal_date=action_date,
@@ -507,13 +514,15 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                 content_md=journal.get('content_md', ''),
                 market_snapshot=json.dumps(
                     {'indices': [{'name': m.get('index_name'),
-                                  'value': m.get('current_value')}
-                                 for m in []]}
+                                  'value': m.get('current_value'),
+                                  'change_percent': m.get('change_percent')}
+                                 for m in (market or [])]}
                 ),
                 actions_summary=json.dumps({
                     'add': sum(1 for a, _ in final_actions.values() if a == 'add'),
                     'remove': sum(1 for a, _ in final_actions.values() if a == 'remove'),
                     'keep': sum(1 for a, _ in final_actions.values() if a == 'keep'),
+                    'details': action_details,
                 })
             )
 
