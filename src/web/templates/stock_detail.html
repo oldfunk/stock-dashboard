@@ -828,13 +828,13 @@
     (function() {
         var code = "{{ code }}";
         var chart = null;
-        // 指标状态：name → pane 信息（stack=主图叠加，false=副图）
+        // 指标状态：name → pane 信息（stack=主图叠加，false=副图；paneId 保存 createIndicator 返回值）
         var indicators = {
-            MA:   { stack: true,  active: true },
-            VOL:  { stack: false, active: true },
-            MACD: { stack: false, active: false },
-            KDJ:  { stack: false, active: false },
-            RSI:  { stack: false, active: false }
+            MA:   { stack: true,  active: true,  paneId: 'candle_pane' },
+            VOL:  { stack: false, active: true,  paneId: null },
+            MACD: { stack: false, active: false, paneId: null },
+            KDJ:  { stack: false, active: false, paneId: null },
+            RSI:  { stack: false, active: false, paneId: null }
         };
         var currentPeriod = 'daily';
 
@@ -844,11 +844,12 @@
                 return;
             }
             chart = klinecharts.init('kline-chart');
-            // 空心K线样式（阳线空心红，阴线实心绿）
+            // 空心K线样式（中国习惯：阳线空心红，阴线实心绿）
+            // candle_up_stroke = 仅上涨K线空心，下跌K线保持实心
             try {
                 chart.setStyles({
                     candle: {
-                        type: 'candle_stroke',
+                        type: 'candle_up_stroke',
                         bar: {
                             upColor: '#ef5350',
                             downColor: '#26a69a',
@@ -867,8 +868,8 @@
             }
             // 主图：MA 均线
             chart.createIndicator('MA', true, { id: 'candle_pane' });
-            // 副图：VOL 成交量
-            chart.createIndicator('VOL');
+            // 副图：VOL 成交量（保存 paneId 用于后续删除）
+            indicators.VOL.paneId = chart.createIndicator('VOL');
             loadKline('daily');
         }
 
@@ -916,10 +917,12 @@
                         if (ind.stack) {
                             chart.createIndicator(name, true, { id: 'candle_pane' });
                         } else {
-                            chart.createIndicator(name);
+                            // 保存返回的 paneId，删除时按 paneId 精确定位
+                            ind.paneId = chart.createIndicator(name);
                         }
                     } else {
-                        chart.removeIndicator(ind.stack ? 'candle_pane' : name, name);
+                        // removeIndicator(paneId, name)：副图用保存的 paneId，主图用 'candle_pane'
+                        chart.removeIndicator(ind.paneId, name);
                     }
                 } catch (e) {
                     console.log('indicator toggle:', name, e.message);

@@ -1518,12 +1518,13 @@ var indexChart = null;
 var currentIndexCode = '';
 
 // 空心K线样式（中国习惯：阳线空心红，阴线实心绿）
+// candle_up_stroke = 仅上涨K线空心，下跌K线保持实心
 function applyHollowCandleStyle(chart) {
     if (!chart) return;
     try {
         chart.setStyles({
             candle: {
-                type: 'candle_stroke',
+                type: 'candle_up_stroke',
                 bar: {
                     upColor: '#ef5350',        // 阳线边框（涨，空心）
                     downColor: '#26a69a',      // 阴线填充（跌，实心）
