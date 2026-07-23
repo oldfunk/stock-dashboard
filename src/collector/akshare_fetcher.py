@@ -15,6 +15,9 @@ import os
 import re
 from collections import defaultdict
 
+import akshare as ak
+import pandas as pd
+
 from src.utils import (
     safe_float, curl_get, tc_encode, parse_tc_line,
     parse_tc_indices, split_tc_response, INDEX_CODES, now_cn,
@@ -908,3 +911,56 @@ def run_collect_pipeline(config: dict) -> list[dict]:
 
     enrich_financial_data(candidates)
     return candidates
+
+
+def fetch_kline_data(code: str, start_date: str | None = None,
+                     adjust: str = "qfq") -> list[dict]:
+    """拉取单只股票的日K线数据。
+
+    参数：
+    - code: 6位股票代码
+    - start_date: 起始日期（YYYY-MM-DD），None 则拉最近1年
+    - adjust: 复权类型，qfq=前复权（默认）
+
+    返回：[{"trade_date", "open", "close", "high", "low", "volume", "amount", "turnover"}, ...]
+    """
+    from datetime import datetime, timedelta
+
+    # 计算日期范围
+    now = now_cn()
+    if start_date is None:
+        start = now - timedelta(days=365)
+    else:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+    start_str = start.strftime("%Y%m%d")
+    end_str = now.strftime("%Y%m%d")
+
+    # 代码转东方财富格式
+    em_code = _code_to_em(code)
+
+    try:
+        df = ak.stock_zh_a_hist(
+            symbol=em_code, period="daily",
+            start_date=start_str, end_date=end_str, adjust=adjust
+        )
+    except Exception as e:
+        logger.warning(f"[K线] 拉取失败 {code}: {e}")
+        return []
+
+    if df is None or df.empty:
+        return []
+
+    # akshare 返回的列名为中文，需映射
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "trade_date": str(row["日期"])[:10],
+            "open": float(row["开盘"]) if pd.notna(row["开盘"]) else None,
+            "close": float(row["收盘"]) if pd.notna(row["收盘"]) else None,
+            "high": float(row["最高"]) if pd.notna(row["最高"]) else None,
+            "low": float(row["最低"]) if pd.notna(row["最低"]) else None,
+            "volume": float(row["成交量"]) if pd.notna(row["成交量"]) else None,
+            "amount": float(row["成交额"]) if pd.notna(row["成交额"]) else None,
+            "turnover": float(row["换手率"]) if pd.notna(row["换手率"]) else None,
+        })
+    return records
