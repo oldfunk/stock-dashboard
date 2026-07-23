@@ -923,6 +923,9 @@ def fetch_kline_data(code: str, start_date: str | None = None,
     - adjust: 复权类型，qfq=前复权（默认）
 
     返回：[{"trade_date", "open", "close", "high", "low", "volume", "amount", "turnover"}, ...]
+
+    数据源优先级：东方财富（stock_zh_a_hist）→ 腾讯（stock_zh_a_hist_tx）备用。
+    push2his.eastmoney.com 域名在某些网络环境下可能被封禁，腾讯数据源作为兜底。
     """
     from datetime import datetime, timedelta
 
@@ -935,22 +938,33 @@ def fetch_kline_data(code: str, start_date: str | None = None,
     start_str = start.strftime("%Y%m%d")
     end_str = now.strftime("%Y%m%d")
 
-    # 代码转东方财富格式
-    em_code = _code_to_em(code)
+    # 优先：东方财富
+    records = _fetch_kline_em(code, start_str, end_str, adjust)
+    if records:
+        return records
 
+    # 备用：腾讯数据源
+    logger.info(f"[K线] 东方财富失败，回退腾讯 {code}")
+    records = _fetch_kline_tx(code, start_str, end_str)
+    return records
+
+
+def _fetch_kline_em(code: str, start_str: str, end_str: str,
+                    adjust: str) -> list[dict]:
+    """东方财富数据源拉取日K"""
+    em_code = _code_to_em(code)
     try:
         df = ak.stock_zh_a_hist(
             symbol=em_code, period="daily",
             start_date=start_str, end_date=end_str, adjust=adjust
         )
     except Exception as e:
-        logger.warning(f"[K线] 拉取失败 {code}: {e}")
+        logger.warning(f"[K线] 东方财富拉取失败 {code}: {e}")
         return []
 
     if df is None or df.empty:
         return []
 
-    # akshare 返回的列名为中文，需映射
     records = []
     for _, row in df.iterrows():
         records.append({
@@ -962,5 +976,35 @@ def fetch_kline_data(code: str, start_date: str | None = None,
             "volume": float(row["成交量"]) if pd.notna(row["成交量"]) else None,
             "amount": float(row["成交额"]) if pd.notna(row["成交额"]) else None,
             "turnover": float(row["换手率"]) if pd.notna(row["换手率"]) else None,
+        })
+    return records
+
+
+def _fetch_kline_tx(code: str, start_str: str, end_str: str) -> list[dict]:
+    """腾讯数据源拉取日K（备用，无成交量和换手率）"""
+    # 代码转腾讯格式：sz000792 / sh600519
+    tx_code = f"sh{code}" if code.startswith(('6', '9')) else f"sz{code}"
+    try:
+        df = ak.stock_zh_a_hist_tx(
+            symbol=tx_code, start_date=start_str, end_date=end_str
+        )
+    except Exception as e:
+        logger.warning(f"[K线] 腾讯拉取失败 {code}: {e}")
+        return []
+
+    if df is None or df.empty:
+        return []
+
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "trade_date": str(row["date"])[:10],
+            "open": float(row["open"]) if pd.notna(row["open"]) else None,
+            "close": float(row["close"]) if pd.notna(row["close"]) else None,
+            "high": float(row["high"]) if pd.notna(row["high"]) else None,
+            "low": float(row["low"]) if pd.notna(row["low"]) else None,
+            "volume": None,  # 腾讯数据源无成交量
+            "amount": float(row["amount"]) if pd.notna(row["amount"]) else None,
+            "turnover": None,  # 腾讯数据源无换手率
         })
     return records
