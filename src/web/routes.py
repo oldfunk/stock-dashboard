@@ -450,6 +450,89 @@ async def stock_detail(request: Request, code: str):
     })
 
 
+def _aggregate_kline(daily_records: list[dict], period: str) -> list[dict]:
+    """将日K聚合为周K或月K
+
+    period: "weekly" 按自然周（周一~周五）聚合
+            "monthly" 按自然月聚合
+    """
+    from datetime import datetime
+
+    if not daily_records:
+        return []
+
+    # 按周/月分组
+    groups: dict[str, list[dict]] = {}
+    for r in daily_records:
+        dt = datetime.strptime(r["trade_date"], "%Y-%m-%d")
+        if period == "weekly":
+            # ISO 周号作为 key
+            key = f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}"
+        else:  # monthly
+            key = f"{dt.year}-{dt.month:02d}"
+        groups.setdefault(key, []).append(r)
+
+    result = []
+    for key, group in groups.items():
+        # 排序确保第一条是周/月第一天
+        group.sort(key=lambda x: x["trade_date"])
+        first = group[0]
+        last = group[-1]
+        result.append({
+            "trade_date": first["trade_date"],
+            "open": first.get("open"),
+            "close": last.get("close"),
+            "high": max((g.get("high") or 0) for g in group),
+            "low": min((g.get("low") or 999999) for g in group),
+            "volume": sum((g.get("volume") or 0) for g in group),
+            "amount": sum((g.get("amount") or 0) for g in group),
+            "turnover": sum((g.get("turnover") or 0) for g in group),
+        })
+    return result
+
+
+def _to_klinecharts(records: list[dict]) -> list[dict]:
+    """DB 记录转 klinecharts 所需格式"""
+    from datetime import datetime
+    result = []
+    for r in records:
+        dt = datetime.strptime(r["trade_date"], "%Y-%m-%d")
+        result.append({
+            "timestamp": int(dt.replace(hour=15).timestamp() * 1000),
+            "open": r.get("open"),
+            "close": r.get("close"),
+            "high": r.get("high"),
+            "low": r.get("low"),
+            "volume": r.get("volume"),
+            "turnover": r.get("turnover"),
+        })
+    return result
+
+
+@app.get("/api/stock/{code}/kline")
+async def stock_kline(code: str, period: str = "daily", limit: int = 250):
+    """K线数据 API
+
+    period: daily / weekly / monthly
+    返回 klinecharts 所需格式
+    """
+    import re
+    if not re.match(r"^\d{6}$", code):
+        raise HTTPException(status_code=404, detail="Invalid code")
+    if period not in ("daily", "weekly", "monthly"):
+        raise HTTPException(status_code=400, detail="period must be daily/weekly/monthly")
+
+    from src.models.database import KlineDAO
+    dao = KlineDAO()
+    daily = dao.get_daily(code, limit=limit)
+
+    if period != "daily":
+        daily = _aggregate_kline(daily, period)
+
+    klines = _to_klinecharts(daily)
+    return {"code": code, "period": period, "klines": klines}
+
+
 @app.get("/api/indices")
 async def api_indices():
     """大盘数据 API"""
