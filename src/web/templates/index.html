@@ -377,8 +377,12 @@
             background: var(--bg-hover);
         }
 
-        .stock-card.clickable, .watchlist-card.clickable {
+        .stock-card.clickable, .watchlist-card.clickable, .market-item.clickable {
             cursor: pointer;
+        }
+        .market-item.clickable:hover {
+            background: var(--bg-tertiary, rgba(0,0,0,0.04));
+            border-radius: var(--radius-sm, 4px);
         }
 
         .stock-row {
@@ -971,7 +975,8 @@
     <div class="market-row" id="marketRow">
         {% if indices %}
         {% for idx in indices %}
-        <div class="market-item">
+        <div class="market-item clickable" title="查看 {{ idx.index_name }} 行情"
+             onclick="window.open('https://quote.eastmoney.com/zs{{ idx.index_code[2:] if idx.index_code else '' }}.html', '_blank')">
             <div class="market-name">{{ idx.index_name }}</div>
             <div class="market-value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
             <div class="market-change {{ 'up' if idx.change_percent is not none and idx.change_percent >= 0 else 'down' }}">
@@ -1044,7 +1049,9 @@
         </div>
     </div>
 
-    <!-- AI 观察池卡片（全宽，不受 dashboard-layout 约束） -->
+    <div class="dashboard-layout">
+    <div class="dashboard-main">
+    <!-- AI 观察池卡片 -->
     <div id="watchlistAiContainer">
         {% with watchlist = ai_watchlist %}
         {% include '_watchlist_card.html' %}
@@ -1056,9 +1063,6 @@
         </div>
         {% endif %}
     </div>
-
-    <div class="dashboard-layout">
-    <div class="dashboard-main">
     <div class="stock-list" id="watchlistContainer" style="display:none;">
         <div style="padding:40px;text-align:center;color:var(--text-tertiary);">
             加载钉选中...
@@ -1362,7 +1366,9 @@
             var cls = idx.change_percent !== null && idx.change_percent >= 0 ? 'up' : 'down';
             var val = idx.current_value != null ? idx.current_value.toFixed(2) : '--';
             var chg = idx.change_percent != null ? (idx.change_percent >= 0 ? '+' : '') + idx.change_percent.toFixed(2) + '%' : '--';
-            return '<div class="market-item">' +
+            var code6 = (idx.index_code || '').slice(2);
+            var url = 'https://quote.eastmoney.com/zs' + code6 + '.html';
+            return '<div class="market-item clickable" title="查看 ' + (idx.index_name || '') + ' 行情" onclick="window.open(\'' + url + '\', \'_blank\')">' +
                 '<div class="market-name">' + (idx.index_name || 'Index') + '</div>' +
                 '<div class="market-value">' + val + '</div>' +
                 '<div class="market-change ' + cls + '">' + chg + '</div>' +

@@ -492,19 +492,23 @@ def _aggregate_kline(daily_records: list[dict], period: str) -> list[dict]:
 
 
 def _to_klinecharts(records: list[dict]) -> list[dict]:
-    """DB 记录转 klinecharts 所需格式"""
+    """DB 记录转 klinecharts 所需格式。
+
+    腾讯数据源无 volume/turnover，返回 None 会导致 klinecharts
+    VOL 指标渲染失败，这里统一转为 0。
+    """
     from datetime import datetime
     result = []
     for r in records:
         dt = datetime.strptime(r["trade_date"], "%Y-%m-%d")
         result.append({
             "timestamp": int(dt.replace(hour=15).timestamp() * 1000),
-            "open": r.get("open"),
-            "close": r.get("close"),
-            "high": r.get("high"),
-            "low": r.get("low"),
-            "volume": r.get("volume"),
-            "turnover": r.get("turnover"),
+            "open": r.get("open") or 0,
+            "close": r.get("close") or 0,
+            "high": r.get("high") or 0,
+            "low": r.get("low") or 0,
+            "volume": r.get("volume") or 0,
+            "turnover": r.get("turnover") or 0,
         })
     return result
 
