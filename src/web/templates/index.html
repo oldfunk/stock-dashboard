@@ -949,7 +949,40 @@
             text-decoration: none;
         }
         .journal-link a:hover { text-decoration: underline; }
+
+        /* ========== 指数 K 线模态框 ========== */
+        .index-kline-modal {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 9999;
+            justify-content: center; align-items: center;
+        }
+        .index-kline-modal.open { display: flex; }
+        .index-kline-content {
+            background: var(--bg-secondary, #1e1e2e);
+            border-radius: 12px; padding: 16px; width: 90%; max-width: 1000px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .index-kline-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 12px;
+        }
+        .index-kline-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+        .index-kline-close {
+            cursor: pointer; font-size: 22px; color: var(--text-tertiary);
+            line-height: 1; padding: 4px 8px;
+        }
+        .index-kline-close:hover { color: var(--text-primary); }
+        .index-kline-toolbar { display: flex; gap: 4px; margin-bottom: 8px; }
+        .ik-period-btn {
+            padding: 3px 10px; border: 1px solid var(--divider); background: transparent;
+            color: var(--text-secondary); border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .ik-period-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent); }
+        #index-kline-chart { width: 100%; height: 480px; background: #fff; border-radius: 4px; }
+        .index-kline-loading { text-align: center; padding: 80px; color: var(--text-tertiary); }
     </style>
+    <script src="/static/js/klinecharts.min.js"></script>
 </head>
 <body>
 <div class="app" id="app">
@@ -976,8 +1009,8 @@
     <div class="market-row" id="marketRow">
         {% if indices %}
         {% for idx in indices %}
-        <div class="market-item clickable" title="查看 {{ idx.index_name }} 行情"
-             onclick="window.open('https://quote.eastmoney.com/zs{{ idx.index_code[2:] if idx.index_code else '' }}.html', '_blank')">
+        <div class="market-item clickable" title="查看 {{ idx.index_name }} K线"
+             onclick="openIndexKline('{{ idx.index_code }}', '{{ idx.index_name }}')">
             <div class="market-name">{{ idx.index_name }}</div>
             <div class="market-value">{{ "%.2f"|format(idx.current_value) if idx.current_value else '--' }}</div>
             <div class="market-change {{ 'up' if idx.change_percent is not none and idx.change_percent >= 0 else 'down' }}">
@@ -1367,9 +1400,8 @@
             var cls = idx.change_percent !== null && idx.change_percent >= 0 ? 'up' : 'down';
             var val = idx.current_value != null ? idx.current_value.toFixed(2) : '--';
             var chg = idx.change_percent != null ? (idx.change_percent >= 0 ? '+' : '') + idx.change_percent.toFixed(2) + '%' : '--';
-            var code6 = (idx.index_code || '').slice(2);
-            var url = 'https://quote.eastmoney.com/zs' + code6 + '.html';
-            return '<div class="market-item clickable" title="查看 ' + (idx.index_name || '') + ' 行情" onclick="window.open(\'' + url + '\', \'_blank\')">' +
+            var code6 = (idx.index_code || '');
+            return '<div class="market-item clickable" title="查看 ' + (idx.index_name || '') + ' K线" onclick="openIndexKline(\'' + (idx.index_code || '') + '\', \'' + (idx.index_name || '') + '\')">' +
                 '<div class="market-name">' + (idx.index_name || 'Index') + '</div>' +
                 '<div class="market-value">' + val + '</div>' +
                 '<div class="market-change ' + cls + '">' + chg + '</div>' +
@@ -1463,6 +1495,116 @@
     refreshDashboard();
     setInterval(refreshDashboard, REFRESH_INTERVAL);
     setInterval(updateTimestamp, 10000);
+</script>
+
+<!-- 指数 K 线模态框 -->
+<div class="index-kline-modal" id="indexKlineModal" onclick="if(event.target===this)closeIndexKline()">
+    <div class="index-kline-content">
+        <div class="index-kline-header">
+            <div class="index-kline-title" id="indexKlineTitle">指数K线</div>
+            <div class="index-kline-close" onclick="closeIndexKline()">&times;</div>
+        </div>
+        <div class="index-kline-toolbar">
+            <button class="ik-period-btn active" data-period="daily">日K</button>
+            <button class="ik-period-btn" data-period="weekly">周K</button>
+            <button class="ik-period-btn" data-period="monthly">月K</button>
+        </div>
+        <div id="index-kline-chart"></div>
+        <div class="index-kline-loading" id="index-kline-loading">加载中...</div>
+    </div>
+</div>
+<script>
+var indexChart = null;
+var currentIndexCode = '';
+
+// 空心K线样式（中国习惯：阳线空心红，阴线实心绿）
+function applyHollowCandleStyle(chart) {
+    if (!chart) return;
+    try {
+        chart.setStyles({
+            candle: {
+                type: 'candle_stroke',
+                bar: {
+                    upColor: '#ef5350',        // 阳线边框（涨，空心）
+                    downColor: '#26a69a',      // 阴线填充（跌，实心）
+                    noChangeColor: '#888888',
+                    upBorderColor: '#ef5350',
+                    downBorderColor: '#26a69a',
+                    noChangeBorderColor: '#888888',
+                    upWickColor: '#ef5350',
+                    downWickColor: '#26a69a',
+                    noChangeWickColor: '#888888'
+                }
+            }
+        });
+    } catch (e) {
+        console.log('setStyles error:', e.message);
+    }
+}
+
+function openIndexKline(code, name) {
+    if (typeof klinecharts === 'undefined') {
+        alert('K线库未加载，请刷新重试');
+        return;
+    }
+    currentIndexCode = code;
+    document.getElementById('indexKlineTitle').textContent = name + ' K线';
+    document.getElementById('indexKlineModal').classList.add('open');
+    document.getElementById('index-kline-loading').style.display = 'block';
+    document.getElementById('index-kline-chart').style.display = 'none';
+
+    if (indexChart) {
+        try { indexChart.resize(); } catch (e) {}
+    } else {
+        indexChart = klinecharts.init('index-kline-chart');
+        indexChart.createIndicator('MA', true, { id: 'candle_pane' });
+        indexChart.createIndicator('VOL');
+    }
+    loadIndexKline('daily');
+}
+
+function loadIndexKline(period) {
+    var loading = document.getElementById('index-kline-loading');
+    var chartEl = document.getElementById('index-kline-chart');
+    loading.style.display = 'block';
+    chartEl.style.display = 'none';
+
+    fetch('/api/index/' + currentIndexCode + '/kline?period=' + period)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            loading.style.display = 'none';
+            if (!data.klines || data.klines.length === 0) {
+                loading.textContent = '暂无K线数据';
+                loading.style.display = 'block';
+                return;
+            }
+            chartEl.style.display = 'block';
+            indexChart.applyNewData(data.klines);
+            applyHollowCandleStyle(indexChart);
+        })
+        .catch(function(e) {
+            loading.textContent = '加载失败: ' + e.message;
+        });
+}
+
+function closeIndexKline() {
+    document.getElementById('indexKlineModal').classList.remove('open');
+    if (indexChart) {
+        try { indexChart.clear(); } catch (e) {}
+    }
+}
+
+document.querySelectorAll('.ik-period-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.ik-period-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        loadIndexKline(btn.dataset.period);
+    });
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeIndexKline();
+});
 </script>
 <script src="/static/watchlist.js"></script>
 </body>

@@ -537,6 +537,27 @@ async def stock_kline(code: str, period: str = "daily", limit: int = 250):
     return {"code": code, "period": period, "klines": klines}
 
 
+@app.get("/api/index/{index_code}/kline")
+async def index_kline(index_code: str, period: str = "daily", limit: int = 250):
+    """指数 K 线数据 API（实时从 akshare 拉取，不缓存）。
+
+    index_code: sh000001 / sz399001 等
+    period: daily / weekly / monthly
+    """
+    import re
+    if not re.match(r"^(sh|sz)\d{6}$", index_code):
+        raise HTTPException(status_code=400, detail="Invalid index code")
+    if period not in ("daily", "weekly", "monthly"):
+        raise HTTPException(status_code=400, detail="period must be daily/weekly/monthly")
+
+    from src.collector.akshare_fetcher import fetch_index_kline
+    daily = fetch_index_kline(index_code, limit=limit)
+    if period != "daily":
+        daily = _aggregate_kline(daily, period)
+    klines = _to_klinecharts(daily)
+    return {"code": index_code, "period": period, "klines": klines}
+
+
 @app.get("/api/indices")
 async def api_indices():
     """大盘数据 API"""

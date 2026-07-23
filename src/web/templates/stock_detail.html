@@ -844,6 +844,27 @@
                 return;
             }
             chart = klinecharts.init('kline-chart');
+            // 空心K线样式（阳线空心红，阴线实心绿）
+            try {
+                chart.setStyles({
+                    candle: {
+                        type: 'candle_stroke',
+                        bar: {
+                            upColor: '#ef5350',
+                            downColor: '#26a69a',
+                            noChangeColor: '#888888',
+                            upBorderColor: '#ef5350',
+                            downBorderColor: '#26a69a',
+                            noChangeBorderColor: '#888888',
+                            upWickColor: '#ef5350',
+                            downWickColor: '#26a69a',
+                            noChangeWickColor: '#888888'
+                        }
+                    }
+                });
+            } catch (e) {
+                console.log('setStyles error:', e.message);
+            }
             // 主图：MA 均线
             chart.createIndicator('MA', true, { id: 'candle_pane' });
             // 副图：VOL 成交量

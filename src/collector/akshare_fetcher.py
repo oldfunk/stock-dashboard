@@ -913,6 +913,41 @@ def run_collect_pipeline(config: dict) -> list[dict]:
     return candidates
 
 
+def fetch_index_kline(index_code: str, limit: int = 250) -> list[dict]:
+    """拉取大盘指数日K线（实时，不缓存）。
+
+    index_code: sh000001 / sz399001 等
+    返回格式与 fetch_kline_data 一致（trade_date/open/close/high/low/volume/amount）
+    """
+    from datetime import datetime, timedelta
+    now = now_cn()
+    start = now - timedelta(days=limit + 60)  # 多拉一些应对节假日
+    start_str = start.strftime("%Y%m%d")
+    end_str = now.strftime("%Y%m%d")
+    try:
+        df = ak.stock_zh_index_daily(symbol=index_code)
+    except Exception as e:
+        logger.warning(f"[指数K线] 拉取失败 {index_code}: {e}")
+        return []
+    if df is None or df.empty:
+        return []
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "trade_date": str(row.get("date", row.name))[:10],
+            "open": float(row["open"]) if pd.notna(row.get("open")) else None,
+            "close": float(row["close"]) if pd.notna(row.get("close")) else None,
+            "high": float(row["high"]) if pd.notna(row.get("high")) else None,
+            "low": float(row["low"]) if pd.notna(row.get("low")) else None,
+            "volume": float(row["volume"]) if pd.notna(row.get("volume")) else 0,
+            "amount": None,
+            "turnover": None,
+        })
+    # 按日期升序，截取最近 limit 条
+    records.sort(key=lambda x: x["trade_date"])
+    return records[-limit:] if len(records) > limit else records
+
+
 def fetch_kline_data(code: str, start_date: str | None = None,
                      adjust: str = "qfq") -> list[dict]:
     """拉取单只股票的日K线数据。
