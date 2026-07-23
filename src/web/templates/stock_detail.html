@@ -203,19 +203,27 @@
         .sd-derived-cell .value.pos { color: var(--color-up); }
         .sd-derived-cell .value.neg { color: var(--color-down); }
 
-        /* ========== 行情图表 ========== */
-        .sd-kline-toolbar { display: flex; gap: 4px; margin-bottom: 12px; }
-        .kline-period-btn {
-            padding: 4px 12px; border: 1px solid var(--divider); background: transparent;
-            color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer;
-            font-size: 13px; transition: background 0.15s, color 0.15s;
+        /* ========== 行情图表（iframe 嵌入东方财富） ========== */
+        .sd-em-frame-wrap {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 8px;
+            overflow: hidden;
         }
-        .kline-period-btn:hover { background: var(--bg-hover); }
-        .kline-period-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-        .sd-kline-wrap { background: var(--bg-secondary); border-radius: var(--radius); padding: 12px; }
-        #kline-chart { width: 100%; height: 500px; }
-        .sd-kline-empty { padding: 48px; text-align: center; color: var(--text-tertiary); display: none; }
-        .sd-kline-loading { padding: 48px; text-align: center; color: var(--text-tertiary); }
+        .sd-em-frame {
+            width: 100%;
+            height: 620px;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: #fff;
+        }
+        .sd-em-tip {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            text-align: right;
+        }
+        .sd-em-tip a { color: var(--accent); }
 
         /* ========== 时间线样式 ========== */
         .sd-score-chart { margin-bottom: 16px; }
@@ -250,7 +258,6 @@
         }
         .sd-wl-history-table th { color: var(--text-tertiary); font-weight: 500; }
     </style>
-    <script src="/static/js/klinecharts.min.js"></script>
 </head>
 <body>
 <div class="stock-detail-page">
@@ -576,18 +583,20 @@
     </section>
     {% endif %}
 
-    <!-- 10. 行情图表 -->
+    <!-- 10. 行情图表（iframe 嵌入东方财富） -->
     <section class="sd-section" id="technical-analysis">
         <h2 class="sd-section-title">行情图表</h2>
-        <div class="sd-kline-toolbar">
-            <button class="kline-period-btn active" data-period="daily">日K</button>
-            <button class="kline-period-btn" data-period="weekly">周K</button>
-            <button class="kline-period-btn" data-period="monthly">月K</button>
+        {% set em_prefix = 'sh' if code.startswith(('6', '9')) else 'sz' %}
+        <div class="sd-em-frame-wrap">
+            <iframe class="sd-em-frame"
+                    src="https://quote.eastmoney.com/{{ em_prefix }}{{ code }}.html"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    title="{{ name }} {{ code }} 行情"></iframe>
         </div>
-        <div class="sd-kline-wrap">
-            <div id="kline-chart"></div>
-            <div class="sd-kline-empty" id="kline-empty">暂无K线数据</div>
-            <div class="sd-kline-loading" id="kline-loading">加载中...</div>
+        <div class="sd-em-tip">
+            数据由东方财富提供 ·
+            <a href="https://quote.eastmoney.com/{{ em_prefix }}{{ code }}.html" target="_blank">在新标签打开 &rarr;</a>
         </div>
     </section>
 
@@ -699,61 +708,5 @@
     </section>
     {% endif %}
 </div>
-    <script>
-    (function() {
-        const code = "{{ code }}";
-        let chart = null;
-
-        function initChart() {
-            if (typeof klinecharts === 'undefined') {
-                document.getElementById('kline-loading').textContent = 'K线库加载失败，请刷新重试';
-                return;
-            }
-            chart = klinecharts.init('kline-chart');
-            // 主图叠加 MA 均线
-            chart.createIndicator('MA', false, { id: 'candle_pane' });
-            // 副图：成交量
-            chart.createIndicator('VOL');
-            loadKline('daily');
-        }
-
-        async function loadKline(period) {
-            document.getElementById('kline-loading').style.display = 'block';
-            document.getElementById('kline-empty').style.display = 'none';
-            document.getElementById('kline-chart').style.display = 'none';
-
-            try {
-                const resp = await fetch('/api/stock/' + code + '/kline?period=' + period);
-                const data = await resp.json();
-                document.getElementById('kline-loading').style.display = 'none';
-
-                if (!data.klines || data.klines.length === 0) {
-                    document.getElementById('kline-empty').style.display = 'block';
-                    return;
-                }
-                document.getElementById('kline-chart').style.display = 'block';
-                chart.applyNewData(data.klines);
-            } catch (e) {
-                document.getElementById('kline-loading').textContent = '加载失败: ' + e.message;
-            }
-        }
-
-        // 日/周/月切换
-        document.querySelectorAll('.kline-period-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.kline-period-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                loadKline(btn.dataset.period);
-            });
-        });
-
-        // 页面加载后初始化
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initChart);
-        } else {
-            initChart();
-        }
-    })();
-    </script>
 </body>
 </html>
