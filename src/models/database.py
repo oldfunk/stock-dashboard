@@ -308,6 +308,25 @@ def init_database():
         _add_column_if_not_exists(conn, 'financial_summary', 'fcf_5y_sum', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'share_dilution_5y', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'roic_5y_avg', 'REAL')
+        # 2026-07-22 新增：K线日线数据表
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS kline_daily (
+                code TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                open REAL,
+                close REAL,
+                high REAL,
+                low REAL,
+                volume REAL,
+                amount REAL,
+                turnover REAL,
+                PRIMARY KEY (code, trade_date)
+            )
+        ''')
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
+            'ON kline_daily(code, trade_date)'
+        )
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
 
@@ -881,3 +900,49 @@ class WatchlistDAO:
                 "UPDATE watchlist SET last_signal = ?, last_updated = ? WHERE code = ?",
                 (signal, now_cn().isoformat(), code)
             )
+
+
+class KlineDAO:
+    """K线日线数据 DAO"""
+
+    def upsert_many(self, code: str, records: list[dict]) -> int:
+        """批量写入日K（INSERT OR REPLACE）
+
+        records 字段：trade_date, open, close, high, low, volume, amount, turnover
+        """
+        if not records:
+            return 0
+        with db_conn() as conn:
+            for r in records:
+                conn.execute("""
+                    INSERT OR REPLACE INTO kline_daily
+                    (code, trade_date, open, close, high, low, volume, amount, turnover)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    code, r['trade_date'],
+                    r.get('open'), r.get('close'),
+                    r.get('high'), r.get('low'),
+                    r.get('volume'), r.get('amount'),
+                    r.get('turnover'),
+                ))
+        return len(records)
+
+    def get_daily(self, code: str, limit: int = 250) -> list[dict]:
+        """按日期升序返回日K（最近 limit 条）"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM kline_daily WHERE code = ? "
+                "ORDER BY trade_date DESC LIMIT ?",
+                (code, limit)
+            ).fetchall()
+        # 反转为升序（API 需要）
+        return [dict(r) for r in reversed(rows)]
+
+    def get_latest_date(self, code: str) -> str | None:
+        """获取该股票最新已缓存日期"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(trade_date) as max_date FROM kline_daily WHERE code = ?",
+                (code,)
+            ).fetchone()
+        return row['max_date'] if row else None
