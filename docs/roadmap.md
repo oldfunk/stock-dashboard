@@ -30,6 +30,8 @@
 - **零依赖优先**：评分趋势用纯 SVG 生成，不引入前端库（除非确有必要，klinecharts 除外）
 - **pi 性能**：数据定时缓存，非实时拉取；复杂渲染评估 CPU/内存负载
 - **klinecharts 渲染**：`init()` 后容器必须可见且尺寸非零，否则 canvas 尺寸为 0 无法绘制（loadKline 只切换 loading/empty 状态，不隐藏 chart 容器）
+- **klinecharts 指标 API**：`createIndicator(name, isStack, {id})` 副图返回 paneId，必须保存；`removeIndicator(paneId, name)` 才能正确删除，不能把 name 当 paneId 传
+- **klinecharts 蜡烛图类型**：`candle_solid`（全实心）/ `candle_stroke`（全空心）/ `candle_up_stroke`（阳线空心阴线实心）/ `candle_down_stroke`（阳线实心阴线空心）。中国习惯用 `candle_up_stroke`
 
 ---
 
@@ -37,10 +39,14 @@
 
 ### ① 行情图表（klinecharts 自研 + AI 交易信号）✅
 - **方案**：klinecharts@9.8.12 本地引用（205KB），非 iframe 嵌入
-- **包含**：日/周/月 K 线 + 技术指标切换（MA/VOL/MACD/KDJ/RSI）+ AI 交易信号标注
+- **包含**：日/周/月 K 线 + 技术指标切换（MA/VOL/MACD/KDJ/RSI 可开关）+ AI 交易信号标注
 - **AI 价值**：图表下方叠加 AI 分析的 Signal（买入/持有/回避）+ 买入区间 + 目标价 + 止损位 + 置信度
-- **根因修复**：loadKline 不再隐藏 chart 容器（原 display:none 导致 canvas 尺寸为 0，klinecharts 无法渲染）
-- **状态**：已部署验证，截图确认蜡烛图渲染（2026-07-23）
+- **K 线样式**：`candle_up_stroke` 空心蜡烛图（中国习惯：阳线空心红边框、阴线实心绿）
+- **主页联动**：大盘指数点击弹出 K 线模态框（日/周/月切换），实时拉取 akshare `stock_zh_index_daily`，不缓存
+- **根因修复**：
+  - loadKline 不再隐藏 chart 容器（原 display:none 导致 canvas 尺寸为 0，klinecharts 无法渲染）
+  - 副图指标 `createIndicator` 返回的 paneId 必须保存，`removeIndicator(paneId, name)` 才能正确删除（原代码误把 name 当 paneId 导致 KDJ/MACD/RSI 关不掉）
+- **状态**：已部署验证，K 线样式 + 指标开关 + 大盘弹窗均通过（2026-07-23）
 
 ---
 
@@ -115,3 +121,5 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 | 2026-07-23 | P1② 时间线交互增强 + 修复 market_snapshot bug | f93b456 |
 | 2026-07-23 | **恢复 klinecharts 自研 + AI 交易信号标注** | bd07242 |
 | 2026-07-23 | 主页大盘改为自研 K 线弹窗 + 空心 K 线样式 | 8a2e610 |
+| 2026-07-23 | roadmap 同步大盘弹窗 + 空心K线 + P1④ 已完成 | 11d176e |
+| 2026-07-23 | fix: KDJ/MACD/RSI 指标关不掉 + 阴线变空心 | 145651a |
