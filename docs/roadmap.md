@@ -34,11 +34,12 @@
 
 ## P0 — 已完成 ✅
 
-### ① 行情图表（iframe 嵌入东方财富）✅
-- **方案**：iframe 嵌入 `quote.eastmoney.com/{sh|sz}{code}.html`
-- **包含**：日/周/月 K 线 + MACD/KDJ/RSI/布林带 + 成交量 + 资金流向 + F10
-- **废弃**：klinecharts 本地渲染、kline API、kline_daily 表、scheduler K 线拉取
-- **状态**：已部署验证（2026-07-23）
+### ① 行情图表（klinecharts 自研 + AI 交易信号）✅
+- **方案**：klinecharts@9.8.12 本地引用（205KB），非 iframe 嵌入
+- **包含**：日/周/月 K 线 + 技术指标切换（MA/VOL/MACD/KDJ/RSI）+ AI 交易信号标注
+- **AI 价值**：图表下方叠加 AI 分析的 Signal（买入/持有/回避）+ 买入区间 + 目标价 + 止损位 + 置信度
+- **根因修复**：loadKline 不再隐藏 chart 容器（原 display:none 导致 canvas 尺寸为 0，klinecharts 无法渲染）
+- **状态**：已部署验证，截图确认蜡烛图渲染（2026-07-23）
 
 ---
 
@@ -82,17 +83,13 @@
 
 ---
 
-## 待清理（已废弃的 K 线自研代码）
+## 待清理（已废弃的 iframe 方案）
 
-iframe 嵌入后以下组件不再使用，可按需清理：
-- `src/web/static/js/klinecharts.min.js`（已删除）
-- `src/web/routes.py` 的 `/api/stock/{code}/kline` 路由 + `_to_klinecharts` + `_aggregate_kline`
-- `src/models/database.py` 的 `kline_daily` 表 + `KlineDAO` 类
-- `src/scheduler.py` 的 `_fetch_kline_daily()` 方法
-- `src/collector/akshare_fetcher.py` 的 `fetch_kline_data` + `_fetch_kline_em` + `_fetch_kline_tx`
-- 相关测试：`tests/collector/test_kline_fetcher.py`、`tests/models/test_kline_dao.py`、`tests/web/test_routes_kline.py`
+klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
+- iframe 嵌入东方财富详情页的 HTML（已替换为 klinecharts 组件）
+- `sd-em-frame` / `sd-em-tip` CSS（已删除）
 
-> 保留策略：若未来需要站内 K 线（如 AI 标注买卖点），可复用这些代码。
+> K 线数据层（kline_daily 表、KlineDAO、fetch_kline_data、scheduler 拉取）全部保留在用。
 
 ---
 
@@ -112,5 +109,6 @@ iframe 嵌入后以下组件不再使用，可按需清理：
 | 2026-07-23 | klinecharts 本地化解决 ORB | 1c5b506 |
 | 2026-07-23 | K线volume为None导致渲染失败修复 + 首页优化 | c9e8857 |
 | 2026-07-23 | 非观察池股票点击跳转东方财富行情页 | 4851d24 |
-| 2026-07-23 | **废弃自研 K 线，改 iframe 嵌入东方财富** | 待 commit |
-| 2026-07-23 | roadmap 重写：聚焦 AI 分析深化 + 筛选策略升级 | 待 commit |
+| 2026-07-23 | **废弃自研 K 线，改 iframe 嵌入东方财富** | a0ae6ba |
+| 2026-07-23 | P1② 时间线交互增强 + 修复 market_snapshot bug | f93b456 |
+| 2026-07-23 | **恢复 klinecharts 自研 + AI 交易信号标注** | 待 commit |
