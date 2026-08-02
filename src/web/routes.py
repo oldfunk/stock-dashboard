@@ -269,7 +269,7 @@ async def index(request: Request):
         if code in realtime:
             item['current_price'] = realtime[code].get('current_price')
             item['change_percent'] = realtime[code].get('change_percent')
-        # 取最近 Signal
+        # 取最近 Signal + 模型
         latest_hist = hist_dao.get_latest_for_code(code)
         if latest_hist and latest_hist.get('ai_trade_strategy'):
             try:
@@ -279,6 +279,14 @@ async def index(request: Request):
                 item['signal'] = None
         else:
             item['signal'] = None
+        # 模型名（ai_analysis JSON 顶层 model 字段，2026-08-03 起写入）
+        item['model'] = None
+        if latest_hist and latest_hist.get('ai_analysis'):
+            try:
+                analysis = json.loads(latest_hist['ai_analysis'])
+                item['model'] = analysis.get('model')
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()

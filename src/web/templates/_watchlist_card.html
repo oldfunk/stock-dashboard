@@ -36,6 +36,7 @@
             {% endif %}
             <span class="wl-confidence" title="AI 信心强度">{{ stock.ai_confidence or '初入池' }}</span>
             <span class="wl-weeks">在池{{ stock.review_count or 1 }}周</span>
+            {% if stock.model %}<span class="wl-model" title="最近 AI 分析所用模型">&#129302; {{ stock.model }}</span>{% endif %}
         </div>
         <div class="wl-reason" title="{{ stock.added_reason or '' }}">
             {{ stock.added_reason or '' }}

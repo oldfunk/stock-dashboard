@@ -271,9 +271,9 @@ class FreeModelPool:
 
     # 偏好顺序：效果好的排前面
     PREFERRED_ORDER = [
-        "nemotron-3-ultra-free",
         "deepseek-v4-flash-free",
         "mimo-v2.5-free",
+        "nemotron-3-ultra-free",
     ]
 
     def __init__(self, api_base: str, api_key: str = None):
@@ -432,6 +432,8 @@ class AiAnalyzer:
             )
         # 最近一次调用的 token 用量（由 _call_llm 写入，供 analyze_batch 记录日志）
         self._last_usage: Optional[dict] = None
+        # 批内固定模型：一批分析（analyze_batch 一次调用）复用同一模型，失败才轮换
+        self._batch_model: Optional[str] = None
 
     @property
     def configured(self) -> bool:
@@ -526,15 +528,26 @@ class AiAnalyzer:
         if not content:
             return None
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
-        return parse_ai_response(content)
+        result = parse_ai_response(content)
+        if result is not None and isinstance(result, dict):
+            result['model'] = used_model
+        return result
 
     # ── 模型调用（含故障轮换） ──
 
     def _resolve_model(self) -> str:
-        """返回本次应使用的模型名称。免费模型从池中获取，非免费用配置值。"""
+        """返回本次应使用的模型名称。免费模型从池中获取，非免费用配置值。
+
+        批内固定：一批分析首次取到的模型会被固定复用（_batch_model），
+        直到该模型被标记死亡（_mark_model_dead 会清空 _batch_model），
+        之后重新 acquire 换下一个——保证单批 20 只质量一致，批间自动轮换。
+        """
         if self._pool:
+            if self._batch_model and self._batch_model not in self._pool._dead:
+                return self._batch_model
             model = self._pool.acquire()
             if model:
+                self._batch_model = model
                 return model
             logger.warning("[AI分析] 模型池无可用模型，回退到配置值: %s", self.model)
         return self.model
@@ -543,6 +556,9 @@ class AiAnalyzer:
         """标记模型不可用（仅对池中的免费模型生效）。"""
         if self._pool:
             self._pool.mark_dead(model)
+            # 批内固定模型死亡 → 解除固定，下次 _resolve_model 重新 acquire
+            if self._batch_model == model:
+                self._batch_model = None
 
     def _call_llm(self, prompt: str) -> tuple[Optional[str], Optional[str], Optional[dict]]:
         """调用 LLM API，使用 BACKOFF_SCHEDULE 做 20 次退避重试。

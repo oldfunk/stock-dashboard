@@ -70,6 +70,10 @@
             color: var(--text-tertiary);
             margin-top: 4px;
         }
+        .journal-model {
+            color: var(--accent);
+            font-size: 11px;
+        }
         .journal-content {
             background: var(--bg-secondary);
             border-radius: var(--radius);
@@ -130,7 +134,10 @@
         <a href="/">&larr; 返回看板</a>
         {% if journal %}
         <h1 class="journal-title">{{ journal.title }}</h1>
-        <div class="journal-date">{{ journal.journal_date }}</div>
+        <div class="journal-date">{{ journal.journal_date }}
+            {% set jsum = journal.actions_summary | from_json %}
+            {% if jsum and jsum.model %}&nbsp;&middot;&nbsp;<span class="journal-model">&#129302; {{ jsum.model }}</span>{% endif %}
+        </div>
         {% endif %}
     </div>
 

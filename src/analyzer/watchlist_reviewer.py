@@ -384,6 +384,8 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                     # 复用 ai_analyzer 的健壮 JSON 解析
                     result = parse_ai_response(content)
                     if result is not None:
+                        if isinstance(result, dict):
+                            result['model'] = current_model
                         return result
                     # parse_ai_response 校验 ai_analyzer 特有字段（analysis/
                     # investment_strategy/trade_strategy），观察池复盘 schema 不同
@@ -403,6 +405,8 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                     except json.JSONDecodeError:
                         logger.warning("[复盘] JSON 解析失败，重试")
                         continue
+                    if isinstance(result, dict):
+                        result['model'] = current_model
                     return result
 
                 # 非 200 → 轮换模型 + 退避
@@ -524,6 +528,7 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                     'remove': sum(1 for a, _ in final_actions.values() if a == 'remove'),
                     'keep': sum(1 for a, _ in final_actions.values() if a == 'keep'),
                     'details': action_details,
+                    'model': result.get('model') if isinstance(result, dict) else None,
                 })
             )
 
