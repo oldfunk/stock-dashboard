@@ -318,7 +318,7 @@ class FreeModelPool:
         self._dead.add(model)
         alive = len(self._pool) - len(self._dead)
         self._logger.warning(
-            "[FreeModelPool] ❌ %s 下线（剩余 %d 个候选）", model, alive)
+            "[FreeModelPool] %s 下线（剩余 %d 个候选）", model, alive)
 
     def current_pool(self) -> list[str]:
         """返回当前模型池快照（用于日志/展示）。"""
@@ -368,7 +368,7 @@ class FreeModelPool:
             self._dead &= set(self._pool)
             self._current = 0
             self._logger.info(
-                "[FreeModelPool] ✅ 发现 %d 个免费模型: %s",
+                "[FreeModelPool] 发现 %d 个免费模型: %s",
                 len(self._pool), ", ".join(self._pool))
 
         except Exception as e:
@@ -840,11 +840,11 @@ def analyze_batch(stocks: list[dict], run_id: str,
             except Exception as e:
                 logger.debug(f"[AI分析] 写 ai_analysis_log 失败（不影响主流程）: {e}")
             analyzed_ok += 1
-            logger.info(f"  ✅ {analyzed_ok}/{total}")
+            logger.info(f"  {analyzed_ok}/{total} 完成")
         else:
             _save_failure(stock, run_id)
             analyzed_failed += 1
-            logger.warning(f"  ✗ Failed {analyzed_failed}")
+            logger.warning(f"  失败 {analyzed_failed}")
 
         # 股票之间冷却
         if idx < total - 1:

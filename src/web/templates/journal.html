@@ -136,7 +136,7 @@
         <h1 class="journal-title">{{ journal.title }}</h1>
         <div class="journal-date">{{ journal.journal_date }}
             {% set jsum = journal.actions_summary | from_json %}
-            {% if jsum and jsum.model %}&nbsp;&middot;&nbsp;<span class="journal-model">&#129302; {{ jsum.model }}</span>{% endif %}
+            {% if jsum and jsum.model %}&nbsp;&middot;&nbsp;<span class="journal-model">模型: {{ jsum.model }}</span>{% endif %}
         </div>
         {% endif %}
     </div>
