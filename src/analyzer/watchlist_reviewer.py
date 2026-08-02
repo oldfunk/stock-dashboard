@@ -436,6 +436,7 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
         from src.models.ai_watchlist import (
             AiWatchlistDAO, AiWatchlistHistoryDAO, AiJournalDAO
         )
+        from src.models.database import MarketIndexDAO
 
         candidate_codes = {c['code'] for c in candidates}
         forced_out_codes = {f['code'] for f in forced_out}

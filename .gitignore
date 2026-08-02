@@ -43,3 +43,8 @@ data/stock_dashboard.db
 
 # Brainstorming visual companion sessions
 .superpowers/
+
+# DB 备份
+/data/db/*.bak
+/data/stock.db
+/data/stock_dashboard.db

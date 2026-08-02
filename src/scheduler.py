@@ -95,6 +95,8 @@ class MarketScheduler:
         self._last_daily_date = self._get_last_completed_date()
         # 周六复盘状态（避免重启后重复触发）
         self._last_review_date = self._get_last_review_date()
+        # 复盘进行中标志：防止并发/30s 洪水式重复触发
+        self._review_in_progress = False
 
     def _get_last_completed_date(self):
         """从数据库获取最新完成运行的日期，用于避免重启后重复触发当日流水线"""
@@ -277,6 +279,10 @@ class MarketScheduler:
             return
         if self._last_review_date == now.date():
             return
+        if self._review_in_progress:
+            logger.info("[复盘] 上次复盘仍在进行，跳过本次触发")
+            return
+        self._review_in_progress = True
         threading.Thread(target=self._run_review, daemon=True).start()
 
     def _run_review(self):
@@ -301,20 +307,26 @@ class MarketScheduler:
 
             if result.get('skipped'):
                 logger.info(f"[复盘] 跳过: {result.get('reason')}")
-                RunLogDAO().complete_run(
-                    run_id, 0, 0, 0, f"skipped: {result.get('reason')}"
-                )
+                RunLogDAO().complete_run(run_id, 0, 0, 0)
             else:
                 new_count = len(result.get('new_watchlist', []))
-                RunLogDAO().complete_run(
-                    run_id, 0, new_count, 0, "review done"
-                )
+                RunLogDAO().complete_run(run_id, 0, new_count, 0)
                 logger.info(f"[复盘] 完成，观察池 {new_count} 只")
 
             # 只在成功后才标记当日已完成
             self._last_review_date = now_cn().date()
         except Exception as e:
             logger.warning(f"[复盘] 异常: {e}", exc_info=True)
+            # 失败也标记当日已完成，避免 30s 洪水式重试
+            self._last_review_date = now_cn().date()
+            try:
+                RunLogDAO().complete_run(
+                    run_id, 0, 0, 0, f"error: {e}"
+                )
+            except Exception:
+                pass
+        finally:
+            self._review_in_progress = False
 
     def _trigger_ai_analysis_async(self, config: dict):
         """在后台线程中异步触发 AI 分析（全量模式）"""
