@@ -123,3 +123,18 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 | 2026-07-23 | 主页大盘改为自研 K 线弹窗 + 空心 K 线样式 | 8a2e610 |
 | 2026-07-23 | roadmap 同步大盘弹窗 + 空心K线 + P1④ 已完成 | 11d176e |
 | 2026-07-23 | fix: KDJ/MACD/RSI 指标关不掉 + 阴线变空心 | 145651a |
+
+---
+
+## 2026-08-02 修复：周六复盘洪水循环（已修复 ✅）
+
+- **症状**：12 天无周复盘（ai_journal 停在 7/21）；ai_watchlist_history 被灌入 3282 条重复（7/25: 2760 + 8/1: 522）
+- **根因**：watchlist_reviewer._validate_and_persist 用 MarketIndexDAO 未 import → NameError → 异常分支不设 _last_review_date → scheduler 每 30s 洪水重试
+- **修复**（commit ae53094）：
+  - _validate_and_persist 补 MarketIndexDAO import
+  - scheduler 加 _review_in_progress 防并发标志
+  - 异常分支也标记当日完成（防 30s 重试）
+  - complete_run 成功/跳过路径不再误传 error 参数（原来成功复盘被标 failed）
+- **数据清理**：history 3287→25 条（按 code+date 保留最新）；649 条僵尸 run 标记 failed；review_count 重置为真实周数
+- **验证**：手动复盘端到端通过（journal 写入、history 每池股 1 条、run_log completed）
+- **观察期**：8/8、8/15 两次周六复盘正常跑，验证产出质量后再定迭代方向
