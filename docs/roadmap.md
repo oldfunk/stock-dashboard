@@ -162,3 +162,10 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 - **前端**（stock_detail.html）：新增 镜子测试区块（5 句逐一显示 + 通过/未通过徽章 + 缺失句标红）
 - **验证**（commit d74e652）：000792 盐湖股份复跑，5 句完整 passed=true，signal=AVOID 一致
 - **状态**：已提交推送 main
+
+### 阶段 D：快速否决红线（已完成 ✅）
+- **prompt**（ai_analyzer.py）：ANALYSIS_PROMPT 新增 eto_checklist 8 条红线（说不清赚钱/连续负FCF/诚信污点/护城河不可逆侵蚀/博傻/无法承受归零/跟风/说不清买入理由）+ triggered_count，任一 true → signal 强制 AVOID
+- **前端**（stock_detail.html）：新增 快速否决红线区块（8 条逐一显示 + 触发标红 + 计数徽章）
+- **复盘联动**（watchlist_reviewer.py）：新增第 5 条硬规则 check_veto_triggered（triggered_count>=1 或任一红线 true → 强制调出观察池），5 个新单测
+- **验证**（commit e9b27df + 18eda31）：000792 盐湖股份复跑，触发 3 条红线（连续负FCF/护城河侵蚀/说不清理由），signal=AVOID 一致；pytest 25 passed
+- **状态**：已提交推送 main
