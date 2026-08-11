@@ -46,7 +46,7 @@
 
 ### Step 1.1: 创建本文件
 
-- [ ] 本 plan 文档已创建（即本文件），作为对齐工作的留存基线。后续每步完成后用 checkbox 追踪。
+- [x] 本 plan 文档已创建（即本文件），作为对齐工作的留存基线。后续每步完成后用 checkbox 追踪。
 
 ---
 
@@ -56,18 +56,18 @@
 
 ### Step 2.1: prompt 增加 `info_richness` 字段
 
-- [ ] 编辑 `src/analyzer/ai_analyzer.py` 的 `ANALYSIS_PROMPT`：
+- [x] 编辑 `src/analyzer/ai_analyzer.py` 的 `ANALYSIS_PROMPT`：
   - 在 JSON 结构中新增字段 `info_richness`：`{ "grade": "A 或 B 或 C", "basis": "评级依据（数据覆盖年限、指标完整度）" }`
   - 增加指导：数据覆盖年限 ≤3 年或多项核心指标缺失 → C 级，且 C 级时 confidence 不得超过"低"、intrinsic_value 需标注"数据不足，估值参考性有限"
 
 ### Step 2.2: 模板渲染信息丰富度徽章
 
-- [ ] 编辑 `src/web/templates/stock_detail.html`：在 AI 分析章节顶部（moat 之前）加"信息丰富度"区块：grade 徽章（A 绿 / B 黄 / C 红）+ basis 一句。缺失时整块不渲染
+- [x] 编辑 `src/web/templates/stock_detail.html`：在 AI 分析章节顶部（moat 之前）加"信息丰富度"区块：grade 徽章（A 绿 / B 黄 / C 红）+ basis 一句。缺失时整块不渲染
 
 ### Step 2.3: 复跑验证 + roadmap 同步
 
-- [ ] 用 `scripts/retry_ai.py` 对 1 只候选股复跑 AI 分析，确认 `info_richness` 落库且页面显示
-- [ ] `docs/roadmap.md` 变更记录表追加阶段 A 行
+- [x] 用 `scripts/retry_ai.py` 对 1 只候选股复跑 AI 分析，确认 `info_richness` 落库且页面显示
+- [x] `docs/roadmap.md` 变更记录表追加阶段 A 行
 
 ---
 
@@ -77,7 +77,7 @@
 
 ### Step 3.1: prompt 增加 `checklist` 字段
 
-- [ ] 编辑 `ANALYSIS_PROMPT`：新增 JSON 字段 `checklist`：
+- [x] 编辑 `ANALYSIS_PROMPT`：新增 JSON 字段 `checklist`：
 
 ```json
 "checklist": {
@@ -90,16 +90,16 @@
 }
 ```
 
-- [ ] 增加指导：护城河/管理层/安全边际三关必须与 moat_evaluation / management_score / intrinsic_value 保持一致；能力圈与纪律是新增判断
+- [x] 增加指导：护城河/管理层/安全边际三关必须与 moat_evaluation / management_score / intrinsic_value 保持一致；能力圈与纪律是新增判断
 
 ### Step 3.2: 模板渲染六关评分卡
 
-- [ ] 编辑 `stock_detail.html`：新增"六关 Checklist"区块，横向 6 卡，每卡：关名 + ★评分（★ 符号渲染实数）+ note 一行。分数 ≥3 绿色、≤2 红色
+- [x] 编辑 `stock_detail.html`：新增"六关 Checklist"区块，横向 6 卡，每卡：关名 + ★评分（★ 符号渲染实数）+ note 一行。分数 ≥3 绿色、≤2 红色
 
 ### Step 3.3: 复跑验证 + roadmap 同步
 
-- [ ] `scripts/retry_ai.py` 复跑 1 只，确认 `checklist` 六关全落库、与单块字段一致（抽查一致性）
-- [ ] `docs/roadmap.md` 变更记录表追加阶段 B 行
+- [x] `scripts/retry_ai.py` 复跑 1 只，确认 `checklist` 六关全落库、与单块字段一致（抽查一致性）
+- [x] `docs/roadmap.md` 变更记录表追加阶段 B 行
 
 ---
 
@@ -109,7 +109,7 @@
 
 ### Step 4.1: prompt 升级 `mirror_test`
 
-- [ ] 编辑 `ANALYSIS_PROMPT`：`mirror_counts` 保留（用于统计），新增 `mirror_test`：
+- [x] 编辑 `ANALYSIS_PROMPT`：`mirror_counts` 保留（用于统计），新增 `mirror_test`：
 
 ```json
 "mirror_test": {
@@ -123,16 +123,16 @@
 }
 ```
 
-- [ ] 指导：5 句缺任意一句或含转折词超限 → passed=false；"5 句话说不完整 = 不买"
+- [x] 指导：5 句缺任意一句或含转折词超限 → passed=false；"5 句话说不完整 = 不买"
 
 ### Step 4.2: 模板渲染镜子测试
 
-- [ ] 编辑 `stock_detail.html`：新增"镜子测试"区块：每句一行（缺句标红），底部通过/未通过徽章
-- [ ] 说明：旧数据只有 mirror_counts 的不用改，新字段缺失时整块不渲染
+- [x] 编辑 `stock_detail.html`：新增"镜子测试"区块：每句一行（缺句标红），底部通过/未通过徽章
+- [x] 说明：旧数据只有 mirror_counts 的不用改，新字段缺失时整块不渲染
 
 ### Step 4.3: 复跑验证 + roadmap 同步
 
-- [ ] 复跑验证 `mirror_test` 落库 + 页面渲染（含 passed=false 样例），roadmap 同步
+- [x] 复跑验证 `mirror_test` 落库 + 页面渲染（含 passed=false 样例），roadmap 同步
 
 ---
 
@@ -142,7 +142,7 @@
 
 ### Step 5.1: prompt 增加 `veto_checklist`
 
-- [ ] 编辑 `ANALYSIS_PROMPT`：新增 `veto_checklist`，8 条逐条 ✅/❌：
+- [x] 编辑 `ANALYSIS_PROMPT`：新增 `veto_checklist`，8 条逐条 ✅/❌：
 
 ```json
 "veto_checklist": {
@@ -158,30 +158,30 @@
 }
 ```
 
-- [ ] 指导：任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高；triggered_count = true 数量
+- [x] 指导：任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高；triggered_count = true 数量
 
 ### Step 5.2: 模板渲染否决区块
 
-- [ ] 编辑 `stock_detail.html`：新增"快速否决"区块：8 条红线逐条显示，触发项标红，顶部显示 triggered_count；与 Signal=AVOID 的一致性提示
+- [x] 编辑 `stock_detail.html`：新增"快速否决"区块：8 条红线逐条显示，触发项标红，顶部显示 triggered_count；与 Signal=AVOID 的一致性提示
 
 ### Step 5.3: 观察池联动（第 5 条硬规则）
 
-- [ ] 编辑 `src/analyzer/watchlist_reviewer.py`：
+- [x] 编辑 `src/analyzer/watchlist_reviewer.py`：
   - 新增 `check_veto_triggered(stock, analysis)`：解析 vet_checklist，triggered_count ≥1 → 强制调出
   - 在 `_apply_hard_rules` 中追加调用，违规理由加 `veto_triggered`
   - 新增对应单元测试（参照现有 4 条规则测试）
 
 ### Step 5.4: 端到端验证 + roadmap 同步
 
-- [ ] 端到端：复跑 AI 分析 → 手动复盘一次，验证 vetoe 触发股票被调出、理由正确
-- [ ] run 单测 `pytest tests/analyzer/test_watchlist_reviewer.py`
-- [ ] `docs/roadmap.md` 变更记录表追加阶段 D 行 + 本计划所有 checkbox 打勾
+- [x] 端到端：复跑 AI 分析 → 手动复盘一次，验证 vetoe 触发股票被调出、理由正确
+- [x] run 单测 `pytest tests/analyzer/test_watchlist_reviewer.py`
+- [x] `docs/roadmap.md` 变更记录表追加阶段 D 行 + 本计划所有 checkbox 打勾
 
 ---
 
 ## 完成定义（Definition of Done）
 
-- [ ] 阶段 A/B/C/D 各有一次成功复跑证据（retry_ai.py 输出 + 详情页截图/字段确认）
-- [ ] watchlist_reviewer 新增测试全绿
-- [ ] roadmap.md 变更记录表完整
-- [ ] 全部改动保持向后兼容（旧 ai_analysis 数据页面不报错）
+- [x] 阶段 A/B/C/D 各有一次成功复跑证据（retry_ai.py 输出 + 详情页截图/字段确认）
+- [x] watchlist_reviewer 新增测试全绿
+- [x] roadmap.md 变更记录表完整
+- [x] 全部改动保持向后兼容（旧 ai_analysis 数据页面不报错）
