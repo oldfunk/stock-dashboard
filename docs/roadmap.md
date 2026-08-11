@@ -156,3 +156,9 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 - **前端**（stock_detail.html）：新增 六关 Checklist评分卡（3x2 网格，★评分 + 通过绿/警示红）
 - **验证**（commit 9a03be6）：000792 盐湖股份复跑，六关全产出且与 moat_evaluation/management_score 一致，signal=AVOID 与低分吻合
 - **状态**：已提交推送 main
+
+### 阶段 C：真镜子测试（已完成 ✅）
+- **prompt**（ai_analyzer.py）：ANALYSIS_PROMPT 新增 mirror_test 字段（5 句模板 statements + passed + missing），保留 mirror_counts 做转折词统计；指导 passed=false 时 signal 不得 BUY
+- **前端**（stock_detail.html）：新增 镜子测试区块（5 句逐一显示 + 通过/未通过徽章 + 缺失句标红）
+- **验证**（commit d74e652）：000792 盐湖股份复跑，5 句完整 passed=true，signal=AVOID 一致
+- **状态**：已提交推送 main
