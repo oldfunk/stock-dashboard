@@ -125,6 +125,14 @@
         .sd-mirror-pass { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
         .sd-mirror-fail { background: rgba(220, 60, 60, 0.15); color: var(--color-down); }
         .sd-mirror-missing-note { margin-top: 8px; color: var(--color-down); font-size: 13px; }
+
+        .sd-veto-count { font-weight: 600; margin-bottom: 10px; color: var(--text-secondary); }
+        .sd-veto-triggered { color: var(--color-down); }
+        .sd-veto-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .sd-veto-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+        .sd-veto-mark { font-weight: 700; width: 14px; }
+        .sd-veto-hit { color: var(--color-down); font-weight: 600; }
+        .sd-veto-hit .sd-veto-mark { color: var(--color-down); }
         .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
         .sd-info-badge.grade-a { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
         .sd-info-badge.grade-b { background: rgba(220, 170, 40, 0.18); color: #b8860b; }
@@ -527,6 +535,39 @@
             {% if mt.missing %}
             <div class="sd-mirror-missing-note">缺失/敷衍句: {{ mt.missing|join(', ') }}</div>
             {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 6.7 快速否决红线 -->
+    {% if ai_parsed.veto_checklist %}
+    {% set vc = ai_parsed.veto_checklist %}
+    {% set vc_rules = [
+        ('cannot_explain_business', '说不清怎么赚钱'),
+        ('negative_fcf_3y_no_improvement', '连续3年FCF为负且无改善'),
+        ('management_integrity_issue', '管理层诚信污点'),
+        ('moat_eroding_irreversibly', '护城河被不可逆侵蚀'),
+        ('greater_fool_required', '靠接盘侠赚钱（博傻）'),
+        ('cannot_afford_total_loss', '无法承受投资归零'),
+        ('following_the_herd', '因为别人都在买'),
+        ('cannot_write_200_char_thesis', '无法用200字写清买入理由')
+    ] %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">快速否决红线</h2>
+        <div class="sd-veto">
+            {% set vc_count = vc.triggered_count|default(0)|int %}
+            <div class="sd-veto-count {{ 'sd-veto-triggered' if vc_count > 0 else '' }}">
+                触发红线: {{ vc_count }}/8 {{ '（一票否决）' if vc_count > 0 else '' }}
+            </div>
+            <ul class="sd-veto-list">
+                {% for key, label in vc_rules %}
+                {% set val = vc.get(key)|default(false) %}
+                <li class="{{ 'sd-veto-hit' if val else '' }}">
+                    <span class="sd-veto-mark">{{ 'x' if val else 'o' }}</span>
+                    {{ label }}
+                </li>
+                {% endfor %}
+            </ul>
         </div>
     </section>
     {% endif %}

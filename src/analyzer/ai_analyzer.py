@@ -143,6 +143,18 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
         "missing": ["缺失或敷衍的句子编号（1-5）"]
     }},
 
+    "veto_checklist": {{
+        "cannot_explain_business": false,
+        "negative_fcf_3y_no_improvement": false,
+        "management_integrity_issue": false,
+        "moat_eroding_irreversibly": false,
+        "greater_fool_required": false,
+        "cannot_afford_total_loss": false,
+        "following_the_herd": false,
+        "cannot_write_200_char_thesis": false,
+        "triggered_count": 0
+    }},
+
     "checklist": {{
         "circle_of_competence": {{"score": 1-5, "note": "一句话能否说清这门生意 + 是否真的理解"}},
         "good_business": {{"score": 1-5, "note": "经济特征综合：ROE/毛利/FCF/杠杆"}},
@@ -163,6 +175,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 7. info_richness 是本次分析的信息丰富度评级：A级=数据充分 长期财务齐全；B级=数据有限 部分指标需推算；C级=数据不足或上市不足3年。C级时：intrinsic_value 必须标注"数据不足，估值参考性有限"，trade_strategy.confidence 不得超过"低"。
 8. checklist 六关评分（1-5★）作为汇总视图：moat 关必须与 moat_evaluation 一致，management 关必须与 management_score 一致，margin_of_safety 关必须与 intrinsic_value 一致；能力圈（circle_of_competence）和纪律（discipline）是新判断。任一关 score≤2 时，trade_strategy.signal 不应为 BUY。
 9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句或某一句含超限转折词 → passed=false 并在 missing 中标注句号。"5 句话说不完整 = 不买"：passed=false 时 trade_strategy.signal 不得为 BUY。
+10. veto_checklist 是快速否决红线（投资纪律一票否决）：8 条逐条如实判断，任一 true 必须在该行写 true，triggered_count 填 true 的总数。8 条含义：cannot_explain_business=说不清怎么赚钱；negative_fcf_3y_no_improvement=连续3年FCF为负且无改善；management_integrity_issue=管理层诚信污点；moat_eroding_irreversibly=护城河被不可逆侵蚀；greater_fool_required=靠接盘侠赚钱（博傻）；cannot_afford_total_loss=无法承受归零；following_the_herd=因为别人都在买；cannot_write_200_char_thesis=无法用200字写清买入理由。任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高。
 """
 
 
