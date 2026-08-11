@@ -150,3 +150,9 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 - **前端**（stock_detail.html）：新增 信息丰富度评级徽章区块（A 绿 / B 黄 / C 红 + 依据一句）
 - **验证**（commit c5e2829）：000792 盐湖股份复跑，产出 grade=B + 完整依据；模型池轮换正常
 - **状态**：已提交推送 main
+
+### 阶段 B：六关 Checklist（已完成 ✅）
+- **prompt**（ai_analyzer.py）：ANALYSIS_PROMPT 新增 checklist 六关字段（能力圈/好生意/护城河/管理层/安全边际/纪律，各 score 1-5 + note），指导 moat/management/margin_of_safety 必须与对应单块字段一致，任一关 ≤2 → signal 不得 BUY
+- **前端**（stock_detail.html）：新增 六关 Checklist评分卡（3x2 网格，★评分 + 通过绿/警示红）
+- **验证**（commit 9a03be6）：000792 盐湖股份复跑，六关全产出且与 moat_evaluation/management_score 一致，signal=AVOID 与低分吻合
+- **状态**：已提交推送 main
