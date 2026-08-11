@@ -75,3 +75,4 @@ ai_review:
     roe_below: 5                   # ROE 低于此值强制调出
     price_above_buyzone_pct: 20    # 越出买入区上限百分比
     roe_collapse_pp: 10            # ROE 同比下降 pp
+    veto_triggered: true            # AI 快速否决红线（一票否决）触发强制调出
