@@ -90,6 +90,29 @@ def check_roe_collapse(stock: dict, analysis: Optional[dict],
     return (last_year - current) > pp
 
 
+def check_veto_triggered(stock: dict, analysis: Optional[dict]) -> bool:
+    """规则 5: AI 快速否决红线触发（veto_checklist.triggered_count >= 1）→ 强制调出
+
+    依赖 analysis['veto_checklist']（由 ai_analyzer prompt 产出的结构化字段）。
+    """
+    if not analysis:
+        return False
+    vc = analysis.get('veto_checklist')
+    if not isinstance(vc, dict):
+        return False
+    count = vc.get('triggered_count')
+    if isinstance(count, (int, float)):
+        return count >= 1
+    # 兜底：任一红线 true 也视为触发
+    for key in ('cannot_explain_business', 'negative_fcf_3y_no_improvement',
+                'management_integrity_issue', 'moat_eroding_irreversibly',
+                'greater_fool_required', 'cannot_afford_total_loss',
+                'following_the_herd', 'cannot_write_200_char_thesis'):
+        if vc.get(key) is True:
+            return True
+    return False
+
+
 # ── 复盘引擎 ──
 
 class WatchlistReviewer:
@@ -135,6 +158,10 @@ class WatchlistReviewer:
             pp = self.hard_rules_cfg.get('roe_collapse_pp', 10)
             if check_roe_collapse(stock, analysis, pp=pp):
                 reasons.append(f'roe_collapse_{pp}')
+
+            if self.hard_rules_cfg.get('veto_triggered', True):
+                if check_veto_triggered(stock, analysis):
+                    reasons.append('veto_triggered')
 
             if reasons:
                 forced_out.append({

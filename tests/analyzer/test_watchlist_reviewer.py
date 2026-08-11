@@ -13,6 +13,7 @@ from src.analyzer.watchlist_reviewer import (
     check_roe_below,
     check_price_above_buyzone,
     check_roe_collapse,
+    check_veto_triggered,
 )
 
 
@@ -402,3 +403,38 @@ def test_review_skips_when_no_candidates(monkeypatch, tmp_path):
     result = reviewer.review("run_test_004")
     assert call_count[0] == 0  # 没调用 LLM
     assert result.get("skipped") is True
+
+
+def test_veto_triggered_count():
+    """规则 5: veto_checklist.triggered_count >= 1 → 强制调出"""
+    stock = {"code": "600000", "name": "某股"}
+    analysis = {"veto_checklist": {"triggered_count": 1,
+                                    "management_integrity_issue": True}}
+    assert check_veto_triggered(stock, analysis) is True
+
+
+def test_veto_triggered_by_any_red_line():
+    """triggered_count 缺失/异常时，任一红线 true 也触发"""
+    stock = {"code": "600000", "name": "某股"}
+    analysis = {"veto_checklist": {"cannot_write_200_char_thesis": True}}
+    assert check_veto_triggered(stock, analysis) is True
+
+
+def test_veto_not_triggered_clean():
+    """8 条全 false → 不触发"""
+    stock = {"code": "600519", "name": "贵州茅台"}
+    analysis = {"veto_checklist": {"triggered_count": 0}}
+    assert check_veto_triggered(stock, analysis) is False
+
+
+def test_veto_not_triggered_no_analysis():
+    """无分析数据 → 不触发"""
+    stock = {"code": "600519", "name": "贵州茅台"}
+    assert check_veto_triggered(stock, None) is False
+
+
+def test_veto_not_triggered_no_veto_field():
+    """analysis 无 veto_checklist 字段 → 不触发（旧数据兼容）"""
+    stock = {"code": "600519", "name": "贵州茅台"}
+    analysis = {"trade_strategy": {"signal": "BUY"}}
+    assert check_veto_triggered(stock, analysis) is False
