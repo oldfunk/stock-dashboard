@@ -138,3 +138,15 @@ klinecharts 自研方案已恢复，以下 iframe 相关代码已删除：
 - **数据清理**：history 3287→25 条（按 code+date 保留最新）；649 条僵尸 run 标记 failed；review_count 重置为真实周数
 - **验证**：手动复盘端到端通过（journal 写入、history 每池股 1 条、run_log completed）
 - **观察期**：8/8、8/15 两次周六复盘正常跑，验证产出质量后再定迭代方向
+
+---
+
+## 2026-08-11 AI Berkshire 深度对齐（进行中）
+
+> 依据 docs/superpowers/plans/2026-08-11-berkshire-deepening.md，逐阶段补全分析理论缺口，全部改动在 prompt + 模板层，不改流水线。
+
+### 阶段 A：信息丰富度评级 A/B/C（已完成 ✅）
+- **prompt**（ai_analyzer.py）：ANALYSIS_PROMPT 新增 info_richness 字段（grade A/B/C + basis），指导 C 级时估值标注受限 + confidence 不得超低
+- **前端**（stock_detail.html）：新增 信息丰富度评级徽章区块（A 绿 / B 黄 / C 红 + 依据一句）
+- **验证**（commit c5e2829）：000792 盐湖股份复跑，产出 grade=B + 完整依据；模型池轮换正常
+- **状态**：已提交推送 main
