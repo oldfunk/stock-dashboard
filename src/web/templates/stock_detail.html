@@ -118,6 +118,13 @@
         .sd-cl-note { color: var(--text-secondary); font-size: 12px; margin-top: 6px; line-height: 1.5; }
 
         .sd-info-rich { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+        .sd-mirror-list { padding-left: 20px; line-height: 1.8; color: var(--text-secondary); }
+        .sd-mirror-missing { color: var(--color-down); font-weight: 600; }
+        .sd-mirror-verdict { margin-top: 12px; font-weight: 600; padding: 8px 14px; border-radius: 4px; display: inline-block; }
+        .sd-mirror-pass { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
+        .sd-mirror-fail { background: rgba(220, 60, 60, 0.15); color: var(--color-down); }
+        .sd-mirror-missing-note { margin-top: 8px; color: var(--color-down); font-size: 13px; }
         .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
         .sd-info-badge.grade-a { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
         .sd-info-badge.grade-b { background: rgba(220, 170, 40, 0.18); color: #b8860b; }
@@ -496,6 +503,29 @@
                 <span class="label">方法</span>
                 <span class="value">{{ ai_parsed.intrinsic_value.method }}</span>
             </div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 6.5 镜子测试 -->
+    {% if ai_parsed.mirror_test %}
+    {% set mt = ai_parsed.mirror_test %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">镜子测试</h2>
+        <div class="sd-mirror">
+            {% if mt.statements %}
+            <ol class="sd-mirror-list">
+                {% for st in mt.statements %}
+                <li class="{{ 'sd-mirror-missing' if loop.index in (mt.missing or []) else '' }}">{{ st }}</li>
+                {% endfor %}
+            </ol>
+            {% endif %}
+            <div class="sd-mirror-verdict {{ 'sd-mirror-pass' if mt.passed else 'sd-mirror-fail' }}">
+                {% if mt.passed %}5 句话完整 - 通过{% else %}5 句话不完整 - 未通过（不买）{% endif %}
+            </div>
+            {% if mt.missing %}
+            <div class="sd-mirror-missing-note">缺失/敷衍句: {{ mt.missing|join(', ') }}</div>
             {% endif %}
         </div>
     </section>

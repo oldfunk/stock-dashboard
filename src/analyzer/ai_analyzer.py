@@ -131,6 +131,18 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 
     "mirror_counts": "5句话中的转折词（但是/然而/不过/除非/如果/只要）计数，用逗号分隔，如 '1,0,1,0,2'。超过2个的句子在后面备注（如'2 第3句过多转折'）。",
 
+    "mirror_test": {{
+        "statements": [
+            "我以___元买入___公司，因为这门生意的本质是___，我理解它",
+            "它的护城河是___，而且在变宽/变窄",
+            "管理层___，值得/不值得信赖",
+            "当前价格相当于内在价值的___折，有/无足够安全边际",
+            "即使我错了，下行风险可控/不可控，因为___"
+        ],
+        "passed": true/false,
+        "missing": ["缺失或敷衍的句子编号（1-5）"]
+    }},
+
     "checklist": {{
         "circle_of_competence": {{"score": 1-5, "note": "一句话能否说清这门生意 + 是否真的理解"}},
         "good_business": {{"score": 1-5, "note": "经济特征综合：ROE/毛利/FCF/杠杆"}},
@@ -150,6 +162,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 6. 所有 score 字段从 1（最差）到 5 或 10（最好）。
 7. info_richness 是本次分析的信息丰富度评级：A级=数据充分 长期财务齐全；B级=数据有限 部分指标需推算；C级=数据不足或上市不足3年。C级时：intrinsic_value 必须标注"数据不足，估值参考性有限"，trade_strategy.confidence 不得超过"低"。
 8. checklist 六关评分（1-5★）作为汇总视图：moat 关必须与 moat_evaluation 一致，management 关必须与 management_score 一致，margin_of_safety 关必须与 intrinsic_value 一致；能力圈（circle_of_competence）和纪律（discipline）是新判断。任一关 score≤2 时，trade_strategy.signal 不应为 BUY。
+9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句或某一句含超限转折词 → passed=false 并在 missing 中标注句号。"5 句话说不完整 = 不买"：passed=false 时 trade_strategy.signal 不得为 BUY。
 """
 
 
