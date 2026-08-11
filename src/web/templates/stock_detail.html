@@ -107,6 +107,13 @@
         .sd-note-body { padding-left: 16px; border-left: 3px solid var(--color-up); }
         .sd-note-body p { margin: 0 0 12px; line-height: 1.7; }
 
+        .sd-info-rich { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
+        .sd-info-badge.grade-a { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
+        .sd-info-badge.grade-b { background: rgba(220, 170, 40, 0.18); color: #b8860b; }
+        .sd-info-badge.grade-c { background: rgba(220, 60, 60, 0.15); color: var(--color-down); }
+        .sd-info-basis { color: var(--text-secondary); font-size: 13px; }
+
         .sd-moat-list { display: flex; flex-direction: column; gap: 0; }
         .sd-moat-row {
             display: grid;
@@ -355,6 +362,22 @@
     </section>
 
     {% if ai_parsed %}
+
+    <!-- 2.5 信息丰富度评级 -->
+    {% if ai_parsed.info_richness %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">信息丰富度评级</h2>
+        <div class="sd-info-rich">
+            {% set grade = ai_parsed.info_richness.grade|default('')|upper %}
+            <span class="sd-info-badge grade-{{ 'a' if grade == 'A' else 'c' if grade == 'C' else 'b' }}">
+                {{ 'A - 数据充分' if grade == 'A' else 'C - 数据不足' if grade == 'C' else 'B - 数据有限' }}
+            </span>
+            {% if ai_parsed.info_richness.basis %}
+            <span class="sd-info-basis">{{ ai_parsed.info_richness.basis }}</span>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
 
     <!-- 3. 投资人笔记 -->
     {% if ai_parsed.analysis %}
