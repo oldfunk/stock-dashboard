@@ -107,6 +107,16 @@
         .sd-note-body { padding-left: 16px; border-left: 3px solid var(--color-up); }
         .sd-note-body p { margin: 0 0 12px; line-height: 1.7; }
 
+        .sd-checklist { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .sd-cl-item { border: 1px solid var(--border-color, #333); border-radius: 6px; padding: 10px 12px; }
+        .sd-cl-item.sd-cl-pass { border-left: 3px solid var(--color-up); }
+        .sd-cl-item.sd-cl-fail { border-left: 3px solid var(--color-down); }
+        .sd-cl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .sd-cl-name { font-weight: 600; }
+        .sd-cl-score { color: var(--color-up); letter-spacing: 1px; }
+        .sd-cl-fail .sd-cl-score { color: var(--color-down); }
+        .sd-cl-note { color: var(--text-secondary); font-size: 12px; margin-top: 6px; line-height: 1.5; }
+
         .sd-info-rich { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
         .sd-info-badge.grade-a { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
@@ -386,6 +396,31 @@
         <div class="sd-note-body">
             {% for paragraph in ai_parsed.analysis.split('\n') if paragraph.strip() %}
             <p>{{ paragraph.strip() }}</p>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 3.5 六关 Checklist -->
+    {% if ai_parsed.checklist %}
+    {% set cl = ai_parsed.checklist %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">六关 Checklist</h2>
+        <div class="sd-checklist">
+            {% for key, label in [('circle_of_competence','能力圈'), ('good_business','好生意'), ('moat','护城河'), ('management','管理层'), ('margin_of_safety','安全边际'), ('discipline','纪律')] %}
+            {% if cl[key] %}
+            {% set c = cl[key] %}
+            {% set cs = c.score|default(0)|int %}
+            <div class="sd-cl-item {{ 'sd-cl-pass' if cs >= 3 else 'sd-cl-fail' }}">
+                <div class="sd-cl-head">
+                    <span class="sd-cl-name">{{ label }}</span>
+                    <span class="sd-cl-score">
+                        {% for i in range(5) %}{% if i < cs %}★{% else %}☆{% endif %}{% endfor %}
+                    </span>
+                </div>
+                {% if c.note %}<div class="sd-cl-note">{{ c.note }}</div>{% endif %}
+            </div>
+            {% endif %}
             {% endfor %}
         </div>
     </section>
