@@ -20,7 +20,7 @@ import pandas as pd
 
 from src.utils import (
     safe_float, curl_get, tc_encode, parse_tc_line,
-    parse_tc_indices, split_tc_response, INDEX_CODES, now_cn,
+    parse_tc_indices, split_tc_response, INDEX_CODES, INDEX_TARGETS, now_cn,
 )
 
 logger = logging.getLogger(__name__)
