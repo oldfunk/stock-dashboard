@@ -175,14 +175,20 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     return reasons
 
 
-def _calculate_moat_score(stock: dict) -> float:
-    """AI Berkshire 五维评分 (0-100)。
+# 五维基础权重（护城河 > 估值 > 增长 > 财务健康 > 定价权）
+_SCORE_WEIGHTS = {'roe': 0.30, 'pe': 0.20, 'growth': 0.20,
+                  'debt': 0.15, 'margin': 0.15}
 
-    权重反映：护城河 > 估值 > 增长 > 财务健康 > 市场验证
+
+def _score_breakdown(stock: dict) -> dict:
+    """评分拆解（透明化基础）。
+
+    返回与 `_calculate_moat_score` 完全一致的逐项子分 + 一致性加分 + 总分，
+    供日后「评分体系透明化」详情页展示五大维度加权公式使用。
+    纯函数、无副作用，不改变任何评分阈值。
     """
-    weights = {'roe': 0.30, 'pe': 0.20, 'growth': 0.20,
-               'debt': 0.15, 'gm': 0.15}
-    score = 0.0
+    weights = _SCORE_WEIGHTS
+    parts: dict = {}
 
     # 1) ROE（资本回报率 — 核心护城河指标）
     roe = stock.get('roe') or 0
@@ -200,7 +206,9 @@ def _calculate_moat_score(stock: dict) -> float:
         roe_s = 25
     else:
         roe_s = 0
-    score += roe_s * weights['roe']
+    parts['roe'] = {'raw': roe_combined, 'sub': roe_s,
+                    'weight': weights['roe'],
+                    'contribution': round(roe_s * weights['roe'], 2)}
 
     # 2) PE（安全边际 — 越低越高分）
     pe = stock.get('pe') or 20
@@ -216,7 +224,8 @@ def _calculate_moat_score(stock: dict) -> float:
         pe_s = 35
     else:
         pe_s = 0
-    score += pe_s * weights['pe']
+    parts['pe'] = {'raw': pe, 'sub': pe_s, 'weight': weights['pe'],
+                   'contribution': round(pe_s * weights['pe'], 2)}
 
     # 3) 增长（营收+净利均衡增长）
     rev_g = stock.get('revenue_growth') or 0
@@ -232,7 +241,8 @@ def _calculate_moat_score(stock: dict) -> float:
         g_s = 40
     else:
         g_s = 20  # 零增长不扣光（价值股特征）
-    score += g_s * weights['growth']
+    parts['growth'] = {'raw': avg_g, 'sub': g_s, 'weight': weights['growth'],
+                       'contribution': round(g_s * weights['growth'], 2)}
 
     # 4) 负债率（财务稳健）
     debt = stock.get('debt_ratio') or 100
@@ -246,7 +256,8 @@ def _calculate_moat_score(stock: dict) -> float:
         d_s = 40
     else:
         d_s = 0
-    score += d_s * weights['debt']
+    parts['debt'] = {'raw': debt, 'sub': d_s, 'weight': weights['debt'],
+                     'contribution': round(d_s * weights['debt'], 2)}
 
     # 5) 毛利率（护城河补充 — 定价权）
     gm = stock.get('gross_margin') or 0
@@ -264,33 +275,49 @@ def _calculate_moat_score(stock: dict) -> float:
         gm_s = 20  # 低毛利但有ROE豁免
     else:
         gm_s = 0
-    score += gm_s * weights['gm']
+    parts['margin'] = {'raw': gm_combined, 'sub': gm_s,
+                       'weight': weights['margin'],
+                       'contribution': round(gm_s * weights['margin'], 2)}
 
     # ── 6) 10年一致性/趋势加分（巴菲特风格）──
+    consistency = 0
     # ROE波动性低 → 加分（稳定）
     volatility = stock.get('roe_volatility')
     if volatility is not None:
         if volatility <= 5:
-            score += 5
+            consistency += 5
         elif volatility <= 10:
-            score += 3
+            consistency += 3
         elif volatility <= 15:
-            score += 1
+            consistency += 1
     # ROE改善趋势 → 加分（5年均值 > 10年均值 = 公司在变好）
     improvement = stock.get('roe_improvement')
     if improvement is not None and improvement > 2:
-        score += min(5, improvement)  # 最多加5分
+        consistency += min(5, improvement)  # 最多加5分
     # FCF一致性：10年中正FCF年份多 → 加分
     fcf_pos = stock.get('fcf_positive_years_10')
     if fcf_pos is not None:
         if fcf_pos >= 8:
-            score += 5  # 90%+年份FCF为正
+            consistency += 5  # 90%+年份FCF为正
         elif fcf_pos >= 6:
-            score += 3
+            consistency += 3
         elif fcf_pos >= 4:
-            score += 1
+            consistency += 1
+    parts['consistency_bonus'] = consistency
 
-    return round(score, 1)
+    base = sum(p['contribution'] for k, p in parts.items()
+               if k not in ('total', 'consistency_bonus'))
+    parts['total'] = round(base + consistency, 1)
+    return parts
+
+
+def _calculate_moat_score(stock: dict) -> float:
+    """AI Berkshire 五维评分 (0-100)。
+
+    权重反映：护城河 > 估值 > 增长 > 财务健康 > 市场验证。
+    实现委托给 `_score_breakdown`，避免评分逻辑与拆解逻辑重复漂移。
+    """
+    return _score_breakdown(stock)['total']
 
 
 # ── 主类 ──
