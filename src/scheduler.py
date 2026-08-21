@@ -231,9 +231,8 @@ class MarketScheduler:
             # 流水线后追加 K 线数据拉取
             self._fetch_kline_daily()
 
-            # 流水线成功后，仅在周五触发 AI 分析（周频分析由 cron 独立控制）
-            if now.weekday() == 4:  # Friday
-                self._trigger_ai_analysis_async(config)
+            # 流水线成功后每日触发 AI 分析（不再仅限周五，避免研报滞后 1-4 天）
+            self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 

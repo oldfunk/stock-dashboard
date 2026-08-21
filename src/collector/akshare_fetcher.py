@@ -497,6 +497,7 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import akshare as ak
     total = len(stocks)
+    with_roe = 0  # 提前初始化：若下方 all_df 为 None(批量接口失败)，避免 UnboundLocalError
     logger.info(f"[财务] AKShare 采集 {total} 只...")
 
     # ── 第一步：stock_yjbb_em — 一次调用获取全量基础数据 ──
