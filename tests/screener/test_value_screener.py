@@ -5,7 +5,9 @@ Tests the 7 gates + exemptions logic, scoring edge cases.
 """
 
 import pytest
-from src.screener.value_screener import _check_7_gates, _calculate_moat_score, ValueScreener
+from src.screener.value_screener import (
+    _check_7_gates, _calculate_moat_score, _score_breakdown, ValueScreener,
+)
 
 
 class TestCheck7Gates:
@@ -38,6 +40,25 @@ class TestCheck7Gates:
         }
         base.update(overrides)
         return base
+
+    def test_score_breakdown_matches_total(self):
+        """评分透明化核心不变量：_score_breakdown 总分必须 == _calculate_moat_score。"""
+        cases = [
+            self._base_stock(),
+            self._base_stock(roe=35.0, roe_5y_avg=0),
+            self._base_stock(pe=4.0, debt_ratio=15.0, gross_margin=65.0),
+            self._base_stock(roe_volatility=3.0, roe_improvement=5.0,
+                             fcf_positive_years_10=9),
+        ]
+        for s in cases:
+            bd = _score_breakdown(s)
+            total = bd['total']
+            assert total == _calculate_moat_score(s)
+            base = sum(p['contribution'] for k, p in bd.items()
+                       if k not in ('total', 'consistency_bonus'))
+            assert abs(base + bd['consistency_bonus'] - total) < 0.5
+            for dim in ('roe', 'pe', 'growth', 'debt', 'margin'):
+                assert {'raw', 'sub', 'weight', 'contribution'} <= set(bd[dim])
 
     def _base_config(self):
         return {

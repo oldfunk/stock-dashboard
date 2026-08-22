@@ -7,6 +7,7 @@
 - run_screener() 函数：编排「加载历史→过滤→评分→排序→持久化」
 """
 
+import json
 import logging
 from src.models.database import ScreeningResultDAO, RunLogDAO, FinancialSummaryDAO
 from src.utils import now_cn
@@ -370,6 +371,14 @@ class ValueScreener:
 
             score = self.calculate_score(c)
 
+            # 评分拆解落库（透明化前置：把五维子分+一致性加分存为 JSON，
+            # 供日后详情页/Routes 展开「加权公式」使用；不影响排序分值本身）
+            try:
+                score_detail = json.dumps(_score_breakdown(c),
+                                          ensure_ascii=False)
+            except (TypeError, ValueError):
+                score_detail = None
+
             # 数据质量标记
             data_years = c.get('data_years', '')
             has_history = bool(data_years)
@@ -382,6 +391,7 @@ class ValueScreener:
                 'code': c['code'],
                 'name': c['name'],
                 'score': score,
+                'score_detail': score_detail,
                 'pe': c.get('pe'),
                 'pb': c.get('pb'),
                 'roe': c.get('roe'),

@@ -28,7 +28,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 评分体系透明化（skill P1③，已拆子项，本次做最小一子项）
   - [x] 抽 `_score_breakdown()` 纯函数：把五维加权 + 一致性加分拆成可逐项解释的结构（透明化前置，不改阈值）
   - [ ] 详情页评分卡片点击展开五大维度子分 + 加权公式（依赖上一步 `_score_breakdown` 输出）
-  - [ ] `screening_result` 落库 `score_detail`（JSON）并在 routes/模板消费
+  - [x] `screening_result` 落库 `score_detail`（JSON）—— 后端半：schema + 迁移 + `score_candidates` 序列化写入（2026-08-22 完成）
+  - [ ] `screening_result.score_detail` 在 routes/模板消费展示（前端半，待下次）
 - [ ] `stock_analysis_history` 补 `model` 列并落库（当前 schema 缺，skill 说应有模型归属）
 - [ ] AI 分析失败时前端/Discord 可见（当前 `scheduler` 仅 `logger.warning` 静默吞掉）
 - [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）
@@ -38,7 +39,15 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 面板展示或清理 `deep_research` 废表（待定，投研 cron 已废弃）
 
 ## 变更记录（Changelog）
-### 2026-08-22（nightly，最小纯工程项）
+### 2026-08-22（nightly #2，最小纯工程项 — 落库评分拆解）
+- 评分透明化（P1③）第二步：把上一步的 `_score_breakdown` 真正落库。
+  - `src/models/database.py`：`screening_result` 表新增 `score_detail TEXT` 列（`CREATE TABLE` 声明 + `init_database` 迁移 `_add_column_if_not_exists` 兜底）；`ScreeningResultDAO.save_batch` 的 INSERT 增加 `score_detail` 字段。
+  - `src/screener/value_screener.py`：`score_candidates` 在算分后调用 `_score_breakdown(c)` 并 `json.dumps(ensure_ascii=False)` 写进 `score_detail`；`score == breakdown.total` 数值完全不变（不变量已用单测守护）。
+  - `tests/screener/test_value_screener.py`：新增 `test_score_breakdown_matches_total` 守护「总分 == `_calculate_moat_score` + 子分加和 == 总分 + 五维结构完整」这三条不变量。
+- 想法/为什么：第一步只把逻辑结构化，但还没落地到数据层，详情页/Routes 仍拿不到子分。这一步**只做后端半**（落库），前端展示（routes/模板消费）拆成独立子项待下次——避免一次改多模块。数据一旦落库，下次迭代只需在 routes 读 `score_detail` 即可，无需再动评分引擎。零风险：不改变任何评分阈值，旧行 `score_detail` 为 NULL 不影响现有查询（SELECT * 兼容）。
+- 冒烟：pi2 `.venv` pytest 41 passed；改动文件 `python3 -m py_compile` 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中。仅改 pi2，未触碰 pi1 运行文件。
+
+### 2026-08-22（nightly #1，最小纯工程项）
 - 评分体系透明化（P1③）拆为子项，本次做最小一子项：在 `src/screener/value_screener.py` 新增纯函数 `_score_breakdown(stock)`，把原本 `_calculate_moat_score` 里内联的五维加权（ROE/PE/增长/负债/毛利）与一致性加分，拆成可逐项解释的结构（每项含 raw/sub/weight/contribution + `consistency_bonus` + `total`）。`_calculate_moat_score` 改为委托 `_score_breakdown` 返回 `total`，评分数值完全不变（已用样本股断言 `score == breakdown.total`，子分加和 == 总分，权重和 == 1.0）。
 - 想法/为什么：面板核心短板是「评分不透明」，用户看得到总分却不知怎么来的。这一步**零风险**（不改任何阈值、不影响生产筛选结果），纯粹把已有逻辑结构化，为后续「详情页展开五大维度子分+加权公式」与「`screening_result` 落库 `score_detail`」铺路。属安全前置，没动生产逻辑。
 - 冒烟：`python3 -m py_compile` 通过；pytest 式样本断言全过；无 emoji（仅含允许的 → 排版箭头）。改动只在 pi2，未触碰 pi1。

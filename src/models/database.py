@@ -116,7 +116,8 @@ CREATE TABLE IF NOT EXISTS screening_result (
     ai_trade_strategy TEXT,           -- AI 买卖策略
     status TEXT DEFAULT 'active',     -- active / eliminated（后续排除）
     eliminated_date TEXT,             -- 排除日期
-    eliminated_reason TEXT            -- 排除原因
+    eliminated_reason TEXT,           -- 排除原因
+    score_detail TEXT                 -- 评分拆解 JSON（五维子分+一致性加分，透明化）
 );
 
 -- AI 分析日志
@@ -293,6 +294,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'gross_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'net_margin', 'REAL')
+        _add_column_if_not_exists(conn, 'screening_result', 'score_detail', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
@@ -448,13 +450,15 @@ class ScreeningResultDAO:
                     INSERT INTO screening_result
                     (run_id, run_date, code, name, score, pe, pb, roe,
                      gross_margin, net_margin, ocf_per_share,
-                     revenue_growth, profit_growth, debt_ratio, market_cap, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     revenue_growth, profit_growth, debt_ratio, market_cap, reason,
+                     score_detail)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (r['run_id'], r['run_date'], r['code'], r['name'],
                       r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
                       r.get('gross_margin'), r.get('net_margin'), r.get('ocf_per_share'),
                       r.get('revenue_growth'), r.get('profit_growth'),
-                      r.get('debt_ratio'), r.get('market_cap'), r.get('reason')))
+                      r.get('debt_ratio'), r.get('market_cap'), r.get('reason'),
+                      r.get('score_detail')))
 
     def update_ai_analysis(self, run_id: str, code: str, analysis: str, strategy: str, trade_strategy: str):
         with db_conn() as conn:
