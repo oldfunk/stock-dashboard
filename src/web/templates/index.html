@@ -414,15 +414,81 @@
         }
 
         .stock-score {
+            display: inline-block;
             font-size: 11px;
             font-weight: 600;
-            color: var(--text-secondary);
-            background: var(--bg-tertiary);
-            padding: 2px 8px;
-            border-radius: 10px;
-            display: inline-block;
-            margin-top: 4px;
+            color: var(--accent);
+            background: var(--accent-soft);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            margin-top: 6px;
         }
+
+        .stock-model {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: var(--bg-tertiary, var(--bg-primary));
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            margin-top: 6px;
+            margin-left: 4px;
+            border: 1px solid var(--border-color, #2a2f3a);
+        }
+
+        .score-detail {
+            margin-top: 8px;
+            border: 1px solid var(--border-color, #2a2f3a);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .score-detail-toggle {
+            width: 100%;
+            text-align: left;
+            background: var(--bg-tertiary, var(--bg-primary));
+            color: var(--text-secondary);
+            border: none;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .score-detail-toggle .caret { float: right; }
+        .score-detail-body { padding: 8px 10px; }
+        .sd-row {
+            display: grid;
+            grid-template-columns: 72px 52px 1fr 36px 36px 48px;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border-color, #20242e);
+        }
+        .sd-row:last-child { border-bottom: none; }
+        .sd-name { color: var(--text-secondary); }
+        .sd-raw { color: var(--text-tertiary); text-align: right; }
+        .sd-bar {
+            height: 8px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .sd-bar i {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, var(--green), #34a853);
+        }
+        .sd-sub { color: var(--color-up); text-align: right; }
+        .sd-w { color: var(--text-tertiary); text-align: right; }
+        .sd-contrib { color: var(--accent); text-align: right; font-weight: 600; }
+        .sd-consistency .sd-name { color: var(--gold, #d4a843); }
+        .sd-total {
+            margin-top: 2px;
+            font-weight: 600;
+            border-top: 1px solid var(--border-color, #2a2f3a);
+        }
+        .sd-total .sd-name { color: var(--text-primary); }
 
         .stock-metrics {
             flex: 1;
@@ -1330,6 +1396,21 @@
         var el = document.getElementById('hd-' + id);
         if (el) {
             el.classList.toggle('open');
+        }
+    }
+
+    // ========== Score Detail Toggle ==========
+    function toggleScoreDetail(code) {
+        var el = document.getElementById('sd-' + code);
+        var caret = document.getElementById('caret-' + code);
+        if (el) {
+            if (el.style.display === 'none') {
+                el.style.display = 'block';
+                if (caret) caret.textContent = '↑';
+            } else {
+                el.style.display = 'none';
+                if (caret) caret.textContent = '↓';
+            }
         }
     }
 

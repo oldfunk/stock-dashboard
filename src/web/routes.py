@@ -124,6 +124,22 @@ def _enrich_stocks(stocks: list[dict]) -> None:
                     s['mirror_counts'] = str(mc)
                     s['mirror_total'] = total
 
+        # 评分拆解（五维子分 + 一致性加分，2026-08-22 起落库 score_detail）
+        if s.get('score_detail'):
+            try:
+                s['score_detail_parsed'] = (json.loads(s['score_detail'])
+                                            if isinstance(s['score_detail'], str)
+                                            else s['score_detail'])
+            except (json.JSONDecodeError, TypeError):
+                s['score_detail_parsed'] = None
+        else:
+            s['score_detail_parsed'] = None
+
+        # 当前分析所用模型名（ai_analysis JSON 顶层 model 字段）
+        s['model'] = None
+        if isinstance(s.get('ai_parsed'), dict):
+            s['model'] = s['ai_parsed'].get('model')
+
         # 4. 财务历史汇总（用于知识面板）
         try:
             fs = fs_dao.get(code)

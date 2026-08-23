@@ -7,6 +7,7 @@
                     <div class="stock-code">{{ stock.code }}</div>
                     <div class="stock-name">{{ stock.name }}</div>
                     <span class="stock-score">{{ stock.score }}</span>
+                    {% if stock.model %}<span class="stock-model" title="AI 分析模型">{{ stock.model }}</span>{% endif %}
                     <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
                     onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
                     title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
@@ -110,6 +111,48 @@
 
             {% if stock.reason %}
             <div class="stock-reason">{{ stock.reason }}</div>
+            {% endif %}
+
+            {% if stock.score_detail_parsed %}
+            <div class="score-detail">
+                <button class="score-detail-toggle" type="button" onclick="toggleScoreDetail('{{ stock.code }}')">
+                    评分拆解 {{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}
+                    <span class="caret" id="caret-{{ stock.code }}">↓</span>
+                </button>
+                <div id="sd-{{ stock.code }}" class="score-detail-body" style="display:none;">
+                    {% set _w = {'roe': 'ROE', 'pe': '估值', 'growth': '增长', 'debt': '财务', 'margin': '毛利'} %}
+                    {% for k, p in stock.score_detail_parsed.items() %}
+                        {% if k in ('roe', 'pe', 'growth', 'debt', 'margin') %}
+                        <div class="sd-row">
+                            <span class="sd-name">{{ _w[k] }}</span>
+                            <span class="sd-raw">{{ "%.1f"|format(p.raw) if p.raw is not none else '--' }}</span>
+                            <span class="sd-bar"><i style="width:{{ p.sub }}%;"></i></span>
+                            <span class="sd-sub">{{ p.sub }}</span>
+                            <span class="sd-w">{{ "%.2f"|format(p.weight) }}</span>
+                            <span class="sd-contrib">+{{ "%.2f"|format(p.contribution) }}</span>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                    {% if stock.score_detail_parsed.consistency_bonus is not none %}
+                    <div class="sd-row sd-consistency">
+                        <span class="sd-name">一致性加分</span>
+                        <span class="sd-raw"></span>
+                        <span class="sd-bar"></span>
+                        <span class="sd-sub"></span>
+                        <span class="sd-w"></span>
+                        <span class="sd-contrib">+{{ stock.score_detail_parsed.consistency_bonus }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="sd-row sd-total">
+                        <span class="sd-name">总分</span>
+                        <span class="sd-raw"></span>
+                        <span class="sd-bar"></span>
+                        <span class="sd-sub"></span>
+                        <span class="sd-w"></span>
+                        <span class="sd-contrib">{{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}</span>
+                    </div>
+                </div>
+            </div>
             {% endif %}
 
             {% if stock.ai_parsed %}

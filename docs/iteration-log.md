@@ -23,14 +23,15 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - **绝不重启生产服务** `stock-dashboard.service`；部署由用户手动 pull+restart。
 - 提交信息中文，写清「改了什么 + 为什么（想法）」。
 - 改完：更新本账（勾掉 backlog 项、Changelog 追加）+ 推 Discord 简报。
+- **git 工作流硬约定（防污染 main）**：每晚迭代在**当前 nightly 分支**上继续（开头 `git fetch origin && git rebase origin/main` 拉平上游，再 commit），commit 后 `git push origin HEAD`。**绝不在本地 `main` 上 commit，绝不 `git push origin main`**。push 后保持 HEAD 在 nightly 分支，勿切回 main（本地 main 由用户/合并流程管理）。多日累积都落在同一个 nightly 分支，审计时一次性 `git log origin/main..HEAD --stat` 即可。
 
 ## 待办 backlog（细粒度，按优先级）
 - [ ] 评分体系透明化（skill P1③，已拆子项，本次做最小一子项）
   - [x] 抽 `_score_breakdown()` 纯函数：把五维加权 + 一致性加分拆成可逐项解释的结构（透明化前置，不改阈值）
-  - [ ] 详情页评分卡片点击展开五大维度子分 + 加权公式（依赖上一步 `_score_breakdown` 输出）
   - [x] `screening_result` 落库 `score_detail`（JSON）—— 后端半：schema + 迁移 + `score_candidates` 序列化写入（2026-08-22 完成）
-  - [ ] `screening_result.score_detail` 在 routes/模板消费展示（前端半，待下次）
-- [ ] `stock_analysis_history` 补 `model` 列并落库（当前 schema 缺，skill 说应有模型归属）
+  - [x] `screening_result.score_detail` 在 routes/模板消费展示（前端半，2026-08-23 完成）：routes 解析 `score_detail` 为 `score_detail_parsed`，`_stock_list.html` 新增「评分拆解」可折叠块（五维 raw/子分/权重/贡献 + 一致性加分 + 总分），index/candidates 双页 JS 切换 + CSS
+  - [ ] 详情页（stock_detail.html）评分卡片独立展开五大维度子分 + 加权公式（候选股列表已覆盖，按需再做）
+- [x] `stock_analysis_history` 补 `model` 列并落库（2026-08-23 完成）：schema + 迁移 `_add_column_if_not_exists` + DAO `save(..., model=None)` 签名 + `ai_analyzer._save_analysis` 传 `result.get('model')`；routes 取 `ai_parsed.model` 并下传模板，候选卡显示「模型: <model>」徽标
 - [ ] AI 分析失败时前端/Discord 可见（当前 `scheduler` 仅 `logger.warning` 静默吞掉）
 - [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）
 - [ ] 钉选股独立分析视图（skill P2⑥）
@@ -39,6 +40,22 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 面板展示或清理 `deep_research` 废表（待定，投研 cron 已废弃）
 
 ## 变更记录（Changelog）
+### 2026-08-23（nightly #2，模型归属落库 + 候选卡徽标）
+- `stock_analysis_history` 补 `model` 列并落库（backlog 第二项闭环）：
+  - `src/models/database.py`：`stock_analysis_history` 表 `CREATE TABLE` 增 `model TEXT` 列；`init_database` 迁移段加 `_add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')` 兜底；`StockAnalysisHistoryDAO.save` 签名增 `model: str = None` 并写入。
+  - `src/analyzer/ai_analyzer.py`：`_save_analysis` 调用 `StockAnalysisHistoryDAO().save(...)` 末位传 `result.get('model')`（此前 `analyze_stock` 已在 `result['model']` 写入用的模型，只是没落库）；`_save_failure` 传 `None`。
+  - `src/web/routes.py`：`_enrich_stocks` 取 `ai_parsed.model` 写入 `s['model']`，下传模板；`_stock_list.html` 在评分旁渲染「模型: <model>」徽标（`stock-model` 样式）。
+- 想法/为什么：模型归属此前只活在 `ai_analysis` JSON 里、复盘日志也读了，但**历史表本身没存**，跨日追溯某次分析用了哪个模型很麻烦。这是 backlog 明确列出的透明化项，且与 #1 同属「评分/分析可追溯」主线，一并闭环。向后兼容：旧行 `model` 为 NULL，`save` 有默认值，不影响既有查询。
+- 冒烟：pi2 `python3 -m py_compile` 三文件全过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 全过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中（本段仅用允许的 → 排版箭头与 `↑/↓` 折叠符）。仅改 pi2，未触碰 pi1 运行文件。
+
+### 2026-08-23（nightly #1，评分透明化前端半 — score_detail 消费）
+- `screening_result.score_detail` 前端消费（backlog 第一项「前端半」闭环，8-22 已落库后端）：
+  - `src/web/routes.py`：`_enrich_stocks` 里把 `s['score_detail']`(JSON 字符串)解析为 `s['score_detail_parsed']`（解析失败降级 `None`，旧行 NULL 兼容）。
+  - `src/web/templates/_stock_list.html`：在 `stock-reason` 之后新增「评分拆解」可折叠块——按钮显示总分 + 折叠箭头（↑/↓），展开为五维行（名称/raw值/子分进度条/权重/贡献） + 一致性加分行 + 总分行。键名映射 `roe→ROE, pe→估值, growth→增长, debt→财务, margin→毛利`，权重/子分/贡献直接来自 8-22 落库的 `score_detail`，零新增评分逻辑。
+  - `src/web/templates/index.html` 与 `candidates.html`：各补 `toggleScoreDetail()` JS + `.stock-model`/`.score-detail`/`.sd-*` 全套 CSS（两页共用 `_stock_list` 片段，须同步）。
+- 想法/为什么：8-22/8-21 两步把评分逻辑结构化并落库，但用户在前端仍只看到总分。这一步把「为什么是 88 分」摊开成可读的五维加权拆解（不透明→透明），是面板核心短板「评分不透明」的收口。风险极低：纯展示层、读既有 `score_detail`、不动评分引擎、旧行 `score_detail` 为 NULL 时整块不渲染。渲染已用 Jinja2 离线 mock 验证（五维行 + 一致性行 + 总分 + 模型徽标均正确出现）。
+- 冒烟：Jinja2 离线渲染 mock 股通过（含 `评分拆解`/`sd-total`/`一致性加分`/`模型徽标`）；两页模板 `python3` 读取无语法错误；emoji 零命中。仅改 pi2，未触碰 pi1。
+
 ### 2026-08-22（nightly #2，最小纯工程项 — 落库评分拆解）
 - 评分透明化（P1③）第二步：把上一步的 `_score_breakdown` 真正落库。
   - `src/models/database.py`：`screening_result` 表新增 `score_detail TEXT` 列（`CREATE TABLE` 声明 + `init_database` 迁移 `_add_column_if_not_exists` 兜底）；`ScreeningResultDAO.save_batch` 的 INSERT 增加 `score_detail` 字段。
