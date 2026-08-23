@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS stock_analysis_history (
     score REAL,
     ai_analysis TEXT,
     ai_trade_strategy TEXT,
+    model TEXT,                     -- 本次分析所用 AI 模型（2026-08-23 起落库，透明化模型归属）
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_history_code_date ON stock_analysis_history(stock_code, analysis_date);
@@ -295,6 +296,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'net_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'score_detail', 'TEXT')
+        _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
@@ -628,14 +630,14 @@ class PipelineProgressDAO:
 
 class StockAnalysisHistoryDAO:
     def save(self, stock_code: str, run_id: str, score: float,
-             ai_analysis: str, ai_trade_strategy: str):
+             ai_analysis: str, ai_trade_strategy: str, model: str = None):
         now = now_cn().isoformat()
         with db_conn() as conn:
             conn.execute("""
                 INSERT INTO stock_analysis_history
-                (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (stock_code, run_id, now[:10], score, ai_analysis, ai_trade_strategy, now))
+                (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, model, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (stock_code, run_id, now[:10], score, ai_analysis, ai_trade_strategy, model, now))
 
     def get_history(self, code: str, limit: int = 10) -> list[dict]:
         with db_conn() as conn:

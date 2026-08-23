@@ -809,14 +809,14 @@ def _save_analysis(stock: dict, result: dict, run_id: str):
         run_id, stock['code'], analysis_json, strategy, trade_json)
     StockAnalysisHistoryDAO().save(
         stock['code'], run_id, stock.get('score'),
-        analysis_json, trade_json)
+        analysis_json, trade_json, result.get('model'))
 
 
 def _save_failure(stock: dict, run_id: str):
     """记录一次失败尝试（写入空记录，避免短时间内重复尝试）。"""
     from src.models.database import StockAnalysisHistoryDAO
     StockAnalysisHistoryDAO().save(
-        stock['code'], run_id, stock.get('score'), '{}', '{}')
+        stock['code'], run_id, stock.get('score'), '{}', '{}', None)
 
 
 def analyze_batch(stocks: list[dict], run_id: str,
