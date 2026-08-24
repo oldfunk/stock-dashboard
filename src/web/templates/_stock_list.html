@@ -8,6 +8,7 @@
                     <div class="stock-name">{{ stock.name }}</div>
                     <span class="stock-score">{{ stock.score }}</span>
                     {% if stock.model %}<span class="stock-model" title="AI 分析模型">{{ stock.model }}</span>{% endif %}
+                    {% if stock.ai_failed and not stock.ai_parsed %}<span class="stock-model stock-ai-fail" title="AI 分析失败：{{ stock.ai_failure_reason }}">AI 未分析</span>{% endif %}
                     <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
                     onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
                     title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
@@ -227,7 +228,7 @@
             {% if stock.analysis_history and stock.analysis_history|length > 0 %}
             <div class="history-bar">
                 <button class="history-toggle" onclick="toggleHistory('{{ stock.code }}')">
-                    &#128214; 历史分析 ({{ stock.analysis_history|length }}次)
+                    历史分析 ({{ stock.analysis_history|length }}次)
                 </button>
                 <div id="hist-{{ stock.code }}" class="history-list" style="display:none;">
                     {% for h in stock.analysis_history %}

@@ -140,6 +140,10 @@ def _enrich_stocks(stocks: list[dict]) -> None:
         if isinstance(s.get('ai_parsed'), dict):
             s['model'] = s['ai_parsed'].get('model')
 
+        # AI 分析失败标记（透明化：失败原因前端/复盘可见）
+        s['ai_failed'] = bool(s.get('ai_failed') in (1, True, '1'))
+        s['ai_failure_reason'] = s.get('ai_failure_reason') or None
+
         # 4. 财务历史汇总（用于知识面板）
         try:
             fs = fs_dao.get(code)
