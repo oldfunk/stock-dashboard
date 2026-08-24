@@ -474,6 +474,7 @@ class AiAnalyzer:
             )
         # 最近一次调用的 token 用量（由 _call_llm 写入，供 analyze_batch 记录日志）
         self._last_usage: Optional[dict] = None
+        self._last_error: Optional[str] = None
         # 批内固定模型：一批分析（analyze_batch 一次调用）复用同一模型，失败才轮换
         self._batch_model: Optional[str] = None
 
@@ -485,6 +486,7 @@ class AiAnalyzer:
         """对一只股票进行 AI 分析，返回解析后的 dict（失败返回 None）。"""
         if not self.api_key and not self._is_free_model:
             logger.error("[AI分析] 无 API Key，跳过分析")
+            self._last_error = '未配置 API Key'
             return None
 
         # 计算派生指标
@@ -568,6 +570,7 @@ class AiAnalyzer:
         content, used_model, usage = self._call_llm(prompt)
         self._last_usage = usage  # 供调用方写入 ai_analysis_log
         if not content:
+            self._last_error = '模型返回空/全部免费模型不可用'
             return None
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
         result = parse_ai_response(content)
@@ -812,9 +815,10 @@ def _save_analysis(stock: dict, result: dict, run_id: str):
         analysis_json, trade_json, result.get('model'))
 
 
-def _save_failure(stock: dict, run_id: str):
-    """记录一次失败尝试（写入空记录，避免短时间内重复尝试）。"""
-    from src.models.database import StockAnalysisHistoryDAO
+def _save_failure(stock: dict, run_id: str, reason: str = None):
+    """记录一次失败尝试（写入空记录 + 标记失败原因，便于前端/复盘可见）。"""
+    from src.models.database import ScreeningResultDAO, StockAnalysisHistoryDAO
+    ScreeningResultDAO().mark_ai_failure(run_id, stock['code'], reason or 'unknown')
     StockAnalysisHistoryDAO().save(
         stock['code'], run_id, stock.get('score'), '{}', '{}', None)
 
@@ -842,7 +846,7 @@ def analyze_batch(stocks: list[dict], run_id: str,
     if not analyzer.configured:
         logger.error("[AI分析] 无 API Key，跳过全部")
         for i, s in enumerate(stocks):
-            _save_failure(s, run_id)
+            _save_failure(s, run_id, '未配置 API Key')
         return 0, total
 
     logger.info(f"[AI分析] 开始分析 {total} 只股票...")
@@ -884,7 +888,7 @@ def analyze_batch(stocks: list[dict], run_id: str,
             analyzed_ok += 1
             logger.info(f"  {analyzed_ok}/{total} 完成")
         else:
-            _save_failure(stock, run_id)
+            _save_failure(stock, run_id, getattr(analyzer, '_last_error', None) or '分析失败')
             analyzed_failed += 1
             logger.warning(f"  失败 {analyzed_failed}")
 

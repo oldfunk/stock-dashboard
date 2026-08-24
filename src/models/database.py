@@ -117,7 +117,9 @@ CREATE TABLE IF NOT EXISTS screening_result (
     status TEXT DEFAULT 'active',     -- active / eliminated（后续排除）
     eliminated_date TEXT,             -- 排除日期
     eliminated_reason TEXT,           -- 排除原因
-    score_detail TEXT                 -- 评分拆解 JSON（五维子分+一致性加分，透明化）
+    score_detail TEXT,                -- 评分拆解 JSON（五维子分+一致性加分，透明化）
+    ai_failed INTEGER DEFAULT 0,      -- 本轮 AI 分析是否失败（1=失败，0=成功/未触发）
+    ai_failure_reason TEXT            -- AI 分析失败原因（模型耗尽/解析失败/超时等）
 );
 
 -- AI 分析日志
@@ -296,6 +298,8 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'net_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'score_detail', 'TEXT')
+        _add_column_if_not_exists(conn, 'screening_result', 'ai_failed', 'INTEGER')
+        _add_column_if_not_exists(conn, 'screening_result', 'ai_failure_reason', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
@@ -466,9 +470,19 @@ class ScreeningResultDAO:
         with db_conn() as conn:
             conn.execute("""
                 UPDATE screening_result
-                SET ai_analysis = ?, ai_investment_strategy = ?, ai_trade_strategy = ?
+                SET ai_analysis = ?, ai_investment_strategy = ?, ai_trade_strategy = ?,
+                    ai_failed = 0, ai_failure_reason = NULL
                 WHERE run_id = ? AND code = ?
             """, (analysis, strategy, trade_strategy, run_id, code))
+
+    def mark_ai_failure(self, run_id: str, code: str, reason: str):
+        """标记本轮 AI 分析失败（落库原因，便于前端/复盘可见）。"""
+        with db_conn() as conn:
+            conn.execute("""
+                UPDATE screening_result
+                SET ai_failed = 1, ai_failure_reason = ?
+                WHERE run_id = ? AND code = ?
+            """, (reason or 'unknown', run_id, code))
 
     def get_latest_results(self, limit: int = 50) -> list[dict]:
         with db_conn() as conn:
