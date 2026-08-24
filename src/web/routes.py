@@ -453,6 +453,18 @@ async def stock_detail(request: Request, code: str):
     if in_watchlist:
         watchlist_history = AiWatchlistHistoryDAO().list_by_code(code)
 
+    # 8. 最新一轮筛选评分拆解（透明化：五维子分 + 一致性加分）
+    from src.models.database import ScreeningResultDAO
+    sr_latest = ScreeningResultDAO().get_latest_for_code(code)
+    score_detail_parsed = None
+    if sr_latest and sr_latest.get("score_detail"):
+        try:
+            score_detail_parsed = (json.loads(sr_latest["score_detail"])
+                                   if isinstance(sr_latest["score_detail"], str)
+                                   else sr_latest["score_detail"])
+        except (json.JSONDecodeError, TypeError):
+            score_detail_parsed = None
+
     config = load_config()
     page_title = config.get("web", {}).get("page_title", "价值投资选股看板")
 
@@ -470,6 +482,7 @@ async def stock_detail(request: Request, code: str):
         "financial_summary": financial_summary,
         "in_watchlist": in_watchlist,
         "watchlist_history": watchlist_history,
+        "score_detail_parsed": score_detail_parsed,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 

@@ -488,6 +488,16 @@ class ScreeningResultDAO:
             """, (code, limit)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_latest_for_code(self, code: str) -> Optional[dict]:
+        """取某只股票最新一轮 screening_result 行（含 score_detail）。"""
+        with db_conn() as conn:
+            row = conn.execute("""
+                SELECT * FROM screening_result
+                WHERE code = ?
+                ORDER BY run_date DESC LIMIT 1
+            """, (code,)).fetchone()
+        return dict(row) if row else None
+
     def get_latest_run_id(self) -> Optional[str]:
         with db_conn() as conn:
             row = conn.execute(

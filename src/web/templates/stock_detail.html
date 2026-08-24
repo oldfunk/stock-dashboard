@@ -94,6 +94,29 @@
         .sd-metric .label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
         .sd-metric .value { font-size: 18px; font-weight: 500; }
 
+        /* ========== 综合评分拆解卡片 ========== */
+        .sd-score-detail { margin-bottom: 32px; }
+        .sd-sd-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+        .sd-sd-total { font-size: 32px; font-weight: 700; color: var(--color-up); letter-spacing: 1px; }
+        .sd-sd-sub { font-size: 13px; color: var(--text-tertiary); }
+        .sd-sd-grid { display: flex; flex-direction: column; gap: 0; }
+        .sd-sd-row {
+            display: grid;
+            grid-template-columns: 64px 1fr 56px 48px;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px dashed var(--divider-thin);
+        }
+        .sd-sd-name { font-weight: 500; }
+        .sd-sd-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
+        .sd-sd-bar > i { display: block; height: 100%; background: var(--color-up); border-radius: 4px; }
+        .sd-sd-sub { text-align: right; font-variant-numeric: tabular-nums; }
+        .sd-sd-contrib { text-align: right; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+        .sd-sd-row.sd-sd-consistency .sd-sd-name { color: var(--gold); }
+        .sd-sd-row.sd-sd-total-row { border-bottom: none; border-top: 2px solid var(--divider); margin-top: 4px; padding-top: 10px; }
+        .sd-sd-row.sd-sd-total-row .sd-sd-name { font-weight: 700; }
+
         .sd-section { margin-bottom: 40px; }
         .sd-section-title {
             font-size: 18px;
@@ -385,6 +408,43 @@
         <div class="sd-metric"><span class="label">负债率</span><span class="value">{{ "%.1f"|format(snapshot.debt_ratio) if snapshot.debt_ratio is not none else '--' }}%</span></div>
         <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ "%.2f"|format(snapshot.dividend_yield) if snapshot.dividend_yield is not none else '--' }}%</span></div>
     </section>
+
+    <!-- 2.3 综合评分拆解（透明化：五维子分 + 一致性加分） -->
+    {% if score_detail_parsed %}
+    <section class="sd-score-detail">
+        <div class="sd-sd-head">
+            <span class="sd-sd-total">{{ "%.1f"|format(score_detail_parsed.total) if score_detail_parsed.total is not none else '--' }}</span>
+            <span class="sd-sd-sub">综合评分（五维加权 + 一致性加分）</span>
+        </div>
+        <div class="sd-sd-grid">
+            {% set _w = {'roe': 'ROE', 'pe': '估值', 'growth': '增长', 'debt': '财务', 'margin': '毛利'} %}
+            {% for k, p in score_detail_parsed.items() %}
+                {% if k in ('roe', 'pe', 'growth', 'debt', 'margin') %}
+                <div class="sd-sd-row">
+                    <span class="sd-sd-name">{{ _w[k] }}</span>
+                    <span class="sd-sd-bar"><i style="width:{{ p.sub }}%;"></i></span>
+                    <span class="sd-sd-sub">{{ "%.1f"|format(p.raw) if p.raw is not none else '--' }}</span>
+                    <span class="sd-sd-contrib">+{{ "%.2f"|format(p.contribution) }}</span>
+                </div>
+                {% endif %}
+            {% endfor %}
+            {% if score_detail_parsed.consistency_bonus is not none %}
+            <div class="sd-sd-row sd-sd-consistency">
+                <span class="sd-sd-name">一致性加分</span>
+                <span class="sd-sd-bar"></span>
+                <span class="sd-sd-sub"></span>
+                <span class="sd-sd-contrib">+{{ score_detail_parsed.consistency_bonus }}</span>
+            </div>
+            {% endif %}
+            <div class="sd-sd-row sd-sd-total-row">
+                <span class="sd-sd-name">总分</span>
+                <span class="sd-sd-bar"></span>
+                <span class="sd-sd-sub"></span>
+                <span class="sd-sd-contrib">{{ "%.1f"|format(score_detail_parsed.total) if score_detail_parsed.total is not none else '' }}</span>
+            </div>
+        </div>
+    </section>
+    {% endif %}
 
     {% if ai_parsed %}
 
