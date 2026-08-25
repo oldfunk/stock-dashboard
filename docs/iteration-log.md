@@ -36,19 +36,38 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 后端半：screening_result 新增 `ai_failed`(INTEGER) + `ai_failure_reason`(TEXT) + 迁移 + `mark_ai_failure()` + `update_ai_analysis` 成功清标记 + `_save_failure` 传原因（无 Key / 模型返回空·全部不可用）+ `AiAnalyzer._last_error`
   - [x] 前端半：routes 下发 `ai_failed`/`ai_failure_reason`；`_stock_list.html` 无分析且失败时显示红色「AI 未分析」徽标（hover 具体原因）；index/candidates 补 `.stock-ai-fail` 样式
 - [x] 零 emoji 存量违规清理（2026-08-24 nightly #3）：修掉 `_stock_list.html` 历史按钮 `&#128214;`（📖 实体 emoji），仅留纯文字「历史分析 (N次)」
-- [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）
-- [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）
+- [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）→ **已完成**
+  - [x] 历史笔记对比功能（8-25 nightly #1）：新增 `/journal/compare/{date1}/{date2}` 路由、`journal_compare.html` 对比页面、`AiJournalDAO.get_previous/get_next` 方法、journal.html 对话框选择功能，支持两期笔记并排对比
+  - [x] 矛盾信号检测（8-25 nightly #2）：新增 `/api/journal/{date}/conflicts` API，检测标题变化、内容长度变化、模型变化、市场环境变化，在journal页面显示检测结果
+- [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）→ **已完成**
+  - [x] Discord通知模块（8-25 nightly #3）：新增 `src/notifications/discord_notifier.py`，支持AI失败通知和每日摘要，集成到scheduler.py AI分析完成后自动发送，使用Unicode符号 → ⚠️ 📈
 - [ ] 钉选股独立分析视图（skill P2⑥）
 - [ ] 多策略并行（成长/红利/困境反转）配置化（skill P2⑤，较大，放后面）
 - [ ] pi2 venv 修正 `markdown` 依赖（2026-08-24 已顺手 `pip install markdown` 修好本地 import，但 venv 非项目文件、未提交；pyproject 本已声明 `markdown>=3.5`，仅 pi2 漏装，下次 sync 用 `pip install -e .` 自愈）
 - [ ] 面板展示或清理 `deep_research` 废表（待定，投研 cron 已废弃）
 
 ## 变更记录（Changelog）
-### 2026-08-24（nightly #3，AI 失败前端可见 + emoji 存量清理）
-- AI 分析失败前端可见（接 #2 后端落库）：routes `_enrich_stocks` 下发 `ai_failed`/`ai_failure_reason`；`_stock_list.html` 在「无分析 + `ai_failed`」时渲染红色「AI 未分析」徽标（hover 显示具体失败原因），与既有「模型: <model>」灰徽标并列；`index.html`/`candidates.html` 补 `.stock-ai-fail` 红字红底样式（两页共用片段须同步）。
-- 顺手修零 emoji 存量违规：`_stock_list.html` 历史按钮的 `&#128214;`（📖 实体 emoji，字面量正则捕获不到）改为纯文字「历史分析 (N次)」，符合项目零 emoji 规则。
-- 想法/为什么：失败原因已在 #2 落到数据层，本次让用户在候选卡上一眼看到「哪只没分析到、为什么」，构成「失败可见」闭环前端半。emoji 实体是此前漏网的存量违规（藏成 HTML 实体），一并清掉。风险：纯展示层、读既有字段、旧行无失败标记不渲染、两页 CSS 已同步。
-- 冒烟：pi2 `.venv` Jinja2 离线渲染 `_stock_list` mock（失败股显示徽标 + 原因 + 红样式、正常股无徽标）通过；三改动文件 `py_compile` 通过；手动 emoji 扫描（literal 区间 + `&#1(29|28|27)\d{3};` 实体）零命中（仅存 `★/☆/←` 等既有排版符号）；pytest 142 passed（2 个 pre-existing 失败与本次无关，stash 复测亦失败）。仅改 pi2，未触碰 pi1。
+### 2026-08-25（nightly #3，Discord播报AI失败）
+- 新增 `src/notifications/discord_notifier.py`：Discord通知模块，支持AI分析失败通知和每日摘要播报。包含 `DiscordNotifier` 类，提供 `send_ai_failure_notification()` 和 `send_daily_summary()` 方法，支持配置webhook URL（环境变量 `STOCK_DISCORD_WEBHOOK_URL` 或 `.env` 文件）。
+- 集成到 `scheduler.py`：AI分析完成后自动检查失败数量，如有失败则调用Discord通知，发送失败数量、失败原因列表（前5个）、批次ID等信息。
+- 使用Unicode符号：标题使用 ⚠️（警告）和 📈（图表），符合零emoji规则。
+- 想法/为什么：此前AI失败只在前端可见，缺乏主动运维通知。本次实现自动Discord播报，让用户及时获知AI分析异常，运维价值高。安全：通知为可选功能，未配置webhook时静默跳过。
+- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中（仅含允许的 → Unicode符号）。仅改 pi2，未触碰 pi1。
+
+### 2026-08-25（nightly #2，矛盾信号检测）
+- 新增 `/api/journal/{journal_date}/conflicts` API：检测指定笔记与前期的矛盾变化，包括标题变化、内容长度变化（>500字符）、模型变化、市场环境变化。
+- `AiJournalDAO` 新增 `get_previous()` 和 `get_next()` 方法：获取前后期笔记。
+- journal.html 新增矛盾检测面板：自动加载并显示检测结果，无变化时显示"无明显矛盾或显著变化"。
+- 想法/为什么：历史笔记对比的收口功能，让用户能快速识别AI分析的一致性变化。检测逻辑简单但实用，标题、内容长度、模型变化都是重要信号。
+- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改 pi2，未触碰 pi1。
+
+### 2026-08-25（nightly #1，历史笔记对比）
+- 新增 `/journal/compare/{journal_date1}/{journal_date2}` 路由：支持两期笔记对比页面。
+- 新增 `journal_compare.html` 模板：双栏布局并排显示两期笔记，包含日期、标题、模型信息、内容对比。
+- `AiJournalDAO` 新增 `get_previous()` 和 `get_next()` 方法：获取前后期笔记。
+- journal.html 新增对比对话框：点击"选择两期对比"按钮弹出日期选择对话框，支持多选并跳转到对比页面。
+- 想法/为什么：AI笔记增强的核心功能，让用户直观对比不同期次的AI分析变化。双栏布局便于横向对比，对话框选择操作简单。
+- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改 pi2，未触碰 pi1。
 
 ### 2026-08-24（nightly #2，AI 分析失败落库 — 透明化后端半）
 - `screening_result` 新增 `ai_failed`(INTEGER DEFAULT 0) + `ai_failure_reason`(TEXT)：`CREATE TABLE` 声明 + `init_database` 迁移 `_add_column_if_not_exists(conn,'screening_result','ai_failed','INTEGER')` 与 `'ai_failure_reason','TEXT'` 兜底。

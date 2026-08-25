@@ -976,6 +976,25 @@ async def journal_by_date(request: Request, journal_date: str):
     })
 
 
+@app.get("/journal/compare/{journal_date1}/{journal_date2}", response_class=HTMLResponse)
+async def journal_compare(request: Request, journal_date1: str, journal_date2: str):
+    """历史笔记对比页"""
+    journal1 = AiJournalDAO().get_by_date(journal_date1)
+    journal2 = AiJournalDAO().get_by_date(journal_date2)
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    
+    return templates.TemplateResponse(request, "journal_compare.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal1": journal1,
+        "journal2": journal2,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
 @app.get("/api/journal/latest")
 async def api_journal_latest():
     """最新笔记 JSON"""
@@ -996,8 +1015,75 @@ async def api_journal_by_date(journal_date: str):
     """指定日期笔记 JSON"""
     journal = AiJournalDAO().get_by_date(journal_date)
     if not journal:
-        raise HTTPException(status_code=404, detail="该日期无笔记")
+        return {"error": "Journal not found"}
     return journal
+
+
+@app.get("/api/journal/{journal_date}/conflicts")
+async def api_journal_conflicts(journal_date: str):
+    """笔记矛盾检测分析"""
+    journal = AiJournalDAO().get_by_date(journal_date)
+    if not journal:
+        return {"error": "Journal not found"}
+    
+    previous = AiJournalDAO().get_previous(journal_date)
+    
+    if not previous:
+        return {"has_conflicts": False, "message": "第一期笔记，无可对比"}
+    
+    # 简单的矛盾检测逻辑
+    conflicts = []
+    
+    # 检查标题变化
+    if journal['title'] != previous['title']:
+        conflicts.append({
+            "type": "title_change",
+            "message": f"标题从 '{previous['title']}' 变为 '{journal['title']}'",
+            "severity": "info"
+        })
+    
+    # 检查内容长度变化
+    content_length_change = len(journal['content_md']) - len(previous['content_md'])
+    if abs(content_length_change) > 500:
+        direction = "增加" if content_length_change > 0 else "减少"
+        conflicts.append({
+            "type": "content_length_change",
+            "message": f"内容长度{direction} {abs(content_length_change)} 字符",
+            "severity": "info"
+        })
+    
+    # 检查模型变化
+    current_actions = journal['actions_summary']
+    previous_actions = previous['actions_summary']
+    
+    if current_actions and previous_actions:
+        try:
+            current_json = json.loads(current_actions)
+            previous_json = json.loads(previous_actions)
+            
+            if current_json.get('model') != previous_json.get('model'):
+                conflicts.append({
+                    "type": "model_change",
+                    "message": f"分析模型从 {previous_json.get('model', '未知')} 变为 {current_json.get('model', '未知')}",
+                    "severity": "info"
+                })
+        except:
+            pass
+    
+    # 检查市场环境变化
+    if journal['market_snapshot'] != previous['market_snapshot']:
+        conflicts.append({
+            "type": "market_change",
+            "message": "市场环境发生变化",
+            "severity": "info"
+        })
+    
+    return {
+        "has_conflicts": len(conflicts) > 0,
+        "conflicts": conflicts,
+        "previous_date": previous['journal_date'],
+        "current_date": journal['journal_date']
+    }
 
 
 def run_server():

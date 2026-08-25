@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} - 投资笔记对比</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* 复用 index.html 的 design tokens */
+        :root {
+            --font-sans: 'Inter', 'Noto Sans SC', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+            --accent: #1a73e8;
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
+            --radius: 8px;
+        }
+        [data-theme="dark"] {
+            --bg-primary: #1a1c1e;
+            --bg-secondary: #202124;
+            --bg-tertiary: #282a2d;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --text-tertiary: #5f6368;
+            --divider: #3c4043;
+            --divider-thin: #303134;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-sans);
+            font-size: 14px;
+            line-height: 1.7;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        .compare-app {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px 32px;
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 32px;
+        }
+        .compare-header {
+            grid-column: 1 / -1;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 16px;
+        }
+        .compare-header a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .compare-title {
+            font-size: 24px;
+            font-weight: 500;
+            margin-top: 8px;
+        }
+        .compare-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        .compare-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .journal-column {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 32px 40px;
+        }
+        .journal-column h2 {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .journal-column .journal-date {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-bottom: 12px;
+        }
+        .journal-column .journal-model {
+            color: var(--accent);
+            font-size: 11px;
+            margin-left: 8px;
+        }
+        .journal-column .journal-body {
+            background: var(--bg-tertiary);
+            border-radius: var(--radius);
+            padding: 24px;
+            min-height: 400px;
+        }
+        .journal-column .journal-body h1 { 
+            font-size: 18px; 
+            font-weight: 500; 
+            margin: 20px 0 10px; 
+            color: var(--text-primary);
+        }
+        .journal-column .journal-body h2 { 
+            font-size: 16px; 
+            font-weight: 500; 
+            margin: 18px 0 8px; 
+            color: var(--text-primary);
+        }
+        .journal-column .journal-body p { 
+            margin-bottom: 10px; 
+            color: var(--text-secondary); 
+        }
+        .journal-column .journal-body ul, 
+        .journal-column .journal-body ol { 
+            margin: 8px 0 12px 24px; 
+        }
+        .journal-column .journal-body li { 
+            margin-bottom: 4px; 
+            color: var(--text-secondary); 
+        }
+        .journal-column .journal-body strong { 
+            color: var(--text-primary); 
+            font-weight: 500; 
+        }
+        .compare-sidebar {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 16px;
+            position: sticky;
+            top: 12px;
+            height: fit-content;
+            max-height: calc(100vh - 24px);
+            overflow-y: auto;
+        }
+        .compare-sidebar h3 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .history-item {
+            padding: 8px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .history-item:hover { background: var(--bg-tertiary); }
+        .history-item.active { background: var(--accent); color: #fff; }
+        .history-item.active .jh-title { color: #fff; }
+        .jh-date { font-size: 11px; color: var(--text-tertiary); }
+        .history-item.active .jh-date { color: rgba(255,255,255,0.7); }
+        .jh-title { font-size: 13px; color: var(--text-primary); margin-top: 2px; }
+        .compare-empty {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-tertiary);
+            grid-column: 1 / -1;
+        }
+        .compare-empty div {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+        .vs-badge {
+            background: var(--accent);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        @media (max-width: 1200px) {
+            .compare-content { grid-template-columns: 1fr; }
+            .compare-app { grid-template-columns: 1fr; }
+            .compare-sidebar { position: static; }
+        }
+    </style>
+</head>
+<body>
+<div class="compare-app">
+    <div class="compare-header">
+        <a href="/">&larr; 返回看板</a>
+        <div class="compare-title">投资笔记对比</div>
+        <div class="compare-subtitle">
+            对比 {{ journal1.journal_date }} 与 {{ journal2.journal_date }} 的投资分析
+        </div>
+    </div>
+
+    <div class="compare-content">
+        {% if journal1 and journal2 %}
+        <div class="journal-column">
+            <h2>
+                {{ journal1.title }}
+                <span class="vs-badge">期一</span>
+            </h2>
+            <div class="journal-date">
+                {{ journal1.journal_date }}
+                {% set jsum1 = journal1.actions_summary | from_json %}
+                {% if jsum1 and jsum1.model %}&nbsp;&middot;&nbsp;<span class="journal-model">模型: {{ jsum1.model }}</span>{% endif %}
+            </div>
+            <div class="journal-body">
+                {{ journal1.content_md | markdown_to_html | safe }}
+            </div>
+        </div>
+
+        <div class="journal-column">
+            <h2>
+                {{ journal2.title }}
+                <span class="vs-badge">期二</span>
+            </h2>
+            <div class="journal-date">
+                {{ journal2.journal_date }}
+                {% set jsum2 = journal2.actions_summary | from_json %}
+                {% if jsum2 and jsum2.model %}&nbsp;&middot;&nbsp;<span class="journal-model">模型: {{ jsum2.model }}</span>{% endif %}
+            </div>
+            <div class="journal-body">
+                {{ journal2.content_md | markdown_to_html | safe }}
+            </div>
+        </div>
+        {% else %}
+        <div class="compare-empty">
+            <div>&#9678;</div>
+            <h2>无法加载对比笔记</h2>
+            <p>请确保两个日期的笔记都存在。</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <aside class="compare-sidebar">
+        <h3>历史归档</h3>
+        {% if history_list %}
+        {% for item in history_list %}
+        <div class="history-item {{ 'active' if (journal1 and item.journal_date == journal1.journal_date) or (journal2 and item.journal_date == journal2.journal_date) else '' }}"
+             onclick="window.location.href='/journal/{{ item.journal_date }}'">
+            <div class="jh-date">{{ item.journal_date }}</div>
+            <div class="jh-title">{{ item.title }}</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="color: var(--text-tertiary); font-size: 12px; padding: 8px 0;">
+            无历史归档
+        </div>
+        {% endif %}
+    </aside>
+</div>
+<script>
+    // 复用 index.html 的主题切换
+    const theme = localStorage.getItem('stock-dashboard-theme') || 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+</script>
+</body>
+</html>

@@ -148,3 +148,23 @@ class AiJournalDAO:
                 (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_previous(self, journal_date: str) -> Optional[dict]:
+        """获取指定日期前一篇笔记"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_journal WHERE journal_date < ? "
+                "ORDER BY journal_date DESC LIMIT 1",
+                (journal_date,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_next(self, journal_date: str) -> Optional[dict]:
+        """获取指定日期后一篇笔记"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_journal WHERE journal_date > ? "
+                "ORDER BY journal_date ASC LIMIT 1",
+                (journal_date,)
+            ).fetchone()
+        return dict(row) if row else None

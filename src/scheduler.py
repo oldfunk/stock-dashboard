@@ -373,6 +373,28 @@ class MarketScheduler:
                     stocks, run_id, interval_seconds=60, on_progress=on_progress
                 )
                 logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
+                
+                # 发送Discord通知（如果配置了webhook）
+                if analyzed_failed > 0:
+                    from src.notifications.discord_notifier import get_discord_notifier
+                    notifier = get_discord_notifier()
+                    if notifier:
+                        # 获取失败原因
+                        from src.models.database import ScreeningResultDAO
+                        failed_stocks = ScreeningResultDAO().get_results_for_run(run_id, limit=100)
+                        failed_reasons = []
+                        for stock in failed_stocks:
+                            if stock.get('ai_failed'):
+                                reason = stock.get('ai_failure_reason', '未知原因')
+                                failed_reasons.append(f"{stock['name']}({stock['code']}): {reason}")
+                        
+                        notifier.send_ai_failure_notification(
+                            run_id=run_id,
+                            failed_count=analyzed_failed,
+                            failed_reasons=failed_reasons,
+                            total_count=len(stocks)
+                        )
+                
                 # 回写本次分析的 run_log.analyzed_count，保持运行记录完整
                 RunLogDAO().update_analyzed_count(run_id, analyzed_ok)
             except Exception as e:
