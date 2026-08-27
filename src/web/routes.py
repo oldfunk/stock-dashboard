@@ -944,6 +944,80 @@ async def api_ai_watchlist_history():
     return AiWatchlistHistoryDAO().list_recent(limit=50)
 
 
+@app.get("/watchlist/{code}")
+async def watchlist_detail(code: str):
+    """钉选股独立分析页面"""
+    # 获取股票基本信息
+    stock = get_stock_by_code(code)
+    if not stock:
+        raise HTTPException(status_code=404, detail="股票不存在")
+    
+    # 获取钉选状态和历史
+    in_watchlist = AiWatchlistDAO().get_by_code(code)
+    watchlist_history = AiWatchlistHistoryDAO().list_by_code(code, limit=20)
+    
+    # 获取分析历史
+    analysis_history = get_analysis_history(code)
+    
+    # 获取最新筛选结果
+    screening_result = ScreeningResultDAO.get_latest_for_code(code)
+    score_detail_parsed = None
+    if screening_result and screening_result.get('score_detail'):
+        try:
+            score_detail_parsed = json.loads(screening_result['score_detail'])
+        except:
+            pass
+    
+    # 获取AI分析结果
+    ai_parsed = None
+    trade_parsed = None
+    if screening_result and screening_result.get('ai_analysis'):
+        try:
+            ai_obj = json.loads(screening_result['ai_analysis'])
+            ai_parsed = ai_obj
+            if ai_obj.get('trade_strategy'):
+                trade_parsed = json.loads(ai_obj['trade_strategy'])
+        except:
+            pass
+    
+    # 获取财务摘要
+    financial_summary = None
+    fs_dao = FinancialSummaryDAO()
+    fs_data = fs_dao.get(code)
+    if fs_data:
+        financial_summary = {k: v for k, v in fs_data.items() 
+                          if k not in ('stock_code', 'updated_at') and v is not None}
+    
+    # 获取年度报告
+    annual_reports = get_annual_reports(code)
+    
+    # 获取K线数据
+    kline_data = None
+    try:
+        kline_response = requests.get(f"{BASE_API}/stock/{code}/kline?period=daily")
+        if kline_response.status_code == 200:
+            kline_data = kline_response.json()
+    except:
+        pass
+    
+    return templates.TemplateResponse("watchlist_detail.html", {
+        "request": request,
+        "code": code,
+        "stock": stock,
+        "in_watchlist": in_watchlist,
+        "watchlist_history": watchlist_history,
+        "analysis_history": analysis_history,
+        "score_detail_parsed": score_detail_parsed,
+        "ai_parsed": ai_parsed,
+        "trade_parsed": trade_parsed,
+        "financial_summary": financial_summary,
+        "annual_reports": annual_reports,
+        "kline_data": kline_data,
+        "snapshot": get_market_snapshot(),
+        "page_title": f"{stock['name']} {code} - 钉选股分析"
+    })
+
+
 @app.get("/journal", response_class=HTMLResponse)
 async def journal_page(request: Request):
     """投资笔记页（默认显示最新一篇）"""
