@@ -2,7 +2,7 @@
 <div class="watchlist-grid">
     {% for stock in watchlist %}
     <div class="watchlist-card clickable" data-code="{{ stock.code }}"
-         onclick="location.href='/stock/{{ stock.code }}'">
+         onclick="location.href='/watchlist/{{ stock.code }}'">
         <div class="wl-card-header">
             <div class="wl-stock-code">{{ stock.code }}</div>
             <div class="wl-stock-name">{{ stock.name }}</div>

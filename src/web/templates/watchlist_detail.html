@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-color-scheme="cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ snapshot.name }} {{ code }} - 钉选股分析</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ========== Design Tokens（与 index.html / stock_detail.html 一致） ========== */
+        :root {
+            --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --bg-hover: #e8eaed;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --accent-soft: #e8f0fe;
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+            --color-warn: var(--gold);
+            --color-up: var(--red);
+            --color-up-bg: var(--red-bg);
+            --color-down: var(--green);
+            --color-down-bg: var(--green-bg);
+            --divider: #e0e3e7;
+            --divider-thin: #e8eaed;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+            --radius: 8px;
+            --radius-sm: 4px;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-sans);
+            font-weight: 400;
+            font-size: 14px;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ========== 钉选股分析页面布局 ========== */
+        .watchlist-detail-page {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px 20px 60px;
+            overflow-x: hidden;
+        }
+        .back-link { margin-bottom: 16px; }
+        .back-link a { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+        .back-link a:hover { color: var(--text-primary); }
+
+        .wd-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--divider-thin);
+            margin-bottom: 24px;
+        }
+        .wd-title h1 { display: inline-block; font-size: 28px; margin: 0; font-weight: 600; }
+        .wd-code { margin-left: 12px; color: var(--text-tertiary); font-size: 14px; }
+        .wd-watchlist-status {
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .wd-watchlist-status.in { background: var(--green-bg); color: var(--green); }
+        .wd-watchlist-status.not-in { background: var(--bg-tertiary); color: var(--text-secondary); }
+
+        .wd-snapshot-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px 32px;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            margin-bottom: 32px;
+            box-shadow: var(--shadow);
+        }
+        .wd-metric { display: flex; flex-direction: column; gap: 2px; }
+        .wd-metric .label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+        .wd-metric .value { font-size: 18px; font-weight: 500; }
+
+        /* ========== 在池状态卡片（钉选股视图核心差异点） ========== */
+        .wd-pool-card {
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            margin-bottom: 32px;
+            box-shadow: var(--shadow);
+            border-left: 3px solid var(--green);
+        }
+        .wd-pool-card.out { border-left-color: var(--text-tertiary); }
+        .wd-wl-row { display: flex; justify-content: space-between; padding: 6px 0; }
+        .wd-wl-row .label { color: var(--text-secondary); }
+        .wd-wl-row .value { font-weight: 500; }
+        .wd-wl-row .value.pos { color: var(--color-up); }
+        .wd-wl-history h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text-secondary); font-weight: 500; }
+        .wd-wl-history-table { width: 100%; border-collapse: collapse; }
+        .wd-wl-history-table th, .wd-wl-history-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--divider-thin);
+            font-size: 13px;
+        }
+        .wd-wl-history-table th { color: var(--text-tertiary); font-weight: 500; }
+
+        /* ========== 综合评分拆解卡片 ========== */
+        .wd-score-detail { margin-bottom: 32px; }
+        .wd-sd-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+        .wd-sd-total { font-size: 32px; font-weight: 700; color: var(--color-up); letter-spacing: 1px; }
+        .wd-sd-sub { font-size: 13px; color: var(--text-tertiary); }
+        .wd-sd-grid { display: flex; flex-direction: column; gap: 0; }
+        .wd-sd-row {
+            display: grid;
+            grid-template-columns: 64px 1fr 56px 48px;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px dashed var(--divider-thin);
+        }
+        .wd-sd-name { font-weight: 500; }
+        .wd-sd-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
+        .wd-sd-bar > i { display: block; height: 100%; background: var(--color-up); border-radius: 4px; }
+        .wd-sd-sub { text-align: right; font-variant-numeric: tabular-nums; }
+        .wd-sd-contrib { text-align: right; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+        .wd-sd-row.wd-sd-consistency .wd-sd-name { color: var(--gold); }
+        .wd-sd-row.wd-sd-total-row { border-bottom: none; border-top: 2px solid var(--divider); margin-top: 4px; padding-top: 10px; }
+        .wd-sd-row.wd-sd-total-row .wd-sd-name { font-weight: 700; }
+
+        .wd-section { margin-bottom: 40px; }
+        .wd-section-title {
+            font-size: 18px;
+            margin: 0 0 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+            font-weight: 600;
+        }
+        .wd-note-body { padding-left: 16px; border-left: 3px solid var(--color-up); }
+        .wd-note-body p { margin: 0 0 12px; line-height: 1.7; }
+        .wd-trade-signal { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+        .wd-trade-signal .label { color: var(--text-secondary); font-size: 13px; }
+        .signal-badge { display: inline-block; padding: 4px 12px; border-radius: var(--radius-sm); font-weight: 600; font-size: 16px; }
+        .signal-buy { background: var(--red-bg); color: var(--red); }
+        .signal-hold { background: var(--gold-bg); color: var(--gold); }
+        .signal-avoid { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .wd-trade .confidence { color: var(--text-secondary); font-size: 13px; }
+        .wd-trade-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--divider-thin); }
+        .wd-trade-row .label { color: var(--text-secondary); }
+        .wd-trade-row .value { font-weight: 500; }
+        .wd-empty { color: var(--text-tertiary); font-style: italic; padding: 16px 0; }
+    </style>
+</head>
+<body>
+<div class="watchlist-detail-page">
+    <div class="back-link">
+        <a href="/">← 返回看板</a>
+    </div>
+
+    <!-- 1. Header（钉选状态徽标） -->
+    <header class="wd-header">
+        <div class="wd-title">
+            <h1>{{ snapshot.name }}</h1>
+            <span class="wd-code">{{ code }}</span>
+            <span class="wd-code">{{ snapshot.sector or '--' }}</span>
+        </div>
+        {% if in_watchlist %}
+        <span class="wd-watchlist-status in">✓ 在池（在池 {{ in_watchlist.review_count|default(1) }} 周）</span>
+        {% else %}
+        <span class="wd-watchlist-status not-in">未在观察池</span>
+        {% endif %}
+    </header>
+
+    <!-- 2. 关键指标快照条 -->
+    <section class="wd-snapshot-bar">
+        <div class="wd-metric"><span class="label">PE</span><span class="value">{{ "%.1f"|format(snapshot.pe) if snapshot.pe is not none else '--' }}</span></div>
+        <div class="wd-metric"><span class="label">PB</span><span class="value">{{ "%.2f"|format(snapshot.pb) if snapshot.pb is not none else '--' }}</span></div>
+        <div class="wd-metric"><span class="label">ROE</span><span class="value">{{ "%.1f"|format(snapshot.roe) if snapshot.roe is not none else '--' }}%</span></div>
+        <div class="wd-metric"><span class="label">营收增</span><span class="value">{{ "%+.1f"|format(snapshot.revenue_growth) if snapshot.revenue_growth is not none else '--' }}%</span></div>
+        <div class="wd-metric"><span class="label">利润增</span><span class="value">{{ "%+.1f"|format(snapshot.profit_growth) if snapshot.profit_growth is not none else '--' }}%</span></div>
+        <div class="wd-metric"><span class="label">市值</span><span class="value">{{ "%.0f"|format(snapshot.market_cap) if snapshot.market_cap is not none else '--' }}亿</span></div>
+        <div class="wd-metric"><span class="label">负债率</span><span class="value">{{ "%.1f"|format(snapshot.debt_ratio) if snapshot.debt_ratio is not none else '--' }}%</span></div>
+        <div class="wd-metric"><span class="label">股息率</span><span class="value">{{ "%.2f"|format(snapshot.dividend_yield) if snapshot.dividend_yield is not none else '--' }}%</span></div>
+    </section>
+
+    <!-- 3. 在池状态卡片（钉选股视图核心差异点） -->
+    {% if in_watchlist %}
+    <section class="wd-pool-card">
+        <div class="wd-wl-row">
+            <span class="label">当前状态</span>
+            <span class="value pos">✓ 在池（在池 {{ in_watchlist.review_count|default(1) }} 周）</span>
+        </div>
+        <div class="wd-wl-row">
+            <span class="label">调入日期</span>
+            <span class="value">{{ in_watchlist.added_at }}</span>
+        </div>
+        {% if in_watchlist.added_reason %}
+        <div class="wd-wl-row">
+            <span class="label">调入理由</span>
+            <span class="value">{{ in_watchlist.added_reason }}</span>
+        </div>
+        {% endif %}
+        {% if in_watchlist.ai_confidence %}
+        <div class="wd-wl-row">
+            <span class="label">AI 置信度</span>
+            <span class="value">{{ in_watchlist.ai_confidence }}</span>
+        </div>
+        {% endif %}
+
+        {% if watchlist_history %}
+        <div class="wd-wl-history">
+            <h3>调入调出历史</h3>
+            <table class="wd-wl-history-table">
+                <thead>
+                    <tr><th>日期</th><th>动作</th><th>原因</th></tr>
+                </thead>
+                <tbody>
+                    {% for wh in watchlist_history %}
+                    <tr>
+                        <td>{{ wh.action_date }}</td>
+                        <td>{{ wh.action }}</td>
+                        <td>{{ wh.reason|default('') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </section>
+    {% else %}
+    <section class="wd-pool-card out">
+        <div class="wd-wl-row">
+            <span class="label">当前状态</span>
+            <span class="value">未在观察池（仅展示公开数据维度）</span>
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 4. 综合评分拆解（透明化：五维子分 + 一致性加分） -->
+    {% if score_detail_parsed %}
+    <section class="wd-score-detail">
+        <div class="wd-sd-head">
+            <span class="wd-sd-total">{{ "%.1f"|format(score_detail_parsed.total) if score_detail_parsed.total is not none else '--' }}</span>
+            <span class="wd-sd-sub">综合评分（五维加权 + 一致性加分）</span>
+        </div>
+        <div class="wd-sd-grid">
+            {% set _w = {'roe': 'ROE', 'pe': '估值', 'growth': '增长', 'debt': '财务', 'margin': '毛利'} %}
+            {% for k, p in score_detail_parsed.items() %}
+                {% if k in ('roe', 'pe', 'growth', 'debt', 'margin') %}
+                <div class="wd-sd-row">
+                    <span class="wd-sd-name">{{ _w[k] }}</span>
+                    <span class="wd-sd-bar"><i style="width:{{ p.sub }}%;"></i></span>
+                    <span class="wd-sd-sub">{{ "%.1f"|format(p.raw) if p.raw is not none else '--' }}</span>
+                    <span class="wd-sd-contrib">+{{ "%.2f"|format(p.contribution) }}</span>
+                </div>
+                {% endif %}
+            {% endfor %}
+            {% if score_detail_parsed.consistency_bonus is not none %}
+            <div class="wd-sd-row wd-sd-consistency">
+                <span class="wd-sd-name">一致性加分</span>
+                <span class="wd-sd-bar"></span>
+                <span class="wd-sd-sub"></span>
+                <span class="wd-sd-contrib">+{{ score_detail_parsed.consistency_bonus }}</span>
+            </div>
+            {% endif %}
+            <div class="wd-sd-row wd-sd-total-row">
+                <span class="wd-sd-name">总分</span>
+                <span class="wd-sd-bar"></span>
+                <span class="wd-sd-sub"></span>
+                <span class="wd-sd-contrib">{{ "%.1f"|format(score_detail_parsed.total) if score_detail_parsed.total is not none else '' }}</span>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 5. 投资人笔记 -->
+    {% if ai_parsed and ai_parsed.analysis %}
+    <section class="wd-section wd-note">
+        <h2 class="wd-section-title">投资人笔记</h2>
+        <div class="wd-note-body">
+            {% for paragraph in ai_parsed.analysis.split('\n') if paragraph.strip() %}
+            <p>{{ paragraph.strip() }}</p>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 6. 交易策略 -->
+    {% if trade_parsed %}
+    <section class="wd-section">
+        <h2 class="wd-section-title">交易策略</h2>
+        <div class="wd-trade">
+            {% if trade_parsed.signal %}
+            <div class="wd-trade-signal">
+                <span class="label">Signal</span>
+                {% set sig = trade_parsed.signal|upper %}
+                <span class="signal-badge signal-{{ sig|lower }}">{{ sig }}</span>
+                {% if trade_parsed.confidence %}
+                <span class="confidence">置信度: {{ trade_parsed.confidence }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if trade_parsed.buy_zone %}
+            <div class="wd-trade-row"><span class="label">买入区间</span><span class="value">{{ trade_parsed.buy_zone }}</span></div>
+            {% endif %}
+            {% if trade_parsed.target_price %}
+            <div class="wd-trade-row"><span class="label">目标价</span><span class="value">{{ trade_parsed.target_price }}</span></div>
+            {% endif %}
+            {% if trade_parsed.stop_loss %}
+            <div class="wd-trade-row"><span class="label">止损价</span><span class="value">{{ trade_parsed.stop_loss }}</span></div>
+            {% endif %}
+            {% if trade_parsed.holding_period %}
+            <div class="wd-trade-row"><span class="label">持有周期</span><span class="value">{{ trade_parsed.holding_period }}</span></div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 7. 历次 AI 分析时间线 -->
+    <section class="wd-section">
+        <h2 class="wd-section-title">历次 AI 分析时间线</h2>
+        {% if analysis_history %}
+        <div class="wd-sd-grid">
+            {% for h in analysis_history %}
+            {% set ai_obj = h.ai_analysis|from_json if h.ai_analysis else {} %}
+            {% set trade_obj = h.ai_trade_strategy|from_json if h.ai_trade_strategy else {} %}
+            {% set signal = (trade_obj.signal|upper) if trade_obj.get('signal') else '' %}
+            <div class="wd-sd-row" style="grid-template-columns: 110px 60px 1fr;">
+                <span class="wd-sd-name">{{ h.analysis_date }}</span>
+                <span>
+                    {% if signal == 'BUY' %}<span class="signal-badge signal-buy" style="font-size:12px;">买入</span>
+                    {% elif signal == 'HOLD' %}<span class="signal-badge signal-hold" style="font-size:12px;">持有</span>
+                    {% elif signal == 'AVOID' %}<span class="signal-badge signal-avoid" style="font-size:12px;">回避</span>
+                    {% else %}<span style="color:var(--text-tertiary);">--</span>{% endif %}
+                </span>
+                <span class="wd-sd-sub" style="text-align:left;">{{ ai_obj.analysis|default(h.ai_analysis)|truncate(100) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="wd-empty">暂无 AI 分析历史</p>
+        {% endif %}
+    </section>
+</div>
+</body>
+</html>

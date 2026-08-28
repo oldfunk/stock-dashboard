@@ -946,64 +946,72 @@ async def api_ai_watchlist_history():
 
 @app.get("/watchlist/{code}")
 async def watchlist_detail(code: str):
-    """钉选股独立分析页面"""
-    # 获取股票基本信息
-    stock = get_stock_by_code(code)
-    if not stock:
-        raise HTTPException(status_code=404, detail="股票不存在")
-    
-    # 获取钉选状态和历史
-    in_watchlist = AiWatchlistDAO().get_by_code(code)
-    watchlist_history = AiWatchlistHistoryDAO().list_by_code(code, limit=20)
-    
-    # 获取分析历史
-    analysis_history = get_analysis_history(code)
-    
-    # 获取最新筛选结果
-    screening_result = ScreeningResultDAO.get_latest_for_code(code)
-    score_detail_parsed = None
-    if screening_result and screening_result.get('score_detail'):
-        try:
-            score_detail_parsed = json.loads(screening_result['score_detail'])
-        except:
-            pass
-    
-    # 获取AI分析结果
+    """钉选股独立分析页面 — 复用 stock_detail 的取数模式，统一数据接口"""
+    import re
+    if not re.match(r"^\d{6}$", code):
+        raise HTTPException(status_code=404, detail="Invalid code")
+
+    from src.models.database import (
+        StockSnapshotDAO, StockAnalysisHistoryDAO,
+        FinancialHistoryDAO, FinancialSummaryDAO, ScreeningResultDAO,
+    )
+
+    # 1. 基础快照 — 没有则 404
+    snapshot = StockSnapshotDAO().get_by_code(code)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    # 2. 实时行情缓存
+    realtime = get_realtime_cache()
+    realtime_data = realtime.get(code, {})
+
+    # 3. 历次 AI 分析时间线（按日期倒序）
+    analysis_history = StockAnalysisHistoryDAO().get_history(code, limit=20)
+
+    # 4. 最新 AI 分析（用于投资人笔记/护城河/估值/交易策略）
+    latest_analysis = StockAnalysisHistoryDAO().get_latest_for_code(code)
     ai_parsed = None
     trade_parsed = None
-    if screening_result and screening_result.get('ai_analysis'):
+    if latest_analysis and latest_analysis.get("ai_analysis"):
         try:
-            ai_obj = json.loads(screening_result['ai_analysis'])
-            ai_parsed = ai_obj
-            if ai_obj.get('trade_strategy'):
-                trade_parsed = json.loads(ai_obj['trade_strategy'])
-        except:
-            pass
-    
-    # 获取财务摘要
-    financial_summary = None
-    fs_dao = FinancialSummaryDAO()
-    fs_data = fs_dao.get(code)
-    if fs_data:
-        financial_summary = {k: v for k, v in fs_data.items() 
-                          if k not in ('stock_code', 'updated_at') and v is not None}
-    
-    # 获取年度报告
-    annual_reports = get_annual_reports(code)
-    
-    # 获取K线数据
-    kline_data = None
-    try:
-        kline_response = requests.get(f"{BASE_API}/stock/{code}/kline?period=daily")
-        if kline_response.status_code == 200:
-            kline_data = kline_response.json()
-    except:
-        pass
-    
+            ai_parsed = json.loads(latest_analysis["ai_analysis"])
+        except (json.JSONDecodeError, TypeError):
+            ai_parsed = None
+    if latest_analysis and latest_analysis.get("ai_trade_strategy"):
+        try:
+            trade_parsed = json.loads(latest_analysis["ai_trade_strategy"])
+        except (json.JSONDecodeError, TypeError):
+            trade_parsed = None
+
+    # 5. 最新一轮筛选评分拆解（透明化：五维子分 + 一致性加分）
+    sr_latest = ScreeningResultDAO().get_latest_for_code(code)
+    score_detail_parsed = None
+    if sr_latest and sr_latest.get("score_detail"):
+        try:
+            score_detail_parsed = (json.loads(sr_latest["score_detail"])
+                                   if isinstance(sr_latest["score_detail"], str)
+                                   else sr_latest["score_detail"])
+        except (json.JSONDecodeError, TypeError):
+            score_detail_parsed = None
+
+    # 6. 动态财务历史（年报，最新在前）
+    annual_reports = FinancialHistoryDAO().get_annual_reports(code)
+    financial_summary = FinancialSummaryDAO().get(code)
+
+    # 7. 在池状态（如在池）
+    in_watchlist = AiWatchlistDAO().get_by_code(code)
+    watchlist_history = []
+    if in_watchlist:
+        watchlist_history = AiWatchlistHistoryDAO().list_by_code(code, limit=20)
+
+    page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
+
     return templates.TemplateResponse("watchlist_detail.html", {
         "request": request,
+        "page_title": page_title,
         "code": code,
-        "stock": stock,
+        "snapshot": snapshot,
+        "realtime": realtime_data,
         "in_watchlist": in_watchlist,
         "watchlist_history": watchlist_history,
         "analysis_history": analysis_history,
@@ -1012,9 +1020,7 @@ async def watchlist_detail(code: str):
         "trade_parsed": trade_parsed,
         "financial_summary": financial_summary,
         "annual_reports": annual_reports,
-        "kline_data": kline_data,
-        "snapshot": get_market_snapshot(),
-        "page_title": f"{stock['name']} {code} - 钉选股分析"
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
 
