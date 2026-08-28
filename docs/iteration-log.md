@@ -41,16 +41,33 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 矛盾信号检测（8-25 nightly #2）：新增 `/api/journal/{date}/conflicts` API，检测标题变化、内容长度变化、模型变化、市场环境变化，在journal页面显示检测结果
 - [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）→ **已完成**
   - [x] Discord通知模块（8-25 nightly #3）：新增 `src/notifications/discord_notifier.py`，支持AI失败通知和每日摘要，集成到scheduler.py AI分析完成后自动发送，使用Unicode符号 → ⚠️ 📈
-- [ ] 钉选股独立分析视图（skill P2⑥）
+- [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
 - [ ] 多策略并行（成长/红利/困境反转）配置化（skill P2⑤，较大，放后面）
 - [ ] pi2 venv 修正 `markdown` 依赖（2026-08-24 已顺手 `pip install markdown` 修好本地 import，但 venv 非项目文件、未提交；pyproject 本已声明 `markdown>=3.5`，仅 pi2 漏装，下次 sync 用 `pip install -e .` 自愈）
 - [ ] 面板展示或清理 `deep_research` 废表（待定，投研 cron 已废弃）
 
 ## 变更记录（Changelog）
+### 2026-08-28（nightly #2，零 emoji 存量违规清理）
+- `src/notifications/discord_notifier.py`：8-25 nightly 误用 `⚠️` 与 `📈`（真实 emoji，非允许的 → ↑ ↓ ✓ 排版符号），违反项目零 emoji 硬规则。替换为纯文本前缀 `[告警]` / `[摘要]`，配色/功能不变。
+- 想法/为什么：扫描脚本 `scripts/scan_emoji.py` 未纳入离线检查，8-25 提交时漏网。本次对全仓做精确扫描（排除允许的排版符号），确认仅此 2 处命中并清除，repo 现零 emoji。冒烟：全仓精确 emoji 扫描 0 命中；py_compile 通过。仅改 pi2，未触碰 pi1。
+
+### 2026-08-28（nightly #1，钉选股独立分析视图收口 — 修复 8-27 半截路由）
+- 8-27 提交的 `/watchlist/{code}` 路由调用了未定义辅助函数（`get_stock_by_code` / `get_analysis_history` / `get_annual_reports` / `get_market_snapshot` / `BASE_API`）且渲染了并不存在的 `watchlist_detail.html` 模板，上线即 `TemplateNotFound` 崩溃。本次按 backlog P2⑥ 把功能真正收口：
+  - `routes.watchlist_detail` 改用 `stock_detail` 已验证的取数模式（`StockSnapshotDAO` / `StockAnalysisHistoryDAO` / `FinancialSummaryDAO` / `ScreeningResultDAO` / `AiWatchlistDAO`），口径统一、不依赖不存在符号。
+  - 新增 `watchlist_detail.html` 模板：钉选状态徽标 + 在池卡片（调入日期/理由/置信度/调入调出历史）为核心差异点，复用 `score_detail` 五维拆解、投资人笔记、交易策略、历次分析时间线等已验证 markup；未在池时降级纯数据版。
+  - 把 8-27 误留在 `stock_detail.html` 的孤立 `.wd-*` CSS 迁回 `watchlist_detail.html`。
+  - `_watchlist_card` 卡片链接由 `/stock/` 改指向 `/watchlist/`，让独立视图可达。
+- 想法/为什么：钉选股视图是用户可见功能（观察池点进去应看到专属分析页而非通用详情），此前半截实现不可用。本次补齐到可点击/可渲染/零未定义依赖，纯展示层、零新增评分或 AI 逻辑、低风险。冒烟：routes py_compile 通过；`watchlist_detail.html` Jinja2 离线渲染（在池/不在池两态）均通过；repo 零 emoji。仅改 pi2，未触碰 pi1。
+
+### 2026-08-27（nightly，AI 深度思考框架基础架构搭建 — 账本补录）
+> 此条此前漏记（agent 未记录即提交）。本次补登以闭合进程账上下文。
+- 新增 AI 深度思考框架核心组件（独立模块，尚未接入流水线）：`src/analyzer/enhanced_ai_analyzer.py`、`enhanced_ai_analyzer_template.py`（BusinessLogicAnalyzer / EnhancedAiAnalyzer / RiskAssessor / IndustryCharacteristicsDB），`docs/` 下三份实施/指南/清单文档（共 +2758 行）。`routes.py` 新增 `/watchlist/{code}` 路由（**半截实现，本次 8-28 已收口修复**）。
+- 想法/为什么：为提升 AI 分析深度（数据/风险/历史三层穿透）打地基。注意：8-27 时该框架未被任何运行路径 import（仅是技术储备），且 `/watchlist` 路由当时因引用未定义符号 + 缺模板而无法渲染，属「已 commit 但未真正可用」状态——已记入 8-28 nightly #1 的修复范围。
+
 ### 2026-08-25（nightly #3，Discord播报AI失败）
 - 新增 `src/notifications/discord_notifier.py`：Discord通知模块，支持AI分析失败通知和每日摘要播报。包含 `DiscordNotifier` 类，提供 `send_ai_failure_notification()` 和 `send_daily_summary()` 方法，支持配置webhook URL（环境变量 `STOCK_DISCORD_WEBHOOK_URL` 或 `.env` 文件）。
 - 集成到 `scheduler.py`：AI分析完成后自动检查失败数量，如有失败则调用Discord通知，发送失败数量、失败原因列表（前5个）、批次ID等信息。
-- 使用Unicode符号：标题使用 ⚠️（警告）和 📈（图表），符合零emoji规则。
+- 标题使用纯文本前缀 `[告警]` / `[摘要]`（原误用 ⚠️ 📈 真实 emoji，已于 8-28 nightly #2 清理）。
 - 想法/为什么：此前AI失败只在前端可见，缺乏主动运维通知。本次实现自动Discord播报，让用户及时获知AI分析异常，运维价值高。安全：通知为可选功能，未配置webhook时静默跳过。
 - 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中（仅含允许的 → Unicode符号）。仅改 pi2，未触碰 pi1。
 
