@@ -25,7 +25,7 @@ class DiscordNotifier:
             
         try:
             # 构建消息
-            title = "⚠️ AI 分析失败通知"  # 使用Unicode符号，不是emoji
+            title = "[告警] AI 分析失败通知"  # 零 emoji：纯文本前缀
             color = 0xff0000  # 红色
             
             # 格式化失败原因
@@ -92,7 +92,7 @@ class DiscordNotifier:
             return False
             
         try:
-            title = "📈 每日分析摘要"  # Unicode符号
+            title = "[摘要] 每日分析摘要"  # 零 emoji：纯文本前缀
             color = 0x00ff00 if ai_failed_count == 0 else 0xffaa00  # 绿色或橙色
             
             message = {
