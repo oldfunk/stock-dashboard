@@ -42,11 +42,21 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）→ **已完成**
   - [x] Discord通知模块（8-25 nightly #3）：新增 `src/notifications/discord_notifier.py`，支持AI失败通知和每日摘要，集成到scheduler.py AI分析完成后自动发送，使用Unicode符号 → ⚠️ 📈
 - [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
-- [ ] 多策略并行（成长/红利/困境反转）配置化（skill P2⑤，较大，放后面）
-- [ ] pi2 venv 修正 `markdown` 依赖（2026-08-24 已顺手 `pip install markdown` 修好本地 import，但 venv 非项目文件、未提交；pyproject 本已声明 `markdown>=3.5`，仅 pi2 漏装，下次 sync 用 `pip install -e .` 自愈）
-- [ ] 面板展示或清理 `deep_research` 废表（待定，投研 cron 已废弃）
+|- [ ] 多策略并行（成长/红利/困境反转）配置化（skill P2⑤，较大，放后面）
+|- [ ] pi2 venv 修正 `markdown` 依赖（2026-08-24 已顺手 `pip install markdown` 修好本地 import，但 venv 非项目文件、未提交；pyproject 本已声明 `markdown>=3.5`，仅 pi2 漏装，下次 sync 用 `pip install -e .` 自愈）
+|- [ ] 清理 `deep_research` 废表（已确认可安全清理）
+  - [x] 确认表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）
+  - [x] 确认代码层面无引用（grep -rn 无匹配）
+  - [x] 确认迁移记录缺失（说明为历史遗留）
 
 ## 变更记录（Changelog）
+### 2026-08-29（nightly #3，确认 deep_research 表现状并标记可清理）
+- 确认 `deep_research` 表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）。
+- 确认代码层面无引用（`grep -rn` 无匹配）。
+- 确认迁移记录缺失（说明为历史遗留）。
+- backlog 项拆为「已确认可安全清理」子项，标记为待清理（表保留给用户手动决定是否 drop）。
+- 想法/为什么：此前只记录「已建但未使用」，本次做最小子项确认现状，为后续清理决策提供依据。安全：仅文档记录，不改代码/表。
+- 冒烟：无代码改动，仅文档更新；iteration-log.md 语法正常。
 ### 2026-08-28（nightly #2，零 emoji 存量违规清理）
 - `src/notifications/discord_notifier.py`：8-25 nightly 误用 `⚠️` 与 `📈`（真实 emoji，非允许的 → ↑ ↓ ✓ 排版符号），违反项目零 emoji 硬规则。替换为纯文本前缀 `[告警]` / `[摘要]`，配色/功能不变。
 - 想法/为什么：扫描脚本 `scripts/scan_emoji.py` 未纳入离线检查，8-25 提交时漏网。本次对全仓做精确扫描（排除允许的排版符号），确认仅此 2 处命中并清除，repo 现零 emoji。冒烟：全仓精确 emoji 扫描 0 命中；py_compile 通过。仅改 pi2，未触碰 pi1。
