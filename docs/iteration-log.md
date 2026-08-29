@@ -6,12 +6,12 @@
 ## 项目定位
 A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情。代码真相源 = GitHub `origin/main`，pi1 从 origin 拉取部署。pi2 仅作开发/迭代副本，**不运行服务**（省 Hermes 进程资源）。
 
-## 当前真实状态（2026-08-21）
+## 当前真实状态（2026-08-29）
 - 每日筛选 5527 → 20 候选：正常，周一至周五 15:30 由 `scheduler.py` 触发。
 - AI 分析：已提频至**每日**（原仅周五），随每日流水线触发，走 `FreeModelPool`（-free 模型自动发现+轮换）。
 - 实时行情/大盘：每 5 分钟更新，正常。
 - 周六复盘系统：`ai_watchlist` / `ai_journal` / `ai_watchlist_history` 在用，链路正常。
-- `deep_research` 表：已建但**当前未使用**（原 Hermes 投研 cron 已废弃，勿依赖）。
+- `deep_research` 表：已建但**当前未使用**（原 Hermes 投研 cron 已废弃，勿依赖）。表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成），代码层面无引用（`grep -rn` 无匹配），迁移记录缺失（说明为历史遗留）。
 - 已知隐患 `with_roe` UnboundLocalError：已修（提前初始化为 0）。
 - pi2 开发 venv：`markdown` 依赖错装为 `markdown-it-py`，本地 `import src.web.routes` 失败——agent 改完代码后用 **ssh pi1** 做冒烟测试，不要依赖 pi2 venv。
 - 面板核心短板：**分析深度浅 + 评分不透明**。功能迭代优先补这两块，而非堆 UI。
