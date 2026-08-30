@@ -36,20 +36,29 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 后端半：screening_result 新增 `ai_failed`(INTEGER) + `ai_failure_reason`(TEXT) + 迁移 + `mark_ai_failure()` + `update_ai_analysis` 成功清标记 + `_save_failure` 传原因（无 Key / 模型返回空·全部不可用）+ `AiAnalyzer._last_error`
   - [x] 前端半：routes 下发 `ai_failed`/`ai_failure_reason`；`_stock_list.html` 无分析且失败时显示红色「AI 未分析」徽标（hover 具体原因）；index/candidates 补 `.stock-ai-fail` 样式
 - [x] 零 emoji 存量违规清理（2026-08-24 nightly #3）：修掉 `_stock_list.html` 历史按钮 `&#128214;`（📖 实体 emoji），仅留纯文字「历史分析 (N次)」
-- [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）→ **已完成**
+|- [ ] AI 笔记增强：历史笔记对比 + 矛盾信号检测（skill P1②）→ **已完成**
   - [x] 历史笔记对比功能（8-25 nightly #1）：新增 `/journal/compare/{date1}/{date2}` 路由、`journal_compare.html` 对比页面、`AiJournalDAO.get_previous/get_next` 方法、journal.html 对话框选择功能，支持两期笔记并排对比
   - [x] 矛盾信号检测（8-25 nightly #2）：新增 `/api/journal/{date}/conflicts` API，检测标题变化、内容长度变化、模型变化、市场环境变化，在journal页面显示检测结果
-- [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）→ **已完成**
+|- [ ] Discord 播报 AI 失败（已有落库，下次接 nightly 简报或 scheduler 失败通知）→ **已完成**
   - [x] Discord通知模块（8-25 nightly #3）：新增 `src/notifications/discord_notifier.py`，支持AI失败通知和每日摘要，集成到scheduler.py AI分析完成后自动发送，使用Unicode符号 → ⚠️ 📈
-- [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
-|- [ ] 多策略并行（成长/红利/困境反转）配置化（skill P2⑤，较大，放后面）
-|- [ ] pi2 venv 修正 `markdown` 依赖（2026-08-24 已顺手 `pip install markdown` 修好本地 import，但 venv 非项目文件、未提交；pyproject 本已声明 `markdown>=3.5`，仅 pi2 漏装，下次 sync 用 `pip install -e .` 自愈）
+|- [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
+||- [x] 多策略配置结构搭建（backlog 第 45 项拆细）：在 `config/strategies.yaml` 定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利等），为后续多策略打地基（不接入流水线）
+||- [x] pi2 venv 修正 `markdown` 依赖（backlog 第 46 项）：已安装（`.venv/bin/pip install markdown`），本地 import 已验证通过
 |- [ ] 清理 `deep_research` 废表（已确认可安全清理）
   - [x] 确认表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）
   - [x] 确认代码层面无引用（grep -rn 无匹配）
   - [x] 确认迁移记录缺失（说明为历史遗留）
+  - [ ] 待执行 drop 脚本（用户手动决定是否 drop）
 
 ## 变更记录（Changelog）
+### 2026-08-30（nightly #4，多策略配置结构 + deep_research 清理记录）
+|- 新增 `config/strategies.yaml`：定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利、股息率等），为后续多策略并行打地基（不接入流水线）。
+|- 更新 `docs/iteration-log.md`：标记 backlog 第 45/46 项完成，deep_research 表清理拆为「待执行 drop 脚本」子项（用户手动决定是否 drop）。
+|- pi2 venv 验证：`markdown` 已安装，本地 import 已验证通过（`.venv/bin/python -c "import src.web.routes"`）。
+- 想法/为什么：
+  - 多策略配置结构是 backlog 第 45 项的拆细子项，先搭配置文件，为后续接入流水线打地基（不碰生产逻辑）。
+  - deep_research 表清理 backlog 第 47 项已确认可安全清理，本次只记录「待执行 drop 脚本」，不实际 drop，让用户决定是否执行。
+- 冒烟：`python3 -c "import yaml; print(yaml.safe_load(open('config/strategies.yaml')))"` 通过；`config/strategies.yaml` 语法正常；pi2 venv `python3 -c "import src.web.routes"` 通过。
 ### 2026-08-29（nightly #3，确认 deep_research 表现状并标记可清理）
 - 确认 `deep_research` 表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）。
 - 确认代码层面无引用（`grep -rn` 无匹配）。

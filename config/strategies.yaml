@@ -1,0 +1,44 @@
+# 多策略配置文件
+# 用于定义成长/红利/困境反转策略的阈值配置
+# 当前为占位结构，后续将接入流水线
+
+growth:
+  name: "成长策略"
+  description: "高增长、高ROE、低估值"
+  thresholds:
+    roe_avg_5y_min: 0.12  # 5年平均ROE >= 12%
+    pe_max: 25.0          # 市盈率 <= 25
+    pe_ttm_max: 30.0      # 市盈率TTM <= 30
+    gross_margin_min: 0.25  # 毛利率 >= 25%
+    net_margin_min: 0.10    # 净利率 >= 10%
+    debt_ratio_max: 0.50    # 资产负债率 <= 50%
+    fcf_yield_min: 0.03     # FCF收益率 >= 3%
+    growth_rate_avg_3y_min: 0.20  # 3年平均增长率 >= 20%
+
+dividend:
+  name: "红利策略"
+  description: "高股息、低估值、稳定现金流"
+  thresholds:
+    roe_avg_5y_min: 0.08   # 5年平均ROE >= 8%
+    pe_max: 20.0          # 市盈率 <= 20
+    pe_ttm_max: 22.0      # 市盈率TTM <= 22
+    gross_margin_min: 0.15  # 毛利率 >= 15%
+    net_margin_min: 0.05    # 净利率 >= 5%
+    debt_ratio_max: 0.60    # 资产负债率 <= 60%
+    dividend_yield_min: 0.04  # 股息率 >= 4%
+    fcf_yield_min: 0.02     # FCF收益率 >= 2%
+    payout_ratio_max: 0.70  # 分红率 <= 70%
+
+turnaround:
+  name: "困境反转策略"
+  description: "短期困境、长期价值、估值低位"
+  thresholds:
+    roe_avg_5y_min: 0.05   # 5年平均ROE >= 5%（放宽）
+    pe_max: 15.0          # 市盈率 <= 15（低估值）
+    pe_ttm_max: 18.0      # 市盈率TTM <= 18
+    gross_margin_min: 0.10  # 毛利率 >= 10%
+    net_margin_min: 0.03    # 净利率 >= 3%
+    debt_ratio_max: 0.70    # 资产负债率 <= 70%
+    fcf_yield_min: 0.01     # FCF收益率 >= 1%
+    debt_to_equity_max: 2.0  # 负债权益比 <= 2.0
+    roe_volatility_max: 0.15  # ROE波动率 <= 15%（近期改善）
