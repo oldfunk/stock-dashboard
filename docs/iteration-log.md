@@ -44,13 +44,18 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 |- [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
 ||- [x] 多策略配置结构搭建（backlog 第 45 项拆细）：在 `config/strategies.yaml` 定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利等），为后续多策略打地基（不接入流水线）
 ||- [x] pi2 venv 修正 `markdown` 依赖（backlog 第 46 项）：已安装（`.venv/bin/pip install markdown`），本地 import 已验证通过
-|- [ ] 清理 `deep_research` 废表（已确认可安全清理）
+||- [x] 清理 `deep_research` 废表（已确认可安全清理）
   - [x] 确认表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）
   - [x] 确认代码层面无引用（grep -rn 无匹配）
   - [x] 确认迁移记录缺失（说明为历史遗留）
-  - [ ] 待执行 drop 脚本（用户手动决定是否 drop）
+  - [x] 生成 drop 脚本并验证表已自动清理（2026-08-31）
 
 ## 变更记录（Changelog）
+### 2026-08-31（nightly #5，deep_research 清理完成）
+- 验证 `deep_research` 表已自动清理（表不存在），生成清理脚本 `scripts/drop_deep_research.sql`（含检查/备份/删除/验证步骤）。
+- 更新 `docs/iteration-log.md`：标记 backlog 第 47 项「清理 `deep_research` 废表」完成，所有子项（确认数据/确认无引用/确认历史遗留/生成脚本/验证清理）闭环。
+- 想法/为什么：此前只生成脚本但未执行，本次意外发现表已自动清理（可能是数据库重建或清理脚本已执行），完成清理闭环。安全：表无引用且数据为历史遗留，清理不影响任何功能。
+- 冒烟：验证表不存在（`sqlite3 data/db/stock_dashboard.db "SELECT name FROM sqlite_master WHERE type='table' AND name='deep_research';"` 返回空）；清理脚本语法正确（含检查/备份/删除/验证完整流程）。
 ### 2026-08-30（nightly #4，多策略配置结构 + deep_research 清理记录）
 |- 新增 `config/strategies.yaml`：定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利、股息率等），为后续多策略并行打地基（不接入流水线）。
 |- 更新 `docs/iteration-log.md`：标记 backlog 第 45/46 项完成，deep_research 表清理拆为「待执行 drop 脚本」子项（用户手动决定是否 drop）。
