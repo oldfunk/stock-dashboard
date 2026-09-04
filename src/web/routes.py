@@ -1006,8 +1006,7 @@ async def watchlist_detail(request: Request, code: str):
 
     page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
 
-    return templates.TemplateResponse("watchlist_detail.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "watchlist_detail.html", {
         "page_title": page_title,
         "code": code,
         "snapshot": snapshot,
