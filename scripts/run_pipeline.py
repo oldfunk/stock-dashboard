@@ -42,6 +42,15 @@ for s in top_stocks[:10]:
     logger.info(f'  score={s["score"]} {s["code"]} {s["name"]:10s} '
                 f'PE={s.get("pe")} ROE={s.get("roe")}%')
 
+# ── 4.5 估值验算闸 B1（Decimal 独立验算，只告警不阻断）──
+try:
+    from scripts.verify_valuation import verify_run as _verify_run
+    _vr = _verify_run(run_id)
+    logger.info(f'验算闸: {run_id} 通过={_vr["pass"]} '
+                f'告警={_vr["warn"]} 失败={_vr["fail"]} 跳过={_vr["skip"]}')
+except Exception as vr_err:
+    logger.warning(f'验算闸异常（不影响后续）: {vr_err}')
+
 # ── 5. 大盘指数（统一走腾讯源，与调度器一致）──
 try:
     indices = fetch_market_index()

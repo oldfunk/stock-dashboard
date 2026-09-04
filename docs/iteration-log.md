@@ -85,7 +85,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 生成 drop 脚本并验证表已自动清理（2026-08-31）
 
 ## Berkshire 填补排期（2026-09-04 设立，按序执行，对应顶部目标 M1→M3）
-- [ ] B1 估值验算闸 P0（排期 9-05/06）：移植 Berkshire financial_rigor 轻量版 `scripts/verify_valuation.py`（Decimal 算市值/PE/ROE/FCF + 双源交叉，超容差告警落库），接入采集后检查。验收：20 候选全量验算通过率 + 告警样本。
+- [x] B1 估值验算闸 P0（2026-09-04 人工完成）：scripts/verify_valuation.py + 单测 12 passed + run_pipeline 4.5 接入；pi1 实测 20/20 通过。V1 待 B8 启用，V2 为宽口径极端值捕捉。
+- [ ] B8 financial_history.total_shares 落库修复 P1（B1 实测暴露：全表 64015 行全 NULL，akshare_fetcher 705 行赋值路径没跑通；修好后 V1 市值独立验算真正启用）。
 - [ ] B2 强制结论三态 P0（排期 9-07 起）：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间，前端纪律展示。验收：prompt 样本 diff + 新路由真机 curl（D4/D5）。
 - [ ] B3 成长 α 纪律 P1：strategies.yaml growth 按 era-alpha 三标准（定价权/壁垒/增长质量）+ 估值锚（PE 超历史均值 3σ 减仓）+ 拐点清单细化。
 - [ ] B4 豁免细化 P1：对照 quality-screen A/B/C 三豁免，补战略投入期与高周转薄利（Costco 类）条款，附等价样本。
@@ -94,6 +95,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
 
 ## 变更记录（Changelog）
+### 2026-09-04（B1 估值验算闸，人工主动推进）
+- 计划：移植 Berkshire financial_rigor 轻量版为 scripts/verify_valuation.py（stdlib only，零 emoji）：Decimal 市值独立验算（现价×年报总股本/1e8 vs 快照市值）+ PE/PB 复算 + 快照/筛选表交叉，批量跑最新 run，JSON 报告落 data/，有 FAIL 则 exit 1；verify_run() 供 run_pipeline 采集后调用（try/except 包裹，永不阻断管线）；附单测。验收：py_compile + 单测 + pi1 只读实测 20 候选通过率。
+- 完成：实测修了两处自己人的错——①初版 V2 用季报单期 EPS 对 TTM PE，19 个系统性 FAIL，改为年报行 + 宽口径（>100% 告警、>300%/符号矛盾失败）；②total_shares 全表 64015 行全 NULL，V1 现只能 SKIP（见 B8）。终测 pi1 最新轮 20/20 通过，单测 12 passed，全仓 153 passed（3 个失败为 pre-existing，干净树复现）。
+- 接入：run_pipeline 步骤 4.5 已调 verify_run，只告警不阻断，下周一 15:30 管线自动带上。
 ### 2026-09-04（Berkshire 填补排期 + 夜间方向约束 D1–D7）
 - 设立目标与发展框架（六层架构 + M1/M2/M3 里程碑）与 Berkshire 填补排期 B1→B5；方向约束 D1–D7 同步写入 skill，今晚 nightly 生效。
 - 夜间迭代复盘结论：透明化与期刊达预期，分析深度零进展（ nightly 在舒适区打转），故加约束。详见 skill D1–D7。
