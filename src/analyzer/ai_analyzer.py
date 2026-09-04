@@ -322,7 +322,9 @@ class FreeModelPool:
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self._pool: list[str] = []        # 当前可用模型列表（按偏好排序）
-        self._dead: set[str] = set()      # 本轮已标记为不可用的模型
+        self._dead: dict[str, float] = {}  # 模型 -> 复活时间戳（TTL，见 mark_dead）
+        self._stats: dict[str, dict] = {}  # 模型 -> {ok,fail,timeouts,lat_sum,n_lat}
+        self._dead_ttl = 1800             # 黑名单 TTL（秒），到期自动复活
         self._current = 0                 # 轮换游标
         self._last_refresh = 0.0
         self._refresh_interval = 1800     # 30 秒刷新（首次会立即刷新）
@@ -331,36 +333,81 @@ class FreeModelPool:
     # ── 公开接口 ──
 
     def acquire(self) -> Optional[str]:
-        """获取一个当前可用的模型。如果全部不可用，强制刷新后重试。"""
+        """性能加权获取：存活模型中得分最高者；同分按游标轮转防饿死。
+        全部在黑名单则清空并强制刷新后重试。"""
         now = time.time()
         if now - self._last_refresh > self._refresh_interval or not self._pool:
             self._refresh()
-
-        # 在池中找一个不在黑名单的
-        for _ in range(len(self._pool) + 1):
-            if not self._pool:
-                break
-            idx = self._current % len(self._pool)
-            self._current = idx + 1
-            model = self._pool[idx]
-            if model not in self._dead:
-                return model
-
-        # 全死了 → 强制刷新并清空黑名单
-        self._logger.warning("[FreeModelPool] 全部模型已下线，强制刷新列表")
+        model = self._pick_alive(now)
+        if model is not None:
+            return model
+        self._logger.warning("[FreeModelPool] 全部模型在黑名单内，清空并强制刷新")
         self._dead.clear()
         self._current = 0
         self._refresh()
-        return self._pool[0] if self._pool else None
+        return self._pick_alive(time.time())
 
-    def mark_dead(self, model: str):
-        """标记一个模型为不可用（本次分析周期不再尝试）。"""
-        if model in self._dead:
-            return
-        self._dead.add(model)
-        alive = len(self._pool) - len(self._dead)
+    def _alive(self, now=None) -> list[str]:
+        """当前存活模型（黑名单未到期者）。"""
+        now = now if now is not None else time.time()
+        return [m for m in self._pool if self._dead.get(m, 0.0) <= now]
+
+    def _pick_alive(self, now=None) -> Optional[str]:
+        """存活者中选最高分；同分按游标起点先见者胜（同分轮转）。"""
+        alive = set(self._alive(now))
+        if not alive or not self._pool:
+            return None
+        n = len(self._pool)
+        start = self._current % n
+        best, best_score = None, None
+        for i in range(n):
+            m = self._pool[(start + i) % n]
+            if m not in alive:
+                continue
+            s = self.score(m)
+            if best is None or s > best_score:
+                best, best_score = m, s
+        if best is not None:
+            self._current = (self._pool.index(best) + 1) % n
+        return best
+
+    def mark_dead(self, model: str, ttl: float = None):
+        """标记模型不可用至 now+ttl（默认 30 分钟），到期自动复活。
+        反复触发会延长禁闭。"""
+        self._dead[model] = time.time() + (ttl if ttl is not None else self._dead_ttl)
+        alive = len(self._alive())
         self._logger.warning(
-            "[FreeModelPool] %s 下线（剩余 %d 个候选）", model, alive)
+            "[FreeModelPool] %s 下线 %.0f 分钟（剩余 %d 个候选）",
+            model, (ttl if ttl is not None else self._dead_ttl) / 60, alive)
+
+    def record_result(self, model: str, ok: bool, latency: float = None,
+                      timeout: bool = False):
+        """记录一次调用结局：成功（含延迟）/失败/超时，用于性能加权。"""
+        st = self._stats.setdefault(
+            model, {'ok': 0, 'fail': 0, 'timeouts': 0, 'lat_sum': 0.0, 'n_lat': 0})
+        if ok:
+            st['ok'] += 1
+            if latency is not None and latency >= 0:
+                st['lat_sum'] += float(latency)
+                st['n_lat'] += 1
+        else:
+            st['fail'] += 1
+        if timeout:
+            st['timeouts'] += 1
+
+    def score(self, model: str) -> float:
+        """性能分：Laplace 平滑成功率 − 超时惩罚 − 延迟惩罚。
+        无记录的新模型得中性先验 0.5，保证试用机会。"""
+        st = self._stats.get(model)
+        if st is None:
+            return 0.5
+        n = st['ok'] + st['fail']
+        rate = (st['ok'] + 2) / (n + 4)
+        timeout_pen = 0.1 * st['timeouts'] / (n + 1)
+        lat_pen = 0.0
+        if st['n_lat']:
+            lat_pen = 0.3 * min(st['lat_sum'] / st['n_lat'], 240.0) / 240.0
+        return rate - timeout_pen - lat_pen
 
     def current_pool(self) -> list[str]:
         """返回当前模型池快照（用于日志/展示）。"""
@@ -406,8 +453,8 @@ class FreeModelPool:
                     seen.add(m)
 
             self._pool = ordered
-            # 从黑名单中移除已不在池中的模型
-            self._dead &= set(self._pool)
+            # 剪掉已不在池中的黑名单条目（过期条目由 _alive 自然忽略）
+            self._dead = {m: t for m, t in self._dead.items() if m in self._pool}
             self._current = 0
             self._logger.info(
                 "[FreeModelPool] 发现 %d 个免费模型: %s",
@@ -418,7 +465,7 @@ class FreeModelPool:
                 "[FreeModelPool] 刷新失败: %s，使用已有缓存", e)
 
     def __repr__(self):
-        alive = len(self._pool) - len(self._dead)
+        alive = len(self._alive())
         return f"FreeModelPool({alive}/{len(self._pool)} alive)"
 
 
@@ -477,6 +524,9 @@ class AiAnalyzer:
         self._last_error: Optional[str] = None
         # 批内固定模型：一批分析（analyze_batch 一次调用）复用同一模型，失败才轮换
         self._batch_model: Optional[str] = None
+        # 同一模型连续 429 计数（_note_429 用，3 次即轮换）
+        self._consecutive_429 = 0
+        self._last_429_model: Optional[str] = None
 
     @property
     def configured(self) -> bool:
@@ -588,7 +638,7 @@ class AiAnalyzer:
         之后重新 acquire 换下一个——保证单批 20 只质量一致，批间自动轮换。
         """
         if self._pool:
-            if self._batch_model and self._batch_model not in self._pool._dead:
+            if self._batch_model and self._batch_model in self._pool._alive():
                 return self._batch_model
             model = self._pool.acquire()
             if model:
@@ -597,13 +647,23 @@ class AiAnalyzer:
             logger.warning("[AI分析] 模型池无可用模型，回退到配置值: %s", self.model)
         return self.model
 
-    def _mark_model_dead(self, model: str):
-        """标记模型不可用（仅对池中的免费模型生效）。"""
+    def _mark_model_dead(self, model: str, timeout: bool = False):
+        """标记模型不可用（仅对池中的免费模型生效），同时记一笔失败战绩。"""
         if self._pool:
             self._pool.mark_dead(model)
+            self._pool.record_result(model, ok=False, timeout=timeout)
             # 批内固定模型死亡 → 解除固定，下次 _resolve_model 重新 acquire
             if self._batch_model == model:
                 self._batch_model = None
+
+    def _note_429(self, model: str) -> bool:
+        """记录一次 429。同一模型连续 3 次则返回 True（应轮换），否则 False。
+        纯计数逻辑，可单测；换模型自动清零。"""
+        if model != self._last_429_model:
+            self._last_429_model = model
+            self._consecutive_429 = 0
+        self._consecutive_429 += 1
+        return self._consecutive_429 >= 3
 
     def _call_llm(self, prompt: str) -> tuple[Optional[str], Optional[str], Optional[dict]]:
         """调用 LLM API，使用 BACKOFF_SCHEDULE 做 20 次退避重试。
@@ -625,6 +685,7 @@ class AiAnalyzer:
         consecutive_timeouts = 0
 
         for attempt in range(max_retries):
+            t0 = time.monotonic()
             payload = {
                 'model': current_model,
                 'messages': [
@@ -669,6 +730,12 @@ class AiAnalyzer:
                         }
                     except Exception:
                         usage = None
+                    if self._pool:
+                        self._pool.record_result(
+                            current_model, ok=True,
+                            latency=time.monotonic() - t0)
+                    self._consecutive_429 = 0
+                    self._last_429_model = None
                     return content, current_model, usage
 
                 # ── 非 200 状态码 ──
@@ -680,6 +747,15 @@ class AiAnalyzer:
                         "[AI分析] HTTP %d (%s), 已轮换至新模型", resp.status_code, current_model)
                 elif resp.status_code == 429:
                     self._log_rate_limit(resp, attempt, max_retries)
+                    if self._note_429(current_model):
+                        logger.warning(
+                            "[AI分析] 连续限流 3 次(%s)，轮换模型", current_model)
+                        self._mark_model_dead(current_model)
+                        current_model = self._resolve_model()
+                        self._consecutive_429 = 0
+                        self._last_429_model = None
+                        time.sleep(2)
+                        continue
                 else:
                     logger.warning(
                         "[AI分析] HTTP %d, 退避 %ds (%s)",
@@ -693,7 +769,7 @@ class AiAnalyzer:
                     current_model, consecutive_timeouts, BACKOFF_SCHEDULE[attempt])
                 if consecutive_timeouts >= 2:
                     logger.warning("[AI分析] 连续超时 %d 次, 轮换模型", consecutive_timeouts)
-                    self._mark_model_dead(current_model)
+                    self._mark_model_dead(current_model, timeout=True)
                     current_model = self._resolve_model()
                     consecutive_timeouts = 0
                     time.sleep(2)
