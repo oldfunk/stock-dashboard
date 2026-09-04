@@ -99,6 +99,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 计划：移植 Berkshire financial_rigor 轻量版为 scripts/verify_valuation.py（stdlib only，零 emoji）：Decimal 市值独立验算（现价×年报总股本/1e8 vs 快照市值）+ PE/PB 复算 + 快照/筛选表交叉，批量跑最新 run，JSON 报告落 data/，有 FAIL 则 exit 1；verify_run() 供 run_pipeline 采集后调用（try/except 包裹，永不阻断管线）；附单测。验收：py_compile + 单测 + pi1 只读实测 20 候选通过率。
 - 完成：实测修了两处自己人的错——①初版 V2 用季报单期 EPS 对 TTM PE，19 个系统性 FAIL，改为年报行 + 宽口径（>100% 告警、>300%/符号矛盾失败）；②total_shares 全表 64015 行全 NULL，V1 现只能 SKIP（见 B8）。终测 pi1 最新轮 20/20 通过，单测 12 passed，全仓 153 passed（3 个失败为 pre-existing，干净树复现）。
 - 接入：run_pipeline 步骤 4.5 已调 verify_run，只告警不阻断，下周一 15:30 管线自动带上。
+- 部署：已合并 main（8c6bd55）并在 pi1 pull + 备份 DB + restart 生效，四页 200、零新 Traceback、import OK（人工）。
 ### 2026-09-04（Berkshire 填补排期 + 夜间方向约束 D1–D7）
 - 设立目标与发展框架（六层架构 + M1/M2/M3 里程碑）与 Berkshire 填补排期 B1→B5；方向约束 D1–D7 同步写入 skill，今晚 nightly 生效。
 - 夜间迭代复盘结论：透明化与期刊达预期，分析深度零进展（ nightly 在舒适区打转），故加约束。详见 skill D1–D7。
