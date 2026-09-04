@@ -945,7 +945,7 @@ async def api_ai_watchlist_history():
 
 
 @app.get("/watchlist/{code}")
-async def watchlist_detail(code: str):
+async def watchlist_detail(request: Request, code: str):
     """钉选股独立分析页面 — 复用 stock_detail 的取数模式，统一数据接口"""
     import re
     if not re.match(r"^\d{6}$", code):
