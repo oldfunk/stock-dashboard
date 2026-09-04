@@ -98,6 +98,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ### 2026-09-04（A+B+C 模型池：429 轮换 + 死亡 TTL + 性能加权，人工主动推进）
 - 计划：FreeModelPool 加三机制——A 同一模型连续 3 个 429 则 mark_dead + 解 pin（约 10 行）；B 黑名单改 dead_until 时间戳，TTL 30 分钟复活；C 性能加权 acquire：池内记 per-model 成功/失败/超时/延迟，Laplace 平滑成功率减延迟惩罚打分，新模型中性先验给试用机会，得分高者优先（同分按游标轮转防饿死）。_call_llm 每次结局调 record_result；429 计数逻辑抽成 _note_429 纯方法可测。验收：池级单测（TTL/打分/轮换）+ 全仓无新失败。只推 nightly，不碰 pi1。
 - 完成：12 处补丁 + 池单测 10 passed，全仓 163 passed（3 失败为 pre-existing，无新增）。只推 nightly，不碰 pi1，等合并。
+- 部署：按新口径（对话期直接合）已合并 main（6df1187）并在 pi1 pull + 备份 + restart 生效，三页 200、零新 Traceback、import OK。注意：C 的性能加权实为可用性路由（成功率/延迟/超时），非真实模型能力，用户已指正，待讨论质量信号方案。
 ### 2026-09-04（B1 估值验算闸，人工主动推进）
 - 计划：移植 Berkshire financial_rigor 轻量版为 scripts/verify_valuation.py（stdlib only，零 emoji）：Decimal 市值独立验算（现价×年报总股本/1e8 vs 快照市值）+ PE/PB 复算 + 快照/筛选表交叉，批量跑最新 run，JSON 报告落 data/，有 FAIL 则 exit 1；verify_run() 供 run_pipeline 采集后调用（try/except 包裹，永不阻断管线）；附单测。验收：py_compile + 单测 + pi1 只读实测 20 候选通过率。
 - 完成：实测修了两处自己人的错——①初版 V2 用季报单期 EPS 对 TTM PE，19 个系统性 FAIL，改为年报行 + 宽口径（>100% 告警、>300%/符号矛盾失败）；②total_shares 全表 64015 行全 NULL，V1 现只能 SKIP（见 B8）。终测 pi1 最新轮 20/20 通过，单测 12 passed，全仓 153 passed（3 个失败为 pre-existing，干净树复现）。
