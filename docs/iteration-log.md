@@ -109,6 +109,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 夜间迭代复盘结论：透明化与期刊达预期，分析深度零进展（ nightly 在舒适区打转），故加约束。详见 skill D1–D7。
 - 新增分析能力方向（用户定调）：小白市场总结 + 监控池进出纪律，拆为 B6/B7 归入 M3。
 - 确认分析周报制：每日短评已废弃（代码中无此功能，仅周六复盘写 journal），B7 改为周报深度版单频。
+- 排名脚本暂搁：外部跑分身份映射不明（muse-spark 两边查无，laguna/ling 版本对不上），先搞主线架构（B2 起），以后再议。
 ### 2026-09-04（人工合并到 main，已上线 pi1）
 - 合并 nightly/20260822 → main（fast-forward，无冲突），已推 origin/main 并在 pi1 pull+restart 生效。
 - 剔除 8-27 AI 深度思考框架 5 个文件（src/analyzer/enhanced_ai_analyzer.py、enhanced_ai_analyzer_template.py、docs 下 3 篇实施文档）：全仓零引用、未接入流水线，另存分支 archive/enhanced-analyzer-20260827 留存，不进 main。routes 的 /watchlist 路由（8-28 已收口重写）与 watchlist_detail.html 保留。
