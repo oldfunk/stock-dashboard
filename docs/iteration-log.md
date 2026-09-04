@@ -51,6 +51,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 生成 drop 脚本并验证表已自动清理（2026-08-31）
 
 ## 变更记录（Changelog）
+### 2026-09-04（人工合并到 main，已上线 pi1）
+- 合并 nightly/20260822 → main（fast-forward，无冲突），已推 origin/main 并在 pi1 pull+restart 生效。
+- 剔除 8-27 AI 深度思考框架 5 个文件（src/analyzer/enhanced_ai_analyzer.py、enhanced_ai_analyzer_template.py、docs 下 3 篇实施文档）：全仓零引用、未接入流水线，另存分支 archive/enhanced-analyzer-20260827 留存，不进 main。routes 的 /watchlist 路由（8-28 已收口重写）与 watchlist_detail.html 保留。
+- DB 迁移：screening_result 新增 score_detail/ai_failed/ai_failure_reason，history 新增 model，均有 _add_column_if_not_exists，pi1 重启一次自动加列。
 ### 2026-08-31（nightly #5，deep_research 清理完成）
 - 验证 `deep_research` 表已自动清理（表不存在），生成清理脚本 `scripts/drop_deep_research.sql`（含检查/备份/删除/验证步骤）。
 - 更新 `docs/iteration-log.md`：标记 backlog 第 47 项「清理 `deep_research` 废表」完成，所有子项（确认数据/确认无引用/确认历史遗留/生成脚本/验证清理）闭环。
