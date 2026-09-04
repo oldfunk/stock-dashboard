@@ -16,6 +16,21 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - pi2 开发 venv：`markdown` 依赖错装为 `markdown-it-py`，本地 `import src.web.routes` 失败——agent 改完代码后用 **ssh pi1** 做冒烟测试，不要依赖 pi2 venv。
 - 面板核心短板：**分析深度浅 + 评分不透明**。功能迭代优先补这两块，而非堆 UI。
 
+## 目标与发展框架（2026-09-04 设立）
+
+六层架构，每层注明 Berkshire 对标：
+1. 数据层（Tencent + AKShare）：对标 financial-data 双源规范；B1 在此层加验算闸
+2. 验算层（新增）：B1 Decimal 精确验算 + 交叉验证，LLM 不得心算
+3. 筛选层（7 门 + 豁免）：B4 对标 quality-screen A/B/C 豁免细化
+4. 分析层（prompt + 模型池）：B2 强制结论三态 + 三档价格区间；深度短板的主战场
+5. 纪律层（策略 + 持有）：B3 成长 α 纪律 + 多策略独立候选池；B5 论点漂移跟踪
+6. 展示层（透明化）：P1③ 已完成，要新数据先有新数据（旧行 NULL 整块不渲染是设计）
+
+里程碑：
+- M1 分析可信（目标 9-14）：B1 + B2 上线，每个候选估值可验算、结论有三态
+- M2 策略分化（目标 9-30）：B3 + B4 + 多策略接入流水线，三策略独立候选池
+- M3 持有纪律（目标 10 月）：B5 + 钉选股监控条件提醒
+
 ## 工程约定
 - 零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 - 每次迭代只做一件小而实的事，不求大改大动；禁止一次性改多个无关模块。
@@ -50,7 +65,17 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] 确认迁移记录缺失（说明为历史遗留）
   - [x] 生成 drop 脚本并验证表已自动清理（2026-08-31）
 
+## Berkshire 填补排期（2026-09-04 设立，按序执行，对应顶部目标 M1→M3）
+- [ ] B1 估值验算闸 P0（排期 9-05/06）：移植 Berkshire financial_rigor 轻量版 `scripts/verify_valuation.py`（Decimal 算市值/PE/ROE/FCF + 双源交叉，超容差告警落库），接入采集后检查。验收：20 候选全量验算通过率 + 告警样本。
+- [ ] B2 强制结论三态 P0（排期 9-07 起）：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间，前端纪律展示。验收：prompt 样本 diff + 新路由真机 curl（D4/D5）。
+- [ ] B3 成长 α 纪律 P1：strategies.yaml growth 按 era-alpha 三标准（定价权/壁垒/增长质量）+ 估值锚（PE 超历史均值 3σ 减仓）+ 拐点清单细化。
+- [ ] B4 豁免细化 P1：对照 quality-screen A/B/C 三豁免，补战略投入期与高周转薄利（Costco 类）条款，附等价样本。
+- [ ] B5 论点漂移 P2：journal 矛盾检测升级为持续 drift 跟踪（论点是否被证伪），落库 + 对比页展示。
+
 ## 变更记录（Changelog）
+### 2026-09-04（Berkshire 填补排期 + 夜间方向约束 D1–D7）
+- 设立目标与发展框架（六层架构 + M1/M2/M3 里程碑）与 Berkshire 填补排期 B1→B5；方向约束 D1–D7 同步写入 skill，今晚 nightly 生效。
+- 夜间迭代复盘结论：透明化与期刊达预期，分析深度零进展（ nightly 在舒适区打转），故加约束。详见 skill D1–D7。
 ### 2026-09-04（人工合并到 main，已上线 pi1）
 - 合并 nightly/20260822 → main（fast-forward，无冲突），已推 origin/main 并在 pi1 pull+restart 生效。
 - 剔除 8-27 AI 深度思考框架 5 个文件（src/analyzer/enhanced_ai_analyzer.py、enhanced_ai_analyzer_template.py、docs 下 3 篇实施文档）：全仓零引用、未接入流水线，另存分支 archive/enhanced-analyzer-20260827 留存，不进 main。routes 的 /watchlist 路由（8-28 已收口重写）与 watchlist_detail.html 保留。
