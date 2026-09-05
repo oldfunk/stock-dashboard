@@ -129,6 +129,13 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
         "take_profit": "止盈条件"
     }},
 
+    "verdict": "最终结论三态，只能填 通过 或 不通过 或 灰色地带，并用一句话写理由，格式如 '通过：护城河宽且估值有折让'。灰色地带=看不懂或证据不足，纪律是不买。",
+    "price_tiers": {{
+        "aggressive": {{"advice": "激进型建议", "range": "价格区间，如 95-105"}},
+        "moderate": {{"advice": "稳健型建议", "range": "价格区间"}},
+        "conservative": {{"advice": "保守型建议", "range": "价格区间或观望"}}
+    }},
+
     "mirror_counts": "5句话中的转折词（但是/然而/不过/除非/如果/只要）计数，用逗号分隔，如 '1,0,1,0,2'。超过2个的句子在后面备注（如'2 第3句过多转折'）。",
 
     "mirror_test": {{
@@ -176,6 +183,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 8. checklist 六关评分（1-5★）作为汇总视图：moat 关必须与 moat_evaluation 一致，management 关必须与 management_score 一致，margin_of_safety 关必须与 intrinsic_value 一致；能力圈（circle_of_competence）和纪律（discipline）是新判断。任一关 score≤2 时，trade_strategy.signal 不应为 BUY。
 9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句或某一句含超限转折词 → passed=false 并在 missing 中标注句号。"5 句话说不完整 = 不买"：passed=false 时 trade_strategy.signal 不得为 BUY。
 10. veto_checklist 是快速否决红线（投资纪律一票否决）：8 条逐条如实判断，任一 true 必须在该行写 true，triggered_count 填 true 的总数。8 条含义：cannot_explain_business=说不清怎么赚钱；negative_fcf_3y_no_improvement=连续3年FCF为负且无改善；management_integrity_issue=管理层诚信污点；moat_eroding_irreversibly=护城河被不可逆侵蚀；greater_fool_required=靠接盘侠赚钱（博傻）；cannot_afford_total_loss=无法承受归零；following_the_herd=因为别人都在买；cannot_write_200_char_thesis=无法用200字写清买入理由。任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高。
+11. verdict 是强制结论：不通过 → trade_strategy.signal 必须为 AVOID；灰色地带 → signal 不得为 BUY（最多 HOLD）；signal 为 BUY 时 verdict 必须为通过。灰色地带就是"不买"的纪律，不要在灰色时给买入建议。price_tiers 三档都要填（拿不准就写观望及理由，不许空着）。
 """
 
 
@@ -292,6 +300,49 @@ def parse_ai_response(content: str) -> Optional[dict]:
     if not all(k in result for k in required):
         logger.warning(f"[AI分析] 返回字段不完整: {list(result.keys())}")
         return None
+    return result
+
+
+def _normalize_verdict(v) -> str:
+    """归一化 verdict：'pass' / 'fail' / 'gray' / ''（缺失或无法识别）。
+    注意'不通过'含'通过'二字，必须先判 fail。"""
+    if not v or not isinstance(v, str):
+        return ''
+    t = v.strip()
+    tl = t.lower()
+    if t.startswith('不通过') or '不买' in t or 'fail' in tl:
+        return 'fail'
+    if t.startswith('灰色') or 'gray' in tl or 'grey' in tl or '观望' in t:
+        return 'gray'
+    if t.startswith('通过') or tl.startswith('pass'):
+        return 'pass'
+    return ''
+
+
+def _enforce_verdict_discipline(result: dict) -> dict:
+    """verdict↔signal 程序纪律（写库前执行）。
+    不通过 → signal 置 AVOID；灰色（含缺失，按灰色保守处置）→ BUY 降 HOLD。
+    只收紧不放松：从不把 HOLD/AVOID 改成 BUY。改动记 _discipline_note。"""
+    if not isinstance(result, dict):
+        return result
+    trade = result.get('trade_strategy')
+    if not isinstance(trade, dict):
+        return result
+    v = _normalize_verdict(result.get('verdict'))
+    if not v:
+        v = 'gray'
+        result['verdict'] = (result.get('verdict') or '') + '灰色地带：模型未输出结论，按纪律保守处置' \
+            if result.get('verdict') else '灰色地带：模型未输出结论，按纪律保守处置'
+    sig = str(trade.get('signal', '')).upper()
+    note = None
+    if v == 'fail' and sig != 'AVOID':
+        trade['signal'] = 'AVOID'
+        note = 'verdict 不通过，signal 强制为 AVOID'
+    elif v == 'gray' and sig == 'BUY':
+        trade['signal'] = 'HOLD'
+        note = 'verdict 灰色，BUY 降为 HOLD'
+    if note:
+        result['_discipline_note'] = note
     return result
 
 
@@ -625,6 +676,7 @@ class AiAnalyzer:
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
         result = parse_ai_response(content)
         if result is not None and isinstance(result, dict):
+            result = _enforce_verdict_discipline(result)
             result['model'] = used_model
         return result
 

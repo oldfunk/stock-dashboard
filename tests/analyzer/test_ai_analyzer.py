@@ -202,5 +202,71 @@ class TestBuildHistorySummary:
         assert len(result) < 500
 
 
+class TestVerdictDiscipline:
+    """B2 verdict↔signal 程序纪律。"""
+
+    def _r(self, verdict, signal):
+        from src.analyzer.ai_analyzer import _enforce_verdict_discipline
+        return _enforce_verdict_discipline({
+            'analysis': 'x', 'investment_strategy': 'y',
+            'trade_strategy': {'signal': signal},
+            'verdict': verdict,
+        })
+
+    def test_fail_forces_avoid(self):
+        r = self._r('不通过：护城河被侵蚀', 'BUY')
+        assert r['trade_strategy']['signal'] == 'AVOID'
+        assert '_discipline_note' in r
+
+    def test_fail_avoid_untouched(self):
+        r = self._r('不通过', 'AVOID')
+        assert r['trade_strategy']['signal'] == 'AVOID'
+        assert '_discipline_note' not in r
+
+    def test_gray_demotes_buy(self):
+        r = self._r('灰色地带：证据不足', 'BUY')
+        assert r['trade_strategy']['signal'] == 'HOLD'
+
+    def test_gray_hold_untouched(self):
+        r = self._r('灰色地带', 'HOLD')
+        assert r['trade_strategy']['signal'] == 'HOLD'
+        assert '_discipline_note' not in r
+
+    def test_pass_buy_untouched(self):
+        r = self._r('通过：低估且护城河宽', 'BUY')
+        assert r['trade_strategy']['signal'] == 'BUY'
+        assert '_discipline_note' not in r
+
+    def test_missing_verdict_is_gray(self):
+        r = self._r(None, 'BUY')
+        assert r['trade_strategy']['signal'] == 'HOLD'
+        assert '灰色' in r['verdict']
+
+    def test_never_upgrades(self):
+        # 只收紧不放松：HOLD/AVOID 永不变成 BUY
+        r = self._r('通过', 'AVOID')
+        assert r['trade_strategy']['signal'] == 'AVOID'
+
+    def test_parse_keeps_new_fields(self):
+        import json
+        from src.analyzer.ai_analyzer import parse_ai_response
+        doc = {'analysis': 'a', 'investment_strategy': 'b',
+               'trade_strategy': {'signal': 'HOLD'},
+               'verdict': '通过：x',
+               'price_tiers': {'aggressive': {'advice': '建仓', 'range': '1-2'}}}
+        r = parse_ai_response(json.dumps(doc))
+        assert r['verdict'] == '通过：x'
+        assert r['price_tiers']['aggressive']['range'] == '1-2'
+
+    def test_old_json_without_verdict_survives(self):
+        import json
+        from src.analyzer.ai_analyzer import parse_ai_response
+        doc = {'analysis': 'a', 'investment_strategy': 'b',
+               'trade_strategy': {'signal': 'HOLD'}}
+        r = parse_ai_response(json.dumps(doc))
+        assert r is not None
+        assert 'verdict' not in r  # 解析层不强加，纪律层在写库时处置
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

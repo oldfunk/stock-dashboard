@@ -220,6 +220,26 @@
                             <div class="value">{{ stock.trade_parsed.take_profit }}</div>
                         </div>
                     </div>
+                    {% if stock.ai_parsed and stock.ai_parsed.verdict is string %}
+                    {% set _v = stock.ai_parsed.verdict %}
+                    {% set _vc = 'fail' if '不通过' in _v else ('pass' if '通过' in _v else 'gray') %}
+                    <div class="trade-cell" style="grid-column: 1 / -1;">
+                        <div class="label">结论</div>
+                        <div class="value signal-{{ 'buy' if _vc == 'pass' else ('avoid' if _vc == 'fail' else 'hold') }}">{{ _v }}</div>
+                    </div>
+                    {% endif %}
+                    {% if stock.ai_parsed and stock.ai_parsed.price_tiers %}
+                    <div class="trade-cell" style="grid-column: 1 / -1;">
+                        <div class="label">分层建议</div>
+                        <div class="value">
+                            {% for key, label in [('aggressive', '激进'), ('moderate', '稳健'), ('conservative', '保守')] %}
+                            {% if stock.ai_parsed.price_tiers[key] %}
+                            <div>{{ label }}：{{ stock.ai_parsed.price_tiers[key].advice }} {{ stock.ai_parsed.price_tiers[key].range }}</div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
                     {% endif %}
                 </div>
             </div>

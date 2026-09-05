@@ -86,7 +86,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## Berkshire 填补排期（2026-09-04 设立，按序执行，对应顶部目标 M1→M3）
 - [x] B1 估值验算闸 P0（2026-09-04 人工完成）：scripts/verify_valuation.py + 单测 12 passed + run_pipeline 4.5 接入；pi1 实测 20/20 通过。V1 待 B8 启用，V2 为宽口径极端值捕捉。
-- [x] B8 financial_history.total_shares 落库修复 P1（2026-09-05 人工完成）：夜间 agent 只交调查报告零落地，违反独立完工律（已补入 prompt 硬约束）。实测：利润表接口两机全灭（东财 hidctype 页面结构变更，1.18.64 全符号 TypeError；agent 称"返回 None"属误诊，且所谓替代接口 abstract_ths 根本无股本列）。DB 自 1989 起 64129 行全 NULL——该列从未真正写进去过（快照市值走的是净利润/EPS 倒推另一条路）。修复：fetcher 加净利润/EPS 兜底 + pi1 回填 39798 行（备份在先，剩余 24331 行缺 eps/net_profit 无法推导）；V1 当晚即抓到电投能源市值偏差 28% 真告警（待查增发或口径差）。
+- [x] B8 financial_history.total_shares 落库修复 P1（2026-09-05 人工完成）：夜间 agent 只交调查报告零落地，违反独立完工律（已补入 prompt 硬约束）。实测：利润表接口两机全灭（东财 hidctype 页面结构变更，1.18.64 全符号 TypeError；agent 称"返回 None"属误诊，且所谓替代接口 abstract_ths 根本无股本列）。DB 自 1989 起 64129 行全 NULL——该列从未真正写进去过（快照市值走的是净利润/EPS 倒推另一条路）。修复：fetcher 加净利润/EPS 兜底 + pi1 回填 39798 行（备份在先，剩余 24331 行缺 eps/net_profit 无法推导）；V1 当晚即抓到电投能源市值偏差 28% 真告警（已定性口径差归档）；余量归档：最新行 890 取 766（124 缺，多为数据稀疏股，V1 判 SKIP）；旧历史行不追。
 - 提示词补独立完工律：调查类不许只交报告，每晚必须修好/fallback/部分落地三选一；替代路径须验证到列级别。
 - [ ] B2 强制结论三态 P0（排期 9-07 起）：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间，前端纪律展示。验收：prompt 样本 diff + 新路由真机 curl（D4/D5）。
 - [ ] B3 成长 α 纪律 P1：strategies.yaml growth 按 era-alpha 三标准（定价权/壁垒/增长质量）+ 估值锚（PE 超历史均值 3σ 减仓）+ 拐点清单细化。
@@ -96,10 +96,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
 
 ## 变更记录（Changelog）
+### 2026-09-05（B2 强制结论三态，人工主动推进）
+- 计划：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间；parse_ai_response 向后兼容（新字段可选）；存量 JSON 缺字段前端降级不渲染；routes 下发 verdict 徽标；附单测。验收：prompt 样本 diff + 新旧 JSON 兼容单测 + pi1 上线后 curl。
+- 完成：prompt 加 verdict 三态 + price_tiers 三档 + 规则 11；_enforce_verdict_discipline 写库前强制（不通过→AVOID、灰色→BUY降HOLD、只收紧不放松）；候选卡 + 详情页结论徽标 + 分层建议（旧行无字段整块不渲染）；单测 9 个（纪律矩阵 7 + 解析兼容 2）；全仓 179 passed 零失败；模板离线真渲染验证新旧降级。
 ### 2026-09-05（全面接手：修 3 个 pre-existing 单测，人工主动推进）
 - 计划：①journal 按日期路由缺失改 404（前端无直接调用，安全）；②reviewer 用例 run_date 写死 7-15 已过 4 周窗口致 skip，改动态近 3 天；③analyzer 历史用例改 tmp 库隔离（现依赖真库，pi2 旧库缺 model 列即挂）。验收：三用例过 + 全仓无新增失败。
-- 状态：计划中（先记账再动手，D6）。
-- 完成：三案全破——journal 缺失改 404（前端无直接调用）；reviewer 时间腐改动态近 3 天；analyzer 改 tmp 库隔离。全仓 170 passed 零失败，历史包袱清零。
+- 完成：三案全破，全仓 170 passed 零失败（后随 B2 到 179）；已合并部署。
 ### 2026-09-05（V1b 流通市值精确校验，人工主动推进）
 - 计划：电投能源 28% 告警定性为口径差（总市值含限售股；流通市值 655.66/现价=22.41亿≈年报 22.39亿，自洽，非数据错误），V1a 保持宽口径。新增 V1b：parse_tc_line 取 parts[44] 流通市值 → snapshot.circulating_cap（DAO 已支持，全表待周一管线回填）→ verify_valuation 新增 verify_circulating（流通市值/现价 vs 年报总股本，紧阈值 1%/5%）；附单测。验收：单测 + pi1 实测腾讯 live 行解析 + 现有 V1a 不变。只读验证先行，合并部署走常规口径。
 - 完成：parse 取 parts[44] + V1b 紧阈值 + 单测 4 个（parse 2 + V1b 2）；51 passed；pi1 实测新旧一致（14 过/5 告警/1 已知 FAIL，V1b 全 SKIP 待周一回填）；电投能源定性口径差归档；已合并 main（5613277）pi1 部署生效。

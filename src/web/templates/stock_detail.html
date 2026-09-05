@@ -648,6 +648,25 @@
                 {% endif %}
             </div>
             {% endif %}
+            {% if ai_parsed and ai_parsed.verdict is string %}
+            {% set _vc = 'fail' if '不通过' in ai_parsed.verdict else ('pass' if '通过' in ai_parsed.verdict else 'gray') %}
+            <div class="sd-trade-row">
+                <span class="label">结论</span>
+                <span class="value signal-badge signal-{{ 'buy' if _vc == 'pass' else ('avoid' if _vc == 'fail' else 'hold') }}">{{ ai_parsed.verdict }}</span>
+            </div>
+            {% endif %}
+            {% if ai_parsed and ai_parsed.price_tiers %}
+            <div class="sd-trade-row">
+                <span class="label">分层建议</span>
+                <span class="value">
+                    {% for key, label in [('aggressive', '激进'), ('moderate', '稳健'), ('conservative', '保守')] %}
+                    {% if ai_parsed.price_tiers[key] %}
+                    <div>{{ label }}：{{ ai_parsed.price_tiers[key].advice }} {{ ai_parsed.price_tiers[key].range }}</div>
+                    {% endif %}
+                    {% endfor %}
+                </span>
+            </div>
+            {% endif %}
             {% if trade_parsed.buy_zone %}
             <div class="sd-trade-row">
                 <span class="label">买入区间</span>
