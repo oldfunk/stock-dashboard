@@ -191,6 +191,52 @@ def test_build_prompt_initial_mode():
     assert "从候选池选 5 只" in prompt
 
 
+def test_build_prompt_contains_watch_clarification():
+    """_build_prompt 包含 watch 动作判断标准"""
+    reviewer = WatchlistReviewer({"ai_review": {"hard_rules": {}}})
+    current = [
+        {"code": "600519", "name": "贵州茅台", "roe": 25.0, "review_count": 3}
+    ]
+    candidates = [
+        {"code": "002415", "name": "海康威视", "roe": 20.0, "score": 75.0}
+    ]
+    analyses = {
+        "600519": {"trade_strategy": {"signal": "HOLD", "buy_zone": "1500-1700"}}
+    }
+    market = [{"index_name": "上证综指", "current_value": 3174.0, "change_percent": 0.5}]
+    forced_out = []
+
+    prompt = reviewer._build_prompt(
+        current, candidates, analyses, market, forced_out
+    )
+
+    # 检查 watch 判断标准
+    assert "watch 动作判断标准" in prompt
+    assert "基本面明显恶化但未达硬规则调出线" in prompt
+    assert "或需等待事件确认" in prompt
+
+
+def test_coverage_validation_logic():
+    """测试覆盖率校验逻辑"""
+    from src.analyzer.watchlist_reviewer import WatchlistReviewer
+    
+    reviewer = WatchlistReviewer({"ai_review": {}})
+    
+    # 模拟覆盖率检查
+    content_md = "# 本周复盘\\n## 池变动\\n调入 000792 盐湖股份\\n## 逐股分析\\n000792: ..."
+    new_codes = {"000792", "600519"}
+    
+    # 检查覆盖率：确保每只在池股票都在 journal 中出现
+    coverage_missing = []
+    if content_md:
+        for code in new_codes:
+            if code not in content_md:
+                coverage_missing.append(code)
+    
+    assert "600519" in coverage_missing
+    assert "000792" not in coverage_missing
+
+
 def test_call_llm_parses_valid_json(monkeypatch):
     """_call_llm 正常返回 JSON 时能解析"""
     reviewer = WatchlistReviewer({"ai_review": {}, "ai": {

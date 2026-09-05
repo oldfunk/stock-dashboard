@@ -250,64 +250,57 @@ class WatchlistReviewer:
                 f"判 watch 并给观察项与期限（watch_until 写 YYYY-MM-DD 日期）。"
             )
 
-        # 强制调出列表
-        if forced_out:
-            forced_lines = []
-            for f in forced_out:
-                forced_lines.append(
-                    f"  - {f['code']} {f['name']}: {', '.join(f['reasons'])}"
-                )
-            forced_section = (
-                "【本次硬规则强制调出】（你必须接受这些调出）\n"
-                + "\n".join(forced_lines)
+        # 规则细化
+        if is_initial:
+            role_line = (
+                f"你是一位价值投资基金经理，这是观察池初始化（首次启动）。"
+                f"请从候选池选 {size} 只作为初始成员。"
+            )
+            rule_line = (
+                f"观察池固定 {size} 只。全部记为 action=add。"
+                f"优先选评分高、ROE 稳定、护城河宽的股票。"
             )
         else:
-            forced_section = "【本次硬规则强制调出】无"
+            role_line = (
+                f"你是一位价值投资基金经理，每周复盘一次观察池（固定 {size} 只）。"
+            )
+            rule_line = (
+                f"观察池固定 {size} 只。优先保持稳定，没有充分理由不要换。"
+                f"调入决策要给出理由，调出决策也要给出理由。"
+                f"action 允许 add/remove/keep/watch：拿不准、需继续观察的不调出，"
+                f"判 watch 并给观察项与期限（watch_until 写 YYYY-MM-DD 日期）。"
+                f"watch 动作判断标准：基本面明显恶化但未达硬规则调出线，"
+                f"或需等待事件确认（财报/政策/行业变化），观察项要具体明确。"
+            )
 
-        # 当前观察池
-        if current:
-            current_lines = []
-            for s in current:
-                analysis = analyses.get(s['code'], {})
-                trade = analysis.get('trade_strategy', {}) if analysis else {}
-                if isinstance(trade, str):
-                    try:
-                        trade = json.loads(trade)
-                    except Exception:
-                        trade = {}
-                signal = trade.get('signal', '--') if trade else '--'
-                current_lines.append(
-                    f"  - {s['code']} {s.get('name', '')} | ROE={s.get('roe', 'N/A')}% "
-                    f"| Signal={signal} | 置信={s.get('ai_confidence', '--')} "
-                    f"| 在池{s.get('review_count', 1)}周 | 进入理由: {s.get('added_reason', '')}"
-                )
-            current_section = "【当前观察池】\n" + "\n".join(current_lines)
-        else:
-            current_section = "【当前观察池】空（首次启动）"
-
-        # 候选池
-        if candidates:
-            cand_lines = []
-            for c in candidates:
-                cand_lines.append(
-                    f"  - {c['code']} {c.get('name', '')} | 评分={c.get('score', 'N/A')} "
-                    f"| ROE={c.get('roe', 'N/A')}% | PE={c.get('pe', 'N/A')} "
-                    f"| 市值={c.get('market_cap', 'N/A')}亿"
-                )
-            cand_section = "【候选池】（最近 4 周 Top 20 去重）\n" + "\n".join(cand_lines)
-        else:
-            cand_section = "【候选池】空"
-
-        # 大盘
-        if market:
-            mkt_lines = [
-                f"  - {m['index_name']}: {m.get('current_value', 'N/A')} "
-                f"({m.get('change_percent', 'N/A')}%)"
-                for m in market
-            ]
-            mkt_section = "【大盘近况】\n" + "\n".join(mkt_lines)
-        else:
-            mkt_section = "【大盘近况】无数据"
+        # 构建各个部分
+        forced_section = (
+            "【本次硬规则强制调出】（你必须接受这些调出）\n" +
+            ("\n".join(f"  - {f['code']} {f['name']}: {', '.join(f['reasons'])}" for f in forced_out) if forced_out else "无")
+        )
+        
+        current_section = (
+            "【当前观察池】\n" +
+            ("\n".join(f"  - {s['code']} {s.get('name', '')} | ROE={s.get('roe', 'N/A')}% "
+                      f"| Signal={analyses.get(s['code'], {}).get('trade_strategy', {}).get('signal', '--') if analyses else '--'} "
+                      f"| 置信={s.get('ai_confidence', '--')} | 在池{s.get('review_count', 1)}周 | 进入理由: {s.get('added_reason', '')}"
+                      for s in current) if current else "空（首次启动）")
+        )
+        
+        cand_section = (
+            "【候选池】（最近 4 周 Top 20 去重）\n" +
+            ("\n".join(f"  - {c['code']} {c.get('name', '')} | 评分={c.get('score', 'N/A')} "
+                      f"| ROE={c.get('roe', 'N/A')}% | PE={c.get('pe', 'N/A')} "
+                      f"| 市值={c.get('market_cap', 'N/A')}亿"
+                      for c in candidates) if candidates else "无")
+        )
+        
+        mkt_section = (
+            "【大盘近况】\n" +
+            ("\n".join(f"  - {m['index_name']}: {m.get('current_value', 'N/A')} "
+                      f"({m.get('change_percent', 'N/A')}%)"
+                      for m in market) if market else "无数据")
+        )
 
         return f"""{role_line}
 
@@ -324,8 +317,7 @@ class WatchlistReviewer:
 
 {mkt_section}
 
-【输出 JSON schema】
-{{
+【输出 JSON schema】{{
     "watchlist_actions": [
         {{"code": "000792", "action": "keep", "reason": "..."}},
         {{"code": "600519", "action": "add", "reason": "..."}},
@@ -345,6 +337,8 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
 2. 市场观察（大盘走势、情绪，一句话结论先行）
 3. 池内逐股财报五句（在池每只都要写：生意一句/财务一句/估值一句/风险一句/操作一句）
 4. 风险提示
+
+注意：每节第一句必须是结论；术语必须括号白话注释；禁用未解释缩写
 """
 
     def _resolve_model(self) -> str:
@@ -538,7 +532,7 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                 reason=reason, review_run_id=run_id, action_date=action_date
             )
 
-        # 4. 笔记落库
+        # 4. 笔记落库 + 覆盖率校验
         if journal and journal.get('title'):
             market = MarketIndexDAO().get_latest()
             # 构造调入调出详情（code + reason）
@@ -547,16 +541,28 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                     for c, (act, r) in final_actions.items() if act == a]
                 for a in ('add', 'remove', 'keep', 'watch')
             }
+            
             # B7 全覆盖校验：新池每只都应在 journal 正文出现，缺的记账不阻断
             content_md = journal.get('content_md', '')
             new_codes = {c for c, (a, _) in final_actions.items()
                          if a in ('add', 'keep', 'watch')}
             new_codes |= {s['code'] for s in current
                           if s['code'] not in final_actions}
-            coverage_missing = sorted(
-                c for c in new_codes if c not in (content_md or ''))
+            
+            # 检查覆盖率：确保每只在池股票都在 journal 中出现
+            coverage_missing = []
+            if content_md:
+                # 简单实现：检查股票代码是否在内容中
+                for code in new_codes:
+                    if code not in content_md:
+                        coverage_missing.append(code)
+            else:
+                # 内容为空，全部算缺失
+                coverage_missing = list(new_codes)
+            
             if coverage_missing:
                 logger.warning(f"[复盘] journal 未覆盖池内股: {coverage_missing}")
+            
             journal_dao = AiJournalDAO()
             journal_dao.save(
                 journal_date=action_date,
