@@ -1098,6 +1098,82 @@ async def api_journal_by_date(journal_date: str):
     return journal
 
 
+def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:
+    """B5 论点漂移（实时计算）：打脸回归 + 池内股跨轮 Signal/verdict 翻转。
+    输入为两期 actions_summary 解析后的 dict；screening 跨轮取最近两轮。"""
+    drifts = []
+    cur_d = (current_json.get('details') or {}) if current_json else {}
+    prev_d = (previous_json.get('details') or {}) if previous_json else {}
+    cur_add = {i.get('code') for i in cur_d.get('add', []) if i.get('code')}
+    prev_out = {i.get('code') for i in prev_d.get('remove', []) if i.get('code')}
+    for code in sorted(cur_add & prev_out):
+        drifts.append({
+            "type": "re_entry",
+            "message": f"打脸回归：{code} 上期调出本期调回，检查当初调出理由是否站得住",
+            "severity": "warning",
+        })
+    # 跨轮 Signal/verdict 翻转（池内相关股）
+    pool_codes = set()
+    for d in (cur_d, prev_d):
+        for a in ('add', 'remove', 'keep', 'watch'):
+            for i in d.get(a, []):
+                if i.get('code'):
+                    pool_codes.add(i.get('code'))
+    if not pool_codes:
+        return drifts
+    run_ids = _latest_two_run_ids()
+    if len(run_ids) < 2:
+        return drifts
+    prev_rows = {r['code']: r for r in
+                 ScreeningResultDAO().get_results_for_run(run_ids[1])}
+    cur_rows = {r['code']: r for r in
+                ScreeningResultDAO().get_results_for_run(run_ids[0])}
+    for code in sorted(pool_codes):
+        p, c = prev_rows.get(code), cur_rows.get(code)
+        if not p or not c:
+            continue
+        ps = _trade_signal(p)
+        cs = _trade_signal(c)
+        if ps and cs and ps != cs:
+            drifts.append({
+                "type": "signal_flip",
+                "message": f"Signal 反转：{code} 上轮 {ps} → 本轮 {cs}",
+                "severity": "warning",
+            })
+        pv, cv = _ai_verdict(p), _ai_verdict(c)
+        if pv and cv and pv != cv:
+            drifts.append({
+                "type": "verdict_flip",
+                "message": f"结论反转：{code} 上轮 {pv} → 本轮 {cv}",
+                "severity": "warning",
+            })
+    return drifts
+
+
+def _latest_two_run_ids() -> list[str]:
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT run_id FROM screening_result "
+            "ORDER BY run_date DESC, run_id DESC LIMIT 2").fetchall()
+    return [r[0] for r in rows]
+
+
+def _trade_signal(row: dict):
+    try:
+        t = row.get('ai_trade_strategy')
+        return (json.loads(t) if isinstance(t, str) else t or {}).get('signal')
+    except Exception:
+        return None
+
+
+def _ai_verdict(row: dict):
+    try:
+        a = row.get('ai_analysis')
+        return (json.loads(a) if isinstance(a, str) else a or {}).get('verdict')
+    except Exception:
+        return None
+
+
 @app.get("/api/journal/{journal_date}/conflicts")
 async def api_journal_conflicts(journal_date: str):
     """笔记矛盾检测分析"""
@@ -1156,7 +1232,13 @@ async def api_journal_conflicts(journal_date: str):
             "message": "市场环境发生变化",
             "severity": "info"
         })
-    
+
+    # B5 论点漂移：打脸回归 + 池内股跨轮 Signal/verdict 翻转（实时计算，免新表）
+    try:
+        conflicts.extend(_detect_pool_drift(current_json, previous_json))
+    except Exception:
+        pass
+
     return {
         "has_conflicts": len(conflicts) > 0,
         "conflicts": conflicts,

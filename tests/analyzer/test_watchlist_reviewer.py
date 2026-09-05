@@ -290,6 +290,59 @@ def test_review_initial_mode_persists_5_stocks(monkeypatch, tmp_path):
     assert result["new_watchlist"] == ["600519"]
 
 
+def test_review_watch_action_persists_status(monkeypatch, tmp_path):
+    """watch 动作：留池 + 状态/期限落库 + 覆盖缺失记账（B6a/B7）"""
+    import json
+    from src.models import database as db_mod
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+    from src.utils import now_cn
+    from datetime import timedelta
+    recent = (now_cn() - timedelta(days=3)).strftime("%Y-%m-%d")
+    from src.models.database import ScreeningResultDAO
+    ScreeningResultDAO().save_batch([
+        {"run_id": "r1", "run_date": recent, "code": "600519",
+         "name": "贵州茅台", "score": 85, "pe": 30, "pb": 10,
+         "roe": 30, "gross_margin": 90, "net_margin": 50,
+         "ocf_per_share": 50, "revenue_growth": 15, "profit_growth": 20,
+         "debt_ratio": 20, "market_cap": 2000, "reason": "测试"},
+    ])
+    from src.models.ai_watchlist import AiWatchlistDAO, AiJournalDAO
+    AiWatchlistDAO().add("600519", "贵州茅台", "ROE 30%+")
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "watchlist_size": 5,
+                      "hard_rules": {}},
+        "ai": {"api_base": "https://example.com", "model": "test-free"}
+    })
+
+    def fake_call_llm(prompt):
+        return {
+            "watchlist_actions": [
+                {"code": "600519", "action": "watch",
+                 "reason": "毛利率拐点待确认", "watch_until": "2026-10-15"}
+            ],
+            "new_watchlist": ["600519"],
+            "journal": {
+                "title": "复盘",
+                "content_md": "# 复盘\n无变动"  # 故意不提代码，触发覆盖缺失
+            }
+        }
+    monkeypatch.setattr(reviewer, "_call_llm", fake_call_llm)
+
+    reviewer.review("run_test_watch")
+
+    row = AiWatchlistDAO().get_by_code("600519")
+    assert row['status'] == 'watch'
+    assert row['status_reason'] == "毛利率拐点待确认"
+    assert row['watch_until'] == "2026-10-15"
+    assert len(AiWatchlistDAO().get_all()) == 1  # watch 仍在池
+    summ = json.loads(AiJournalDAO().get_latest()['actions_summary'])
+    assert summ['coverage_missing'] == ["600519"]
+    assert summ['watch'] == 1
+
+
 def test_review_rejects_candidate_not_in_pool(monkeypatch, tmp_path):
     """LLM 调入未在候选池的股票 → 拒绝调入"""
     from src.models import database as db_mod

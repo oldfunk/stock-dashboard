@@ -246,6 +246,8 @@ class WatchlistReviewer:
             rule_line = (
                 f"观察池固定 {size} 只。优先保持稳定，没有充分理由不要换。"
                 f"调入决策要给出理由，调出决策也要给出理由。"
+                f"action 允许 add/remove/keep/watch：拿不准、需继续观察的不调出，"
+                f"判 watch 并给观察项与期限（watch_until 写 YYYY-MM-DD 日期）。"
             )
 
         # 强制调出列表
@@ -327,7 +329,8 @@ class WatchlistReviewer:
     "watchlist_actions": [
         {{"code": "000792", "action": "keep", "reason": "..."}},
         {{"code": "600519", "action": "add", "reason": "..."}},
-        {{"code": "002415", "action": "remove", "reason": "Signal 转 AVOID"}}
+        {{"code": "002415", "action": "remove", "reason": "Signal 转 AVOID"}},
+        {{"code": "600276", "action": "watch", "reason": "毛利率拐点待确认", "watch_until": "2026-10-15"}}
     ],
     "new_watchlist": ["000792", "600519", "300750", "600276", "002415"],
     "journal": {{
@@ -336,10 +339,11 @@ class WatchlistReviewer:
     }}
 }}
 
-journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票），包含：
-1. 本周市场观察（大盘走势、情绪）
-2. 观察池调整动作的思考过程
-3. 对当前观察池的整体判断
+journal.content_md 用 Markdown，按周报深度版结构写（小白可读：每节第一句必须是结论；
+术语必须括号白话注释；禁用未解释缩写），包含：
+1. 池变动（调入写触发条件，调出写原因；无变动写一句"无变动及原因"；watch 名单写观察项与期限）
+2. 市场观察（大盘走势、情绪，一句话结论先行）
+3. 池内逐股财报五句（在池每只都要写：生意一句/财务一句/估值一句/风险一句/操作一句）
 4. 风险提示
 """
 
@@ -521,6 +525,11 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                         name = c['name']
                         break
                 watchlist_dao.add(code, name, added_reason=reason)
+            elif action == 'watch':
+                # 观察态：留池，记观察项与期限（B6a 状态机）
+                wu = next((a.get('watch_until') for a in actions
+                           if a.get('code') == code), None)
+                watchlist_dao.set_status(code, 'watch', reason, wu)
             elif action == 'keep':
                 watchlist_dao.update_reviewed(code)
 
@@ -536,8 +545,18 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
             action_details = {
                 a: [{'code': c, 'reason': r}
                     for c, (act, r) in final_actions.items() if act == a]
-                for a in ('add', 'remove', 'keep')
+                for a in ('add', 'remove', 'keep', 'watch')
             }
+            # B7 全覆盖校验：新池每只都应在 journal 正文出现，缺的记账不阻断
+            content_md = journal.get('content_md', '')
+            new_codes = {c for c, (a, _) in final_actions.items()
+                         if a in ('add', 'keep', 'watch')}
+            new_codes |= {s['code'] for s in current
+                          if s['code'] not in final_actions}
+            coverage_missing = sorted(
+                c for c in new_codes if c not in (content_md or ''))
+            if coverage_missing:
+                logger.warning(f"[复盘] journal 未覆盖池内股: {coverage_missing}")
             journal_dao = AiJournalDAO()
             journal_dao.save(
                 journal_date=action_date,
@@ -554,8 +573,10 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
                     'add': sum(1 for a, _ in final_actions.values() if a == 'add'),
                     'remove': sum(1 for a, _ in final_actions.values() if a == 'remove'),
                     'keep': sum(1 for a, _ in final_actions.values() if a == 'keep'),
+                    'watch': sum(1 for a, _ in final_actions.values() if a == 'watch'),
                     'details': action_details,
                     'model': result.get('model') if isinstance(result, dict) else None,
+                    'coverage_missing': coverage_missing,
                 })
             )
 

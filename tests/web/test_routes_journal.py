@@ -105,6 +105,46 @@ def test_api_journal_by_date(client):
     assert resp.status_code == 404
 
 
+def test_api_journal_drift_reentry_and_flip(client):
+    """B5 drift：打脸回归 + 跨轮 Signal/verdict 翻转"""
+    import json
+    from src.models.ai_watchlist import AiJournalDAO
+    from src.models.database import ScreeningResultDAO
+    prev_actions = json.dumps({
+        'add': [], 'remove': [{'code': '600519', 'reason': '贵'}],
+        'keep': [], 'model': 'm1',
+        'details': {'add': [], 'remove': [{'code': '600519', 'reason': '贵'}],
+                    'keep': []}})
+    cur_actions = json.dumps({
+        'add': [{'code': '600519', 'reason': '回来'}], 'remove': [],
+        'keep': [], 'model': 'm1',
+        'details': {'add': [{'code': '600519', 'reason': '回来'}],
+                    'remove': [], 'keep': []}})
+    AiJournalDAO().save(
+        "2026-07-20", "r1", "标题1", "# 内容1", None, prev_actions)
+    AiJournalDAO().save(
+        "2026-07-27", "r2", "标题2", "# 内容2", None, cur_actions)
+    base = {"code": "600519", "name": "贵州茅台", "score": 85,
+            "pe": 20, "pb": 5, "roe": 25, "market_cap": 2000,
+            "reason": "测试"}
+    ScreeningResultDAO().save_batch([
+        dict(base, run_id="ro", run_date="2026-07-20"),
+        dict(base, run_id="rn", run_date="2026-07-27"),
+    ])
+    ScreeningResultDAO().update_ai_analysis(
+        "ro", "600519", json.dumps({"verdict": "通过：低估"}), "{}",
+        json.dumps({"signal": "BUY"}))
+    ScreeningResultDAO().update_ai_analysis(
+        "rn", "600519", json.dumps({"verdict": "灰色地带：看不清"}), "{}",
+        json.dumps({"signal": "HOLD"}))
+    resp = client.get("/api/journal/2026-07-27/conflicts")
+    assert resp.status_code == 200
+    types = {c['type'] for c in resp.json()['conflicts']}
+    assert 're_entry' in types
+    assert 'signal_flip' in types
+    assert 'verdict_flip' in types
+
+
 def test_api_journal_list(client):
     from src.models.ai_watchlist import AiJournalDAO
     for i in range(3):

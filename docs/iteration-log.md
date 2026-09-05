@@ -96,6 +96,9 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
 
 ## 变更记录（Changelog）
+### 2026-09-05（B5+B7 持有纪律与周报模板，人工主动推进）
+- 计划：B5 drift 实时算免新表——conflicts API 加跨轮 Signal/verdict 翻转检测（screening_result 最近两轮，池内股）+ 打脸回归（上期调出本期调回）；B7 reviewer prompt 加 watch 动作 + journal 结构（池变动章节/每股财报五句/小白三标准）+ persist 加 coverage 校验（缺股记 actions_summary.coverage_missing，只告警不阻断）；watch 落库走 set_status。验收：单测（watch 落库/conflicts 翻转/coverage 缺失）+ 全仓无回归 + pi1 conflicts 真跑。prompt 生效等周六 live。
+- 完成：reviewer prompt（watch 动作/schema 示例/周报结构/小白）+ watch 落库分支 + coverage 记账 + conflicts drift（打脸回归/Signal/verdict 翻转）；修 drift 双重取下标 bug（run_id 变 'r' 全空）；单测 2 个；全仓 194 passed 零失败。
 ### 2026-09-05（B6a 监控池状态机 schema，人工主动推进）
 - 计划：ai_watchlist 加 status（core/watch/dropped）+ status_reason + watch_until（含迁移守卫）；remove() 改软删除（UPDATE dropped+原因，行保留）替代 DELETE；add() 重纳时重置 core；get_all() 默认过滤 dropped（5 只容量/前端/K线逻辑全不受影响）；reviewer 调出传 reason；单测（软删留行/默认过滤/重纳重置/非法状态拒绝）。watch 指派逻辑（reviewer prompt 教 AI 何时判 watch）并入 B7（需周六 live 驗），此处只埋 schema。验收：单测 + 全仓无回归。
 - 完成：schema + 软删除 + 重纳重置 + 默认过滤 + reviewer 传 reason；单测 3 个；全仓 192 passed 零失败。watch 指派并入 B7。
