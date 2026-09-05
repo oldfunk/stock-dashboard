@@ -251,6 +251,33 @@ class TestSafeFloat:
         assert safe_float('1.236') == 1.24
 
 
+class TestParseCirculatingCap:
+    """parse_tc_line 取 parts[44] 流通市值（V1b 数据源）。"""
+
+    def _line(self, circ='655.66', cap='914.49'):
+        f = [''] * 50
+        f[1] = '电投能源'
+        f[2] = '002128'
+        f[3] = '29.25'
+        f[39] = '11.89'
+        f[43] = '1.70'
+        f[44] = circ
+        f[45] = cap
+        f[46] = '3.0'
+        return '~'.join(f)
+
+    def test_circulating_parsed(self):
+        q = parse_tc_line(self._line())
+        assert q['circulating_cap'] == 655.66
+        assert q['market_cap'] == 914.49
+
+    def test_short_line_skips(self):
+        q = parse_tc_line(self._line())
+        assert q is not None
+        short = '~'.join([''] * 40)
+        assert parse_tc_line(short) is None
+
+
 class TestNowCn:
     """Tests for timezone-aware current time."""
 

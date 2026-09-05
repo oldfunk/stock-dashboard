@@ -87,6 +87,7 @@ def parse_tc_line(raw: str) -> Optional[dict]:
             'turnover_rate': safe_float(parts[38]) if len(parts) > 38 else None,
             'pe': safe_float(parts[39]) if len(parts) > 39 else None,
             'market_cap': safe_float(parts[45]) if len(parts) > 45 else None,
+            'circulating_cap': safe_float(parts[44]) if len(parts) > 44 else None,
             'amplitude': safe_float(parts[43]) if len(parts) > 43 else None,
             'pb': safe_float(parts[46]) if len(parts) > 46 else None,
         }

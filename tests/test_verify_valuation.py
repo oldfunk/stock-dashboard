@@ -68,3 +68,17 @@ class TestCrossCheck:
     def test_one_side_missing(self):
         r = cross_check('pe', 15.5, None)
         assert r['verdict'] == 'SKIP'
+
+
+class TestCirculating:
+    """V1b 流通口径：流通市值/现价 vs 年报总股本，紧阈值。"""
+
+    def test_diantou_self_consistent(self):
+        # 电投能源：流通 655.66亿 / 29.25 ≈ 22.41亿股 ≈ 年报 22.39亿 → 通过
+        r = verify_market_cap(29.25, 2.239e9, 655.66)
+        assert r['verdict'] == 'PASS'
+
+    def test_total_vs_circulating_flagged(self):
+        # 误拿总市值 914.49 当流通口径 → 28% 偏差 → 失败（正是 V1b 要抓的）
+        r = verify_market_cap(29.25, 2.239e9, 914.49)
+        assert r['verdict'] == 'FAIL'

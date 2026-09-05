@@ -147,7 +147,7 @@ def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
             'SELECT code, name, pe, pb, market_cap FROM screening_result WHERE run_id = ?',
             (run_id,))]
         snaps = {r['code']: dict(r) for r in con.execute(
-            'SELECT code, current_price, pe, pb, market_cap FROM stock_snapshot')}
+            'SELECT code, current_price, pe, pb, market_cap, circulating_cap FROM stock_snapshot')}
         hist = {}
         for r in con.execute(
                 'SELECT stock_code, report_date, report_type, eps, total_shares '
@@ -188,14 +188,22 @@ def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
                     'deviation_pct': None, 'verdict': 'SKIP',
                     'note': 'history 无 bvps 列，PB 复算待补'}
         v3 = cross_check('pe', s.get('pe'), snap.get('pe'))
-        overall = _worst(v1['verdict'], v2['pe']['verdict'], v3['verdict'])
+        # V1b 流通口径精确校验（紧阈值）：流通市值/现价 vs 年报总股本
+        v1b = verify_market_cap(price, (h.get('latest') or {}).get('total_shares'),
+                                snap.get('circulating_cap'))
+        v1b['check'] = 'V1b-流通精确'
+        if v1b['verdict'] != 'SKIP' and v1b['note']:
+            v1b['note'] = '流通口径精确校验（紧阈值）；' + v1b['note']
+        overall = _worst(v1['verdict'], v2['pe']['verdict'], v3['verdict'],
+                         v1b['verdict'])
         counts[overall] += 1
         results.append({'code': code, 'name': s.get('name'),
                         'report_date': (h.get('latest') or {}).get('report_date'),
                         'market_cap': v1, 'ratios': v2, 'xcheck': v3,
-                        'verdict': overall})
+                        'circulating': v1b, 'verdict': overall})
     alerts = [{'code': r['code'], 'name': r['name'], 'verdict': r['verdict'],
-               'market_cap': r['market_cap'], 'ratios': r['ratios']}
+               'market_cap': r['market_cap'], 'ratios': r['ratios'],
+               'circulating': r['circulating']}
               for r in results if r['verdict'] in ('WARN', 'FAIL')]
     summary = {'run_id': run_id, 'total': len(results),
                'pass': counts['PASS'], 'warn': counts['WARN'],
