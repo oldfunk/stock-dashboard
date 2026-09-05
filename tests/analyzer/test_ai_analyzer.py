@@ -159,11 +159,16 @@ class TestBuildHistorySummary:
         result = _build_history_summary("NEVER_EXISTS_999999", limit=3)
         assert result == ""
 
-    def test_real_stock_returns_proper_format(self):
-        """实际有历史记录的股票返回格式正确"""
+    def test_real_stock_returns_proper_format(self, monkeypatch, tmp_path):
+        """实际有历史记录的股票返回格式正确（tmp 库隔离，不碰真库）"""
         from src.analyzer.ai_analyzer import _build_history_summary
+        from src.models import database as db_mod
         from src.models.database import StockAnalysisHistoryDAO, db_conn
         import json
+
+        db_path = str(tmp_path / "test.db")
+        monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+        db_mod.init_database()
 
         # 插入一条临时测试记录
         code = "TEST_HIST_0001"

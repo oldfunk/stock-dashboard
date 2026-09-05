@@ -238,10 +238,13 @@ def test_review_initial_mode_persists_5_stocks(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test.db")
     monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
     db_mod.init_database()
-    # 预置 screening_result（候选池数据源）
+    # 预置 screening_result（候选池数据源，run_date 取近 3 天防时间腐）
+    from src.utils import now_cn
+    from datetime import timedelta
+    recent = (now_cn() - timedelta(days=3)).strftime("%Y-%m-%d")
     from src.models.database import ScreeningResultDAO
     ScreeningResultDAO().save_batch([
-        {"run_id": "r1", "run_date": "2026-07-15", "code": "600519",
+        {"run_id": "r1", "run_date": recent, "code": "600519",
          "name": "贵州茅台", "score": 85, "pe": 30, "pb": 10,
          "roe": 30, "gross_margin": 90, "net_margin": 50,
          "ocf_per_share": 50, "revenue_growth": 15, "profit_growth": 20,

@@ -1091,10 +1091,10 @@ async def api_journal_list():
 
 @app.get("/api/journal/{journal_date}")
 async def api_journal_by_date(journal_date: str):
-    """指定日期笔记 JSON"""
+    """指定日期笔记 JSON（缺失 404，与 /latest 一致）"""
     journal = AiJournalDAO().get_by_date(journal_date)
     if not journal:
-        return {"error": "Journal not found"}
+        raise HTTPException(status_code=404, detail="Journal not found")
     return journal
 
 
