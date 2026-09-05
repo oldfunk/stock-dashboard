@@ -91,9 +91,9 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] B2 强制结论三态 P0（2026-09-05 人工完成）：verdict+三档价格+程序纪律+双页徽标，全仓179过，已合并部署。
 - [x] B3 成长 α 纪律 P1（2026-09-05 人工完成）：growth 重写α三标准+估值锚+拐点清单。
 - [x] B4 豁免细化 P1（2026-09-05 人工完成）：A/C/C2/D 对标 Berkshire；单测补 C2 缺口；pi1 零翻转；已合并 main（26f39c6）pi1 部署生效。
-- [ ] B5 论点漂移 P2：journal 矛盾检测升级为持续 drift 跟踪（论点是否被证伪），落库 + 对比页展示。
-- [ ] B6 监控池状态机与进出纪律 P1（M3）：ai_watchlist 加 status（core/watch/dropped）+ 原因 + 期限字段，调入/调出必须书面理由，8 条否决线命中即时出。
-- [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
+- [x] B5 论点漂移 P2（2026-09-05 人工完成）：conflicts 实时算（打脸回归/Signal/verdict 翻转），免新表；修双重取下标 bug。
+- [x] B6 监控池状态机与进出纪律 P1（M3）：schema + 软删除 + watch 落库（B6a+B7）；watch 指派进 reviewer prompt，待周六 live 驗。
+- [x] B7 市场总结模板与全覆盖校验 P1（M3）：reviewer prompt 周报结构（池变动/逐股五句/小白）+ coverage 记 actions_summary；prompt 生效等周六 live。
 
 ## 变更记录（Changelog）
 ### 2026-09-05（B5+B7 持有纪律与周报模板，人工主动推进）
