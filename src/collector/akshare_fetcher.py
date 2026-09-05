@@ -703,6 +703,12 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         if op is not None and ie is not None and ie != 0:
                             rec['interest_coverage'] = round(op / abs(ie), 2)
                         rec['total_shares'] = safe_float(row_ps.get('TOTAL_SHARES'))
+                        if rec.get('total_shares') is None:
+                            # 利润表接口不可用时的兜底：总股本 = 净利润 / EPS
+                            # （快照市值即用此口径倒推，与 V1 验算闸一致）
+                            _np, _ep = rec.get('net_profit'), rec.get('eps')
+                            if _np is not None and _ep is not None and _ep > 0:
+                                rec['total_shares'] = _np / _ep
                         # 利润表净利润
                         ps_np = safe_float(row_ps.get('NETPROFIT'))
                         if ps_np is not None and rec.get('net_profit') is None:

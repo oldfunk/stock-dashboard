@@ -86,7 +86,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## Berkshire 填补排期（2026-09-04 设立，按序执行，对应顶部目标 M1→M3）
 - [x] B1 估值验算闸 P0（2026-09-04 人工完成）：scripts/verify_valuation.py + 单测 12 passed + run_pipeline 4.5 接入；pi1 实测 20/20 通过。V1 待 B8 启用，V2 为宽口径极端值捕捉。
-- [ ] B8 financial_history.total_shares 落库修复 P1（B1 实测暴露：全表 64015 行全 NULL，akshare_fetcher 705 行赋值路径没跑通；修好后 V1 市值独立验算真正启用）。
+- [x] B8 financial_history.total_shares 落库修复 P1（2026-09-05 人工完成）：夜间 agent 只交调查报告零落地，违反独立完工律（已补入 prompt 硬约束）。实测：利润表接口两机全灭（东财 hidctype 页面结构变更，1.18.64 全符号 TypeError；agent 称"返回 None"属误诊，且所谓替代接口 abstract_ths 根本无股本列）。DB 自 1989 起 64129 行全 NULL——该列从未真正写进去过（快照市值走的是净利润/EPS 倒推另一条路）。修复：fetcher 加净利润/EPS 兜底 + pi1 回填 39798 行（备份在先，剩余 24331 行缺 eps/net_profit 无法推导）；V1 当晚即抓到电投能源市值偏差 28% 真告警（待查增发或口径差）。
+- 提示词补独立完工律：调查类不许只交报告，每晚必须修好/fallback/部分落地三选一；替代路径须验证到列级别。
 - [ ] B2 强制结论三态 P0（排期 9-07 起）：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间，前端纪律展示。验收：prompt 样本 diff + 新路由真机 curl（D4/D5）。
 - [ ] B3 成长 α 纪律 P1：strategies.yaml growth 按 era-alpha 三标准（定价权/壁垒/增长质量）+ 估值锚（PE 超历史均值 3σ 减仓）+ 拐点清单细化。
 - [ ] B4 豁免细化 P1：对照 quality-screen A/B/C 三豁免，补战略投入期与高周转薄利（Costco 类）条款，附等价样本。
