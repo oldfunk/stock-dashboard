@@ -96,6 +96,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
 
 ## 变更记录（Changelog）
+### 2026-09-05（B3+B4 成长α纪律与豁免细化，人工主动推进）
+- 计划：B3 重写 strategies.yaml growth（era-alpha 三标准：定价权毛利≥30%且不低于5年均、壁垒ROE5y≥15%且波动≤10、增长质量营收净利OCF三正 + 估值锚泡沫PE40 + 拐点清单；dividend/turnaround 不动）。B4 对标 quality-screen 细化三豁免：A 加 OCF 转正（ocf_latest>0 且趋势非降）+ 数据跨度<12 年；C 加改善趋势（营收净利双正）；D 加 OCF 质量（ocf>0 且过半年份为正）+ 净利率下限>0。行为会变（D5 改为 flip 计数报告，不追求零差异）。验收：单测 + pi1 全市场 flip 计数 + 全仓无回归。
+- 状态：计划中（先记账再动手，D6）。
+- 完成：B3 growth 重写（α三标准+估值锚泡沫PE40+拐点清单，dividend/turnaround 不动）；B4 豁免A/C/C2/D细化（单测抓出 Costco 类连净利门都过不了，补 C2 后闭环）；旧2用例按新契约更新；单测 11 个；全仓 190 passed 零失败；pi1 全市场 44/44、20只全字段 20/20，新老零翻转，周一输出不受影响。
 ### 2026-09-05（B2 强制结论三态，人工主动推进）
 - 计划：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间；parse_ai_response 向后兼容（新字段可选）；存量 JSON 缺字段前端降级不渲染；routes 下发 verdict 徽标；附单测。验收：prompt 样本 diff + 新旧 JSON 兼容单测 + pi1 上线后 curl。
 - 完成：prompt 加 verdict 三态 + price_tiers 三档 + 规则 11；_enforce_verdict_discipline 写库前强制（不通过→AVOID、灰色→BUY降HOLD、只收紧不放松）；候选卡 + 详情页结论徽标 + 分层建议（旧行无字段整块不渲染）；单测 9 个（纪律矩阵 7 + 解析兼容 2）；全仓 179 passed 零失败；模板离线真渲染验证新旧降级。

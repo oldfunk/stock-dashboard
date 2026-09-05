@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 
 # ── AI Berkshire 规则定义 ──
 
+def _data_years_span(data_years) -> int | None:
+    """'2020-2026' → 6；解析失败返回 None（调用方判不豁免）。"""
+    try:
+        a, b = str(data_years).split('-')
+        return int(b) - int(a)
+    except (ValueError, AttributeError):
+        return None
+
+
 def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     """AI Berkshire 7条门规 + 3条豁免 + 季节性OCF容差。
 
@@ -50,11 +59,16 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     # 5年平均ROE（AI Berkshire: 10年平均<8%排除，我们取5年）
     roe_5y = stock.get('roe_5y_avg')
     if roe_5y is not None and roe_5y < 8:
-        # 豁免A：上市不足8年且处于高增长期（增长>20%）
+        # 豁免A：战略投入期（对标 Berkshire 豁免A）——高增长 + OCF 已转正 + 数据覆盖短
         rev_g = stock.get('revenue_growth') or 0
-        if rev_g < 20:
+        ocf_l = stock.get('ocf_latest')
+        ocf_tr = stock.get('ocf_5y_trend', 0) or 0
+        span = _data_years_span(stock.get('data_years'))
+        if rev_g >= 20 and ocf_l is not None and ocf_l > 0 and ocf_tr >= 0 \
+                and span is not None and span < 12:
+            reasons.append(f"5年均ROE={roe_5y}%（<8%，豁免A：高增长{rev_g}%+OCF转正+覆盖{span}年投入期）")
+        else:
             return []
-        reasons.append(f"5年均ROE={roe_5y}%（<8%，豁免：高增长{rev_g}%新期公司）")
     elif roe_5y is not None:
         reasons.append(f"5年均ROE={roe_5y}%")
 
@@ -65,10 +79,11 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     ocf_pos_years = stock.get('ocf_positive_years')
     if ocf is not None:
         if ocf <= 0:
-            # 豁免B：战略投入期（高毛利率+高营收增长可豁免）
+            # 豁免B：战略投入期（高毛利率+高营收增长+净利已改善，缺一不可）
             gm = stock.get('gross_margin') or 0
             rev_g = stock.get('revenue_growth') or 0
-            if gm >= 30 and rev_g >= 20:
+            prof_g = stock.get('profit_growth') or 0
+            if gm >= 30 and rev_g >= 20 and prof_g > 0:
                 reasons.append(
                     f"OCF/股={ocf}（≤0，豁免：高毛利率{gm}%+高增长{rev_g}%投入期）")
             else:
@@ -85,9 +100,22 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     # 用当前毛利率近似判断（无当前净利率字段，但有毛利率和5年均净利率）
     gm_current = stock.get('gross_margin')
     if nm_5y is not None and nm_5y < min_nm:
-        # 豁免C：主动低利润率模式（毛利率>30%说明产品有差异化，故意压低净利扩张）
-        if gm_current and gm_current >= 30:
-            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免：高毛利率{gm_current}%主动压利）")
+        # 豁免C2：高周转薄利（对标 Berkshire 豁免C 后半）——ROE>20% + OCF 质量 +
+        # 本身薄利模式（毛利<15%）+ 净利为正（不失血）。Costco 类靠此条过净利门。
+        roe_c = stock.get('roe') or 0
+        gm_c = stock.get('gross_margin')
+        ocf_c = stock.get('ocf_per_share')
+        ocf_py_c = stock.get('ocf_positive_years')
+        rev_g = stock.get('revenue_growth') or 0
+        prof_g = stock.get('profit_growth') or 0
+        if roe_c >= 20 and gm_c is not None and gm_c < 15 \
+                and ocf_c is not None and ocf_c > 0 \
+                and ocf_py_c is not None and ocf_py_c >= 3 and nm_5y > 0:
+            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免C2：高ROE薄利+OCF质量）")
+        # 豁免C：主动低利润率模式（对标 Berkshire 豁免B）——毛利率>30%（有能力赚）+
+        # 营收净利双正（改善趋势，非长期失血）
+        elif gm_current and gm_current >= 30 and rev_g > 0 and prof_g > 0:
+            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免C：高毛利率{gm_current}%+双增长改善）")
         else:
             return []
     elif nm_5y is not None:
@@ -98,11 +126,17 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     gross_margin = stock.get('gross_margin')
     if gross_margin is not None:
         if gross_margin < min_gm:
-            # 豁免D：高周转薄利模式（ROE>20% 说明资本回报率高，可容忍毛利率低）
+            # 豁免D：高周转薄利模式（对标 Berkshire 豁免C：Costco 类）——ROE>20% +
+            # OCF 为正且过半年份为正（现金真实）+ 5年均净利率>0（不失血）
             roe = stock.get('roe') or 0
-            if roe >= 20:
+            ocf = stock.get('ocf_per_share')
+            ocf_py = stock.get('ocf_positive_years')
+            nm_5y_d = stock.get('net_margin_5y_avg')
+            if roe >= 20 and ocf is not None and ocf > 0 \
+                    and ocf_py is not None and ocf_py >= 3 \
+                    and nm_5y_d is not None and nm_5y_d > 0:
                 reasons.append(
-                    f"毛利率={gross_margin}%（<{min_gm}%，豁免：高ROE={roe}%薄利模式）")
+                    f"毛利率={gross_margin}%（<{min_gm}%，豁免D：高ROE={roe}%+OCF质量+净利为正薄利模式）")
             else:
                 return []
         else:

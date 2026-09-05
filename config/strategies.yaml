@@ -4,16 +4,35 @@
 
 growth:
   name: "成长策略"
-  description: "高增长、高ROE、低估值"
+  description: "era-alpha 高增长主线：定价权+壁垒+增长质量三标准，持有到拐点"
+  alpha_criteria:
+    pricing_power:
+      gross_margin_min: 0.30
+      margin_vs_5y_avg: "ge"
+    moat:
+      roe_avg_5y_min: 0.15
+      roe_volatility_max: 10.0
+    growth_quality:
+      revenue_growth_min: 0.0
+      profit_growth_min: 0.0
+      ocf_per_share_min: 0.0
+      growth_rate_avg_3y_min: 0.20
   thresholds:
-    roe_avg_5y_min: 0.12  # 5年平均ROE >= 12%
-    pe_max: 25.0          # 市盈率 <= 25
-    pe_ttm_max: 30.0      # 市盈率TTM <= 30
-    gross_margin_min: 0.25  # 毛利率 >= 25%
-    net_margin_min: 0.10    # 净利率 >= 10%
-    debt_ratio_max: 0.50    # 资产负债率 <= 50%
-    fcf_yield_min: 0.03     # FCF收益率 >= 3%
-    growth_rate_avg_3y_min: 0.20  # 3年平均增长率 >= 20%
+    roe_avg_5y_min: 0.15
+    pe_max: 25.0
+    pe_ttm_max: 30.0
+    gross_margin_min: 0.30
+    net_margin_min: 0.10
+    debt_ratio_max: 0.50
+    fcf_yield_min: 0.03
+  valuation_anchor:
+    bubble_pe: 40.0
+    buy_zone: "合理或低估时重仓"
+  exit_triggers:
+    - "毛利率连续2年下滑"
+    - "OCF转负"
+    - "ROE跌破12%"
+    - "PE超历史均值3σ（待历史PE落库后启用）"
 
 dividend:
   name: "红利策略"

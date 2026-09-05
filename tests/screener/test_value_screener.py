@@ -129,11 +129,20 @@ class TestCheck7Gates:
 
     # --- Gate 3: 5-year avg ROE < 8% with exemption ---
     def test_gate_roe_5y_low_exempt_high_growth(self):
-        """5y ROE < 8% but revenue growth > 20% -> exemption applies."""
-        stock = self._base_stock(roe_5y_avg=7.0, revenue_growth=25.0)
+        """5y ROE < 8% + 高增长 + OCF转正 + 短覆盖 -> 豁免A（细化后更严）"""
+        stock = self._base_stock(roe_5y_avg=7.0, revenue_growth=25.0,
+                                 ocf_latest=3.0, ocf_5y_trend=1,
+                                 data_years='2020-2024')
         reasons = _check_7_gates(stock, self._base_config())
         assert len(reasons) > 0
-        assert any('豁免' in r and '高增长' in r for r in reasons)
+        assert any('豁免A' in r for r in reasons)
+
+    def test_gate_roe_5y_low_no_ocf_no_exemption(self):
+        """5y ROE < 8% + 高增长但 OCF 未转正 -> 照样排除（细化新增）"""
+        stock = self._base_stock(roe_5y_avg=7.0, revenue_growth=25.0,
+                                 ocf_latest=-1.0,
+                                 data_years='2020-2024')
+        assert _check_7_gates(stock, self._base_config()) == []
 
     def test_gate_roe_5y_low_no_exemption(self):
         """5y ROE < 8% and growth <= 20% -> excluded."""
@@ -166,11 +175,11 @@ class TestCheck7Gates:
 
     # --- Gate 5: Net margin 5y avg ---
     def test_gate_net_margin_5y_low_exempt_high_gm(self):
-        """5y net margin < 5% but GM >= 30% -> exemption."""
+        """5y net margin < 5% + GM >= 30% + 双增长 -> 豁免C（细化后须双正）"""
         stock = self._base_stock(net_margin_5y_avg=4.0, gross_margin=35.0)
         reasons = _check_7_gates(stock, self._base_config())
         assert len(reasons) > 0
-        assert any('豁免' in r and '主动压利' in r for r in reasons)
+        assert any('豁免C' in r and '双增长改善' in r for r in reasons)
 
     def test_gate_net_margin_5y_low_no_exemption(self):
         stock = self._base_stock(net_margin_5y_avg=4.0, gross_margin=20.0)
@@ -416,6 +425,71 @@ class TestValueScreenerIntegration:
             vs_module.FinancialSummaryDAO.get_batch = original_get_batch
 
         assert len(results) <= 20
+
+
+class TestExemptionsRefined:
+    """B4 豁免细化（对标 Berkshire A/B/C）：只收紧不放松的反例矩阵。"""
+
+    def test_span_helper(self):
+        from src.screener.value_screener import _data_years_span
+        assert _data_years_span('2020-2026') == 6
+        assert _data_years_span('broken') is None
+        assert _data_years_span(None) is None
+
+    def test_exempt_a_full_house_passes(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        base = T._base_stock(T(), roe_5y_avg=5.0, revenue_growth=25.0,
+                             ocf_latest=2.0, ocf_5y_trend=1,
+                             data_years='2020-2024')
+        cfg = T._base_config(T())
+        assert len(_check_7_gates(base, cfg)) > 0
+
+    def test_exempt_a_ocf_negative_rejected(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        base = T._base_stock(T(), roe_5y_avg=5.0, revenue_growth=25.0,
+                             ocf_latest=-1.0, ocf_5y_trend=-1,
+                             data_years='2020-2024')
+        assert _check_7_gates(base, T._base_config(T())) == []
+
+    def test_exempt_a_long_history_rejected(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        base = T._base_stock(T(), roe_5y_avg=5.0, revenue_growth=25.0,
+                             ocf_latest=2.0, ocf_5y_trend=1,
+                             data_years='2005-2024')
+        assert _check_7_gates(base, T._base_config(T())) == []
+
+    def test_exempt_b_needs_profit_recovery(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        bad = T._base_stock(T(), ocf_per_share=-1.0, gross_margin=35.0,
+                            revenue_growth=25.0, profit_growth=0.0)
+        assert _check_7_gates(bad, T._base_config(T())) == []
+        good = T._base_stock(T(), ocf_per_share=-1.0, gross_margin=35.0,
+                             revenue_growth=25.0, profit_growth=5.0)
+        assert len(_check_7_gates(good, T._base_config(T()))) > 0
+
+    def test_exempt_c_needs_dual_growth(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        bad = T._base_stock(T(), net_margin_5y_avg=3.0, gross_margin=35.0,
+                            revenue_growth=0.0, profit_growth=5.0)
+        assert _check_7_gates(bad, T._base_config(T())) == []
+        good = T._base_stock(T(), net_margin_5y_avg=3.0, gross_margin=35.0,
+                             revenue_growth=5.0, profit_growth=5.0)
+        assert len(_check_7_gates(good, T._base_config(T()))) > 0
+
+    def test_exempt_d_needs_cash_quality(self):
+        from tests.screener.test_value_screener import TestCheck7Gates as T
+        good = T._base_stock(T(), gross_margin=10.0, roe=25.0,
+                             ocf_per_share=5.0, ocf_positive_years=4,
+                             net_margin_5y_avg=2.5)
+        assert len(_check_7_gates(good, T._base_config(T()))) > 0
+        thin_ocf = T._base_stock(T(), gross_margin=10.0, roe=25.0,
+                                 ocf_per_share=5.0, ocf_positive_years=1,
+                                 net_margin_5y_avg=2.5)
+        assert _check_7_gates(thin_ocf, T._base_config(T())) == []
+        bleeding = T._base_stock(T(), gross_margin=10.0, roe=25.0,
+                                 ocf_per_share=5.0, ocf_positive_years=4,
+                                 net_margin_5y_avg=-2.0)
+        assert _check_7_gates(bleeding, T._base_config(T())) == []
 
 
 if __name__ == '__main__':
