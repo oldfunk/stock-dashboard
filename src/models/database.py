@@ -246,7 +246,10 @@ CREATE TABLE IF NOT EXISTS ai_watchlist (
     added_reason    TEXT,
     ai_confidence   TEXT,
     last_reviewed   TEXT,
-    review_count    INTEGER DEFAULT 1
+    review_count    INTEGER DEFAULT 1,
+    status          TEXT DEFAULT 'core',  -- core/watch/dropped（B6a 状态机）
+    status_reason   TEXT,                 -- 状态变更原因（调出/观察理由）
+    watch_until     TEXT                  -- 观察期限 YYYY-MM-DD（watch 态用）
 );
 
 -- AI 观察池历史调整记录
@@ -301,6 +304,9 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failed', 'INTEGER')
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failure_reason', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_watchlist', 'status_reason', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_watchlist', 'watch_until', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')

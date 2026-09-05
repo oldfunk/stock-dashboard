@@ -513,7 +513,7 @@ journal.content_md 用 Markdown，写叙事性笔记（不要只是列股票）�
         for code, (action, reason) in final_actions.items():
             name = current_map.get(code, {}).get('name', '')
             if action == 'remove':
-                watchlist_dao.remove(code)
+                watchlist_dao.remove(code, reason)
             elif action == 'add':
                 # 从候选池找 name
                 for c in candidates:

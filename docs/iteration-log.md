@@ -88,17 +88,19 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] B1 估值验算闸 P0（2026-09-04 人工完成）：scripts/verify_valuation.py + 单测 12 passed + run_pipeline 4.5 接入；pi1 实测 20/20 通过。V1 待 B8 启用，V2 为宽口径极端值捕捉。
 - [x] B8 financial_history.total_shares 落库修复 P1（2026-09-05 人工完成）：夜间 agent 只交调查报告零落地，违反独立完工律（已补入 prompt 硬约束）。实测：利润表接口两机全灭（东财 hidctype 页面结构变更，1.18.64 全符号 TypeError；agent 称"返回 None"属误诊，且所谓替代接口 abstract_ths 根本无股本列）。DB 自 1989 起 64129 行全 NULL——该列从未真正写进去过（快照市值走的是净利润/EPS 倒推另一条路）。修复：fetcher 加净利润/EPS 兜底 + pi1 回填 39798 行（备份在先，剩余 24331 行缺 eps/net_profit 无法推导）；V1 当晚即抓到电投能源市值偏差 28% 真告警（已定性口径差归档）；余量归档：最新行 890 取 766（124 缺，多为数据稀疏股，V1 判 SKIP）；旧历史行不追。
 - 提示词补独立完工律：调查类不许只交报告，每晚必须修好/fallback/部分落地三选一；替代路径须验证到列级别。
-- [ ] B2 强制结论三态 P0（排期 9-07 起）：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间，前端纪律展示。验收：prompt 样本 diff + 新路由真机 curl（D4/D5）。
-- [ ] B3 成长 α 纪律 P1：strategies.yaml growth 按 era-alpha 三标准（定价权/壁垒/增长质量）+ 估值锚（PE 超历史均值 3σ 减仓）+ 拐点清单细化。
-- [ ] B4 豁免细化 P1：对照 quality-screen A/B/C 三豁免，补战略投入期与高周转薄利（Costco 类）条款，附等价样本。
+- [x] B2 强制结论三态 P0（2026-09-05 人工完成）：verdict+三档价格+程序纪律+双页徽标，全仓179过，已合并部署。
+- [x] B3 成长 α 纪律 P1（2026-09-05 人工完成）：growth 重写α三标准+估值锚+拐点清单。
+- [x] B4 豁免细化 P1（2026-09-05 人工完成）：A/C/C2/D 对标 Berkshire；单测补 C2 缺口；pi1 零翻转；已合并 main（26f39c6）pi1 部署生效。
 - [ ] B5 论点漂移 P2：journal 矛盾检测升级为持续 drift 跟踪（论点是否被证伪），落库 + 对比页展示。
 - [ ] B6 监控池状态机与进出纪律 P1（M3）：ai_watchlist 加 status（core/watch/dropped）+ 原因 + 期限字段，调入/调出必须书面理由，8 条否决线命中即时出。
 - [ ] B7 市场总结模板与全覆盖校验 P1（M3）：周报（周六复盘）深度版，财报式五句/股，小白三标准，发布前程序校验池内 code 全覆盖，缺一只打回。
 
 ## 变更记录（Changelog）
+### 2026-09-05（B6a 监控池状态机 schema，人工主动推进）
+- 计划：ai_watchlist 加 status（core/watch/dropped）+ status_reason + watch_until（含迁移守卫）；remove() 改软删除（UPDATE dropped+原因，行保留）替代 DELETE；add() 重纳时重置 core；get_all() 默认过滤 dropped（5 只容量/前端/K线逻辑全不受影响）；reviewer 调出传 reason；单测（软删留行/默认过滤/重纳重置/非法状态拒绝）。watch 指派逻辑（reviewer prompt 教 AI 何时判 watch）并入 B7（需周六 live 驗），此处只埋 schema。验收：单测 + 全仓无回归。
+- 完成：schema + 软删除 + 重纳重置 + 默认过滤 + reviewer 传 reason；单测 3 个；全仓 192 passed 零失败。watch 指派并入 B7。
 ### 2026-09-05（B3+B4 成长α纪律与豁免细化，人工主动推进）
-- 计划：B3 重写 strategies.yaml growth（era-alpha 三标准：定价权毛利≥30%且不低于5年均、壁垒ROE5y≥15%且波动≤10、增长质量营收净利OCF三正 + 估值锚泡沫PE40 + 拐点清单；dividend/turnaround 不动）。B4 对标 quality-screen 细化三豁免：A 加 OCF 转正（ocf_latest>0 且趋势非降）+ 数据跨度<12 年；C 加改善趋势（营收净利双正）；D 加 OCF 质量（ocf>0 且过半年份为正）+ 净利率下限>0。行为会变（D5 改为 flip 计数报告，不追求零差异）。验收：单测 + pi1 全市场 flip 计数 + 全仓无回归。
-- 状态：计划中（先记账再动手，D6）。
+- 计划：B3 重写 strategies.yaml growth（era-alpha 三标准：定价权毛利≥30%且不低于5年均、壁垒ROE5y≥15%且波动≤10、增长质量营收净利OCF三正 + 估值锚泡沫PE40 + 拐点清单；dividend/turnaround 不动）。B4 对标 quality-screen 细化三豁免：A 加 OCF 转正（ocf_latest>0 且趋势非降）+ 数据跨度<12 年；C 加改善趋势（营收净利双正）；D 加 OCF 质量（ocf>0 且过半年份为正）+ 净利率下限>0。行为会变（D5 改为 flip 计数报告，不追求零差异）。验收：单测 + pi1 全市场 flip 计数 + 全仓无回归。（已完成，见下行）
 - 完成：B3 growth 重写（α三标准+估值锚泡沫PE40+拐点清单，dividend/turnaround 不动）；B4 豁免A/C/C2/D细化（单测抓出 Costco 类连净利门都过不了，补 C2 后闭环）；旧2用例按新契约更新；单测 11 个；全仓 190 passed 零失败；pi1 全市场 44/44、20只全字段 20/20，新老零翻转，周一输出不受影响。
 ### 2026-09-05（B2 强制结论三态，人工主动推进）
 - 计划：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间；parse_ai_response 向后兼容（新字段可选）；存量 JSON 缺字段前端降级不渲染；routes 下发 verdict 徽标；附单测。验收：prompt 样本 diff + 新旧 JSON 兼容单测 + pi1 上线后 curl。

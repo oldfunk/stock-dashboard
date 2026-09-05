@@ -43,9 +43,39 @@ def test_watchlist_remove():
     from src.models.ai_watchlist import AiWatchlistDAO
     dao = AiWatchlistDAO()
     dao.add("600519", "贵州茅台", "测试")
-    assert dao.remove("600519") is True
-    assert dao.get_by_code("600519") is None
+    assert dao.remove("600519", "估值过高") is True
+    # B6a 软删除：行保留、状态 dropped、默认列表不可见
+    row = dao.get_by_code("600519")
+    assert row is not None
+    assert row['status'] == 'dropped'
+    assert row['status_reason'] == "估值过高"
+    assert dao.get_all() == []
+    assert len(dao.get_all(include_dropped=True)) == 1
     assert dao.remove("999999") is False
+
+
+def test_watchlist_readd_resets_core():
+    from src.models.ai_watchlist import AiWatchlistDAO
+    dao = AiWatchlistDAO()
+    dao.add("600519", "贵州茅台", "测试")
+    dao.remove("600519", "旧原因")
+    dao.add("600519", "贵州茅台", "新逻辑重纳")
+    row = dao.get_by_code("600519")
+    assert row['status'] == 'core'
+    assert row['status_reason'] is None
+    assert len(dao.get_all()) == 1
+
+
+def test_watchlist_set_status():
+    from src.models.ai_watchlist import AiWatchlistDAO
+    dao = AiWatchlistDAO()
+    dao.add("600519", "贵州茅台", "测试")
+    assert dao.set_status("600519", "watch", "观察毛利率拐点", "2026-10-01") is True
+    row = dao.get_by_code("600519")
+    assert row['status'] == 'watch'
+    assert row['watch_until'] == "2026-10-01"
+    assert dao.set_status("600519", "bogus") is False
+    assert dao.set_status("999999", "watch") is False
 
 
 def test_watchlist_update_reviewed():

@@ -15,10 +15,14 @@ from src.utils import now_cn
 class AiWatchlistDAO:
     """当前观察池状态（固定 5 只，由 WatchlistReviewer 保证容量）"""
 
-    def get_all(self) -> list[dict]:
+    def get_all(self, include_dropped: bool = False) -> list[dict]:
+        """观察池列表。默认过滤已调出（dropped），保持 5 只容量/前端/K线语义不变；
+        include_dropped=True 用于审计（不许静默消失的行都在这里）。"""
         with db_conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM ai_watchlist ORDER BY added_at ASC"
+                "SELECT * FROM ai_watchlist "
+                + ("" if include_dropped else "WHERE status IS NULL OR status != 'dropped' ")
+                + "ORDER BY added_at ASC"
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -31,19 +35,39 @@ class AiWatchlistDAO:
 
     def add(self, code: str, name: str, added_reason: str = None,
             ai_confidence: str = None) -> bool:
+        """调入（重纳 dropped 时重置为 core，理由清空）。"""
         with db_conn() as conn:
             cur = conn.execute(
                 "INSERT OR REPLACE INTO ai_watchlist "
-                "(code, name, added_at, added_reason, ai_confidence, last_reviewed, review_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                "(code, name, added_at, added_reason, ai_confidence, last_reviewed, review_count, "
+                "status, status_reason, watch_until) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, 'core', NULL, NULL)",
                 (code, name, now_cn().isoformat(), added_reason, ai_confidence,
                  now_cn().strftime("%Y-%m-%d"))
             )
             return cur.rowcount > 0
 
-    def remove(self, code: str) -> bool:
+    def remove(self, code: str, reason: str = None) -> bool:
+        """调出 = 软删除：行保留，status 置 dropped + 原因（B6a 不许静默消失）。"""
         with db_conn() as conn:
-            cur = conn.execute("DELETE FROM ai_watchlist WHERE code = ?", (code,))
+            cur = conn.execute(
+                "UPDATE ai_watchlist SET status = 'dropped', status_reason = ? "
+                "WHERE code = ? AND (status IS NULL OR status != 'dropped')",
+                (reason, code))
+            return cur.rowcount > 0
+
+    VALID_STATUSES = ('core', 'watch', 'dropped')
+
+    def set_status(self, code: str, status: str, reason: str = None,
+                   watch_until: str = None) -> bool:
+        """状态机变迁（core/watch/dropped）。非法状态直接拒绝。"""
+        if status not in self.VALID_STATUSES:
+            return False
+        with db_conn() as conn:
+            cur = conn.execute(
+                "UPDATE ai_watchlist SET status = ?, status_reason = ?, "
+                "watch_until = ? WHERE code = ?",
+                (status, reason, watch_until, code))
             return cur.rowcount > 0
 
     def update_reviewed(self, code: str, confidence: str = None):
