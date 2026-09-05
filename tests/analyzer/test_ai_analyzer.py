@@ -268,5 +268,71 @@ class TestVerdictDiscipline:
         assert 'verdict' not in r  # 解析层不强加，纪律层在写库时处置
 
 
+class TestQualityScore:
+    """Q 能力分：质量优先，可用次之。"""
+
+    def test_quality_beats_availability(self):
+        from src.analyzer.ai_analyzer import FreeModelPool
+        import time
+        p = FreeModelPool('http://127.0.0.1:9', None)
+        p._pool = ['good', 'fast']
+        p._last_refresh = time.time()
+        for _ in range(5):
+            p.record_quality('good', True)
+        for _ in range(4):
+            p.record_quality('fast', False)
+        for _ in range(5):
+            p.record_result('fast', ok=True, latency=3.0)
+        for _ in range(4):
+            p.record_result('good', ok=False)
+        assert p.quality_score('good') > p.quality_score('fast')
+        assert p.acquire() == 'good'
+
+    def test_newcomer_neutral(self):
+        from src.analyzer.ai_analyzer import FreeModelPool
+        p = FreeModelPool('http://127.0.0.1:9', None)
+        assert p.quality_score('never-seen') == 0.5
+
+
+class TestConsistencyEnforce:
+    """Q 确定性交叉：否决改判 + 镜子/六关熔断。"""
+
+    def _r(self, **kw):
+        from src.analyzer.ai_analyzer import _enforce_verdict_discipline
+        d = {'analysis': 'x', 'investment_strategy': 'y',
+             'trade_strategy': {'signal': 'BUY'},
+             'verdict': '通过：低估',
+             'veto_checklist': {'triggered_count': 0},
+             'mirror_test': {'passed': True},
+             'checklist': {}}
+        d.update(kw)
+        return _enforce_verdict_discipline(d)
+
+    def test_veto_overrides_all(self):
+        r = self._r(veto_checklist={'triggered_count': 1,
+                                    'following_the_herd': True})
+        assert r['verdict'].startswith('不通过')
+        assert r['trade_strategy']['signal'] == 'AVOID'
+        assert '_discipline_note' in r
+
+    def test_mirror_melts_buy(self):
+        r = self._r(mirror_test={'passed': False})
+        assert r['trade_strategy']['signal'] == 'HOLD'
+
+    def test_checklist_low_melts_buy(self):
+        r = self._r(checklist={'moat': {'score': 2, 'note': '浅'}})
+        assert r['trade_strategy']['signal'] == 'HOLD'
+
+    def test_consistency_fn(self):
+        from src.analyzer.ai_analyzer import _check_output_consistency
+        assert _check_output_consistency({}) == []
+        assert _check_output_consistency('nope') == []
+        bad = {'trade_strategy': {'signal': 'BUY'},
+               'veto_checklist': {'triggered_count': 2},
+               'verdict': '通过：好'}
+        issues = _check_output_consistency(bad)
+        assert len(issues) == 2
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

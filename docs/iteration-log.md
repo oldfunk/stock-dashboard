@@ -96,6 +96,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] B7 市场总结模板与全覆盖校验 P1（M3）：reviewer prompt 周报结构（池变动/逐股五句/小白）+ coverage 记 actions_summary；prompt 生效等周六 live。
 
 ## 变更记录（Changelog）
+### 2026-09-05（Q 模型能力分：解析有效率+逻辑自洽率，人工主动推进）
+- 计划：pool 加 quality 台账（record_quality/quality_score，Laplace 先验 0.5）；score 改能力优先（0.65 质量 + 0.35 可用 − 超时/延迟惩罚）；analyze_stock 写库前记质量（解析失败/不一致记 fail）；_enforce 扩展否决触发改判（verdict 不通过 + signal AVOID）+ 镜子/六关 BUY 熔断（→HOLD）；_check_output_consistency 纯函数；单测（质量排序/否决改判/熔断/一致性矩阵）。验收：单测 + 全仓无回归 + 旧池单测不破。
+- 状态：计划中（先记账再动手，D6）。
+- 完成：pool 能力台账 + score 改 0.65 质量/0.35 可用；analyze_stock 写库前记质量（判原始输出）；_enforce 加否决改判 + 镜子/六关熔断；_check_output_consistency 纯函数；单测 6 个；全仓 200 passed 零失败，旧池单测全过。
 ### 2026-09-05（B5+B7 持有纪律与周报模板，人工主动推进）
 - 计划：B5 drift 实时算免新表——conflicts API 加跨轮 Signal/verdict 翻转检测（screening_result 最近两轮，池内股）+ 打脸回归（上期调出本期调回）；B7 reviewer prompt 加 watch 动作 + journal 结构（池变动章节/每股财报五句/小白三标准）+ persist 加 coverage 校验（缺股记 actions_summary.coverage_missing，只告警不阻断）；watch 落库走 set_status。验收：单测（watch 落库/conflicts 翻转/coverage 缺失）+ 全仓无回归 + pi1 conflicts 真跑。prompt 生效等周六 live。
 - 完成：reviewer prompt（watch 动作/schema 示例/周报结构/小白）+ watch 落库分支 + coverage 记账 + conflicts drift（打脸回归/Signal/verdict 翻转）；修 drift 双重取下标 bug（run_id 变 'r' 全空）；单测 2 个；全仓 194 passed 零失败。

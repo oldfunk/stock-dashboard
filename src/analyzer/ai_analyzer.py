@@ -319,30 +319,94 @@ def _normalize_verdict(v) -> str:
     return ''
 
 
+def _check_output_consistency(result: dict) -> list[str]:
+    """确定性交叉：否决触发/镜子未过/六关≤2 却给 BUY/通过 → 返回矛盾描述。
+    空列表 = 自洽。纯函数，可单测；写库前用于质量记账。"""
+    issues = []
+    if not isinstance(result, dict):
+        return issues
+    trade = result.get('trade_strategy')
+    sig = str(trade.get('signal', '')).upper() if isinstance(trade, dict) else ''
+    veto = result.get('veto_checklist') or {}
+    trig = 0
+    try:
+        trig = int(veto.get('triggered_count', 0) or 0)
+    except (ValueError, TypeError):
+        trig = 0
+    true_items = [k for k, v in veto.items()
+                  if k != 'triggered_count' and v is True]
+    if trig > 0 or true_items:
+        if _normalize_verdict(result.get('verdict')) == 'pass':
+            issues.append('否决触发却判通过')
+        if sig == 'BUY':
+            issues.append('否决触发却给 BUY')
+    mirror = result.get('mirror_test') or {}
+    if mirror.get('passed') is False and sig == 'BUY':
+        issues.append('镜子未过却给 BUY')
+    checklist = result.get('checklist') or {}
+    low = [k for k, v in checklist.items()
+           if isinstance(v, dict) and isinstance(v.get('score'), (int, float))
+           and v['score'] <= 2]
+    if low and sig == 'BUY':
+        issues.append(f"六关{','.join(low)}≤2 却给 BUY")
+    return issues
+
+
 def _enforce_verdict_discipline(result: dict) -> dict:
-    """verdict↔signal 程序纪律（写库前执行）。
-    不通过 → signal 置 AVOID；灰色（含缺失，按灰色保守处置）→ BUY 降 HOLD。
-    只收紧不放松：从不把 HOLD/AVOID 改成 BUY。改动记 _discipline_note。"""
+    """verdict↔signal 程序纪律 + 确定性交叉强制（写库前执行）。
+    否决触发 → verdict 不通过 + signal AVOID；灰色（含缺失）→ BUY 降 HOLD；
+    镜子未过/六关≤2 → BUY 熔断为 HOLD。只收紧不放松，改动记 _discipline_note。"""
     if not isinstance(result, dict):
         return result
     trade = result.get('trade_strategy')
     if not isinstance(trade, dict):
         return result
+    notes = []
+    sig = str(trade.get('signal', '')).upper()
+    # 1. 否决触发（规则 10 程序化）：结论改判 + 信号改 AVOID
+    veto = result.get('veto_checklist') or {}
+    try:
+        trig = int(veto.get('triggered_count', 0) or 0)
+    except (ValueError, TypeError):
+        trig = 0
+    if trig > 0 or any(k != 'triggered_count' and v is True
+                       for k, v in veto.items()):
+        if _normalize_verdict(result.get('verdict')) != 'fail':
+            result['verdict'] = '不通过：快速否决红线触发（程序强制）'
+            notes.append('否决触发，verdict 改判不通过')
+        if sig != 'AVOID':
+            trade['signal'] = 'AVOID'
+            notes.append('否决触发，signal 强制为 AVOID')
+        sig = 'AVOID'
+    # 2. verdict↔signal（B2 原逻辑）
     v = _normalize_verdict(result.get('verdict'))
     if not v:
         v = 'gray'
         result['verdict'] = (result.get('verdict') or '') + '灰色地带：模型未输出结论，按纪律保守处置' \
             if result.get('verdict') else '灰色地带：模型未输出结论，按纪律保守处置'
-    sig = str(trade.get('signal', '')).upper()
-    note = None
     if v == 'fail' and sig != 'AVOID':
         trade['signal'] = 'AVOID'
-        note = 'verdict 不通过，signal 强制为 AVOID'
+        notes.append('verdict 不通过，signal 强制为 AVOID')
+        sig = 'AVOID'
     elif v == 'gray' and sig == 'BUY':
         trade['signal'] = 'HOLD'
-        note = 'verdict 灰色，BUY 降为 HOLD'
-    if note:
-        result['_discipline_note'] = note
+        notes.append('verdict 灰色，BUY 降为 HOLD')
+        sig = 'HOLD'
+    # 3. 镜子/六关 BUY 熔断
+    if sig == 'BUY':
+        mirror = result.get('mirror_test') or {}
+        checklist = result.get('checklist') or {}
+        low = [k for k, v in checklist.items()
+               if isinstance(v, dict) and isinstance(v.get('score'), (int, float))
+               and v['score'] <= 2]
+        if mirror.get('passed') is False:
+            trade['signal'] = 'HOLD'
+            notes.append('镜子未过，BUY 熔断为 HOLD')
+        elif low:
+            trade['signal'] = 'HOLD'
+            notes.append(f"六关{','.join(low)}≤2，BUY 熔断为 HOLD")
+    if notes:
+        result['_discipline_note'] = '; '.join(notes)
     return result
 
 
@@ -375,6 +439,7 @@ class FreeModelPool:
         self._pool: list[str] = []        # 当前可用模型列表（按偏好排序）
         self._dead: dict[str, float] = {}  # 模型 -> 复活时间戳（TTL，见 mark_dead）
         self._stats: dict[str, dict] = {}  # 模型 -> {ok,fail,timeouts,lat_sum,n_lat}
+        self._quality: dict[str, dict] = {}  # 模型 -> {ok,fail} 能力台账（解析+自洽）
         self._dead_ttl = 1800             # 黑名单 TTL（秒），到期自动复活
         self._current = 0                 # 轮换游标
         self._last_refresh = 0.0
@@ -447,18 +512,33 @@ class FreeModelPool:
             st['timeouts'] += 1
 
     def score(self, model: str) -> float:
-        """性能分：Laplace 平滑成功率 − 超时惩罚 − 延迟惩罚。
-        无记录的新模型得中性先验 0.5，保证试用机会。"""
+        """总分：0.65 能力分（解析有效率+逻辑自洽率）+ 0.35 可用分 − 超时/延迟惩罚。
+        无记录的新模型两项都是中性先验，保证试用机会。能力优先：秒回但废话的
+        模型排在慢但高质量的后面；熔断（死亡名单）仍独立生效。"""
         st = self._stats.get(model)
         if st is None:
+            avail, timeout_pen, lat_pen = 0.5, 0.0, 0.0
+        else:
+            n = st['ok'] + st['fail']
+            avail = (st['ok'] + 2) / (n + 4)
+            timeout_pen = 0.1 * st['timeouts'] / (n + 1)
+            lat_pen = 0.0
+            if st['n_lat']:
+                lat_pen = 0.3 * min(st['lat_sum'] / st['n_lat'], 240.0) / 240.0
+        return 0.65 * self.quality_score(model) + 0.35 * avail \
+            - timeout_pen - lat_pen
+
+    def record_quality(self, model: str, ok: bool):
+        """能力战绩：解析成功且逻辑自洽记 ok，反之记 fail。"""
+        q = self._quality.setdefault(model, {'ok': 0, 'fail': 0})
+        q['ok' if ok else 'fail'] += 1
+
+    def quality_score(self, model: str) -> float:
+        """能力分：Laplace 平滑的能力成功率；无记录返回中性 0.5。"""
+        q = self._quality.get(model)
+        if q is None:
             return 0.5
-        n = st['ok'] + st['fail']
-        rate = (st['ok'] + 2) / (n + 4)
-        timeout_pen = 0.1 * st['timeouts'] / (n + 1)
-        lat_pen = 0.0
-        if st['n_lat']:
-            lat_pen = 0.3 * min(st['lat_sum'] / st['n_lat'], 240.0) / 240.0
-        return rate - timeout_pen - lat_pen
+        return (q['ok'] + 2) / (q['ok'] + q['fail'] + 4)
 
     def current_pool(self) -> list[str]:
         """返回当前模型池快照（用于日志/展示）。"""
@@ -675,7 +755,19 @@ class AiAnalyzer:
             return None
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
         result = parse_ai_response(content)
-        if result is not None and isinstance(result, dict):
+        if result is None:
+            if self._pool:
+                self._pool.record_quality(used_model, False)
+            return None
+        if isinstance(result, dict):
+            # 质量记账判的是模型原始输出（ enforce 之前）
+            if _check_output_consistency(result):
+                logger.warning(f"[AI分析] 输出自洽检查未过({used_model}): "
+                               f"{_check_output_consistency(result)}")
+                if self._pool:
+                    self._pool.record_quality(used_model, False)
+            elif self._pool:
+                self._pool.record_quality(used_model, True)
             result = _enforce_verdict_discipline(result)
             result['model'] = used_model
         return result
