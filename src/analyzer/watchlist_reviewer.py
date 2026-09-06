@@ -230,27 +230,7 @@ class WatchlistReviewer:
         size = self.watchlist_size
         is_initial = len(current) == 0
 
-        if is_initial:
-            role_line = (
-                f"你是一位价值投资基金经理，这是观察池初始化（首次启动）。"
-                f"请从候选池选 {size} 只作为初始成员。"
-            )
-            rule_line = (
-                f"观察池固定 {size} 只。全部记为 action=add。"
-                f"优先选评分高、ROE 稳定、护城河宽的股票。"
-            )
-        else:
-            role_line = (
-                f"你是一位价值投资基金经理，每周复盘一次观察池（固定 {size} 只）。"
-            )
-            rule_line = (
-                f"观察池固定 {size} 只。优先保持稳定，没有充分理由不要换。"
-                f"调入决策要给出理由，调出决策也要给出理由。"
-                f"action 允许 add/remove/keep/watch：拿不准、需继续观察的不调出，"
-                f"判 watch 并给观察项与期限（watch_until 写 YYYY-MM-DD 日期）。"
-            )
-
-        # 规则细化
+        # 规则细化（role/rule 的唯一定义处，勿重复定义——后者覆盖前者易成死代码）
         if is_initial:
             role_line = (
                 f"你是一位价值投资基金经理，这是观察池初始化（首次启动）。"
@@ -279,13 +259,27 @@ class WatchlistReviewer:
             ("\n".join(f"  - {f['code']} {f['name']}: {', '.join(f['reasons'])}" for f in forced_out) if forced_out else "无")
         )
         
-        current_section = (
-            "【当前观察池】\n" +
-            ("\n".join(f"  - {s['code']} {s.get('name', '')} | ROE={s.get('roe', 'N/A')}% "
-                      f"| Signal={analyses.get(s['code'], {}).get('trade_strategy', {}).get('signal', '--') if analyses else '--'} "
-                      f"| 置信={s.get('ai_confidence', '--')} | 在池{s.get('review_count', 1)}周 | 进入理由: {s.get('added_reason', '')}"
-                      for s in current) if current else "空（首次启动）")
-        )
+        # 当前观察池（Signal 防御：trade_strategy 可能以 JSON 字符串存储，
+        # check_signal_avoid/买入区规则均保留同款 isinstance(str) 解析）
+        if current:
+            current_lines = []
+            for s in current:
+                analysis = analyses.get(s['code'], {})
+                trade = analysis.get('trade_strategy', {}) if analysis else {}
+                if isinstance(trade, str):
+                    try:
+                        trade = json.loads(trade)
+                    except Exception:
+                        trade = {}
+                signal = trade.get('signal', '--') if trade else '--'
+                current_lines.append(
+                    f"  - {s['code']} {s.get('name', '')} | ROE={s.get('roe', 'N/A')}% "
+                    f"| Signal={signal} | 置信={s.get('ai_confidence', '--')} "
+                    f"| 在池{s.get('review_count', 1)}周 | 进入理由: {s.get('added_reason', '')}"
+                )
+            current_section = "【当前观察池】\n" + "\n".join(current_lines)
+        else:
+            current_section = "【当前观察池】空（首次启动）"
         
         cand_section = (
             "【候选池】（最近 4 周 Top 20 去重）\n" +

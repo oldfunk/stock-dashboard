@@ -216,6 +216,44 @@ def test_build_prompt_contains_watch_clarification():
     assert "或需等待事件确认" in prompt
 
 
+def test_build_prompt_signal_from_str_trade_strategy():
+    """trade_strategy 以 JSON 字符串存储时 _build_prompt 不崩且正确提取 Signal
+
+    回归测试（2026-09-06 审查 3323ead 发现）：夜间重构把 Signal 提取压成
+    一行链式 .get()，删掉了 isinstance(str) 防御——真实库当前全为 dict 不触发，
+    但 check_signal_avoid() 等函数仍保留同款防御，说明字段可为 str（模型输出
+    漂移/历史数据/独立 ai_trade_strategy 列写入路径）。str 形态会导致
+    AttributeError 崩掉整个周六复盘。
+    """
+    reviewer = WatchlistReviewer({"ai_review": {"hard_rules": {}}})
+    current = [
+        {"code": "600519", "name": "贵州茅台", "roe": 25.0, "review_count": 3}
+    ]
+    analyses = {
+        "600519": {
+            "trade_strategy": json.dumps(
+                {"signal": "HOLD", "confidence": "0.6"}, ensure_ascii=False
+            )
+        }
+    }
+    prompt = reviewer._build_prompt(current, [], analyses, [], [])
+    assert "| Signal=HOLD |" in prompt
+
+
+def test_build_prompt_signal_from_dict_trade_strategy():
+    """dict 形态的 trade_strategy 正常渲染（当前生产数据形态）"""
+    reviewer = WatchlistReviewer({"ai_review": {"hard_rules": {}}})
+    current = [
+        {"code": "600519", "name": "贵州茅台", "roe": 25.0, "review_count": 3}
+    ]
+    analyses = {
+        "600519": {"trade_strategy": {"signal": "BUY", "confidence": "0.8"}}
+    }
+    prompt = reviewer._build_prompt(current, [], analyses, [], [])
+    assert "| Signal=BUY |" in prompt
+    assert "| Signal=" in prompt
+
+
 def test_coverage_validation_logic():
     """测试覆盖率校验逻辑"""
     from src.analyzer.watchlist_reviewer import WatchlistReviewer
