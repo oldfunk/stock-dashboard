@@ -51,6 +51,15 @@ try:
 except Exception as vr_err:
     logger.warning(f'验算闸异常（不影响后续）: {vr_err}')
 
+# ── 4.6 终值验算闸 C1（戈登终值+LLM隐含倍数反解+C1/C2体检，只告警不阻断）──
+try:
+    from scripts.verify_intrinsic import verify_run as _verify_intrinsic_run
+    _vir = _verify_intrinsic_run(run_id)
+    logger.info(f'终值验算: {run_id} 通过={_vir["pass"]} '
+                f'告警={_vir["warn"]} 失败={_vir["fail"]} 跳过={_vir["skip"]}')
+except Exception as vir_err:
+    logger.warning(f'终值验算异常（不影响后续）: {vir_err}')
+
 # ── 5. 大盘指数（统一走腾讯源，与调度器一致）──
 try:
     indices = fetch_market_index()

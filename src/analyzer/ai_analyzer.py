@@ -410,6 +410,92 @@ def _enforce_verdict_discipline(result: dict) -> dict:
     return result
 
 
+def _enforce_intrinsic_discipline(result: dict, stock: dict) -> dict:
+    """终值验算纪律（C1）：写库前检查 intrinsic_value 三档是否通过 C1/C2 体检。
+
+    - C1：乐观档隐含 g > 2% → 该档标注"分母失效，仅情景参考"
+    - C2：任一档 r-g < 5pct → 该档标注"分母失效，仅情景参考"
+    不阻断落库，只改判标注（估值是观点，验算是标尺）。
+    """
+    if not isinstance(result, dict):
+        return result
+
+    intrinsic = result.get('intrinsic_value')
+    if not isinstance(intrinsic, dict):
+        return result
+
+    # 需要 stock 的财务数据来跑验算
+    roic_5y = stock.get('roic_5y_avg')
+    fcf_5y = stock.get('fcf_5y_sum')
+    market_cap_yi = stock.get('market_cap')
+    current_price = stock.get('current_price')
+
+    if roic_5y is None or fcf_5y is None or market_cap_yi is None or current_price is None:
+        return result
+
+    from decimal import Decimal
+    from scripts.verify_intrinsic import (
+        exact, gordon_terminal_pe, implied_g_from_multiple,
+        C1_G_CAP_CNY, C2_DENOM_MIN, R_CNY_MEDIAN,
+    )
+
+    roic = exact(roic_5y) / Decimal('100')  # % 转小数
+    fcf_5y_dec = exact(fcf_5y)
+    if fcf_5y_dec <= 0:
+        return result  # FCF 非正，无法算 Owner Earnings
+    oe_annual_yi = fcf_5y_dec / Decimal('5') / Decimal('1e8')  # 年均 FCF (亿)
+
+    tiers = ['pessimistic', 'base_case', 'optimistic']
+    g_values = {
+        'pessimistic': Decimal('0'),
+        'base_case': Decimal('0.03'),
+        'optimistic': Decimal('0.04'),
+    }
+
+    notes = []
+    for tier in tiers:
+        iv_str = intrinsic.get(tier)
+        if iv_str is None or oe_annual_yi <= 0:
+            continue
+
+        iv_yi = exact(iv_str)
+        implied_multiple = iv_yi / oe_annual_yi
+
+        # C2 体检：终值 PE 分母检查
+        g = g_values[tier]
+        term_res = gordon_terminal_pe(roic, g, R_CNY_MEDIAN)
+        c2_fail = not term_res['denom_ok']
+
+        # C1 体检：反解隐含 g
+        implied_g = implied_g_from_multiple(implied_multiple, roic, R_CNY_MEDIAN)
+        c1_fail = implied_g is not None and implied_g > C1_G_CAP_CNY
+
+        if c1_fail or c2_fail:
+            # 标注该档估值
+            tier_data = intrinsic[tier]
+            if isinstance(tier_data, dict):
+                orig_advice = tier_data.get('advice', '')
+            else:
+                orig_advice = str(tier_data)
+            suffix = []
+            if c1_fail:
+                suffix.append(f'隐含g={float(implied_g)*100:.1f}%超2%上限')
+            if c2_fail:
+                suffix.append(f'分母r-g={float(R_CNY_MEDIAN - g)*100:.1f}%<5%')
+            note = '；'.join(suffix) + ' → 仅情景参考'
+            if isinstance(tier_data, dict):
+                intrinsic[tier]['advice'] = (orig_advice + ' ' + note).strip()
+            else:
+                intrinsic[tier] = str(tier_data) + ' ' + note
+            notes.append(f'{tier}: {note}')
+
+    if notes:
+        result['_intrinsic_note'] = '; '.join(notes)
+        logger.warning(f"[终值纪律] {stock.get('code')} {stock.get('name')}: {'; '.join(notes)}")
+
+    return result
+
+
 # 已知的免费模型列表（无需 API Key）
 # 不再硬编码——FreeModelPool 自动从 /api/models 发现
 FREE_MODELS = {"nemotron-3-ultra-free", "deepseek-v4-flash-free", "mimo-v2.5-free"}
@@ -769,6 +855,7 @@ class AiAnalyzer:
             elif self._pool:
                 self._pool.record_quality(used_model, True)
             result = _enforce_verdict_discipline(result)
+            result = _enforce_intrinsic_discipline(result, stock)
             result['model'] = used_model
         return result
 
