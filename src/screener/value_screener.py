@@ -56,27 +56,56 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     if roe is not None and roe > 0:
         reasons.append(f"ROE={roe}%（≥{min_roe}%）")
 
-    # 5年平均ROE（AI Berkshire: 10年平均<8%排除，我们取5年）
+    # 10年平均ROE（AI Berkshire: 10年平均<8%排除，我们优先用10年）
+    roe_10y = stock.get('roe_10y_avg')
     roe_5y = stock.get('roe_5y_avg')
-    if roe_5y is not None and roe_5y < 8:
+    
+    # 优先用10年数据，如果10年数据不可用则降级为5年
+    roe_to_check = roe_10y if roe_10y is not None else roe_5y
+    
+    if roe_to_check is not None and roe_to_check < 8:
         # 豁免A：战略投入期（对标 Berkshire 豁免A）——高增长 + OCF 已转正 + 数据覆盖短
         rev_g = stock.get('revenue_growth') or 0
         ocf_l = stock.get('ocf_latest')
         ocf_tr = stock.get('ocf_5y_trend', 0) or 0
         span = _data_years_span(stock.get('data_years'))
-        if rev_g >= 20 and ocf_l is not None and ocf_l > 0 and ocf_tr >= 0 \
-                and span is not None and span < 12:
-            reasons.append(f"5年均ROE={roe_5y}%（<8%，豁免A：高增长{rev_g}%+OCF转正+覆盖{span}年投入期）")
+        
+        # 年限判断：上游要求10年，我们用实际数据长度（但不超过10年）
+        data_span = span if span is not None else 5
+        effective_span = min(data_span, 10)  # 最多按10年判断
+        
+        # 修正：使用 ocf_per_share 作为 ocf_latest 的代理（当 ocf_latest 为空时）
+        ocf_to_check = ocf_l if ocf_l is not None else stock.get('ocf_per_share')
+        
+        if rev_g >= 20 and ocf_to_check is not None and ocf_to_check > 0 and ocf_tr >= 0 \
+                and effective_span < 10:
+            reasons.append(f"{'10年' if roe_10y else '5年'}均ROE={roe_to_check}%（<8%，豁免A：高增长{rev_g}%+OCF转正+覆盖{effective_span}年投入期）")
         else:
             return []
-    elif roe_5y is not None:
-        reasons.append(f"5年均ROE={roe_5y}%")
+    elif roe_to_check is not None:
+        reasons.append(f"{'10年' if roe_10y else '5年'}均ROE={roe_to_check}%")
 
-    # ── 规则 2：OCF/NI ≥ 0.7 代理（用OCF/股正数 + 历史OCF为正的年数）──
-    # AI Berkshire: 5年累计FCF为负排除 + OCF/NI < 0.7排除
-    # 代理：OCF/股>0 + 多数年份OCF为正
+    # ── 规则 2：OCF/NI 精确计算（AI Berkshire: 5年累计FCF为负排除 + OCF/NI < 0.7排除）──
+    # 代理：OCF/股正数 + 多数年份OCF为正（保持向后兼容）
     ocf = stock.get('ocf_per_share')
     ocf_pos_years = stock.get('ocf_positive_years')
+    
+    # 新增：OCF/NI 精确计算（如果数据可得）
+    ocf_ni_ratio = None
+    if stock.get('ocf_5y_sum') and stock.get('net_margin_5y_avg'):
+        # OCF/NI = 5年累计OCF / 5年累计净利润（近似）
+        ocf_5y_sum = stock.get('ocf_5y_sum', 0)
+        net_margin_5y_avg = stock.get('net_margin_5y_avg', 0)
+        if net_margin_5y_avg > 0 and ocf_5y_sum > 0:
+            # 用最新年度净利润作为分母基准
+            net_profit_latest = stock.get('net_profit', 0)
+            if net_profit_latest > 0:
+                ocf_ni_ratio = ocf_5y_sum / net_profit_latest
+            else:
+                # 净利润为0时用净利率推算
+                ocf_ni_ratio = ocf_5y_sum / (net_margin_5y_avg * 1e8) if net_margin_5y_avg > 0 else None
+    
+    # 代理逻辑（保持向后兼容）- 放在精确计算之后
     if ocf is not None:
         if ocf <= 0:
             # 豁免B：战略投入期（高毛利率+高营收增长+净利已改善，缺一不可）
@@ -93,54 +122,70 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
             if ocf_pos_years is not None and ocf_pos_years < 3 and stock.get('roe_5y_count', 0) >= 4:
                 return []  # 多数年份OCF为负 → 排除
             reasons.append(f"OCF/股={ocf}（正数）")
-
-    # ── 规则 3：净利率 ≥ 5%（当前 + 5年均值）──
-    min_nm = screen.get('min_net_margin', 5)
-    nm_5y = stock.get('net_margin_5y_avg')
-    # 用当前毛利率近似判断（无当前净利率字段，但有毛利率和5年均净利率）
-    gm_current = stock.get('gross_margin')
-    if nm_5y is not None and nm_5y < min_nm:
-        # 豁免C2：高周转薄利（对标 Berkshire 豁免C 后半）——ROE>20% + OCF 质量 +
-        # 本身薄利模式（毛利<15%）+ 净利为正（不失血）。Costco 类靠此条过净利门。
-        roe_c = stock.get('roe') or 0
-        gm_c = stock.get('gross_margin')
-        ocf_c = stock.get('ocf_per_share')
-        ocf_py_c = stock.get('ocf_positive_years')
-        rev_g = stock.get('revenue_growth') or 0
-        prof_g = stock.get('profit_growth') or 0
-        if roe_c >= 20 and gm_c is not None and gm_c < 15 \
-                and ocf_c is not None and ocf_c > 0 \
-                and ocf_py_c is not None and ocf_py_c >= 3 and nm_5y > 0:
-            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免C2：高ROE薄利+OCF质量）")
-        # 豁免C：主动低利润率模式（对标 Berkshire 豁免B）——毛利率>30%（有能力赚）+
-        # 营收净利双正（改善趋势，非长期失血）
-        elif gm_current and gm_current >= 30 and rev_g > 0 and prof_g > 0:
-            reasons.append(f"5年均净利率={nm_5y}%（<{min_nm}%，豁免C：高毛利率{gm_current}%+双增长改善）")
-        else:
-            return []
-    elif nm_5y is not None:
-        reasons.append(f"5年均净利率={nm_5y}%")
-
-    # ── 规则 4：毛利率 ≥ 15%（当前）──
-    min_gm = screen.get('min_gross_margin', 15)
-    gross_margin = stock.get('gross_margin')
-    if gross_margin is not None:
-        if gross_margin < min_gm:
-            # 豁免D：高周转薄利模式（对标 Berkshire 豁免C：Costco 类）——ROE>20% +
-            # OCF 为正且过半年份为正（现金真实）+ 5年均净利率>0（不失血）
-            roe = stock.get('roe') or 0
-            ocf = stock.get('ocf_per_share')
-            ocf_py = stock.get('ocf_positive_years')
-            nm_5y_d = stock.get('net_margin_5y_avg')
-            if roe >= 20 and ocf is not None and ocf > 0 \
-                    and ocf_py is not None and ocf_py >= 3 \
-                    and nm_5y_d is not None and nm_5y_d > 0:
-                reasons.append(
-                    f"毛利率={gross_margin}%（<{min_gm}%，豁免D：高ROE={roe}%+OCF质量+净利为正薄利模式）")
+    
+    # 新增：OCF/NI 精确计算检查
+    if ocf_ni_ratio is not None:
+        if ocf_ni_ratio < 0.7:
+            # 豁免B：高毛利率+高增长+净利改善（OCF/NI < 0.7 但商业模式优秀）
+            gm = stock.get('gross_margin') or 0
+            rev_g = stock.get('revenue_growth') or 0
+            prof_g = stock.get('profit_growth') or 0
+            if gm >= 30 and rev_g >= 20 and prof_g > 0:
+                reasons.append(f"OCF/NI={ocf_ni_ratio:.2f}（<0.7，豁免：高毛利率{gm}%+高增长{rev_g}%投入期）")
             else:
+                reasons.append(f"OCF/NI={ocf_ni_ratio:.2f}（<0.7，不达标）")
                 return []
         else:
-            reasons.append(f"毛利率={gross_margin}%（≥{min_gm}%）")
+            reasons.append(f"OCF/NI={ocf_ni_ratio:.2f}（≥0.7，通过）")
+    elif ocf is not None:
+        # 只有代理数据，无精确计算
+        reasons.append(f"OCF/NI数据不足（仅OCF/股代理）")
+
+    # ── 规则 3：净利率 ≥ 5%（当前 + 5年均值 + 10年均值）──
+    min_nm = screen.get('min_net_margin', 5)
+    nm_5y = stock.get('net_margin_5y_avg')
+    nm_10y = stock.get('net_margin_10y_avg')
+    
+    # 优先用10年数据，如果10年数据不可用则降级为5年
+    nm_to_check = nm_10y if nm_10y is not None else nm_5y
+    
+    if nm_to_check is not None and nm_to_check < min_nm:
+        # 豁免C：主动低利润率模式（对标 Berkshire 豁免B）——毛利率>30%（有能力赚）+
+        # 营收净利双正（改善趋势，非长期失血）
+        gm_current = stock.get('gross_margin')
+        rev_g = stock.get('revenue_growth') or 0
+        prof_g = stock.get('profit_growth') or 0
+        if gm_current and gm_current >= 30 and rev_g > 0 and prof_g > 0:
+            reasons.append(f"{'10年' if nm_10y else '5年'}均净利率={nm_to_check}%（<{min_nm}%，豁免C：高毛利率{gm_current}%+双增长改善）")
+        else:
+            return []
+    elif nm_to_check is not None:
+        reasons.append(f"{'10年' if nm_10y else '5年'}均净利率={nm_to_check}%")
+
+    # ── 规则 4：毛利率 ≥ 15%（当前 + 5年均值）──
+    min_gm = screen.get('min_gross_margin', 15)
+    gm_current = stock.get('gross_margin')
+    gm_5y = stock.get('gross_margin_5y_avg')
+    
+    # 优先用5年均值，如果5年数据不可用则用当前值
+    gm_to_check = gm_5y if gm_5y is not None else gm_current
+    
+    if gm_to_check is not None and gm_to_check < min_gm:
+        # 豁免D：高周转薄利模式（对标 Berkshire 豁免C：Costco 类）——ROE>20% +
+        # OCF 为正且过半年份为正（现金真实）+ 5年均净利率>0（不失血）
+        roe = stock.get('roe') or 0
+        ocf = stock.get('ocf_per_share')
+        ocf_py = stock.get('ocf_positive_years')
+        nm_5y_d = stock.get('net_margin_5y_avg')
+        if roe >= 20 and ocf is not None and ocf > 0 \
+                and ocf_py is not None and ocf_py >= 3 \
+                and nm_5y_d is not None and nm_5y_d > 0:
+            reasons.append(
+                f"毛利率={gm_to_check}%（<{min_gm}%，豁免D：高ROE={roe}%+OCF质量+净利为正薄利模式）")
+        else:
+            return []
+    elif gm_to_check is not None:
+        reasons.append(f"毛利率={gm_to_check}%（≥{min_gm}%）")
 
     # ── 规则 5：营收增长 ≥ 0 + 净利增长 ≥ 0 ──
     min_rev = screen.get('min_revenue_growth', 0)
@@ -395,7 +440,9 @@ class ValueScreener:
                       # 10年拓展字段
                       'roe_10y_avg', 'net_margin_10y_avg', 'fcf_10y_sum',
                       'fcf_positive_years_10', 'roe_volatility', 'roe_improvement',
-                      'intcov_10y_avg', 'share_dilution_10y', 'roic_10y_avg'):
+                      'intcov_10y_avg', 'share_dilution_10y', 'roic_10y_avg',
+                      # 新增字段：用于精确计算
+                      'ocf_5y_sum', 'fcf_5y_sum', 'net_profit'):
                 if summary.get(k) is not None:
                     c[k] = summary.get(k)
 
