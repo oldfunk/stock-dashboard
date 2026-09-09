@@ -189,13 +189,20 @@ class TestCheck7Gates:
     def test_gate_gross_margin_low_exempt_high_roe(self):
         """GM < 15% but ROE >= 20% -> exemption."""
         stock = self._base_stock(gross_margin=12.0, roe=25.0)
+        # Set 5y gross margin to None to force use of current value (12.0 < 15%)
+        stock['gross_margin_5y_avg'] = None
         reasons = _check_7_gates(stock, self._base_config())
         assert len(reasons) > 0
         assert any('豁免' in r and '薄利模式' in r for r in reasons)
 
     def test_gate_gross_margin_low_no_exemption(self):
+        """GM < 15% but ROE < 20% -> no exemption, should fail gross margin gate."""
         stock = self._base_stock(gross_margin=12.0, roe=10.0)
-        assert _check_7_gates(stock, self._base_config()) == []
+        # Set 5y gross margin to None to force use of current value (12.0 < 15%)
+        stock['gross_margin_5y_avg'] = None
+        reasons = _check_7_gates(stock, self._base_config())
+        # Should return empty list because gross margin gate fails and no exemption applies
+        assert reasons == []
 
     # --- Gate 7: Revenue/Profit growth ---
     def test_gate_revenue_growth_negative(self):
@@ -480,15 +487,19 @@ class TestExemptionsRefined:
         from tests.screener.test_value_screener import TestCheck7Gates as T
         good = T._base_stock(T(), gross_margin=10.0, roe=25.0,
                              ocf_per_share=5.0, ocf_positive_years=4,
-                             net_margin_5y_avg=2.5)
+                             net_margin_5y_avg=6.0)
+        # Set 5y gross margin to None to trigger exemption logic
+        good['gross_margin_5y_avg'] = None
         assert len(_check_7_gates(good, T._base_config(T()))) > 0
         thin_ocf = T._base_stock(T(), gross_margin=10.0, roe=25.0,
                                  ocf_per_share=5.0, ocf_positive_years=1,
-                                 net_margin_5y_avg=2.5)
+                                 net_margin_5y_avg=6.0)
+        thin_ocf['gross_margin_5y_avg'] = None
         assert _check_7_gates(thin_ocf, T._base_config(T())) == []
         bleeding = T._base_stock(T(), gross_margin=10.0, roe=25.0,
                                  ocf_per_share=5.0, ocf_positive_years=4,
                                  net_margin_5y_avg=-2.0)
+        bleeding['gross_margin_5y_avg'] = None
         assert _check_7_gates(bleeding, T._base_config(T())) == []
 
 
