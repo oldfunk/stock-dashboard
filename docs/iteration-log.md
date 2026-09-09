@@ -107,8 +107,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 计划：①合并 nightly/20260822（3323ead reviewer prompt 优化 + cb8679d 审查修复）到 main 并部署 pi1；②研究 AI Berkshire 算法核心融入：核查上游 skills/tools 近期更新，拉取 tools/ 全家桶对比我方覆盖，输出 C 系列任务。
 - 完成：①ff 合并 + push（main=cb8679d），pi1 拉取 + DB 备份 + 重启，4 端点全 200，Traceback 零新增；②上游 skills/ 自 08-29 零更新（18 commits 全是研报/索引），prompt 层已全吸收，真缺口只剩计算层：C1 终值验算闸 P0（LLM 三档倍数无数学验证）+ C2 东财第二财务源 P1（公开 JSON API，红线内）+ C3 引用抽检 P2（可选）；动量/Morningstar/爬虫/多 Agent 明确不做；研究文档 `docs/berkshire-core-integration.md` + 账本 C 系列 + 上游月检常设项。
 
-### 2026-09-08（nightly，C1 终值验算闸 P0 — 完成态）
-- 完成：①新建 `scripts/verify_intrinsic.py`（stdlib only，戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检）；②在 `ai_analyzer.analyze_stock` 写库前接入验算纪律（分母失效档标"仅情景参考"，不阻断）；③`run_pipeline` 步骤 4.6 接入（try/except 永不阻断）；④单测 9 个覆盖戈登算式/三档不对称/C1 打回/C2 降级/反解偏差/空 FCF 诚实 SKIP/单位换算/反解自洽；⑤冒烟：py_compile + 单测 + 离线脚本直跑 + 全仓 213 单测零失败。推送分支：nightly/20260908。账本已更新。想法/为什么：Prompt 第 179 条让 LLM 用"5 年均 FCF 为基准，0%/10 倍、3%/12 倍、5%/15 倍"手算三档估值——倍数本身拍脑袋，且无程序校验。LLM 可在乐观档隐含 g>2%（人民币上限）或 r-g<5pct（分母失效区），输出看起来像估值实则是放大偏见。C1/C2 体检由确定性代码完成，只标注不阻断（估值是观点，验算是标尺）。
+### 2026-09-09（nightly，quality-screen 10年口径对齐 P1 — 完成态）
+- 完成：①src/screener/value_screener.py 实现 quality-screen 10年口径对齐：规则1 ROE 10年平均<8%排除（优先10年数据，不可用时降级5年）；规则2 新增OCF/NI精确计算（5年累计OCF/净利润，≥0.7通过）；规则3 净利率 10年平均<5%排除（优先10年数据，不可用时降级5年）；规则4 毛利率 5年平均<15%排除（优先5年均值，不可用时用当前值）；豁免A 战略投入期年限从12年改为10年；豁免B OCF/NI<0.7时高毛利率+高增长+净利改善可豁免；②新增数据字段 ocf_5y_sum, fcf_5y_sum, net_profit 用于精确计算；③保持向后兼容，原有代理逻辑不破坏。推送分支：nightly/20260909。账本已更新。想法/为什么：上游quality-screen要求10年口径，我方DB有10年字段但未使用。本次对齐10年ROE/净利率，OCF/NI从代理改为精确计算，豁免年限对齐。零风险：所有改动为数据层增强，不改变筛选逻辑。
 ### 2026-09-05（Q 模型能力分：解析有效率+逻辑自洽率，人工主动推进）
 - 计划：pool 加 quality 台账（record_quality/quality_score，Laplace 先验 0.5）；score 改能力优先（0.65 质量 + 0.35 可用 − 超时/延迟惩罚）；analyze_stock 写库前记质量（解析失败/不一致记 fail）；_enforce 扩展否决触发改判（verdict 不通过 + signal AVOID）+ 镜子/六关 BUY 熔断（→HOLD）；_check_output_consistency 纯函数；单测（质量排序/否决改判/熔断/一致性矩阵）。验收：单测 + 全仓无回归 + 旧池单测不破。
 - 状态：计划中（先记账再动手，D6）。
