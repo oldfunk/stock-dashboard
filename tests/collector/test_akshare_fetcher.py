@@ -288,5 +288,88 @@ class TestNowCn:
         assert dt.tzinfo is None  # tzinfo stripped for compatibility
 
 
+class TestC2EastmoneyFallback:
+    """C2 东财 datacenter 直连兜底测试。"""
+
+    def test_fetch_eastmoney_direct_success(self):
+        """正常股票返回完整财务字段。"""
+        from src.collector.akshare_fetcher import _fetch_eastmoney_direct
+        result = _fetch_eastmoney_direct('600519')
+        assert result is not None
+        assert 'roe' in result
+        assert 'gross_margin' in result
+        assert 'eps' in result
+        assert result['roe'] is not None
+        assert result['roe'] > 0
+
+    def test_fetch_eastmoney_direct_invalid_code(self):
+        """无效代码返回 None。"""
+        from src.collector.akshare_fetcher import _fetch_eastmoney_direct
+        result = _fetch_eastmoney_direct('999999')
+        assert result is None
+
+    def test_code_to_em_format(self):
+        """股票代码转东财格式正确。"""
+        from src.collector.akshare_fetcher import _code_to_em
+        assert _code_to_em('600519') == '600519.SH'
+        assert _code_to_em('000858') == '000858.SZ'
+        assert _code_to_em('300750') == '300750.SZ'
+
+    def test_enrich_fallback_on_akshare_failure(self):
+        """AKShare 失败时自动触发 C2 兜底，填充财务字段。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import MagicMock, patch
+
+        mock_ak = MagicMock()
+        mock_ak.stock_yjbb_em.side_effect = Exception('simulated failure')
+
+        stocks = [{'code': '600519', 'name': '茅台'}]
+
+        with patch.dict('sys.modules', {'akshare': mock_ak}):
+            with patch.object(fetcher, 'ak', mock_ak, create=True):
+                result = fetcher.enrich_financial_data(stocks)
+
+        s = result[0]
+        assert s.get('roe') is not None
+        assert s['roe'] > 0
+        assert s.get('gross_margin') is not None
+
+    def test_enrich_normal_path_unchanged(self):
+        """AKShare 正常时不触发 C2 兜底（正常路径不受影响）。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import MagicMock, patch
+        import pandas as pd
+
+        mock_ak = MagicMock()
+        # 模拟 stock_yjbb_em 返回正常数据
+        mock_df = pd.DataFrame([{
+            '股票代码': '600519',
+            '净资产收益率': 32.5,
+            '销售毛利率': 91.2,
+            '每股经营现金流量': 50.0,
+            '每股收益': 65.66,
+            '营业总收入-同比增长': 15.0,
+            '净利润-同比增长': 20.0,
+            '净利润-净利润': 800e8,
+            '每股净资产': 200.0,
+        }])
+        mock_ak.stock_yjbb_em.return_value = mock_df
+        mock_ak.stock_financial_abstract_ths.return_value = pd.DataFrame([{
+            '报告期': '2025-12-31',
+            '销售净利率': '52.3%',
+            '资产负债率': '20.1%',
+        }])
+
+        stocks = [{'code': '600519', 'name': '茅台'}]
+
+        with patch.dict('sys.modules', {'akshare': mock_ak}):
+            with patch.object(fetcher, 'ak', mock_ak, create=True):
+                result = fetcher.enrich_financial_data(stocks)
+
+        s = result[0]
+        assert s['roe'] == 32.5
+        assert s['gross_margin'] == 91.2
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
