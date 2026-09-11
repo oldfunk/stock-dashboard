@@ -4,8 +4,8 @@ Core unit tests for akshare_fetcher - focusing on parsing edge cases.
 Tests parse_tc_line, parse_tc_indices, tc_encode, and _computed_fallback edge cases.
 """
 
-import json
 import pytest
+import json
 from src.utils import (
     tc_encode, parse_tc_line, parse_tc_indices, split_tc_response,
     safe_float, curl_get, now_cn
@@ -372,6 +372,7 @@ class TestC2EastmoneyFallback:
         assert s['gross_margin'] == 91.2
 
 
+
 class TestC2_5EastmoneyRoicFcf:
     """C2.5: 东财 datacenter 补 roic/fcf"""
 
@@ -389,7 +390,7 @@ class TestC2_5EastmoneyRoicFcf:
                 ]}})
             result = fetcher._fetch_eastmoney_roic_fcf('000792')
             assert '2025-12-31' in result
-            assert '2025-06-30' not in result  # 中报被过滤
+            assert '2025-06-30' not in result
             assert result['2025-12-31']['roic'] == 19.0
             assert result['2025-12-31']['fcf'] == 583649808.75
 
