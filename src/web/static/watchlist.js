@@ -145,7 +145,7 @@ function searchStocks() {
                 var mcStr = s.market_cap != null ? s.market_cap.toFixed(0) + '亿' : '--';
                 var btnClass = s.watched ? 'watch-btn watched' : 'watch-btn';
                 var btnText = s.watched ? '已钉' : '钉选';
-                return '<div class="search-item clickable" title="在东方财富查看" onclick="window.open(emStockUrl(\'' + s.code + '\'), \'_blank\')">' +
+                return '<div class="search-item clickable" title="查看详情" onclick="location.href=\'/stock/' + s.code + '\'">' +
                     '<div class="si-info"><span class="si-code">' + s.code + '</span> ' + s.name + ' ' + badges + '</div>' +
                     '<div class="si-metrics">PE ' + peStr + ' | ROE ' + roeStr + ' | 市值 ' + mcStr + '</div>' +
                     '<button class="' + btnClass + '" data-scode="' + s.code + '">' + btnText + '</button>' +

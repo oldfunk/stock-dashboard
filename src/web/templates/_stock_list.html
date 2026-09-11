@@ -1,7 +1,7 @@
 {% for stock in stocks %}
         <div class="stock-card clickable" data-code="{{ stock.code }}"
-             onclick="window.open(emStockUrl('{{ stock.code }}'), '_blank')"
-             title="在东方财富查看 {{ stock.name }}">
+             onclick="location.href='/stock/{{ stock.code }}'"
+             title="查看 {{ stock.name }} 详情">
             <div class="stock-row">
                 <div class="stock-info">
                     <div class="stock-code">{{ stock.code }}</div>
