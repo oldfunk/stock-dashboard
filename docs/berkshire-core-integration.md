@@ -53,6 +53,20 @@
 填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润。
 单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变），全仓 218 passed。
 
+## C2.5 东财 datacenter 补 roic/fcf P0（2026-09-12 完成）
+
+`_fetch_eastmoney_roic_fcf()` 直连 `datacenter.eastmoney.com` 取年报 ROIC + FCFF_BACK
+（stdlib only，curl_get），仅当 `collect_historical_financial_data` 中 AKShare
+利润表/现金流 API 挂掉时自动触发兜底。
+
+背景：AKShare 的 `stock_profit_sheet_by_report_em` 和 `stock_cash_flow_sheet_by_report_em`
+已挂（'NoneType' object is not subscriptable），导致 financial_history 的 roic 和 fcf
+全空，C1 终值验算闸形同虚设。东财 datacenter API 直接有 ROIC 和 FCFF_BACK 字段，
+与 C2 同源 API。
+
+批量重建后 822/904 股有 roic_10y_avg 和 fcf_5y_sum（91%），C1 可正常工作。
+单测 3 个（年报过滤/API失败/部分字段缺失），全仓 221 passed。
+
 ## C3 AI 引用数字抽检 P2（可选）
 
 仿 report_audit：每次复盘/AI 分析落库后，抽样正文中的数字断言

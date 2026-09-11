@@ -98,11 +98,17 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ## Berkshire 算法核心融入（2026-09-07 设立，C 系列，接 B 系列之后执行）
 - [x] C1 终值验算闸 P0（详见 `docs/berkshire-core-integration.md`）：`scripts/verify_intrinsic.py`（戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检，stdlib only）+ `analyze_stock` 写库前改判标注（分母失效档标"仅情景参考"，不阻断）+ run_pipeline 4.6 接入（try/except 永不阻断）+ 单测 ≥6。验收：单测 + pi1 实测 20 只 + 全仓无回归。
 - [x] C2 东财 datacenter 第二财务源 P0（2026-09-11 完成）：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API（stdlib only）；`enrich_financial_data()` 第一步 stock_yjbb_em 失败时自动触发 C2 兜底；填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变）；全仓 218 passed 零失败。
+- [x] C2.5 东财 datacenter 补 roic/fcf P0（2026-09-12 完成）：`_fetch_eastmoney_roic_fcf()` 直连 datacenter 取年报 ROIC + FCFF_BACK（stdlib only）；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发兜底；批量重建后 822/904 股有 roic/fcf（91%）；单测 3 个；全仓 221 passed 零失败。
 - [ ] C3 AI 引用数字抽检 P2（可选，C1 落地后再议）：仿 report_audit，抽样正文数字断言 vs 库交叉，记 `actions_summary.numeric_mismatch`，warn-only 永不阻断。
 - 明确不做：动量/技术面（上游自证无预测力）、Morningstar（无 A 股价值）、雪球爬虫（红线）、多 Agent（性能配额）、上游研报跟进（只看 skills/ + tools/）。
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-12（C2.5 东财 datacenter 补 roic/fcf P0）
+- 完成：`_fetch_eastmoney_roic_fcf()` 直连 datacenter.eastmoney.com 取年报 ROIC + FCFF_BACK；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发 C2.5 兜底补全 roic/fcf；批量重建 financial_summary，822/904 股有 roic_10y_avg 和 fcf_5y_sum（91%）；单测 3 个（年报过滤/API失败/部分字段缺失）；全仓 221 passed 零失败；pi1 main 部署生效。
+- 想法/为什么：AKShare 的 `stock_profit_sheet_by_report_em` 和 `stock_cash_flow_sheet_by_report_em` 已挂（'NoneType' object is not subscriptable），导致 financial_history 的 roic 和 fcf 全空，C1 终值验算闸形同虚设。东财 datacenter API 直接有 ROIC 和 FCFF_BACK 字段，与 C2 同源 API，stdlib only。
+- 验收：单测（年报过滤/API失败/部分字段缺失）+ pi1 端到端 000792 验证（roic_5y=31.8, fcf_5y=172亿）+ 全仓 221 passed + 批量重建 822/904 有 roic/fcf。
+
 ### 2026-09-11（C2 东财 datacenter 第二财务源 P0，opencode 接管）
 - 完成：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API；`enrich_financial_data()` AKShare 失败时自动触发 C2 兜底；填充 ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个；全仓 218 passed 零失败；pi1 部署 main 生效。
 - 想法/为什么：berkshire-core-integration.md 列的 C2 P1 任务，此前标记未完成。实现方式为 stdlib only（curl_get + json），不引入新依赖，与上游 ashare_data.py 同源 API。
