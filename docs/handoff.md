@@ -4,12 +4,13 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件，写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-09 守卫合并后落袋）
-- 分支：`nightly/20260909`（HEAD `56c6f0f`）已合并至 main，pi1 SHA `56c6f0f`
-- 合并内容：quality-screen 10年口径对齐 P1（规则1-4 + 豁免A-B + 新增字段 ocf_5y_sum/fcf_5y_sum/net_profit）
-- 合并验证：pi1 四端点 200 + Traceback 零新增 + 筛选表 1180 行（历史累积）
-- 待观察项：D 的净利率下限>0 子条件在全关序列里实际不可达（0~5% 先倒在规则3），记作规格观察项，不改。
-- 当日管线：09-08 筛选 20 只，AI 分析 20 失败（待 15:30 新管线）
+## 最后状态（2026-09-11 opencode 接管后落袋）
+- 分支：`main`（HEAD `6f61780`）
+- 合并内容：C2 东财 datacenter 第二财务源 P0（`_fetch_eastmoney_direct()` + `enrich_financial_data()` 兜底 + 单测 5 个）
+- 验收：全仓 218 passed 零失败；pi1 实测模拟 AKShare 失败触发 C2 兜底路径正常
+- C 系列完成状态：C1 已完成 / C2 已完成 / C3 待议（P2 可选）
+- 待观察项：C2 兜底仅覆盖基础财务字段（ROE/毛利率/EPS等），net_margin/debt_ratio 仍走同花顺（stock_financial_abstract_ths），不受 C2 影响
+- 当日管线：09-11 筛选 20 只，AI 分析 0（正常：AI 为每周六触发）
 
 ## 历史交接区（追加，不删）
 - 2026-09-09 建交接文件，三任务串联启动。
