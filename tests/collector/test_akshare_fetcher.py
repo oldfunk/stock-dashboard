@@ -4,6 +4,7 @@ Core unit tests for akshare_fetcher - focusing on parsing edge cases.
 Tests parse_tc_line, parse_tc_indices, tc_encode, and _computed_fallback edge cases.
 """
 
+import json
 import pytest
 from src.utils import (
     tc_encode, parse_tc_line, parse_tc_indices, split_tc_response,
@@ -369,6 +370,51 @@ class TestC2EastmoneyFallback:
         s = result[0]
         assert s['roe'] == 32.5
         assert s['gross_margin'] == 91.2
+
+
+class TestC2_5EastmoneyRoicFcf:
+    """C2.5: 东财 datacenter 补 roic/fcf"""
+
+    def test_fetch_roic_fcf_annual_only(self):
+        """只取年报的 roic 和 fcf"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        with patch.object(fetcher, 'curl_get') as mock_curl:
+            mock_curl.return_value = json.dumps({
+                'result': {'data': [
+                    {'REPORT_DATE': '2025-12-31 00:00:00', 'REPORT_TYPE': '年报',
+                     'ROIC': 19.0, 'FCFF_BACK': 583649808.75},
+                    {'REPORT_DATE': '2025-06-30 00:00:00', 'REPORT_TYPE': '中报',
+                     'ROIC': 6.6, 'FCFF_BACK': -1925852263.17},
+                ]}})
+            result = fetcher._fetch_eastmoney_roic_fcf('000792')
+            assert '2025-12-31' in result
+            assert '2025-06-30' not in result  # 中报被过滤
+            assert result['2025-12-31']['roic'] == 19.0
+            assert result['2025-12-31']['fcf'] == 583649808.75
+
+    def test_fetch_roic_fcf_api_fail(self):
+        """API 返回空 → 空 dict"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        with patch.object(fetcher, 'curl_get') as mock_curl:
+            mock_curl.return_value = None
+            result = fetcher._fetch_eastmoney_roic_fcf('000792')
+            assert result == {}
+
+    def test_fetch_roic_fcf_missing_fields(self):
+        """部分字段缺失时只返回有的"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        with patch.object(fetcher, 'curl_get') as mock_curl:
+            mock_curl.return_value = json.dumps({
+                'result': {'data': [
+                    {'REPORT_DATE': '2025-12-31 00:00:00', 'REPORT_TYPE': '年报',
+                     'ROIC': 19.0, 'FCFF_BACK': None},
+                ]}})
+            result = fetcher._fetch_eastmoney_roic_fcf('000792')
+            assert result['2025-12-31']['roic'] == 19.0
+            assert result['2025-12-31']['fcf'] is None
 
 
 if __name__ == '__main__':

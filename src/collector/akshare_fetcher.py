@@ -425,6 +425,44 @@ def _fetch_eastmoney_direct(code: str) -> dict | None:
         return None
 
 
+
+def _fetch_eastmoney_roic_fcf(code: str) -> dict:
+    """东财 datacenter 补 roic/fcf — AKShare 利润表/现金流 API 挂掉时的兜底。
+
+    返回 {report_date_str: {roic: float, fcf: float}}，仅年报。
+    """
+    secucode = _code_to_em(code)
+    url = (
+        "https://datacenter.eastmoney.com/securities/api/data/get"
+        f"?type=RPT_F10_FINANCE_MAINFINADATA&sty=ALL"
+        f"&filter=(SECUCODE%3D%22{secucode}%22)"
+        f"&p=1&ps=30&sr=-1&st=REPORT_DATE&source=HSF10&client=PC"
+    )
+    raw = curl_get(url, timeout=10)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        reports = data.get("result", {}).get("data", [])
+        if not reports:
+            return {}
+        result = {}
+        for r in reports:
+            rpt_type = r.get("REPORT_TYPE", "")
+            if rpt_type != "年报":
+                continue
+            date_str = str(r.get("REPORT_DATE", ""))[:10]
+            if not date_str:
+                continue
+            roic = safe_float(r.get("ROIC"))
+            fcf = safe_float(r.get("FCFF_BACK"))
+            if roic is not None or fcf is not None:
+                result[date_str] = {"roic": roic, "fcf": fcf}
+        return result
+    except Exception as e:
+        logger.debug(f"[C2.5] {code} 东财 roic/fcf 解析失败: {e}")
+        return {}
+
 def _find_latest_yjbb_date(ak_module) -> str:
     """找到 stock_yjbb_em 最新的可用报告期。"""
     import pandas as pd
@@ -803,6 +841,29 @@ def collect_historical_financial_data(all_stocks: list[dict],
                             ocfps = round(cf_ocf / shares, 4)
                             if rec.get('ocf_per_share') is None:
                                 rec['ocf_per_share'] = ocfps
+
+            # C2.5: AKShare 利润表/现金流 API 挂掉时，用东财 datacenter 补 roic/fcf
+            if records:
+                has_gap = any(r.get('fcf') is None or r.get('roic') is None for r in records)
+                if has_gap:
+                    try:
+                        em_data = _fetch_eastmoney_roic_fcf(code)
+                        if em_data:
+                            filled = 0
+                            for rec in records:
+                                rpt = rec['report_date']
+                                if rpt in em_data:
+                                    em = em_data[rpt]
+                                    if rec.get('fcf') is None and em.get('fcf') is not None:
+                                        rec['fcf'] = em['fcf']
+                                        filled += 1
+                                    if rec.get('roic') is None and em.get('roic') is not None:
+                                        rec['roic'] = em['roic']
+                                        filled += 1
+                            if filled:
+                                logger.info(f"[C2.5] {code}: 东财补 roic/fcf {filled} 项")
+                    except Exception as e:
+                        logger.debug(f"[C2.5] {code} 东财兜底失败: {e}")
 
             if records:
                 # 简化：去重（同一个报告期只留一个）
