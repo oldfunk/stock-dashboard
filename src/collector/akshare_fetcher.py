@@ -381,11 +381,48 @@ def pre_filter_stocks(stocks: list[dict], config: dict) -> list[dict]:
     return candidates
 
 
-# ── 财务补充（AKShare 核心数据源）──
+# ── 财务补充（AKShare 核心数据源 + 东财 datacenter 兜底）──
 
 def _code_to_em(code: str) -> str:
     """股票代码转东方财富格式"""
     return f"{code}.SH" if code.startswith(('6', '9')) else f"{code}.SZ"
+
+
+def _fetch_eastmoney_direct(code: str) -> dict | None:
+    """东财 datacenter 公开 JSON API — AKShare 失败时的兜底财务源。
+
+    直接 HTTP 调用 datacenter.eastmoney.com，不依赖 AKShare。
+    返回 dict 含 roe/gross_margin/eps/revenue_growth/profit_growth/net_profit/bvps，
+    全部失败返回 None。
+    """
+    secucode = _code_to_em(code)
+    url = (
+        "https://datacenter.eastmoney.com/securities/api/data/get"
+        f"?type=RPT_F10_FINANCE_MAINFINADATA&sty=ALL"
+        f"&filter=(SECUCODE%3D%22{secucode}%22)(REPORT_TYPE%3D%22%E5%B9%B4%E6%8A%A5%22)"
+        f"&p=1&ps=1&sr=-1&st=REPORT_DATE&source=HSF10&client=PC"
+    )
+    raw = curl_get(url, timeout=10)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        reports = data.get("result", {}).get("data", [])
+        if not reports:
+            return None
+        r = reports[0]
+        return {
+            'roe': safe_float(r.get('ROEJQ')),
+            'gross_margin': safe_float(r.get('XSMLL')),
+            'eps': safe_float(r.get('EPSJB')),
+            'bvps': safe_float(r.get('BPS')),
+            'revenue_growth': safe_float(r.get('TOTALOPERATEREVETZ')),
+            'profit_growth': safe_float(r.get('PARENTNETPROFITTZ')),
+            'net_profit': safe_float(r.get('PARENTNETPROFIT')),
+        }
+    except Exception as e:
+        logger.debug(f"[C2] {code} 东财 datacenter 解析失败: {e}")
+        return None
 
 
 def _find_latest_yjbb_date(ak_module) -> str:
@@ -491,6 +528,7 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
     """用AKShare批量获取财务指标（ROE/毛利率/净利率/OCF/负债率等）。
 
     - 全A股用 stock_yjbb_em 一次批量调用（~6秒）
+    - 若 stock_yjbb_em 失败，启动 C2 兜底：东财 datacenter 直连 HTTP
     - 候选股深度数据用 stock_financial_abstract_ths 并发获取，并带 7 天本地缓存
     原地补充字段后返回同一列表。
     """
@@ -530,6 +568,24 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
 
         with_roe = sum(1 for s in stocks if s.get('roe') is not None)
         logger.info(f"[财务] stock_yjbb_em: {with_roe}/{total} 有ROE")
+
+    # ── C2 兜底：东财 datacenter 直连（stock_yjbb_em 失败时触发）──
+    if all_df is None:
+        still_missing = [s for s in stocks if s.get('roe') is None]
+        if still_missing:
+            logger.warning(f"[C2] stock_yjbb_em 失败，启动东财 datacenter 直连兜底（{len(still_missing)} 只）...")
+            fallback_ok = 0
+            for s in still_missing:
+                result = _fetch_eastmoney_direct(s['code'])
+                if result is None:
+                    continue
+                for k, v in result.items():
+                    if v is not None:
+                        s[k] = v
+                fallback_ok += 1
+                time.sleep(0.1)  # 温和限流
+            with_roe = sum(1 for s in stocks if s.get('roe') is not None)
+            logger.info(f"[C2] 东财 datacenter 兜底: {fallback_ok}/{len(still_missing)} 成功, 总ROE覆盖: {with_roe}/{total}")
 
     # ── 第二步：stock_financial_abstract_ths 并发深度补充 ──
     # 补齐：净利率/负债率（stock_yjbb_em 不提供）
