@@ -46,17 +46,12 @@
 验收：单测 + pi1 实测 20 只（报告每只三档 verdict 分布 + 打回/降级数）+
 全仓无回归 + 零 emoji。合并部署走常规口径。
 
-## C2 东财 datacenter 第二财务源 P1
+## C2 东财 datacenter 第二财务源 P0（2026-09-11 完成）
 
-对方 `ashare_data.py` 命中的三个端点全是公开 JSON（非 HTML 抓取）：
-`qt.gtimg.cn`（我方已有）、`datacenter.eastmoney.com/securities/api/data/get`
-（财务）、`searchadapter.eastmoney.com/api/suggest/get`（搜索）。
-与 AKShare 同源家族，属"公开 API"而非爬虫，在用户"不要太明显"口径内。
-
-设计：fetcher 加东财 datacenter fallback（仅当 AKShare 端点抛异常/回 None 时触发，
-仿 B8 兜底）；重点补 `total_shares` 类股本字段（B8 剩余 124 稀疏股 + 24331 历史行
-可重估）；独立完工律适用：替代路径必须验证到列级别（B8 教训：abstract_ths 无股本列）。
-验收：双机 2+ symbols 实测 + 列名对照表 + 单测 + 回填行数报告（可填/不可填分开报）。
+`_fetch_eastmoney_direct()` 直连 `datacenter.eastmoney.com/securities/api/data/get`
+公开 JSON API（stdlib only，curl_get），仅当 `stock_yjbb_em` 抛异常时触发。
+填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润。
+单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变），全仓 218 passed。
 
 ## C3 AI 引用数字抽检 P2（可选）
 

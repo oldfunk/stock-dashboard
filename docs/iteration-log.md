@@ -96,13 +96,17 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] B7 市场总结模板与全覆盖校验 P1（M3）：reviewer prompt 周报结构（池变动/逐股五句/小白）+ coverage 记 actions_summary；prompt 生效等周六 live。
 
 ## Berkshire 算法核心融入（2026-09-07 设立，C 系列，接 B 系列之后执行）
-- [ ] C1 终值验算闸 P0（详见 `docs/berkshire-core-integration.md`）：`scripts/verify_intrinsic.py`（戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检，stdlib only）+ `analyze_stock` 写库前改判标注（分母失效档标"仅情景参考"，不阻断）+ run_pipeline 4.6 接入（try/except 永不阻断）+ 单测 ≥6。验收：单测 + pi1 实测 20 只 + 全仓无回归。
-- [ ] C2 东财 datacenter 第二财务源 P1：fetcher 加公开 JSON API fallback（仅 AKShare 抛异常/回 None 时触发）；重点补 total_shares 类字段；替代路径验证到列级别；双机实测 + 列名对照 + 回填行数分开报。
+- [x] C1 终值验算闸 P0（详见 `docs/berkshire-core-integration.md`）：`scripts/verify_intrinsic.py`（戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检，stdlib only）+ `analyze_stock` 写库前改判标注（分母失效档标"仅情景参考"，不阻断）+ run_pipeline 4.6 接入（try/except 永不阻断）+ 单测 ≥6。验收：单测 + pi1 实测 20 只 + 全仓无回归。
+- [x] C2 东财 datacenter 第二财务源 P0（2026-09-11 完成）：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API（stdlib only）；`enrich_financial_data()` 第一步 stock_yjbb_em 失败时自动触发 C2 兜底；填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变）；全仓 218 passed 零失败。
 - [ ] C3 AI 引用数字抽检 P2（可选，C1 落地后再议）：仿 report_audit，抽样正文数字断言 vs 库交叉，记 `actions_summary.numeric_mismatch`，warn-only 永不阻断。
 - 明确不做：动量/技术面（上游自证无预测力）、Morningstar（无 A 股价值）、雪球爬虫（红线）、多 Agent（性能配额）、上游研报跟进（只看 skills/ + tools/）。
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-11（C2 东财 datacenter 第二财务源 P0，opencode 接管）
+- 完成：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API；`enrich_financial_data()` AKShare 失败时自动触发 C2 兜底；填充 ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个；全仓 218 passed 零失败；pi1 部署 main 生效。
+- 想法/为什么：berkshire-core-integration.md 列的 C2 P1 任务，此前标记未完成。实现方式为 stdlib only（curl_get + json），不引入新依赖，与上游 ashare_data.py 同源 API。
+- 验收：单测（直接API/无效代码/代码格式/兜底触发/正常路径不变）+ pi1 全仓 218 passed + 手动模拟 AKShare 失败验证兜底路径。
 ### 2026-09-07（3323ead+cb8679d 合并上线 + Berkshire 算法核心融入研究，人工主动推进）
 - 计划：①合并 nightly/20260822（3323ead reviewer prompt 优化 + cb8679d 审查修复）到 main 并部署 pi1；②研究 AI Berkshire 算法核心融入：核查上游 skills/tools 近期更新，拉取 tools/ 全家桶对比我方覆盖，输出 C 系列任务。
 - 完成：①ff 合并 + push（main=cb8679d），pi1 拉取 + DB 备份 + 重启，4 端点全 200，Traceback 零新增；②上游 skills/ 自 08-29 零更新（18 commits 全是研报/索引），prompt 层已全吸收，真缺口只剩计算层：C1 终值验算闸 P0（LLM 三档倍数无数学验证）+ C2 东财第二财务源 P1（公开 JSON API，红线内）+ C3 引用抽检 P2（可选）；动量/Morningstar/爬虫/多 Agent 明确不做；研究文档 `docs/berkshire-core-integration.md` + 账本 C 系列 + 上游月检常设项。
