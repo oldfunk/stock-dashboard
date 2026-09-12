@@ -33,51 +33,46 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - M2 策略分化（目标 9-30）：B3 + B4 + 多策略接入流水线，三策略独立候选池
 - M3 持有纪律（目标 10 月）：B5 + B6 + B7 + 钉选股监控条件提醒
 
-## Hermes 自动迭代方向（2026-09-13 设立）
+## Hermes 自动迭代方向（2026-09-13 设立，09-12 更新）
 
-> Hermes 只提交到 GitHub，不部署 pi1。每次迭代前通读本文件 + berkshire-core-integration.md。
+> Hermes 只提交到 GitHub，不部署 pi1。每次迭代前通读本文件 + `docs/architecture.md`。
 
-### 终极目标
-让 AI 接管投资决策。当前系统能做详尽分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但离 AI 接管操作还有距离。现阶段任务：围绕 AI Berkshire 算法搭一个足够细致直观的网页面板。
+### 已完成清单（2026-09-12 人工 + Hermes 合计）
+- B1–B8：估值验算闸 / 三态结论 / 成长α / 豁免细化 / 论点漂移 / 状态机 / 周报模板 / total_shares 修复
+- C1–C2.5：终值验算闸 / 东财第二财务源 / 东财补 roic/fcf
+- P1③ 全子项：score_breakdown / score_detail 落库 / 候选卡五维拆解 / 详情页独立评分拆解
+- P1②：历史笔记对比 / 矛盾信号检测
+- 其他：model 列落库 / AI 失败可见 / Discord 通知 / 钉选股独立视图 / strategies.yaml 定义 / deep_research 清理
 
-### 当前短板（面板核心问题）
-1. **分析深度浅**：AI 输出了护城河/管理层/估值，但面板展示不够直观，用户需要点进去才能看到
-2. **评分不透明**：综合评分 0-100，但不知道分数怎么来的，五大维度子分数未展示
-3. **操作指引弱**：有 Signal（BUY/HOLD/AVOID）但缺少"现在该做什么"的明确指引
+### 当前未完成项（按优先级）
 
-### 迭代优先级（按序执行）
+**P0 — M2 多策略接入（目标 9-30，核心待办）**
+1. **策略管线接入**：`strategies.yaml` 已定义 growth/dividend/turnaround 三策略阈值，但**未接入筛选流水线**。需要在 `src/screener/value_screener.py` 新增多策略筛选模式——按候选股命中策略标签分组输出三个独立候选池（成长池 / 红利池 / 反转池），每个池有自己的 Top-N。
+2. **策略标签**：每只候选股在 `screening_result` 新增 `strategy_tags`（TEXT，JSON array），记录命中哪些策略（如 `["growth","dividend"]`）。
+3. **首页展示**：首页候选池增加策略 Tab 切换（全部 / 成长 / 红利 / 反转），`_stock_list.html` 支持按策略标签过滤。
+4. **注意**：`strategies.yaml` 中 growth 的 `alpha_criteria`（定价权/壁垒/增长质量三标准）和 `exit_triggers` 是 AI Berkshire 核心，但目前 AI 分析的 `investment_strategy` 已有类似字段。本次只做**阈值筛选**，不做 AI prompt 改动。
 
-**P0 — 面板深度（当前阶段核心）**
-- 评分透明化：综合评分卡片点击展开，显示五大维度子分数 + 加权公式 + 与行业平均对比（roadmap P1③）
-- 分析摘要前置：候选列表直接显示关键结论（护城河类型/管理层评分/估值区间），不用点进详情
-- 操作指引强化：Signal 卡片增加"下一步动作"区块（立即买入/等待回调/观望/回避 + 具体条件）
+**P1 — 分析深度补强（M2 完成后）**
+5. **分析摘要前置**：候选列表直接显示关键结论（护城河类型 / 管理层评分 / 估值区间），不用点进详情。改动：`_enrich_stocks()` 解析 `ai_analysis` JSON 提取 `moat_evaluation[0].type` / `management_score` / `intrinsic_value`，写入 `s['moat_type']` / `s['mgmt_score']` / `s['iv_range']`，模板渲染。
+6. **操作指引强化**：Signal 卡片增加"下一步动作"区块。改动：解析 `trade_strategy` 的 `signal`/`buy_zone`/`target_price`/`stop_loss` 生成自然语言指引（如"BUY 置信度高：现价在买入区间内，目标价 XX，止损 XX"），写入模板。
 
-**P1 — 分析质量**
-- AI 分析历史对比：本周 vs 上周变化高亮（roadmap P1②）
-- 矛盾信号检测：AI 自动检测矛盾（如 PE 下降但股价上涨）并标注
-- C3 AI 引用数字抽检（可选）：抽样正文数字 vs 库交叉验证
+**P2 — 可选（C3 或上游跟踪）**
+7. C3 AI 引用数字抽检（P2，可选）：仿 report_audit，抽样正文数字 vs 库交叉验证，记 `actions_summary.numeric_mismatch`，warn-only。
+8. 上游跟踪：每月初检查上游 skills/tools/ 有无新增 commit。
 
-**P2 — 策略扩展**
-- 多策略管线接入：strategies.yaml 已定义 growth/dividend/turnaround，但未接流水线（roadmap P2⑤）
-- 钉选股独立分析：钉选股自动生成详情页 + 自定义监控条件（roadmap P2⑥）
+### 周六 live 验证（B6/B7）
+- B6（监控池状态机）和 B7（周报模板）prompt 已就位，本周六复盘自动触发。
+- 验证要点：watch 动作是否触发（基本面恶化 → watch + 观察项 + 期限）；journal 是否按新模板输出（池变动章节 / 逐股财报五句 / 小白标准）；coverage 校验是否记录缺失。
+- 若验证通过：标记 B6/B7 为完成态。若不通过：根据实际输出修 prompt + 补单测。
 
-**P3 — 体验优化**
-- 详情页内快捷切换股票（上一只/下一只）
-- 财务指标同环比高亮（红绿）
-- 移动端适配
-- 搜索结果支持按 PE/ROE/市值排序
-
-### 不做（明确排除）
-- 动量/技术面（上游自证无预测力）
-- Morningstar（无 A 股价值）
-- 雪球爬虫（红线）
-- 多 Agent（性能配额）
-- 上游研报跟进（只看 skills/ + tools/）
-
-### 约束
-- 改动必须有单测
-- 全仓测试必须 221+ passed 零失败
-- pi1 部署由用户手动操作，Hermes 不触发
+### 迭代约束（Hermes 必须遵守）
+- 每次只做一件小而实的事，禁止改多个无关模块
+- 全仓 pytest 零失败（基线 221+ passed）
+- `collector/` `screener/` `analyzer/` 改动必须附单测
+- 禁删 S1–S7 适配函数（除非替代 + 单测同到）
+- 禁止 emoji（仅允许 → ↑ ↓ ✓）
+- 提交到 nightly 分支，不直接 push main
+- pi1 部署由用户手动 pull+restart，Hermes 不触发
 
 ## 分析能力方向（2026-09-04 用户定调）
 
@@ -152,6 +147,16 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-12（架构治理：结构图 + 总路线 + 虚拟盘方向）
+- 起因：缺结构图导致迭代破坏地基（AKShare S4/S5 在迭代中静默遗失，靠 C2/C2.5 事后抢救）。
+- 新增 `docs/architecture.md`（架构真相源）：系统结构图 + 每日流水线图 + 模块边界禁令表 + 数据表清单 + 数据源注册表 S1–S7 + 三条铁律 + 回归门禁。
+- 新增 `docs/paper-trading.md`：选型矩阵（2026-09 实调）→ M4a 自研 paper engine（SQLite+K线，跑pi，零依赖）/ M4b QLib 离线（PC/云）/ M4c QMT模拟首选·PTrade备选（Windows+券商）/ M4d 实盘预备（达标+下令才启动）。miniQMT 已死（2026-07-06 停新）永不选。A股撮合清单 + 风控闸 + BrokerAdapter 接口草案。
+- `docs/roadmap.md` 升级为总路线（M1–M4d + mermaid 路线图 + 防回归门禁），原单股内容归档为子路线。
+- README 重排：逻辑分区（what → start → how → arch → config），数据源改表格，补脚本速查表。
+- 迭代账 Hermes 方向更新：已完成清单（B1–B8/C1–C2.5/P1③/P1②）+ 未完成项（P0 多策略接入/P1 分析深度/P2 可选）+ 周六 live 验证 + 迭代约束。
+- 想法/为什么：终极目标是 AI 接管投资决策，纸盘是"分析→操作"的第一座桥；先有图再有路，Hermes 后续迭代沿 M 线走，不再各自为政。
+- 冒烟：纯文档变更，无代码；emoji 零命中。pi1 仅 git pull 同步，不重启服务。
+
 ### 2026-09-12（C2.5 东财 datacenter 补 roic/fcf P0）
 - 完成：`_fetch_eastmoney_roic_fcf()` 直连 datacenter.eastmoney.com 取年报 ROIC + FCFF_BACK；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发 C2.5 兜底补全 roic/fcf；批量重建 financial_summary，822/904 股有 roic_10y_avg 和 fcf_5y_sum（91%）；单测 3 个（年报过滤/API失败/部分字段缺失）；全仓 221 passed 零失败；pi1 main 部署生效。
 - 想法/为什么：AKShare 的 `stock_profit_sheet_by_report_em` 和 `stock_cash_flow_sheet_by_report_em` 已挂（'NoneType' object is not subscriptable），导致 financial_history 的 roic 和 fcf 全空，C1 终值验算闸形同虚设。东财 datacenter API 直接有 ROIC 和 FCFF_BACK 字段，与 C2 同源 API，stdlib only。
