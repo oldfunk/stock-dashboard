@@ -34,6 +34,7 @@
             {% else %}
             <span class="wl-signal wl-signal-none" title="尚未生成交易信号">待分析</span>
             {% endif %}
+            {% if stock.score is not none %}<span class="wl-score" title="筛选评分">Score {{ "%.0f"|format(stock.score) }}</span>{% endif %}
             <span class="wl-confidence" title="AI 信心强度">{{ stock.ai_confidence or '初入池' }}</span>
             <span class="wl-weeks">在池{{ stock.review_count or 1 }}周</span>
             {% if stock.model %}<span class="wl-model" title="最近 AI 分析所用模型">模型: {{ stock.model }}</span>{% endif %}

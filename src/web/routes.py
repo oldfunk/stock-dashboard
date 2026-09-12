@@ -281,32 +281,42 @@ async def index(request: Request):
     ai_watchlist = AiWatchlistDAO().get_all()
     realtime = get_realtime_cache()
     hist_dao = StockAnalysisHistoryDAO()
+    snap_dao = StockSnapshotDAO()
+    sr_dao = ScreeningResultDAO()
     for item in ai_watchlist:
         code = item['code']
-        # 实时行情：默认 None，命中缓存才填值（避免模板访问未定义字段报 500）
+        # 实时行情：优先实时缓存，降级到 stock_snapshot
         item['current_price'] = None
         item['change_percent'] = None
         if code in realtime:
             item['current_price'] = realtime[code].get('current_price')
             item['change_percent'] = realtime[code].get('change_percent')
-        # 取最近 Signal + 模型
+        else:
+            snap = snap_dao.get_by_code(code)
+            if snap:
+                item['current_price'] = snap.get('current_price')
+        # 取最近 Signal + 模型：优先分析历史，降级到 screening_result
+        item['signal'] = None
+        item['model'] = None
+        item['score'] = None
         latest_hist = hist_dao.get_latest_for_code(code)
         if latest_hist and latest_hist.get('ai_trade_strategy'):
             try:
                 trade = json.loads(latest_hist['ai_trade_strategy'])
                 item['signal'] = trade.get('signal')
             except (json.JSONDecodeError, TypeError):
-                item['signal'] = None
-        else:
-            item['signal'] = None
-        # 模型名（ai_analysis JSON 顶层 model 字段，2026-08-03 起写入）
-        item['model'] = None
+                pass
         if latest_hist and latest_hist.get('ai_analysis'):
             try:
                 analysis = json.loads(latest_hist['ai_analysis'])
                 item['model'] = analysis.get('model')
             except (json.JSONDecodeError, TypeError):
                 pass
+        # 降级：从 screening_result 补 score/PE/ROE
+        if item['score'] is None:
+            sr = sr_dao.get_latest_for_code(code)
+            if sr:
+                item['score'] = sr.get('score')
 
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()
