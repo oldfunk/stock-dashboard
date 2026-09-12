@@ -43,6 +43,9 @@
             --divider: #e0e3e7;
             --divider-thin: #e8eaed;
 
+            --text-on-green: #ffffff;
+            --text-on-accent: #ffffff;
+
             --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
             --radius: 8px;
             --radius-sm: 4px;
@@ -71,6 +74,9 @@
 
             --divider: #3c4043;
             --divider-thin: #303134;
+
+            --text-on-green: #ffffff;
+            --text-on-accent: #ffffff;
 
             --shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
@@ -314,10 +320,10 @@
         /* 搜索 + 钉选 */
         .view-tabs { display: flex; gap: 4px; }
         .view-tab { padding: 4px 12px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: var(--radius-sm); font-size: 13px; }
-        .view-tab.active { background: var(--accent); color: #fff; }
+        .view-tab.active { background: var(--accent); color: var(--text-on-accent); }
         .search-box { position: relative; margin-left: auto; display: flex; align-items: center; gap: 4px; }
         .search-box input { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; width: 180px; }
-        .search-box button { padding: 4px 10px; border: none; background: var(--accent); color: #fff; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+        .search-box button { padding: 4px 10px; border: none; background: var(--accent); color: var(--text-on-accent); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
         .search-results { position: absolute; top: 100%; right: 0; width: 380px; max-height: 400px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; }
         .search-item { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
         .search-item:hover { background: rgba(255,255,255,0.05); }
@@ -327,12 +333,12 @@
         .si-code { font-weight: 600; color: var(--accent); }
         .si-metrics { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
         .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin-left: 4px; }
-        .badge-list { background: var(--accent); color: #fff; }
+        .badge-list { background: var(--accent); color: var(--text-on-accent); }
         .badge-signal { background: rgba(255,193,7,0.2); color: #ffc107; }
-        .badge-watched { background: var(--color-up); color: #fff; }
+        .badge-watched { background: var(--color-up); color: var(--text-on-green); }
         .watch-btn { padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; margin-left: 6px; }
         .watch-btn:hover { border-color: var(--accent); color: var(--accent); }
-        .watch-btn.watched { background: var(--color-up); color: #fff; border-color: var(--color-up); }
+        .watch-btn.watched { background: var(--color-up); color: var(--text-on-green); border-color: var(--color-up); }
         .signal-buy { color: var(--color-up); font-weight: 600; }
         .signal-hold { color: #ffc107; font-weight: 600; }
         .signal-avoid { color: var(--red); font-weight: 600; }
@@ -704,7 +710,7 @@
         }
         .update-banner button:hover {
             background: var(--accent);
-            color: #fff;
+            color: var(--text-on-accent);
         }
 
         /* ========== Dashboard Layout (2-column) ========== */
@@ -927,7 +933,7 @@
         .wl-item {
             background: var(--bg-secondary);
             border: 1px solid var(--divider-thin);
-            border-left: 3px solid var(--color-accent);
+            border-left: 3px solid var(--accent);
             border-radius: var(--radius);
             padding: 14px 18px;
             transition: background 0.15s;
@@ -969,14 +975,14 @@
             padding: 2px 8px;
             border-radius: 3px;
         }
-        .wl-signal-buy { background: var(--color-up); color: #fff; }
+        .wl-signal-buy { background: var(--color-up); color: var(--text-on-green); }
         .wl-signal-hold { background: transparent; border: 1px solid var(--text-tertiary); color: var(--text-secondary); }
         .wl-signal-avoid { background: transparent; border: 1px dashed var(--red); color: var(--red); }
         .wl-signal-none { color: var(--text-tertiary); }
         .wl-score {
             font-size: 12px;
             font-weight: 600;
-            color: var(--color-accent);
+            color: var(--accent);
         }
         .wl-tag {
             font-size: 10px;
@@ -1029,8 +1035,8 @@
             font-weight: 500;
             padding: 0 5px;
             border-radius: 3px;
-            background: var(--color-accent);
-            color: #fff;
+            background: var(--accent);
+            color: var(--text-on-accent);
             margin-right: 4px;
         }
         .wl-reason {
@@ -1109,8 +1115,8 @@
             padding: 3px 10px; border: 1px solid var(--divider); background: transparent;
             color: var(--text-secondary); border-radius: 4px; cursor: pointer; font-size: 12px;
         }
-        .ik-period-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent); }
-        #index-kline-chart { width: 100%; height: 480px; background: #fff; border-radius: 4px; }
+        .ik-period-btn.active { background: var(--accent, #6366f1); color: var(--text-on-accent); border-color: var(--accent); }
+        #index-kline-chart { width: 100%; height: 480px; background: var(--bg-secondary); border-radius: 4px; }
         .index-kline-loading { text-align: center; padding: 80px; color: var(--text-tertiary); }
     </style>
     <script src="/static/js/klinecharts.min.js"></script>
