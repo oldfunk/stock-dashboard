@@ -157,10 +157,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 想法/为什么：终极目标是 AI 接管投资决策，纸盘是"分析→操作"的第一座桥；先有图再有路，Hermes 后续迭代沿 M 线走，不再各自为政。
 - 冒烟：纯文档变更，无代码；emoji 零命中。pi1 仅 git pull 同步，不重启服务。
 
-### 2026-09-12（C2.5 东财 datacenter 补 roic/fcf P0）
-- 完成：`_fetch_eastmoney_roic_fcf()` 直连 datacenter.eastmoney.com 取年报 ROIC + FCFF_BACK；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发 C2.5 兜底补全 roic/fcf；批量重建 financial_summary，822/904 股有 roic_10y_avg 和 fcf_5y_sum（91%）；单测 3 个（年报过滤/API失败/部分字段缺失）；全仓 221 passed 零失败；pi1 main 部署生效。
-- 想法/为什么：AKShare 的 `stock_profit_sheet_by_report_em` 和 `stock_cash_flow_sheet_by_report_em` 已挂（'NoneType' object is not subscriptable），导致 financial_history 的 roic 和 fcf 全空，C1 终值验算闸形同虚设。东财 datacenter API 直接有 ROIC 和 FCFF_BACK 字段，与 C2 同源 API，stdlib only。
-- 验收：单测（年报过滤/API失败/部分字段缺失）+ pi1 端到端 000792 验证（roic_5y=31.8, fcf_5y=172亿）+ 全仓 221 passed + 批量重建 822/904 有 roic/fcf。
+### 2026-09-13（nightly，AI 分析摘要前置 P0）
+- 完成：候选股列表 AI 分析摘要前置，显示护城河类型/管理层评分/结论/稳健估值区间等核心信息，无需点击详情页即可快速了解 AI 关键判断
+- 想法/为什么：面板核心短板是"分析深度浅"，用户需点进详情页才能看到 AI 分析结论。本次在候选卡直接前置显示：护城河类型+评分、管理层配置/股东友好度、三态结论、稳健价格区间或基准估值，大幅提升信息获取效率
+- 验收：单测（新增模板渲染验证）+ 全仓 224 passed + 零 emoji + 模板语法正确（Jinja2 离线渲染通过）
 
 ### 2026-09-11（C2 东财 datacenter 第二财务源 P0，opencode 接管）
 - 完成：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API；`enrich_financial_data()` AKShare 失败时自动触发 C2 兜底；填充 ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个；全仓 218 passed 零失败；pi1 部署 main 生效。

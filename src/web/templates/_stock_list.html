@@ -157,6 +157,44 @@
             {% endif %}
 
             {% if stock.ai_parsed %}
+            <div class="ai-summary">
+                {% set _ai = stock.ai_parsed %}
+                {% set _moat = _ai.moat_evaluation[0] if _ai.moat_evaluation else None %}
+                {% set _mgmt = _ai.management_score %}
+                {% set _verdict = _ai.verdict %}
+                {% set _tiers = _ai.price_tiers %}
+                <div class="ai-summary-row">
+                    {% if _moat and _moat.type %}
+                    <span class="ai-summary-item">
+                        <span class="ai-summary-label">护城河</span>
+                        <span class="ai-summary-value">{{ _moat.type }}{% if _moat.score %}（{{ _moat.score }}/5）{% endif %}</span>
+                    </span>
+                    {% endif %}
+                    {% if _mgmt %}
+                    <span class="ai-summary-item">
+                        <span class="ai-summary-label">管理层</span>
+                        <span class="ai-summary-value">配置{{ _mgmt.capital_allocation }}/10、股东{{ _mgmt.shareholder_friendliness }}/10</span>
+                    </span>
+                    {% endif %}
+                    {% if _verdict %}
+                    <span class="ai-summary-item ai-verdict-{{ 'pass' if '通过' in _verdict else ('fail' if '不通过' in _verdict else 'gray') }}">
+                        <span class="ai-summary-label">结论</span>
+                        <span class="ai-summary-value">{{ _verdict }}</span>
+                    </span>
+                    {% endif %}
+                    {% if _tiers and _tiers.moderate %}
+                    <span class="ai-summary-item">
+                        <span class="ai-summary-label">稳健区间</span>
+                        <span class="ai-summary-value">{{ _tiers.moderate.range }} → {{ _tiers.moderate.advice }}</span>
+                    </span>
+                    {% elif _ai.intrinsic_value and _ai.intrinsic_value.base_case %}
+                    <span class="ai-summary-item">
+                        <span class="ai-summary-label">基准估值</span>
+                        <span class="ai-summary-value">{{ _ai.intrinsic_value.base_case }}亿</span>
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
             <div class="ai-section">
                 <div class="ai-tabs">
                     <button class="ai-tab" onclick="switchTab(this, 'analysis-{{ stock.code }}')">分析</button>
