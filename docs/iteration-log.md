@@ -316,3 +316,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - AI 分析提频至每日（`scheduler.py` 去掉 `weekday()==4` 限制），研报不再滞后 1-4 天。
 - 已推 `origin/main` `aaa7561` 并重启 pi1 生产服务生效。
 - 建立本迭代进程账 `docs/iteration-log.md`，作为 nightly 迭代 agent 的全局上下文源。
+
+### 2026-09-12（架构治理：结构图 + 总路线 + 虚拟盘方向）
+- 起因：缺结构图导致迭代破坏地基（AKShare S4/S5 在迭代中静默遗失，靠 C2/C2.5 事后抢救）。
+- 新增 `docs/architecture.md`（架构真相源）：系统结构图 + 每日流水线图 + 模块边界禁令表 + 数据表清单 + 数据源注册表 S1–S7 + 三条铁律 + 回归门禁。
+- 新增 `docs/paper-trading.md`：选型矩阵（2026-09 实调）→ M4a 自研 paper engine（SQLite+K线，跑pi，零依赖）/ M4b QLib 离线（PC/云）/ M4c QMT模拟首选·PTrade备选（Windows+券商）/ M4d 实盘预备（达标+下令才启动）。miniQMT 已死（2026-07-06 停新）永不选。A股撮合清单（T+1/涨跌停/100股/佣金万2.5·印花税卖出0.5‰·过户费0.01‰/滑点）+ 风控闸 + BrokerAdapter 接口草案。
+- `docs/roadmap.md` 升级为总路线（M1–M4d + mermaid 路线图 + 防回归门禁），原单股详情内容归档为子路线保留。
+- 想法/为什么：终极目标是 AI 接管投资决策，纸盘是"分析→操作"的第一座桥；先有图再有路，Hermes 后续迭代沿 M 线走，不再各自为政。
+- 冒烟：纯文档变更，无代码；emoji 零命中（本段无 emoji）。待 push 后 pi1 仅 git pull 同步，不重启服务。
