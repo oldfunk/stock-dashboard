@@ -102,6 +102,13 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 改完：更新本账（勾掉 backlog 项、Changelog 追加）+ 推 Discord 简报。
 - **git 工作流硬约定（防污染 main）**：每晚迭代在**当前 nightly 分支**上继续（开头 `git fetch origin && git rebase origin/main` 拉平上游，再 commit），commit 后 `git push origin HEAD`。**绝不在本地 `main` 上 commit，绝不 `git push origin main`**。push 后保持 HEAD 在 nightly 分支，勿切回 main（本地 main 由用户/合并流程管理）。多日累积都落在同一个 nightly 分支，审计时一次性 `git log origin/main..HEAD --stat` 即可。
 
+### 踩坑铁律（从真实事故提炼，Hermes 每次迭代前必读）
+
+1. **提交前想清楚，不重复提交同一文件**：README 在 4 个 commit 内被改了 3 次（`d0f8176` 新写 → `2d18db1` 全覆盖 → `b801d36` 去重），等于前两次白做。规则：对同一文件的修改如果间隔 < 3 个 commit，说明没想清楚，应该 `git commit --amend` 或等想清楚再提。
+2. **handoff.md 只追加不删历史**：原文件有"历史交接区（追加，不删）"规则，但重写时整段消失。规则：重写 handoff.md 时，"历史交接区"段必须保留并追加新条目，不得删除已有历史。
+3. **单一事实源，不重复维护**：README 数据源 S1–S7 完整表与 `architecture.md` §5 完全重复，两处维护改一处忘另一处必出错。规则：README 只放摘要 + 链接，完整内容只在一个文件里维护。
+4. **里程碑日期必须与实际任务对齐**：roadmap.md 写 M1 目标 9-14，但 B1/B2 已于 9-05 完成，日期变成空壳误导。规则：里程碑完成后必须标注完成态或移除日期，不留"目标 XX 月"的空壳。
+
 ## 待办 backlog（细粒度，按优先级）
 - [ ] 评分体系透明化（skill P1③，已拆子项，本次做最小一子项）
   - [x] 抽 `_score_breakdown()` 纯函数：把五维加权 + 一致性加分拆成可逐项解释的结构（透明化前置，不改阈值）
