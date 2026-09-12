@@ -920,96 +920,35 @@
         /* ========== AI Watchlist Grid ========== */
         .watchlist-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
             margin-bottom: 16px;
         }
         .watchlist-card {
-            background: var(--bg-secondary);
-            border-radius: var(--radius);
-            padding: 16px;
-            transition: background 0.15s;
-            border: 1px solid var(--divider-thin);
-            min-width: 0;
-            overflow: hidden;
+            border-left: 3px solid var(--color-accent);
         }
-        .watchlist-card:hover { background: var(--bg-hover); }
-        .wl-card-header { margin-bottom: 12px; }
-        .wl-stock-code {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            letter-spacing: 0.02em;
-        }
-        .wl-stock-name {
-            font-size: 15px;
+        .wl-pool-badge {
+            font-size: 10px;
             font-weight: 500;
-            color: var(--text-primary);
-            margin-top: 1px;
-        }
-        .wl-card-body { margin-bottom: 12px; }
-        .wl-price {
-            font-size: 20px;
-            font-weight: 400;
-            letter-spacing: -0.01em;
-            color: var(--text-primary);
-        }
-        .wl-change { font-size: 11px; margin-top: 2px; }
-        .wl-card-footer {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-wrap: wrap;
-            padding-top: 8px;
-            border-top: 1px solid var(--divider-thin);
-        }
-        .wl-signal {
-            font-size: 11px;
-            font-weight: 600;
-            padding: 2px 8px;
+            padding: 1px 6px;
             border-radius: 3px;
-        }
-        .wl-signal-buy { background: var(--color-up); color: #fff; }
-        .wl-signal-hold {
-            background: transparent;
-            border: 1px solid var(--text-tertiary);
+            background: var(--bg-tertiary);
             color: var(--text-secondary);
+            margin-left: 4px;
         }
-        .wl-signal-avoid {
-            background: transparent;
-            border: 1px dashed var(--red);
-            color: var(--red);
-        }
-        .wl-signal-none { color: var(--text-tertiary); }
-        .wl-score {
+        .wl-confidence-badge {
             font-size: 10px;
-            font-weight: 600;
-            color: var(--color-accent);
-            margin-left: 6px;
-        }
-        .wl-confidence {
-            font-size: 10px;
-            color: var(--text-tertiary);
-        }
-        .wl-weeks {
-            font-size: 10px;
-            color: var(--text-tertiary);
-            margin-left: auto;
-        }
-        .wl-reason {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--divider-thin);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            font-weight: 500;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: var(--gold-bg);
+            color: var(--gold);
         }
         @media (max-width: 1200px) {
-            .watchlist-grid { grid-template-columns: repeat(3, 1fr); }
+            .watchlist-grid { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 600px) {
-            .watchlist-grid { grid-template-columns: repeat(2, 1fr); }
+            .watchlist-grid { grid-template-columns: 1fr; }
         }
 
         /* ========== Journal Link ========== */

@@ -284,6 +284,7 @@ async def index(request: Request):
     hist_dao = StockAnalysisHistoryDAO()
     snap_dao = StockSnapshotDAO()
     sr_dao = ScreeningResultDAO()
+    fs_dao = FinancialSummaryDAO()
     for item in ai_watchlist:
         code = item['code']
         # 实时行情：优先实时缓存，降级到 stock_snapshot
@@ -296,10 +297,62 @@ async def index(request: Request):
             snap = snap_dao.get_by_code(code)
             if snap:
                 item['current_price'] = snap.get('current_price')
-        # 取最近 Signal + 模型：优先分析历史，降级到 screening_result
+
+        # 从 screening_result 补全指标（pe/pb/roe/gross_margin/net_margin 等）
+        sr = sr_dao.get_latest_for_code(code)
+        if sr:
+            item['pe'] = sr.get('pe')
+            item['pb'] = sr.get('pb')
+            item['roe'] = sr.get('roe')
+            item['debt_ratio'] = sr.get('debt_ratio')
+            item['market_cap'] = sr.get('market_cap')
+            item['revenue_growth'] = sr.get('revenue_growth')
+            item['profit_growth'] = sr.get('profit_growth')
+            item['gross_margin'] = sr.get('gross_margin')
+            item['net_margin'] = sr.get('net_margin')
+            item['ocf_per_share'] = sr.get('ocf_per_share')
+            item['score'] = sr.get('score')
+            item['reason'] = sr.get('reason')
+            # 评分拆解
+            if sr.get('score_detail'):
+                try:
+                    item['score_detail_parsed'] = json.loads(sr['score_detail']) if isinstance(sr['score_detail'], str) else sr['score_detail']
+                except (json.JSONDecodeError, TypeError):
+                    item['score_detail_parsed'] = None
+            else:
+                item['score_detail_parsed'] = None
+        else:
+            for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
+                       'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
+                       'score', 'reason', 'score_detail_parsed'):
+                item[k] = None
+
+        # 降级：stock_snapshot 补 pe/roe 等（筛选结果缺失时）
+        snap = snap_dao.get_by_code(code)
+        if snap:
+            if item.get('pe') is None:
+                item['pe'] = snap.get('pe')
+            if item.get('pb') is None:
+                item['pb'] = snap.get('pb')
+            if item.get('roe') is None:
+                item['roe'] = snap.get('roe')
+            if item.get('debt_ratio') is None:
+                item['debt_ratio'] = snap.get('debt_ratio')
+            if item.get('market_cap') is None:
+                item['market_cap'] = snap.get('market_cap')
+            if item.get('revenue_growth') is None:
+                item['revenue_growth'] = snap.get('revenue_growth')
+            if item.get('profit_growth') is None:
+                item['profit_growth'] = snap.get('profit_growth')
+
+        # AI 分析（优先分析历史，降级到 screening_result）
         item['signal'] = None
         item['model'] = None
-        item['score'] = None
+        item['ai_parsed'] = None
+        item['trade_parsed'] = None
+        item['ai_failed'] = False
+        item['mirror_counts'] = None
+        item['mirror_total'] = 0
         latest_hist = hist_dao.get_latest_for_code(code)
         if latest_hist and latest_hist.get('ai_trade_strategy'):
             try:
@@ -310,14 +363,66 @@ async def index(request: Request):
         if latest_hist and latest_hist.get('ai_analysis'):
             try:
                 analysis = json.loads(latest_hist['ai_analysis'])
+                item['ai_parsed'] = analysis
                 item['model'] = analysis.get('model')
+                mc = analysis.get('mirror_counts')
+                if mc is not None:
+                    item['mirror_counts'] = str(mc)
+                    import re as _re
+                    nums = _re.findall(r'\d+', str(mc).split()[0] if ' ' in str(mc) else str(mc))
+                    item['mirror_total'] = sum(int(n) for n in nums) if nums else 0
             except (json.JSONDecodeError, TypeError):
                 pass
-        # 降级：从 screening_result 补 score/PE/ROE
-        if item['score'] is None:
-            sr = sr_dao.get_latest_for_code(code)
-            if sr:
-                item['score'] = sr.get('score')
+        if not item['signal'] and sr and sr.get('ai_trade_strategy'):
+            try:
+                trade = json.loads(sr['ai_trade_strategy'])
+                item['signal'] = trade.get('signal')
+                item['trade_parsed'] = trade
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if not item['ai_parsed'] and sr and sr.get('ai_analysis'):
+            try:
+                item['ai_parsed'] = json.loads(sr['ai_analysis'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if sr:
+            item['ai_failed'] = bool(sr.get('ai_failed') in (1, True, '1'))
+
+        # 分析历史时间线（最近5条）
+        history = hist_dao.get_history(code, limit=5)
+        parsed_history = []
+        for h in history:
+            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
+                try:
+                    ai_obj = json.loads(h['ai_analysis'])
+                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
+                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
+                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
+                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
+                except Exception:
+                    pass
+            parsed_history.append(h)
+        item['analysis_history'] = parsed_history
+
+        # 财务历史汇总（5y/10y）
+        try:
+            fs = fs_dao.get(code)
+            if fs:
+                item['_summary'] = {
+                    'roe_5y_avg': fs.get('roe_5y_avg'),
+                    'roe_10y_avg': fs.get('roe_10y_avg'),
+                    'roe_improvement': fs.get('roe_improvement'),
+                    'roe_volatility': fs.get('roe_volatility'),
+                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
+                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
+                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
+                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
+                    'share_dilution_5y': fs.get('share_dilution_5y'),
+                    'share_dilution_10y': fs.get('share_dilution_10y'),
+                    'data_years': fs.get('data_years'),
+                }
+        except Exception:
+            pass
 
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()
