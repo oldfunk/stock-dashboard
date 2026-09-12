@@ -6,9 +6,13 @@
                 <div class="stock-info">
                     <div class="stock-code">{{ stock.code }}</div>
                     <div class="stock-name">{{ stock.name }}</div>
-                    <span class="stock-score">{{ stock.score }}</span>
+                    {% if stock.score is not none %}<span class="stock-score">{{ stock.score }}</span>{% endif %}
                     {% if stock.model %}<span class="stock-model" title="AI 分析模型">{{ stock.model }}</span>{% endif %}
                     {% if stock.ai_failed and not stock.ai_parsed %}<span class="stock-model stock-ai-fail" title="AI 分析失败：{{ stock.ai_failure_reason }}">AI 未分析</span>{% endif %}
+                    {% if stock.in_pool %}
+                    <span class="pool-badge" title="AI 观察池在池周数">池{{ stock.review_count or 1 }}周</span>
+                    {% if stock.pool_confidence %}<span class="pool-conf" title="AI 信心">{{ stock.pool_confidence }}</span>{% endif %}
+                    {% endif %}
                     <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
                     onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
                     title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
@@ -112,6 +116,8 @@
 
             {% if stock.reason %}
             <div class="stock-reason">{{ stock.reason }}</div>
+            {% elif stock.in_pool and stock.pool_reason %}
+            <div class="stock-reason">{{ stock.pool_reason }}</div>
             {% endif %}
 
             {% if stock.score_detail_parsed %}

@@ -384,7 +384,7 @@
             background: var(--bg-hover);
         }
 
-        .stock-card.clickable, .wl-item.clickable, .market-item.clickable {
+        .stock-card.clickable, .market-item.clickable {
             cursor: pointer;
         }
         .market-item.clickable:hover {
@@ -923,153 +923,23 @@
             border-radius: var(--radius-sm);
         }
 
-        /* ========== Watchlist Vertical List ========== */
-        .wl-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-        .wl-item {
-            background: var(--bg-secondary);
-            border: 1px solid var(--divider-thin);
-            border-left: 3px solid var(--accent);
-            border-radius: var(--radius);
-            padding: 14px 18px;
-            transition: background 0.15s;
-        }
-        .wl-item:hover { background: var(--bg-hover); }
-        .wl-item-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 10px;
-        }
-        .wl-item-left {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .wl-item-right {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-shrink: 0;
-        }
-        .wl-code {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            font-family: var(--font-mono);
-        }
-        .wl-name {
-            font-size: 15px;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-        .wl-signal {
-            font-size: 11px;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 3px;
-        }
-        .wl-signal-buy { background: var(--color-up); color: var(--text-on-green); }
-        .wl-signal-hold { background: transparent; border: 1px solid var(--text-tertiary); color: var(--text-secondary); }
-        .wl-signal-avoid { background: transparent; border: 1px dashed var(--red); color: var(--red); }
-        .wl-signal-none { color: var(--text-tertiary); }
-        .wl-score {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--accent);
-        }
-        .wl-tag {
+        /* ========== Pool Badges (in_pool, shared _stock_list.html) ========== */
+        .pool-badge {
             font-size: 10px;
-            padding: 2px 6px;
+            font-weight: 500;
+            padding: 1px 6px;
             border-radius: 3px;
             background: var(--bg-tertiary);
             color: var(--text-secondary);
+            margin-left: 4px;
         }
-        .wl-tag-gold { background: var(--gold-bg); color: var(--gold); }
-        .wl-metrics {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px 16px;
-            margin-bottom: 8px;
-        }
-        .wl-m {
-            display: flex;
-            align-items: baseline;
-            gap: 4px;
-        }
-        .wl-m-label {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            white-space: nowrap;
-        }
-        .wl-m-value {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-primary);
-            white-space: nowrap;
-        }
-        .wl-m-value.good { color: var(--color-up); }
-        .wl-m-value.warn { color: var(--gold); }
-        .wl-m-change {
-            font-size: 11px;
-            font-weight: 400;
-        }
-        .wl-summary {
-            font-size: 11px;
-            color: var(--text-tertiary);
-            line-height: 1.8;
-            padding: 6px 10px;
-            background: var(--bg-tertiary);
-            border-radius: var(--radius-sm);
-            margin-bottom: 8px;
-        }
-        .wl-sum-badge {
-            display: inline-block;
+        .pool-conf {
             font-size: 10px;
             font-weight: 500;
-            padding: 0 5px;
+            padding: 1px 6px;
             border-radius: 3px;
-            background: var(--accent);
-            color: var(--text-on-accent);
-            margin-right: 4px;
-        }
-        .wl-reason {
-            font-size: 12px;
-            color: var(--text-tertiary);
-            margin-bottom: 6px;
-            line-height: 1.5;
-        }
-        .wl-ai-toggle {
-            font-size: 12px;
-            color: var(--text-secondary);
-            background: none;
-            border: 1px solid var(--divider-thin);
-            border-radius: var(--radius-sm);
-            padding: 4px 10px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .wl-ai-toggle:hover { background: var(--bg-tertiary); }
-        .wl-ai-body {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--divider-thin);
-        }
-        .wl-ai-tabs {
-            display: flex;
-            gap: 0;
-            margin-bottom: 8px;
-        }
-
-        @media (max-width: 768px) {
-            .wl-metrics { gap: 4px 12px; }
-            .wl-item { padding: 12px; }
+            background: var(--gold-bg);
+            color: var(--gold);
         }
 
         /* ========== Journal Link ========== */
@@ -1224,8 +1094,8 @@
     <div class="dashboard-main">
     <!-- AI 观察池卡片 -->
     <div id="watchlistAiContainer">
-        {% with watchlist = ai_watchlist %}
-        {% include '_watchlist_card.html' %}
+        {% with stocks = ai_watchlist %}
+        {% include '_stock_list.html' %}
         {% endwith %}
         {% if ai_journal_latest %}
         <div class="journal-link">
@@ -1453,16 +1323,6 @@
     }
 
     setColorScheme(getPreferredColorScheme());
-
-    // ========== Watchlist AI Toggle ==========
-    function toggleWlAi(code) {
-        var body = document.getElementById('wl-ai-body-' + code);
-        var caret = document.getElementById('wl-caret-' + code);
-        if (!body) return;
-        var show = body.style.display === 'none';
-        body.style.display = show ? 'block' : 'none';
-        if (caret) caret.textContent = show ? '-' : '+';
-    }
 
     // ========== History Toggle ==========
     function toggleHistory(code) {

@@ -22,6 +22,7 @@ from src.models.database import (
     PipelineProgressDAO,
     FinancialHistoryDAO,
     FinancialSummaryDAO,
+    StockSnapshotDAO,
     WatchlistDAO,
     db_conn,
 )
@@ -242,7 +243,6 @@ if static_dir.exists():
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """看板首页"""
-    from src.models.database import StockSnapshotDAO
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
 
@@ -278,151 +278,56 @@ async def index(request: Request):
     # 解析 AI 分析 JSON + 历史 + 财务汇总
     _enrich_stocks(stocks)
 
-    # 获取 AI 观察池 + 合并实时行情 + 最近 AI Signal
-    ai_watchlist = AiWatchlistDAO().get_all()
+    # AI 观察池：与候选股走同一数据路径，保证与 /candidates 共用 _stock_list.html 单模板渲染。
+    # 基础行取自 screening_result（完整财务字段），叠加池元数据后走 realtime 合并 + _enrich_stocks()。
+    pool_rows = AiWatchlistDAO().get_all()
     realtime = get_realtime_cache()
-    hist_dao = StockAnalysisHistoryDAO()
-    snap_dao = StockSnapshotDAO()
     sr_dao = ScreeningResultDAO()
-    fs_dao = FinancialSummaryDAO()
-    for item in ai_watchlist:
-        code = item['code']
-        # 实时行情：优先实时缓存，降级到 stock_snapshot
-        item['current_price'] = None
-        item['change_percent'] = None
-        if code in realtime:
-            item['current_price'] = realtime[code].get('current_price')
-            item['change_percent'] = realtime[code].get('change_percent')
-        else:
-            snap = snap_dao.get_by_code(code)
-            if snap:
-                item['current_price'] = snap.get('current_price')
-
-        # 从 screening_result 补全指标（pe/pb/roe/gross_margin/net_margin 等）
+    snap_dao = StockSnapshotDAO()
+    ai_watchlist = []
+    for w in pool_rows:
+        code = w['code']
         sr = sr_dao.get_latest_for_code(code)
         if sr:
-            item['pe'] = sr.get('pe')
-            item['pb'] = sr.get('pb')
-            item['roe'] = sr.get('roe')
-            item['debt_ratio'] = sr.get('debt_ratio')
-            item['market_cap'] = sr.get('market_cap')
-            item['revenue_growth'] = sr.get('revenue_growth')
-            item['profit_growth'] = sr.get('profit_growth')
-            item['gross_margin'] = sr.get('gross_margin')
-            item['net_margin'] = sr.get('net_margin')
-            item['ocf_per_share'] = sr.get('ocf_per_share')
-            item['score'] = sr.get('score')
-            item['reason'] = sr.get('reason')
-            # 评分拆解
-            if sr.get('score_detail'):
-                try:
-                    item['score_detail_parsed'] = json.loads(sr['score_detail']) if isinstance(sr['score_detail'], str) else sr['score_detail']
-                except (json.JSONDecodeError, TypeError):
-                    item['score_detail_parsed'] = None
-            else:
-                item['score_detail_parsed'] = None
+            item = dict(sr)
         else:
-            for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
-                       'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
-                       'score', 'reason', 'score_detail_parsed'):
-                item[k] = None
+            # 兜底：无筛选结果时用 snapshot 构造最小字段（同 candidates 历史兜底模式）
+            snap = snap_dao.get_by_code(code)
+            item = {
+                'code': code,
+                'name': w.get('name') or (snap.get('name') if snap else code),
+                'score': None,
+                'ai_analysis': '', 'ai_trade_strategy': '', 'score_detail': None,
+                'pe': None, 'pb': None, 'roe': None, 'debt_ratio': None,
+                'revenue_growth': None, 'profit_growth': None, 'market_cap': None,
+                'gross_margin': None, 'net_margin': None, 'ocf_per_share': None,
+                'reason': None, 'ai_failed': 0, 'ai_failure_reason': None,
+            }
+            if snap:
+                for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap',
+                          'revenue_growth', 'profit_growth'):
+                    item[k] = snap.get(k)
+        # 实时行情合并（与候选股路径一致；缓存缺失时降级 snapshot 现价）
+        if code in realtime:
+            rt = realtime[code]
+            item['current_price'] = rt.get('current_price')
+            item['change_percent'] = rt.get('change_percent')
+            item['change_amount'] = rt.get('change_amount')
+        else:
+            snap = snap_dao.get_by_code(code)
+            item['current_price'] = snap.get('current_price') if snap else None
+            item['change_percent'] = None
+            item['change_amount'] = None
+        # 池元数据（供 _stock_list.html 内 in_pool 条件块展示）
+        item['in_pool'] = True
+        item['review_count'] = w.get('review_count') or 1
+        item['pool_confidence'] = w.get('ai_confidence')
+        item['pool_reason'] = w.get('added_reason')
+        ai_watchlist.append(item)
 
-        # 降级：stock_snapshot 补 pe/roe 等（筛选结果缺失时）
-        snap = snap_dao.get_by_code(code)
-        if snap:
-            if item.get('pe') is None:
-                item['pe'] = snap.get('pe')
-            if item.get('pb') is None:
-                item['pb'] = snap.get('pb')
-            if item.get('roe') is None:
-                item['roe'] = snap.get('roe')
-            if item.get('debt_ratio') is None:
-                item['debt_ratio'] = snap.get('debt_ratio')
-            if item.get('market_cap') is None:
-                item['market_cap'] = snap.get('market_cap')
-            if item.get('revenue_growth') is None:
-                item['revenue_growth'] = snap.get('revenue_growth')
-            if item.get('profit_growth') is None:
-                item['profit_growth'] = snap.get('profit_growth')
-
-        # AI 分析（优先分析历史，降级到 screening_result）
-        item['signal'] = None
-        item['model'] = None
-        item['ai_parsed'] = None
-        item['trade_parsed'] = None
-        item['ai_failed'] = False
-        item['mirror_counts'] = None
-        item['mirror_total'] = 0
-        latest_hist = hist_dao.get_latest_for_code(code)
-        if latest_hist and latest_hist.get('ai_trade_strategy'):
-            try:
-                trade = json.loads(latest_hist['ai_trade_strategy'])
-                item['signal'] = trade.get('signal')
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if latest_hist and latest_hist.get('ai_analysis'):
-            try:
-                analysis = json.loads(latest_hist['ai_analysis'])
-                item['ai_parsed'] = analysis
-                item['model'] = analysis.get('model')
-                mc = analysis.get('mirror_counts')
-                if mc is not None:
-                    item['mirror_counts'] = str(mc)
-                    import re as _re
-                    nums = _re.findall(r'\d+', str(mc).split()[0] if ' ' in str(mc) else str(mc))
-                    item['mirror_total'] = sum(int(n) for n in nums) if nums else 0
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if not item['signal'] and sr and sr.get('ai_trade_strategy'):
-            try:
-                trade = json.loads(sr['ai_trade_strategy'])
-                item['signal'] = trade.get('signal')
-                item['trade_parsed'] = trade
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if not item['ai_parsed'] and sr and sr.get('ai_analysis'):
-            try:
-                item['ai_parsed'] = json.loads(sr['ai_analysis'])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if sr:
-            item['ai_failed'] = bool(sr.get('ai_failed') in (1, True, '1'))
-
-        # 分析历史时间线（最近5条）
-        history = hist_dao.get_history(code, limit=5)
-        parsed_history = []
-        for h in history:
-            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
-                try:
-                    ai_obj = json.loads(h['ai_analysis'])
-                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
-                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
-                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
-                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
-                except Exception:
-                    pass
-            parsed_history.append(h)
-        item['analysis_history'] = parsed_history
-
-        # 财务历史汇总（5y/10y）
-        try:
-            fs = fs_dao.get(code)
-            if fs:
-                item['_summary'] = {
-                    'roe_5y_avg': fs.get('roe_5y_avg'),
-                    'roe_10y_avg': fs.get('roe_10y_avg'),
-                    'roe_improvement': fs.get('roe_improvement'),
-                    'roe_volatility': fs.get('roe_volatility'),
-                    'intcov_5y_avg': fs.get('intcov_5y_avg'),
-                    'fcf_5y_sum': fs.get('fcf_5y_sum'),
-                    'fcf_10y_sum': fs.get('fcf_10y_sum'),
-                    'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
-                    'share_dilution_5y': fs.get('share_dilution_5y'),
-                    'share_dilution_10y': fs.get('share_dilution_10y'),
-                    'data_years': fs.get('data_years'),
-                }
-        except Exception:
-            pass
+    _enrich_stocks(ai_watchlist)
+    # 池代码加入实时轮询（set_active_codes 为覆盖式，可重复调用）
+    set_active_codes(codes + [i['code'] for i in ai_watchlist])
 
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()
