@@ -1,6 +1,26 @@
 # Stock Dashboard — AI/量化驱动的 A 股价值投资选股看板
 
-全自动 A 股价值投资筛选系统，每日收盘后跑完量化筛选（全市场），AI 分析每周五收盘后运行（长线逻辑，基本面周级稳定）。
+全自动 A 股价值投资筛选系统，每日收盘后跑完量化筛选（全市场），AI 分析每日随流水线运行（长线逻辑，基本面日级跟踪）。
+
+## 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| `docs/architecture.md` | 架构真相源：系统结构图、每日流水线、模块边界、数据表清单、数据源注册表 S1–S7、防回归门禁 |
+| `docs/roadmap.md` | 开发总路线 M1–M4d（分析可信 → 策略分化 → 持有纪律 → 虚拟盘 → 券商仿真 → 实盘预备） |
+| `docs/paper-trading.md` | 虚拟盘/量化接入规划：自研 paper engine（M4a）+ QLib 离线验证（M4b）+ QMT/PTrade 仿真（M4c） |
+| `docs/iteration-log.md` | 迭代进程账（Hermes agent 全局上下文源） |
+| `docs/handoff.md` | 班次交接速览 |
+
+## 发展路线（摘要，详见 `docs/roadmap.md`）
+
+- **M1 分析可信**：估值可验算、结论三态化
+- **M2 策略分化**：growth/dividend/turnaround 三策略独立候选池
+- **M3 持有纪律**：论点漂移跟踪 + 钉选股监控提醒
+- **M4a 自研虚拟盘**：信号→模拟委托→持仓→净值，T+1 全建模，跑在 pi 上
+- **M4b QLib 离线验证**：PC/云跑 TopK 回测，只回流结论
+- **M4c 券商仿真**：QMT 模拟模式首选、PTrade 备选（需 Windows + 券商账户；miniQMT 已死，不选）
+- **M4d 实盘预备**：仿真达标 + 明确下令才启动
 
 ## 项目初衷
 
@@ -52,7 +72,7 @@ bash scripts/stock-ai-slow-feed.sh
 
 ### 方式 C：补跑失败的 AI 分析
 
-每周五 AI 分析后，个别股票可能因模型限流/解析失败而漏分析。`scripts/retry_ai.py`
+每日 AI 分析后，个别股票可能因模型限流/解析失败而漏分析。`scripts/retry_ai.py`
 会自动定位失败股票并补跑，无需手改 run_id：
 
 ```bash
@@ -72,7 +92,7 @@ python3 scripts/retry_ai.py --dry-run
 ### 部署：systemd 常驻（生产推荐）
 
 项目在树莓派等小设备上推荐用 systemd 常驻运行，内置调度器会自动完成每日流水线
-与周五 AI 分析，无需额外配置 OS cron。服务异常退出会自动重启：
+与每日 AI 分析，无需额外配置 OS cron。服务异常退出会自动重启：
 
 ```bash
 # /etc/systemd/system/stock-dashboard.service
@@ -106,17 +126,21 @@ STOCK_AI_MODEL=deepseek-v4-flash-free  # 免费模型，无需 API Key
 
 **免费模型无需任何 API Key**，自动从 OpenCode Zen 发现可用 free 模型，支持故障轮换。
 
-## 数据源架构
+## 数据源架构（注册表摘要，全表见 `docs/architecture.md` §5）
 
 ```
-腾讯行情 (qt.gtimg.cn)
+腾讯行情 (qt.gtimg.cn)                         [S1，主用；兜底：新浪 → AKShare 自算]
   └─ 核心行情: PE/PB/市值/价格/涨跌幅（主数据源，覆盖 A 股三大交易所+科创板）
 
 AKShare（社区维护的中国金融数据工具箱）
-  ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务：ROE/毛利率/OCF/EPS/增长率
-  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度补充：净利率/负债率
-  ├─ stock_profit_sheet_by_report_em → 利润表明细：利息费用/总股本
-  └─ stock_cash_flow_sheet_by_report_em → 现金流量表：经营/投资现金流 → FCF
+  ├─ stock_yjbb_em（东方财富底层）→ 全A股批量财务        [S2；兜底 C2 东财直连]
+  ├─ stock_financial_abstract_ths（同花顺底层）→ 逐只深度补充 [S3；失败即缺数，onboard 重试]
+  ├─ stock_profit_sheet_by_report_em → 利润表明细          [S4；已挂，兜底 C2.5]
+  └─ stock_cash_flow_sheet_by_report_em → 现金流量表 → FCF  [S5；已挂，兜底 C2.5]
+
+东财 datacenter 直连（自研 HTTP）
+  ├─ _fetch_eastmoney_direct → S2 兜底（ROE/毛利/负债率等） [C2]
+  └─ _fetch_eastmoney_roic_fcf → S4/S5 兜底（ROIC/FCF）      [C2.5，永久兜底]
 ```
 
 > **腾讯做行情主力**：唯一免费且稳定提供 A 股实时 PE/PB/市值/价格的公开接口，财务数据完全不用腾讯。**兜底策略**：腾讯失败时自动切换到新浪证券 + AKShare 财务自算。
@@ -140,17 +164,16 @@ AKShare（社区维护的中国金融数据工具箱）
 ## 流水线
 
 ```
-交易日 15:30（收盘后自动触发）:
+交易日 15:30（收盘后自动触发，完整流程见 docs/architecture.md §2）:
   1. 腾讯行情 → 全A股行情 → 初筛预过滤
-  2. AKShare stock_yjbb_em → 当前财务（ROE/毛利率/OCF）
+  2. AKShare stock_yjbb_em（兜底 C2 东财直连）→ 当前财务（ROE/毛利率/OCF）
   3. AKShare 深度补充（净利率/负债率）
-  4. AKShare 利润表+现金流表 → 历史财务采集 → financial_history
+  4. 历史财务采集（摘要 + 利润表 + 现金流表，S4/S5 挂则走 C2.5 兜底）→ financial_history
   5. 重建 5年/10年汇总 → financial_summary
-  6. 7条门规筛选 → 评分 → 候选池（≤20只）
+  6. 质量闸（ROE 覆盖 ≥50%）→ 7条门规筛选 → 评分 → 候选池（≤20只）
+  7. K 线拉取（池 + Top25）→ AI 分析（每日，失败股票可用 scripts/retry_ai.py 补跑）
 
-每周五（流水线完成后自动触发）:
-  7. AI 分析 → 护城河 / 管理层 / 估值 / 逆向思考 / 买卖策略
-  注：AI 分析在每日流水线成功后，仅周五触发；失败股票可用 scripts/retry_ai.py 补跑
+每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal
 ```
 
 ## 本地数据仓库
@@ -199,6 +222,7 @@ AKShare（社区维护的中国金融数据工具箱）
 - **AI 分析**: OpenAI 兼容 API + OpenCode Zen 免费模型池（自动故障轮换）
 - **Web 看板**: FastAPI + Jinja2
 - **调度**: 内置调度器（`src/scheduler.py`，daemon 线程）+ systemd 常驻；OS cron 脚本可选兜底
+- **虚拟盘（规划中）**: 自研 `src/paper/` 引擎（SQLite + 库内 K 线/信号，零新依赖），详见 `docs/paper-trading.md`
 
 ## 与 AI Berkshire 的关系
 
