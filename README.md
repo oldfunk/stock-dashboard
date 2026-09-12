@@ -99,17 +99,12 @@ sudo systemctl enable --now stock-dashboard
 
 ## 数据源架构
 
-注册表摘要（完整表见 [`docs/architecture.md` §5](docs/architecture.md)）：
+7 个数据源（S1–S7），详见 [`docs/architecture.md` §5](docs/architecture.md) 注册表：
 
-| 源 | 接口 | 用途 | 兜底 |
-|---|---|---|---|
-| **S1** 腾讯 | `qt.gtimg.cn` | 行情（PE/PB/市值/价格/涨跌幅） | 新浪 → AKShare 自算 |
-| **S2** AKShare | `stock_yjbb_em` | 全 A 股批量财务（ROE/毛利率/OCF） | C2 东财直连 |
-| **S3** AKShare | `stock_financial_abstract_ths` | 逐只深度补充（净利率/负债率） | onboard 重试 |
-| **S4** AKShare | `stock_profit_sheet_by_report_em` | 利润表明细 | C2.5 东财直连（已挂，永久兜底） |
-| **S5** AKShare | `stock_cash_flow_sheet_by_report_em` | 现金流量表 → FCF | C2.5 东财直连（已挂，永久兜底） |
-| **S6** AKShare | `stock_zh_index_daily` / `fetch_kline_data` | K 线数据 | 东财 → 腾讯回退 |
-| **S7** AKShare | `_poll_stocks` → `_realtime_cache` | 实时 tick（调度缓存） | `fetch_stock_realtime` 按需拉 |
+- **行情**：腾讯为主（S1），兜底新浪 → AKShare 自算
+- **财务**：AKShare stock_yjbb_em 为主（S2），兜底 C2 东财直连
+- **深度/历史**：AKShare 摘要 + 利润表 + 现金流表（S3–S5），S4/S5 已挂，C2.5 东财直连永久兜底
+- **K 线 / tick**：AKShare（S6–S7），东财 → 腾讯回退
 
 ---
 
