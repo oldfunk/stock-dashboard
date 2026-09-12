@@ -242,6 +242,7 @@ if static_dir.exists():
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """看板首页"""
+    from src.models.database import StockSnapshotDAO
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
 
