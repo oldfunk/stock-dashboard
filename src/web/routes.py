@@ -462,6 +462,11 @@ async def stock_detail(request: Request, code: str):
     annual_reports = FinancialHistoryDAO().get_annual_reports(code)
     financial_summary = FinancialSummaryDAO().get(code)
 
+    # 兜底：首次访问未填充的股票，异步触发全量填充（下次刷新生效）
+    if not annual_reports and not financial_summary:
+        from src.collector.onboard import onboard_stock_async
+        onboard_stock_async(code)
+
     # 7. 在池状态（如在池）
     in_watchlist = AiWatchlistDAO().get_by_code(code)
     watchlist_history = []
@@ -891,10 +896,10 @@ async def api_watchlist():
 
 @app.post("/api/watchlist/{code}")
 async def api_watchlist_add(code: str):
-    """加入钉选（从 stock_snapshot 取名称；若财务字段缺失则后台 enrich）
+    """加入钉选（从 stock_snapshot 取名称；若财务字段缺失则后台全量填充）
 
     被预过滤剔除的股票（如 PE 超范围）从未被 enrich，财务字段全空。
-    钉选时检测 ROE 是否为空，空则后台异步拉取并回写，不阻塞响应。
+    钉选时检测 ROE 是否为空，空则后台异步执行 onboard_stock 全量填充，不阻塞响应。
     """
     with db_conn() as conn:
         row = conn.execute(
@@ -904,24 +909,11 @@ async def api_watchlist_add(code: str):
         raise HTTPException(status_code=404, detail="股票不存在")
     WatchlistDAO().add(code, row['name'])
 
-    # 若 ROE 为空，后台异步 enrich（不阻塞当前请求）
+    # 若 ROE 为空，后台全量填充（不阻塞当前请求）
     if row['roe'] is None:
-        import threading
-        def _enrich_bg():
-            try:
-                from src.collector.akshare_fetcher import enrich_financial_data, fetch_tencent_batch
-                from src.models.database import StockSnapshotDAO
-                quotes = fetch_tencent_batch([code])
-                if quotes:
-                    enrich_financial_data(quotes)
-                    today = now_cn().strftime("%Y-%m-%d")
-                    for q in quotes:
-                        q['snapshot_date'] = q.get('snapshot_date') or today
-                    StockSnapshotDAO().save_batch(quotes)
-                    logger.info(f"[Watchlist] 后台 enrich 完成: {code}")
-            except Exception as e:
-                logger.warning(f"[Watchlist] 后台 enrich 失败 {code}: {e}")
-        threading.Thread(target=_enrich_bg, daemon=True).start()
+        from src.collector.onboard import onboard_stock_async
+        onboard_stock_async(code)
+        logger.info(f"[Watchlist] 触发全量填充: {code}")
 
     return {"ok": True, "code": code, "name": row['name']}
 
