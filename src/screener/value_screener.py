@@ -9,10 +9,112 @@
 
 import json
 import logging
+from pathlib import Path
+
+import yaml
+
 from src.models.database import ScreeningResultDAO, RunLogDAO, FinancialSummaryDAO
 from src.utils import now_cn
 
 logger = logging.getLogger(__name__)
+
+STRATEGY_KEYS = ('growth', 'dividend', 'turnaround')
+
+_DEFAULT_STRATEGIES_PATH = (
+    Path(__file__).resolve().parent.parent.parent / 'config' / 'strategies.yaml'
+)
+
+
+def load_strategies(path: str | Path | None = None) -> dict:
+    """读取 config/strategies.yaml，返回三策略阈值配置。
+
+    缺文件/解析失败返回 {}（调用方退化为单策略行为），不抛异常。
+    """
+    p = Path(path) if path else _DEFAULT_STRATEGIES_PATH
+    try:
+        with open(p, encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, ValueError, AttributeError):
+        logger.warning(f'[策略] 策略配置文件读取失败: {p}')
+        return {}
+    return {k: v for k, v in data.items() if k in STRATEGY_KEYS and isinstance(v, dict)}
+
+
+def _as_percent(value: float | None, threshold: float) -> float | None:
+    """阈值归一化：strategies.yaml 用小数（如 0.30），行情字段用百分比如 40.0。
+
+    阈值 <1 且字段值 >1 时视为小数口径，放大 100 倍对齐。
+    """
+    if value is None:
+        return None
+    if abs(threshold) < 1 < abs(value):
+        return threshold * 100
+    return threshold
+
+
+def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
+    """单策略阈值检查：返回命中理由，空列表 = 未命中该策略。
+
+    缺失数据的阈值项直接跳过（不否决）：策略层叠加在 7 门基础质量之上，
+    只对可验证项加严，不因上游字段缺失误杀。
+    """
+    reasons: list[str] = []
+    t = thresholds or {}
+
+    def _num(*keys):
+        for k in keys:
+            v = stock.get(k)
+            if v is not None:
+                return v
+        return None
+
+    checks = [
+        ('roe_avg_5y_min', _num('roe_5y_avg', 'roe'), 'ge', 'ROE5年均'),
+        ('pe_max', _num('pe'), 'le', 'PE'),
+        ('pe_ttm_max', _num('pe'), 'le', 'PE_TTM'),
+        ('gross_margin_min', _num('gross_margin_5y_avg', 'gross_margin'), 'ge', '毛利率'),
+        ('net_margin_min', _num('net_margin_5y_avg', 'net_margin'), 'ge', '净利率'),
+        ('debt_ratio_max', _num('debt_ratio'), 'le', '负债率'),
+        ('dividend_yield_min', _num('dividend_yield'), 'ge', '股息率'),
+        ('roe_volatility_max', _num('roe_volatility'), 'le', 'ROE波动'),
+    ]
+    for key, val, op, label in checks:
+        if key not in t or val is None:
+            continue
+        bound = _as_percent(val, t[key])
+        if op == 'ge' and val < bound:
+            return []
+        if op == 'le' and val > bound:
+            return []
+        reasons.append(f'{label}{val}(策略线{bound})')
+
+    # 负债权益比：由负债率推导 D/E = debt/(100-debt)
+    if 'debt_to_equity_max' in t:
+        debt = _num('debt_ratio')
+        if debt is not None and 0 < debt < 100:
+            de = debt / (100 - debt)
+            if de > t['debt_to_equity_max']:
+                return []
+            reasons.append(f'负债权益比{de:.2f}')
+
+    # 分红率：无上游字段时跳过（只在可验证时加严）
+    if 'payout_ratio_max' in t:
+        payout = _num('payout_ratio')
+        if payout is not None and payout > t['payout_ratio_max'] * (
+                100 if abs(t['payout_ratio_max']) < 1 < abs(payout) else 1):
+            return []
+
+    # FCF 收益率：年均FCF/市值，缺数据跳过
+    if 'fcf_yield_min' in t:
+        fcf_sum = _num('fcf_5y_sum')
+        mc = _num('market_cap')
+        if fcf_sum is not None and mc:
+            wear = fcf_sum / 5 / (mc * 1e8)
+            if wear < t['fcf_yield_min']:
+                return []
+            reasons.append(f'FCF收益率{wear:.3f}')
+
+    return reasons
 
 
 # ── AI Berkshire 规则定义 ──
@@ -417,22 +519,14 @@ class ValueScreener:
     def calculate_score(self, stock: dict) -> float:
         return _calculate_moat_score(stock)
 
-    def score_candidates(self, candidates: list[dict],
-                         run_id: str, run_date: str) -> list[dict]:
-        """过滤+评分+排序，返回 Top N（不写库）。
-
-        自动从 financial_summary 加载 5年历史均值嵌入每个 stock。
-        """
-        # 批量加载历史汇总（如果数据库中有的话）
+    def _embed_history(self, candidates: list[dict]) -> None:
+        """批量加载 financial_summary 并原地嵌入每个候选（无冲突字段）。"""
         codes = [c['code'] for c in candidates]
         try:
             summaries = FinancialSummaryDAO().get_batch(codes)
         except Exception:
             summaries = {}
-
-        scored = []
         for c in candidates:
-            # 嵌入历史数据到 stock dict（无冲突字段）
             summary = summaries.get(c['code'], {})
             for k in ('roe_5y_avg', 'roe_5y_count', 'gross_margin_5y_avg',
                       'net_margin_5y_avg', 'ocf_5y_trend', 'ocf_latest',
@@ -446,54 +540,118 @@ class ValueScreener:
                 if summary.get(k) is not None:
                     c[k] = summary.get(k)
 
-            reasons = self.check_criteria(c)
-            if not reasons:
-                continue
-
-            score = self.calculate_score(c)
-
-            # 评分拆解落库（透明化前置：把五维子分+一致性加分存为 JSON，
-            # 供日后详情页/Routes 展开「加权公式」使用；不影响排序分值本身）
-            try:
-                score_detail = json.dumps(_score_breakdown(c),
-                                          ensure_ascii=False)
-            except (TypeError, ValueError):
-                score_detail = None
-
-            # 数据质量标记
-            data_years = c.get('data_years', '')
-            has_history = bool(data_years)
-            if has_history:
-                reasons.append(f"财务数据覆盖={data_years}")
-
-            scored.append({
-                'run_id': run_id,
-                'run_date': run_date,
-                'code': c['code'],
-                'name': c['name'],
-                'score': score,
-                'score_detail': score_detail,
-                'pe': c.get('pe'),
-                'pb': c.get('pb'),
-                'roe': c.get('roe'),
-                'gross_margin': c.get('gross_margin'),
-                'net_margin': c.get('net_margin'),
-                'ocf_per_share': c.get('ocf_per_share'),
-                'revenue_growth': c.get('revenue_growth'),
-                'profit_growth': c.get('profit_growth'),
-                'debt_ratio': c.get('debt_ratio'),
-                'market_cap': c.get('market_cap'),
-                'reason': '; '.join(reasons),
-            })
-
-        scored.sort(key=lambda x: x['score'], reverse=True)
+    def _max_n(self) -> int:
         max_n = self.cfg.get('max_candidates', 20) if isinstance(self.cfg, dict) else 20
-        return scored[:max_n]
+        return max_n
+
+    def _build_row(self, c: dict, run_id: str, run_date: str,
+                   reasons: list[str], score: float,
+                   strategy_tags: list[str] | None = None) -> dict:
+        # 评分拆解落库（透明化前置：把五维子分+一致性加分存为 JSON，
+        # 供日后详情页/Routes 展开「加权公式」使用；不影响排序分值本身）
+        try:
+            score_detail = json.dumps(_score_breakdown(c),
+                                      ensure_ascii=False)
+        except (TypeError, ValueError):
+            score_detail = None
+
+        # 数据质量标记
+        data_years = c.get('data_years', '')
+        has_history = bool(data_years)
+        if has_history:
+            reasons.append(f'财务数据覆盖={data_years}')
+
+        return {
+            'run_id': run_id,
+            'run_date': run_date,
+            'code': c['code'],
+            'name': c['name'],
+            'score': score,
+            'score_detail': score_detail,
+            'strategy_tags': json.dumps(strategy_tags or [], ensure_ascii=False)
+            if strategy_tags is not None else None,
+            'pe': c.get('pe'),
+            'pb': c.get('pb'),
+            'roe': c.get('roe'),
+            'gross_margin': c.get('gross_margin'),
+            'net_margin': c.get('net_margin'),
+            'ocf_per_share': c.get('ocf_per_share'),
+            'revenue_growth': c.get('revenue_growth'),
+            'profit_growth': c.get('profit_growth'),
+            'debt_ratio': c.get('debt_ratio'),
+            'market_cap': c.get('market_cap'),
+            'reason': '; '.join(reasons),
+        }
+
+    def score_candidates(self, candidates: list[dict],
+                         run_id: str, run_date: str,
+                         multi_strategy: bool = False,
+                         strategies: dict | None = None) -> list[dict] | dict[str, list[dict]]:
+        """过滤+评分+排序，返回 Top N（不写库）。
+
+        自动从 financial_summary 加载 5年历史均值嵌入每个 stock。
+        multi_strategy=False（默认）：原有单策略行为，返回 list。
+        multi_strategy=True：对 strategies.yaml 每个策略单独跑一遍 7 门 +
+            策略阈值 + 评分，返回 {策略名: TopN}；每行 strategy_tags 为该股
+            命中的全量策略 JSON 数组。
+        """
+        self._embed_history(candidates)
+
+        if not multi_strategy:
+            scored = []
+            for c in candidates:
+                reasons = self.check_criteria(c)
+                if not reasons:
+                    continue
+                score = self.calculate_score(c)
+                scored.append(self._build_row(c, run_id, run_date, reasons, score))
+            scored.sort(key=lambda x: x['score'], reverse=True)
+            return scored[:self._max_n()]
+
+        if strategies is None:
+            strategies = load_strategies()
+        pools: dict[str, list[dict]] = {}
+        tags_by_code: dict[str, set] = {}
+        for name in STRATEGY_KEYS:
+            cfg = (strategies or {}).get(name)
+            if not cfg:
+                continue
+            thresholds = cfg.get('thresholds', {})
+            pool = []
+            for c in candidates:
+                reasons = self.check_criteria(dict(c))
+                if not reasons:
+                    continue
+                strat_reasons = _check_strategy_thresholds(c, thresholds)
+                if not strat_reasons:
+                    continue
+                score = self.calculate_score(c)
+                pool.append(self._build_row(
+                    c, run_id, run_date,
+                    reasons + [f'策略{name}:{r}' for r in strat_reasons],
+                    score, strategy_tags=[]))
+            pool.sort(key=lambda x: x['score'], reverse=True)
+            pool = pool[:self._max_n()]
+            pools[name] = pool
+            for row in pool:
+                tags_by_code.setdefault(row['code'], set()).add(name)
+        # 第二遍：每行盖上全量命中标签
+        for pool in pools.values():
+            for row in pool:
+                row['strategy_tags'] = json.dumps(
+                    sorted(tags_by_code.get(row['code'], set())),
+                    ensure_ascii=False)
+        return pools
 
 
 def run_screener(config: dict, candidates: list[dict],
-                 run_id: str = None, run_date: str = None) -> list[dict]:
-    """候选股评分排序 + 持久化到筛选结果表。"""
+                 run_id: str = None, run_date: str = None,
+                 multi_strategy: bool = False) -> list[dict]:
+    """候选股评分排序 + 持久化到筛选结果表。
+
+    multi_strategy=True 时持久化三策略池的并集（按 code 去重、保留最高分行，
+    strategy_tags 为全量命中标签）。
+    """
     # 注意：ValueScreener / _check_7_gates 内部会再取一层 screener.conditions，
     #      因此这里必须传完整 config，否则 config.yaml 的阈值会全部失效（走代码默认值）
     screener = ValueScreener(config)
@@ -503,7 +661,19 @@ def run_screener(config: dict, candidates: list[dict],
     if run_date is None:
         run_date = now_cn().strftime("%Y-%m-%d")
 
-    top_n = screener.score_candidates(candidates, run_id, run_date)
+    scored = screener.score_candidates(candidates, run_id, run_date,
+                                        multi_strategy=multi_strategy)
+    if multi_strategy:
+        # 三策略池并集：去重保留最高分（同分保留首见），返回 list 保持调用方兼容
+        merged: dict[str, dict] = {}
+        for pool in scored.values():
+            for row in pool:
+                prev = merged.get(row['code'])
+                if prev is None or row['score'] > prev['score']:
+                    merged[row['code']] = row
+        top_n = sorted(merged.values(), key=lambda x: x['score'], reverse=True)
+    else:
+        top_n = scored
 
     result_dao = ScreeningResultDAO()
     if top_n:

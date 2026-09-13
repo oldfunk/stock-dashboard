@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS screening_result (
     eliminated_date TEXT,             -- 排除日期
     eliminated_reason TEXT,           -- 排除原因
     score_detail TEXT,                -- 评分拆解 JSON（五维子分+一致性加分，透明化）
+    strategy_tags TEXT,               -- 命中策略 JSON 数组（如 ["growth","dividend"]，多策略模式）
     ai_failed INTEGER DEFAULT 0,      -- 本轮 AI 分析是否失败（1=失败，0=成功/未触发）
     ai_failure_reason TEXT            -- AI 分析失败原因（模型耗尽/解析失败/超时等）
 );
@@ -301,6 +302,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'ocf_per_share', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'net_margin', 'REAL')
         _add_column_if_not_exists(conn, 'screening_result', 'score_detail', 'TEXT')
+        _add_column_if_not_exists(conn, 'screening_result', 'strategy_tags', 'TEXT')
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failed', 'INTEGER')
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failure_reason', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
@@ -463,14 +465,14 @@ class ScreeningResultDAO:
                     (run_id, run_date, code, name, score, pe, pb, roe,
                      gross_margin, net_margin, ocf_per_share,
                      revenue_growth, profit_growth, debt_ratio, market_cap, reason,
-                     score_detail)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     score_detail, strategy_tags)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (r['run_id'], r['run_date'], r['code'], r['name'],
                       r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
                       r.get('gross_margin'), r.get('net_margin'), r.get('ocf_per_share'),
                       r.get('revenue_growth'), r.get('profit_growth'),
                       r.get('debt_ratio'), r.get('market_cap'), r.get('reason'),
-                      r.get('score_detail')))
+                      r.get('score_detail'), r.get('strategy_tags')))
 
     def update_ai_analysis(self, run_id: str, code: str, analysis: str, strategy: str, trade_strategy: str):
         with db_conn() as conn:
