@@ -135,6 +135,17 @@ def _enrich_stocks(stocks: list[dict]) -> None:
         else:
             s['score_detail_parsed'] = None
 
+        # 策略标签透传（多策略模式落库为 JSON array 字符串，单策略模式为 NULL）
+        raw_tags = s.get('strategy_tags')
+        s['strategy_tags'] = []
+        if raw_tags:
+            try:
+                tags = json.loads(raw_tags) if isinstance(raw_tags, str) else raw_tags
+                if isinstance(tags, list):
+                    s['strategy_tags'] = [t for t in tags if isinstance(t, str)]
+            except (json.JSONDecodeError, TypeError):
+                s['strategy_tags'] = []
+
         # 当前分析所用模型名（ai_analysis JSON 顶层 model 字段）
         s['model'] = None
         if isinstance(s.get('ai_parsed'), dict):

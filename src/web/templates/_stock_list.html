@@ -1,5 +1,12 @@
+<div class="strategy-tabs view-tabs" style="margin-bottom:12px;">
+    <button class="view-tab active" data-strategy="all" onclick="switchStrategyTab('all', event)">全部</button>
+    <button class="view-tab" data-strategy="growth" onclick="switchStrategyTab('growth', event)">成长</button>
+    <button class="view-tab" data-strategy="dividend" onclick="switchStrategyTab('dividend', event)">红利</button>
+    <button class="view-tab" data-strategy="turnaround" onclick="switchStrategyTab('turnaround', event)">反转</button>
+</div>
 {% for stock in stocks %}
         <div class="stock-card clickable" data-code="{{ stock.code }}"
+             data-tags="{{ stock.strategy_tags|join(',') if stock.strategy_tags else '' }}"
              onclick="location.href='/stock/{{ stock.code }}'"
              title="查看 {{ stock.name }} 详情">
             <div class="stock-row">
@@ -295,3 +302,20 @@
             {% endif %}
         </div>
 {% endfor %}
+<script>
+function switchStrategyTab(tag, event) {
+    if (event) {
+        var bar = event.target.closest('.strategy-tabs');
+        if (bar) {
+            var tabs = bar.querySelectorAll('.view-tab');
+            for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+        }
+        event.target.classList.add('active');
+    }
+    var cards = document.querySelectorAll('.stock-card[data-tags]');
+    for (var j = 0; j < cards.length; j++) {
+        var tags = (cards[j].getAttribute('data-tags') || '').split(',').filter(Boolean);
+        cards[j].style.display = (tag === 'all' || tags.indexOf(tag) !== -1) ? '' : 'none';
+    }
+}
+</script>
