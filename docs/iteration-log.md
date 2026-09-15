@@ -43,18 +43,21 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - P1③ 全子项：score_breakdown / score_detail 落库 / 候选卡五维拆解 / 详情页独立评分拆解
 - P1②：历史笔记对比 / 矛盾信号检测
 - 其他：model 列落库 / AI 失败可见 / Discord 通知 / 钉选股独立视图 / strategies.yaml 定义 / deep_research 清理
+- P0#1-3 M2 多策略接入（2026-09-14/15 完成）：`402cd5e` 后端核心（strategy_tags 列 + 迁移守卫 + load_strategies + multi_strategy 开关 + 5 单测，已合入 main）+ `293e08d` 前置（strategy_tags 透传 + 首页策略 Tab + 3 回归测试，已合入 main）
+- P1#5 分析摘要前置（2026-09-15 完成，`6256d58`，在 nightly/20260914 待合）：moat_type/mgmt_score/iv_range 透传 + 候选卡摘要块 + 4 回归测试
+- P1#6 操作指引强化（2026-09-15 完成，`4495b9c`，在 nightly/20260914 待合）：交易 Tab trade-guide 一句话指引 + 5 用例渲染验证
 
 ### 当前未完成项（按优先级）
 
-**P0 — M2 多策略接入（目标 9-30，核心待办）**
-1. **策略管线接入**：`strategies.yaml` 已定义 growth/dividend/turnaround 三策略阈值，但**未接入筛选流水线**。需要在 `src/screener/value_screener.py` 新增多策略筛选模式——按候选股命中策略标签分组输出三个独立候选池（成长池 / 红利池 / 反转池），每个池有自己的 Top-N。
-2. **策略标签**：每只候选股在 `screening_result` 新增 `strategy_tags`（TEXT，JSON array），记录命中哪些策略（如 `["growth","dividend"]`）。
-3. **首页展示**：首页候选池增加策略 Tab 切换（全部 / 成长 / 红利 / 反转），`_stock_list.html` 支持按策略标签过滤。
+**P0 — M2 多策略接入（目标 9-30，已完成，剩 orchestrator 开关收尾见下一步）**
+1. [x] **策略管线接入**（2026-09-14 完成，`402cd5e`，已合入 main）：`src/screener/value_screener.py` 新增 `load_strategies`（读 `config/strategies.yaml` 三策略阈值）+ 单股策略阈值检查 + `score_candidates`/`run_screener` 支持 `multi_strategy` 开关（默认关闭，单策略行为不变）；multi 模式按策略分组输出三独立候选池并持久化去重；单测 5 项。
+2. [x] **策略标签**（2026-09-14 完成，`402cd5e` schema + 迁移守卫，已合入 main）：`screening_result` 新增 `strategy_tags`（TEXT，JSON array），记录命中策略（如 `["growth","dividend"]`）；`293e08d` 在 `_enrich_stocks` 透传为 `s['strategy_tags']`（NULL/非法值默认 `[]`）。
+3. [x] **首页展示**（2026-09-15 完成，`293e08d`，已合入 main）：首页候选池策略 Tab（全部 / 成长 / 红利 / 反转），`_stock_list.html` 按 `strategy_tags` 纯前端过滤，旧数据默认全部分类可见；回归测试 3 例。
 4. **注意**：`strategies.yaml` 中 growth 的 `alpha_criteria`（定价权/壁垒/增长质量三标准）和 `exit_triggers` 是 AI Berkshire 核心，但目前 AI 分析的 `investment_strategy` 已有类似字段。本次只做**阈值筛选**，不做 AI prompt 改动。
 
-**P1 — 分析深度补强（M2 完成后）**
-5. **分析摘要前置**：候选列表直接显示关键结论（护城河类型 / 管理层评分 / 估值区间），不用点进详情。改动：`_enrich_stocks()` 解析 `ai_analysis` JSON 提取 `moat_evaluation[0].type` / `management_score` / `intrinsic_value`，写入 `s['moat_type']` / `s['mgmt_score']` / `s['iv_range']`，模板渲染。
-6. **操作指引强化**：Signal 卡片增加"下一步动作"区块。改动：解析 `trade_strategy` 的 `signal`/`buy_zone`/`target_price`/`stop_loss` 生成自然语言指引（如"BUY 置信度高：现价在买入区间内，目标价 XX，止损 XX"），写入模板。
+**P1 — 分析深度补强（已完成，M2 完成后落地）**
+5. [x] **分析摘要前置**（2026-09-15 完成，`6256d58`，在 nightly/20260914 待合）：`_enrich_stocks()` 解析 `ai_analysis` JSON 提取 `moat_evaluation[0].type` / `management_score` / `intrinsic_value`，写入 `s['moat_type']` / `s['mgmt_score']` / `s['iv_range']`（NULL/异形行守卫为 None，有值才渲染）；候选卡新增摘要块；回归测试 4 例。注：2026-09-13 nightly 与 08-30 条目曾记一次前置，本次为合并冲突后存量丢失的重做，以本次为准。
+6. [x] **操作指引强化**（2026-09-15 完成，`4495b9c`，在 nightly/20260914 待合）：交易 Tab 在 trade-grid 下方新增 trade-guide 动态行，按 `trade_parsed.signal`（大小写归一）生成一句话指引（BUY 含置信度/目标价/止损、HOLD、AVOID），无 trade_parsed 不显示；Jinja 五用例渲染验证 5/5。
 
 **P2 — 可选（C3 或上游跟踪）**
 7. C3 AI 引用数字抽检（P2，可选）：仿 report_audit，抽样正文数字 vs 库交叉验证，记 `actions_summary.numeric_mismatch`，warn-only。
@@ -156,6 +159,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-15（账本对齐：P0#1-3 与 P1#5-6 标记完成，纯文档）
+- 起因：账本「当前未完成项」仍把 P0#1 策略管线 / P0#2 标签 / P0#3 Tab / P1#5 摘要前置 / P1#6 操作指引标为待办，但代码已落地（`402cd5e` 后端 + `293e08d` Tab 已合入 main；`6256d58` 摘要透传 + `4495b9c` trade-guide 在 nightly/20260914 待合），真相源失真，后继迭代会重复造轮子。
+- 改了什么：仅 `docs/iteration-log.md` + `docs/handoff.md`——未完成项 P0#1-3 与 P1#5-6 勾为 [x] 并注提交号与日期；已完成清单追补三条；handoff「最后状态」重写为当前 main + nightly 状态，下一步指向 M2 收尾（orchestrator multi_strategy 开关）/ C3 / M4a；历史交接区追补不删。
+- 验证：`git diff` 仅 docs/ 两文件；改动文件 emoji 零命中；`bash ~/work/gate.sh` PASS（纯文档改动，全仓 236 不受影响）。
 ### 2026-09-14（合并 nightly/20260914 + nightly/20260913 + CSS 去重）
 - 合并两个 nightly 分支到 main（M2 多策略后端 + AI 摘要前置）
 - CSS 去重：AI 摘要样式从 index.html + candidates.html 各删 33 行，移入 `_stock_list.html` 的 `<style>` 块（唯一消费者）
