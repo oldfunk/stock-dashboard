@@ -278,6 +278,60 @@ CREATE TABLE IF NOT EXISTS ai_journal (
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_journal_date ON ai_journal(journal_date);
+
+-- M4a 纸盘（paper-trading.md §4.1，复用现有 DB，零新依赖，金额单位均为元）
+CREATE TABLE IF NOT EXISTS paper_account (
+    id INTEGER PRIMARY KEY,              -- 单账户固定 id=1
+    name TEXT NOT NULL DEFAULT 'default',
+    initial_cash REAL NOT NULL DEFAULT 1000000,  -- 初始资金（默认100万，可配）
+    cash REAL NOT NULL DEFAULT 1000000,          -- 可用现金
+    total_value REAL,                            -- 总资产（现金+持仓市值，引擎快照更新）
+    cumulative_pnl REAL DEFAULT 0,               -- 累计收益
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    direction TEXT NOT NULL,             -- BUY/SELL
+    price REAL NOT NULL,                 -- 委托价
+    volume INTEGER NOT NULL,             -- 委托数量（股，100整数倍，卖出清仓除外）
+    signal_source TEXT,                  -- 信号来源（run_id/策略标识）
+    status TEXT NOT NULL DEFAULT 'submitted',  -- submitted/filled/cancelled/invalid/blocked（blocked=风控拦截，§4.4）
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_paper_orders_code ON paper_orders(code);
+CREATE INDEX IF NOT EXISTS idx_paper_orders_status ON paper_orders(status);
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES paper_orders(id),
+    code TEXT NOT NULL,
+    direction TEXT NOT NULL,             -- BUY/SELL
+    price REAL NOT NULL,                 -- 成交价
+    volume INTEGER NOT NULL,             -- 成交数量（股）
+    commission REAL DEFAULT 0,           -- 佣金（双边，万2.5最低5元）
+    stamp_tax REAL DEFAULT 0,            -- 印花税（仅卖出，0.5‰）
+    transfer_fee REAL DEFAULT 0,         -- 过户费（双边，0.01‰）
+    traded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_code ON paper_trades(code);
+CREATE TABLE IF NOT EXISTS paper_positions (
+    code TEXT PRIMARY KEY,
+    volume INTEGER NOT NULL DEFAULT 0,       -- 持仓数量（股）
+    avail_volume INTEGER NOT NULL DEFAULT 0, -- 可用数量（T+1 冻结部分不可卖）
+    avg_price REAL,                          -- 持仓均价
+    floating_pnl REAL,                       -- 浮动盈亏（引擎按现价快照更新）
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_nav (
+    nav_date TEXT PRIMARY KEY,           -- 净值日期 YYYY-MM-DD
+    total_value REAL NOT NULL,           -- 总资产
+    cash REAL,                           -- 现金
+    market_value REAL,                   -- 持仓市值
+    pnl REAL,                            -- 当日收益
+    cumulative_pnl REAL,                 -- 累计收益
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -343,6 +397,29 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
             'ON kline_daily(code, trade_date)'
         )
+        # 2026-09-15 新增：M4a 纸盘五表列守卫（旧版残缺 paper_* 表补列用）
+        for _table, _cols in [
+            ('paper_account', [('name', 'TEXT'), ('initial_cash', 'REAL'),
+                               ('cash', 'REAL'), ('total_value', 'REAL'),
+                               ('cumulative_pnl', 'REAL'), ('updated_at', 'TEXT')]),
+            ('paper_orders', [('code', 'TEXT'), ('direction', 'TEXT'),
+                              ('price', 'REAL'), ('volume', 'INTEGER'),
+                              ('signal_source', 'TEXT'), ('status', 'TEXT'),
+                              ('created_at', 'TEXT'), ('updated_at', 'TEXT')]),
+            ('paper_trades', [('order_id', 'INTEGER'), ('code', 'TEXT'),
+                              ('direction', 'TEXT'), ('price', 'REAL'),
+                              ('volume', 'INTEGER'), ('commission', 'REAL'),
+                              ('stamp_tax', 'REAL'), ('transfer_fee', 'REAL'),
+                              ('traded_at', 'TEXT')]),
+            ('paper_positions', [('volume', 'INTEGER'), ('avail_volume', 'INTEGER'),
+                                 ('avg_price', 'REAL'), ('floating_pnl', 'REAL'),
+                                 ('updated_at', 'TEXT')]),
+            ('paper_nav', [('total_value', 'REAL'), ('cash', 'REAL'),
+                           ('market_value', 'REAL'), ('pnl', 'REAL'),
+                           ('cumulative_pnl', 'REAL'), ('created_at', 'TEXT')]),
+        ]:
+            for _col, _typ in _cols:
+                _add_column_if_not_exists(conn, _table, _col, _typ)
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
 
@@ -984,3 +1061,194 @@ class KlineDAO:
                 (code,)
             ).fetchone()
         return row['max_date'] if row else None
+
+
+class PaperAccountDAO:
+    """纸盘账户 DAO（单账户，id=1；初始资金默认100万，可配）"""
+
+    DEFAULT_CASH = 1000000.0
+
+    def get_or_create(self, initial_cash: float = None) -> dict:
+        """取账户，不存在则建账（重复调用幂等，保留已有资金）"""
+        cash = self.DEFAULT_CASH if initial_cash is None else initial_cash
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_account "
+                "(id, name, initial_cash, cash, updated_at) "
+                "VALUES (1, 'default', ?, ?, ?)",
+                (cash, cash, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM paper_account WHERE id = 1"
+            ).fetchone()
+        return dict(row)
+
+    def get(self) -> Optional[dict]:
+        """查账"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_account WHERE id = 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update(self, cash: float = None, total_value: float = None,
+               cumulative_pnl: float = None) -> bool:
+        """更新资金快照（非空字段才写）"""
+        sets, params = [], []
+        if cash is not None:
+            sets.append('cash = ?')
+            params.append(cash)
+        if total_value is not None:
+            sets.append('total_value = ?')
+            params.append(total_value)
+        if cumulative_pnl is not None:
+            sets.append('cumulative_pnl = ?')
+            params.append(cumulative_pnl)
+        if not sets:
+            return False
+        sets.append('updated_at = ?')
+        params.append(now_cn().isoformat())
+        with db_conn() as conn:
+            cur = conn.execute(
+                f"UPDATE paper_account SET {','.join(sets)} WHERE id = 1",
+                params,
+            )
+            return cur.rowcount > 0
+
+
+class PaperOrderDAO:
+    """纸盘委托 DAO（状态：submitted/filled/cancelled/invalid/blocked）"""
+
+    def place(self, code: str, direction: str, price: float,
+              volume: int, signal_source: str = None) -> int:
+        """下委托，返回 order_id"""
+        now = now_cn().isoformat()
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO paper_orders (code, direction, price, volume, "
+                "signal_source, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?)",
+                (code, direction, price, volume, signal_source, now, now),
+            )
+            return cur.lastrowid
+
+    def update_status(self, order_id: int, status: str) -> bool:
+        """更新委托状态（含风控拦截 blocked，§4.4）"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "UPDATE paper_orders SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now_cn().isoformat(), order_id),
+            )
+            return cur.rowcount > 0
+
+    def get(self, order_id: int) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_orders WHERE id = ?", (order_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_by_code(self, code: str, limit: int = 50) -> list[dict]:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM paper_orders WHERE code = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+class PaperTradeDAO:
+    """纸盘成交 DAO（费用明细：佣金/印花税/过户费，§4.3）"""
+
+    def record(self, order_id: int, code: str, direction: str,
+               price: float, volume: int, commission: float = 0,
+               stamp_tax: float = 0, transfer_fee: float = 0) -> int:
+        """记一笔成交，返回 trade id"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO paper_trades (order_id, code, direction, price, "
+                "volume, commission, stamp_tax, transfer_fee, traded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (order_id, code, direction, price, volume,
+                 commission, stamp_tax, transfer_fee, now_cn().isoformat()),
+            )
+            return cur.lastrowid
+
+    def list_by_code(self, code: str, limit: int = 50) -> list[dict]:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM paper_trades WHERE code = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+class PaperPositionDAO:
+    """纸盘持仓 DAO（T+1 用 avail_volume 建模当日冻结）"""
+
+    def upsert(self, code: str, volume: int, avail_volume: int,
+               avg_price: float = None, floating_pnl: float = None):
+        with db_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO paper_positions "
+                "(code, volume, avail_volume, avg_price, floating_pnl, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (code, volume, avail_volume, avg_price,
+                 floating_pnl, now_cn().isoformat()),
+            )
+
+    def get(self, code: str) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_positions WHERE code = ?", (code,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_all(self) -> list[dict]:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM paper_positions ORDER BY code"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def remove(self, code: str) -> bool:
+        """清仓删行"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM paper_positions WHERE code = ?", (code,)
+            )
+            return cur.rowcount > 0
+
+
+class PaperNavDAO:
+    """纸盘每日净值 DAO"""
+
+    def save(self, nav_date: str, total_value: float, cash: float = None,
+             market_value: float = None, pnl: float = None,
+             cumulative_pnl: float = None):
+        with db_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO paper_nav "
+                "(nav_date, total_value, cash, market_value, pnl, "
+                "cumulative_pnl, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (nav_date, total_value, cash, market_value, pnl,
+                 cumulative_pnl, now_cn().isoformat()),
+            )
+
+    def get(self, nav_date: str) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_nav WHERE nav_date = ?", (nav_date,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_latest(self) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_nav ORDER BY nav_date DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
