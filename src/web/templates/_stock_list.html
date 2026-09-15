@@ -20,6 +20,21 @@
                     onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
                     title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
                 </div>
+                {% if stock.moat_type or stock.mgmt_score or stock.iv_range %}
+                <div class="ai-summary" style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:4px;">
+                    {% if stock.moat_type %}<span style="margin-right:12px;" title="护城河类型">护城河: {{ stock.moat_type }}</span>{% endif %}
+                    {% if stock.mgmt_score %}
+                        {% if stock.mgmt_score is mapping %}
+                        <span style="margin-right:12px;" title="{{ stock.mgmt_score.summary or '' }}">管理层: 配置{{ stock.mgmt_score.capital_allocation }}/股东{{ stock.mgmt_score.shareholder_friendliness }}</span>
+                        {% else %}<span style="margin-right:12px;">管理层: {{ stock.mgmt_score }}</span>{% endif %}
+                    {% endif %}
+                    {% if stock.iv_range %}
+                        {% if stock.iv_range is mapping %}
+                        <span title="{{ stock.iv_range.method or '' }}">估值: {{ stock.iv_range.conservative }}–{{ stock.iv_range.base_case }}–{{ stock.iv_range.optimistic }}亿{% if stock.iv_range.margin_of_safety %} (安全边际{{ stock.iv_range.margin_of_safety }}){% endif %}</span>
+                        {% else %}<span>估值: {{ stock.iv_range }}</span>{% endif %}
+                    {% endif %}
+                </div>
+                {% endif %}
 
                 <div class="stock-metrics">
                     <div class="metric-cell">

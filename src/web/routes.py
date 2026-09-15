@@ -151,6 +151,17 @@ def _enrich_stocks(stocks: list[dict]) -> None:
         if isinstance(s.get('ai_parsed'), dict):
             s['model'] = s['ai_parsed'].get('model')
 
+        # 分析摘要前置：护城河类型 / 管理层评分 / 估值区间（仅透传，旧分析 NULL 行保持 None）
+        s['moat_type'] = None
+        s['mgmt_score'] = None
+        s['iv_range'] = None
+        if isinstance(s.get('ai_parsed'), dict):
+            moats = s['ai_parsed'].get('moat_evaluation')
+            if isinstance(moats, list) and moats and isinstance(moats[0], dict):
+                s['moat_type'] = moats[0].get('type')
+            s['mgmt_score'] = s['ai_parsed'].get('management_score')
+            s['iv_range'] = s['ai_parsed'].get('intrinsic_value')
+
         # AI 分析失败标记（透明化：失败原因前端/复盘可见）
         s['ai_failed'] = bool(s.get('ai_failed') in (1, True, '1'))
         s['ai_failure_reason'] = s.get('ai_failure_reason') or None
