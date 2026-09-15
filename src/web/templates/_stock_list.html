@@ -280,6 +280,17 @@
                             <div class="value">{{ stock.trade_parsed.take_profit }}</div>
                         </div>
                     </div>
+                    {% if signal == 'BUY' and stock.trade_parsed.confidence %}
+                    <div class="trade-guide">BUY 置信度{{ stock.trade_parsed.confidence }}：现价在买入区间内，目标价 {{ stock.trade_parsed.target_price }}，止损 {{ stock.trade_parsed.stop_loss }}</div>
+                    {% elif signal == 'BUY' %}
+                    <div class="trade-guide">BUY：可分批建仓，注意控制仓位与止损</div>
+                    {% elif signal == 'HOLD' %}
+                    <div class="trade-guide">HOLD：持有观望，等待更明确信号</div>
+                    {% elif signal == 'AVOID' %}
+                    <div class="trade-guide">AVOID：当前估值偏高或基本面恶化，暂不介入</div>
+                    {% else %}
+                    <div class="trade-guide">{{ signal }}：以纪律为准，等待更明确信号</div>
+                    {% endif %}
                     {% if stock.ai_parsed and stock.ai_parsed.verdict is string %}
                     {% set _v = stock.ai_parsed.verdict %}
                     {% set _vc = 'fail' if '不通过' in _v else ('pass' if '通过' in _v else 'gray') %}
