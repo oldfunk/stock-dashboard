@@ -1,47 +1,7 @@
 # Stock Dashboard — AI 驱动的 A 股价值投资选股看板
 
 > 全自动 · 量化筛选 + 结构化 AI 分析 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
-> 最终目标：让 AI 接管投资决策（见 `docs/roadmap.md` 总路线）
-
----
-
-## 当前阶段（Stage Marker）
-
-> **M2 策略分化收尾 → M3 持有纪律前夜 · 更新 2026-09-15 · 分支 `nightly/20260914` ahead 2**
-
-| 里程碑 | 状态 | 关键产出 | 说明 |
-|---|---|---|---|
-| **M1 分析可信** | ✓ 已完成 | B1 估值验算闸 + B2 结论三态 | 每个候选估值可验算，三档价格区间，目标 9-14 已达成 |
-| **M2 策略分化** | → 进行中 90% | `strategies.yaml` 三策略 + `strategy_tags` 落库 + 首页策略 Tab | 后端核心 `402cd5e` 与 Tab `293e08d` 已合入 `main`；仅剩 `orchestrator` multi 开关收尾（`t_dbebf27e`） |
-| **M3 持有纪律** | 计划 10 月 | B5 论点漂移 + B6/B7 状态机与周报 | prompt 已就位待周六 live 验证 |
-| **M4a 自研纸盘** | 规划 Q4 | `src/paper/` + `paper_*` 五表 | 信号→委托→持仓→净值全链路（见 `paper-trading.md`） |
-| M4b QLib 离线验证 | 并行 | PC/云 TopK 回测 | 只回流结论不回流代码 |
-| M4c 券商仿真 | 待定 | QMT 模拟首选 / PTrade 备选 | 需 Windows+券商账户 |
-| M4d 实盘预备 | 达标后议 | BrokerAdapter+人工闸 | 仿真 3 个月达标 + 明确下令才启动 |
-
-**本周在做（Active Kanban `stock-trading` 板）**
-- `t_a217d8a2` [P0] 账本对齐（docs 真相源修复）→ ready
-- `t_dbebf27e` [P0] orchestrator 接 multi_switch
-- `t_34a0cdc1` [P1] paper_* 五表 schema
-- `t_1c8b8467` [P1] C3 数字抽检 warn-only
-- `t_08938e57` [P2] BrokerAdapter 接口
-- `t_eef5de93` [P2] 上游跟踪月检
-
-生产：`pi1 192.168.50.210` `stock-dashboard.service` :9527（`main` 部署，Hermes 只推 `nightly/*` 不碰生产）
-
----
-
-## 文档导航（单一事实源）
-
-| 文档 | 定位 |
-|---|---|
-| `docs/architecture.md` | 架构真相源：结构图、每日流水线、模块边界禁令、数据源 S1–S7 注册表、防回归门禁 |
-| `docs/roadmap.md` | 总路线 M1–M4d（含子路线沉淀） |
-| `docs/paper-trading.md` | 虚拟盘/量化接入选型与 M4a–M4d 设计草案 |
-| `docs/iteration-log.md` | 迭代进程账（Hermes agent 上下文源，含 backlog 与踩坑铁律） |
-| `docs/handoff.md` | 班次交接速览（三段重写 + 历史追加不删） |
-
-> 约定：`README` 仅放摘要与链接，完整表格/清单只在对应文档维护一处（见铁律 #3）。
+> 最终目标：让 AI 接管投资决策（见 `docs/roadmap.md`）
 
 ---
 
@@ -50,10 +10,11 @@
 ```bash
 git clone https://github.com/oldfunk/stock-dashboard.git
 cd stock-dashboard
-# 推荐：proot Debian（glibc，Python 3.13）一键验证闸
-bash ~/work/gate.sh          # → 导入 8/8 + 236 passed + 改动文件 emoji clean
-# 或本地
+
+# 安装依赖
 pip install -r requirements.txt 2>/dev/null || pip install akshare fastapi uvicorn jinja2 httpx python-dotenv schedule
+
+# 启动 Web + 内置调度器
 python -m src.main serve
 # 浏览器打开 http://localhost:9527/
 ```
@@ -67,7 +28,7 @@ STOCK_AI_API_KEY=your_api_key_here          # 仅非免费模型需要
 STOCK_AI_API_BASE=https://opencode.ai/zen/v1
 ```
 
-### 生产部署（systemd，pi1）
+### 生产部署（systemd）
 
 ```bash
 # /etc/systemd/system/stock-dashboard.service
@@ -75,7 +36,73 @@ STOCK_AI_API_BASE=https://opencode.ai/zen/v1
 sudo systemctl enable --now stock-dashboard
 ```
 
-内置调度器自动完成每日流水线 + AI 分析，无需额外 cron。`scripts/daily_cron.sh` 仅作 Web 未运行时的 OS cron 兜底。虚拟盘/回测见 `paper-trading.md`。
+内置调度器自动完成每日流水线 + AI 分析，无需额外 cron。
+
+---
+
+## 项目结构
+
+```
+stock-dashboard/
+├── config/
+│   ├── config.yaml           # 全局配置（筛选条件、AI、Web、调度）
+│   └── strategies.yaml       # 多策略定义（成长/红利/困境反转阈值）
+├── src/
+│   ├── collector/            # 数据采集层
+│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S7 注册表）
+│   │   └── onboard.py          # 新股上市检测
+│   ├── screener/
+│   │   └── value_screener.py   # 7 条门规筛选 + 多策略评分
+│   ├── analyzer/
+│   │   ├── ai_analyzer.py      # LLM 结构化分析 + FreeModelPool
+│   │   └── watchlist_reviewer.py # AI 观察池复盘（周六）
+│   ├── models/
+│   │   ├── database.py         # SQLite DAO（screening/analysis/paper 等）
+│   │   └── ai_watchlist.py     # 观察池 DAO
+│   ├── paper/                 # M4a 虚拟盘（规划中）
+│   │   └── broker.py           # BrokerAdapter 接口 + PaperBroker 桩
+│   ├── web/
+│   │   ├── routes.py           # FastAPI 路由
+│   │   ├── templates/          # Jinja2 模板
+│   │   │   ├── index.html            # 首页（候选池 + 策略 Tab）
+│   │   │   ├── stock_detail.html     # 详情页（4 标签页）
+│   │   │   ├── candidates.html       # 历史候选池
+│   │   │   ├── watchlist_detail.html # 观察池详情
+│   │   │   ├── journal.html          # 投资日记
+│   │   │   ├── journal_compare.html  # 日记对比
+│   │   │   ├── _stock_list.html      # 共享候选卡 partial
+│   │   │   └── _watchlist_card.html  # 共享观察池卡 partial
+│   │   └── static/             # CSS/JS 静态资源
+│   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
+│   ├── scheduler.py            # 内置定时调度（daemon 线程）
+│   ├── config.py               # YAML 配置加载
+│   └── main.py                 # 入口（serve / run-once）
+├── scripts/
+│   ├── stock-ai-slow-feed.sh   # 全量流水线（采集+筛选+AI）
+│   ├── run_pipeline.py         # 同上，Python 版
+│   ├── retry_ai.py             # 补跑失败 AI 分析
+│   ├── run_ai_analysis.py      # 慢喂模式（每次 1 只）
+│   ├── verify_valuation.py     # B1 估值验算闸
+│   ├── verify_intrinsic.py     # C1 终值验算闸
+│   ├── check_upstream.py       # 上游数据月度巡检
+│   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
+│   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
+├── tests/                      # pytest（基线 236 passed）
+│   ├── screener/               # 筛选器单测
+│   ├── analyzer/               # AI 分析单测
+│   ├── models/                 # DAO + paper 表单测
+│   ├── paper/                  # Broker 单测
+│   └── web/                    # 路由 + 模板渲染单测
+├── data/db/                    # SQLite 数据库（gitignore）
+├── docs/
+│   ├── architecture.md         # 架构真相源
+│   ├── roadmap.md              # 总路线 M1–M4d
+│   ├── iteration-log.md        # 迭代进程账（Hermes 上下文源）
+│   ├── handoff.md              # 班次交接速览
+│   ├── paper-trading.md        # 虚拟盘/量化接入选型
+│   └── strategies-dry-run.md   # 多策略 dry-run 文档
+└── tools/berkshire/            # 上游 AI Berkshire 对照工具
+```
 
 ---
 
@@ -148,13 +175,16 @@ sudo systemctl enable --now stock-dashboard
 | 命令 | 用途 |
 |---|---|
 | `python -m src.main serve` | 启动 Web + 内置调度器 |
-| `bash ~/work/gate.sh` | 本机验证闸（Debian）：导入冒烟 + 全仓 pytest + 改动文件 emoji 扫描 |
+| `python -m src.main run-once` | 执行一次完整流水线（采集→筛选→AI） |
 | `bash scripts/stock-ai-slow-feed.sh` | 全量脚本（采集 + 筛选 + AI 分析） |
 | `python3 scripts/retry_ai.py` | 补跑最新 run 中失败的 AI 分析 |
 | `python3 scripts/retry_ai.py --all-failed` | 扫所有 run 里的失败记录 |
 | `python3 scripts/retry_ai.py --dry-run` | 只列清单不调用 |
+| `python3 scripts/run_ai_analysis.py` | 慢喂模式（每次 1 只，适合 cron） |
 | `python3 scripts/verify_valuation.py` | B1 估值验算闸 |
 | `python3 scripts/verify_intrinsic.py` | C1 终值验算闸 |
+| `python3 scripts/check_upstream.py` | 上游数据月度巡检 |
+| `python3 scripts/c25_bulk_fill.py` | C2.5 批量补 ROIC/FCF |
 
 ---
 
@@ -162,12 +192,17 @@ sudo systemctl enable --now stock-dashboard
 
 详见 `config/config.yaml`：
 
-- `screener.conditions.*` — 7 条门规阈值
-- `screener.multi_strategy` — 多策略开关（默认 false，M2 收尾接入 orchestrator）
-- `strategies.yaml` — growth/dividend/turnaround 三策略阈值（`thresholds`）与 `alpha_criteria`/`exit_triggers`
-- `schedule.daily_update_time` — 每日运行时间（默认 15:30）
-- `web.port` — 看板端口（默认 9527）
-- `ai.*` — LLM API 配置（默认 OpenCode Zen 免费模型池）
+| 配置项 | 说明 |
+|---|---|
+| `screener.conditions.*` | 7 条门规阈值（ROE/FCF/利息覆盖/毛利率/OCF/净利率/稀释） |
+| `screener.multi_strategy` | 多策略开关（默认 false，true 走 strategies.yaml 三池） |
+| `strategies.yaml` | growth/dividend/turnaround 三策略阈值 + alpha_criteria + exit_triggers |
+| `schedule.daily_update_time` | 每日运行时间（默认 15:30） |
+| `web.port` | 看板端口（默认 9527） |
+| `ai.*` | LLM API 配置（默认 OpenCode Zen 免费模型池） |
+| `ai_review.*` | 周六 AI 复盘配置（观察池容量、硬规则） |
+
+本地覆盖：`config/local.yaml`（gitignore），YAML 合并到 config.yaml。
 
 ---
 
@@ -178,7 +213,7 @@ sudo systemctl enable --now stock-dashboard
 - **AI 分析** — OpenAI 兼容 API + OpenCode Zen 免费模型池（自动故障轮换，FreeModelPool）
 - **Web 看板** — FastAPI + Jinja2（单模板 `_stock_list.html` 被多页 include，样式写在 partial 内）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程）+ systemd 常驻
-- **验证** — `bash ~/work/gate.sh`（proot Debian Python 3.13 + pandas 2.3.3 + curl，基线 236 passed）
+- **验证** — `bash ~/work/gate.sh`（proot Debian Python 3.13 + pandas，基线 236 passed）
 - **虚拟盘（M4a 规划）** — 自研 `src/paper/` 引擎，详见 `paper-trading.md`
 
 ---
@@ -199,7 +234,27 @@ sudo systemctl enable --now stock-dashboard
 
 ## 开发
 
-- 看板：`hermes kanban --board stock-trading list`（当前 1 ready + 5 todo，per_profile=2 并发）
-- 分支：`main` 受保护（pre-push 钩子硬拦），迭代在 `nightly/*`（`git fetch origin && git rebase origin/main` 再推）
-- 约束：单模块改动 + 单测 + 零 emoji（仅 → ↑ ↓ ✓）+ 全仓 pytest 零失败（基线 236 passed 只升不降）
-- 踩坑铁律：见 `iteration-log.md` §踩坑铁律（6 条，含共享 partial CSS 放置与合并前查共改文件）
+### 工作流
+
+1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 236 passed 只升不降）
+3. 推送 nightly → 合并到 main → 同步 pi1
+4. 生产环境：`pi1 192.168.50.210` `stock-dashboard.service` :9527
+
+### 约束
+
+- 单模块改动 + 单测 + 零 emoji（仅 → ↑ ↓ ✓）
+- `main` 受保护（pre-push 钩子硬拦），迭代在 `nightly/*`
+- 踩坑铁律 6 条：见 `iteration-log.md` §工程约定
+
+### 文档约定
+
+单一事实源，不重复维护：
+
+| 文档 | 定位 |
+|---|---|
+| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S7 |
+| `docs/roadmap.md` | 总路线 M1–M4d |
+| `docs/iteration-log.md` | 迭代进程账（Hermes agent 上下文源，含 backlog） |
+| `docs/handoff.md` | 班次交接速览（历史追加不删） |
+| `docs/paper-trading.md` | 虚拟盘/量化接入选型 |
