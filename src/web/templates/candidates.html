@@ -539,6 +539,39 @@
             border-top: 1px solid var(--divider-thin);
         }
 
+        /* ========== AI Summary (front-loaded key conclusions) ========== */
+        .ai-summary {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--divider-thin);
+        }
+        .ai-summary-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 11px;
+        }
+        .ai-summary-item {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        .ai-summary-label {
+            color: var(--text-tertiary);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .ai-summary-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .ai-verdict-pass .ai-summary-value { color: var(--green); }
+        .ai-verdict-fail .ai-summary-value { color: var(--red); }
+        .ai-verdict-gray .ai-summary-value { color: var(--gold); }
+
         /* ========== History Bar ========== */
         .history-bar {
             margin-top: 8px;
