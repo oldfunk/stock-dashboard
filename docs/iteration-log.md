@@ -108,6 +108,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 2. **handoff.md 只追加不删历史**：原文件有"历史交接区（追加，不删）"规则，但重写时整段消失。规则：重写 handoff.md 时，"历史交接区"段必须保留并追加新条目，不得删除已有历史。
 3. **单一事实源，不重复维护**：README 数据源 S1–S7 完整表与 `architecture.md` §5 完全重复，两处维护改一处忘另一处必出错。规则：README 只放摘要 + 链接，完整内容只在一个文件里维护。
 4. **里程碑日期必须与实际任务对齐**：roadmap.md 写 M1 目标 9-14，但 B1/B2 已于 9-05 完成，日期变成空壳误导。规则：里程碑完成后必须标注完成态或移除日期，不留"目标 XX 月"的空壳。
+5. **共享 partial 的 CSS 必须写在 partial 里，不写在父页面**：`nightly/20260913` 为 AI 摘要区块写了 33 行 CSS，同时放在 `index.html` 和 `candidates.html` 两处（共 66 行重复）。合并后人工清理移到 `_stock_list.html`。规则：`_xxx.html` partial 是被多个页面 include 的，其专属样式必须写在 partial 内的 `<style>` 块中，不得写在父页面。新组件开发前先确认被几个页面 include，再决定 CSS 放置位置。
+6. **分支合并前先检查共改文件**：`nightly/20260914` 和 `nightly/20260913` 同时改了 `_stock_list.html`，合并时 handoff.md 产生冲突。规则：启动新 nightly 前先 `git fetch origin && git log --oneline origin/main..origin/nightly/*` 检查是否有其他活跃分支在改同一批文件，有冲突风险时先协调合并顺序。
 
 ## 待办 backlog（细粒度，按优先级）
 - [ ] 评分体系透明化（skill P1③，已拆子项，本次做最小一子项）
