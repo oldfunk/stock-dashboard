@@ -154,6 +154,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-14（合并 nightly/20260914 + nightly/20260913 + CSS 去重）
+- 合并两个 nightly 分支到 main（M2 多策略后端 + AI 摘要前置）
+- CSS 去重：AI 摘要样式从 index.html + candidates.html 各删 33 行，移入 `_stock_list.html` 的 `<style>` 块（唯一消费者）
+- 验证：全仓 229 passed 零失败；改动文件 py_compile 通过；emoji 零命中
 ### 2026-09-14（M2 多策略筛选模式接入流水线后端核心，impl 402cd5e + verify 收尾）
 - 改了什么：`screening_result` 新增 `strategy_tags` 列（TEXT，全量命中标签 JSON array）+ `_add_column_if_not_exists` 迁移守卫；`src/screener/value_screener.py` 新增 `load_strategies`（读 `config/strategies.yaml` 成长/红利/反转三策略阈值）+ 单股策略阈值检查（缺数字字段跳过不否决，小数/百分比阈值自动归一）+ `score_candidates`/`run_screener` 支持 `multi_strategy` 开关（默认关闭，单策略行为完全不变）；multi 模式按策略分组返回三独立候选池并持久化去重；新增 `tests/screener/test_multi_strategy.py` 5 项单测。
 - 为什么：M2 策略分化（目标 9-30）要求三策略独立候选池；`strategies.yaml` 自 08-30 起只定义阈值、未接入流水线，这是接入第一步（后端核心，不含首页策略 Tab UI，后续单独做）。
