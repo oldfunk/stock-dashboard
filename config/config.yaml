@@ -41,6 +41,11 @@ screener:
   # ── 新增：股本稀释上限 — AI Berkshire规则7
   max_share_dilution: 20
 
+  # ── 多策略开关（M2收尾，默认 false）──
+  # true 时 orchestrator 走 config/strategies.yaml 三池（成长/红利/困境反转）
+  # 并集持久化；false 保持原有单策略行为不变
+  multi_strategy: false
+
 # -------- AI 分析配置 --------
 ai:
   # LLM API 配置 (OpenAI 兼容)

@@ -13,6 +13,7 @@ AI 分析由 cron 单独触发（scripts/run_ai_analysis.py），不在此处执
 - run_daily_pipeline(config) → 上面函数的带锁封装，含 ROE 质量门禁。
 """
 
+import json
 import logging
 import threading
 
@@ -26,6 +27,25 @@ logger = logging.getLogger(__name__)
 
 # 流水线并发锁：防止调度器与手动触发同时跑
 _pipeline_lock = threading.Lock()
+
+
+def _is_multi_strategy(config: dict) -> bool:
+    """读取 screening.multi_strategy 开关（默认 False，保持单策略行为）。"""
+    screening = (config or {}).get('screening', {}) or {}
+    return bool(screening.get('multi_strategy', False))
+
+
+def _log_strategy_pool_sizes(top_stocks: list[dict]) -> None:
+    """多策略模式下打三池命中数（从并集行 strategy_tags 反推）。"""
+    counts: dict[str, int] = {}
+    for s in top_stocks:
+        try:
+            tags = json.loads(s.get('strategy_tags') or '[]')
+        except (ValueError, TypeError):
+            tags = []
+        for t in tags:
+            counts[t] = counts.get(t, 0) + 1
+    logger.info(f"[筛选] 多策略模式：各池命中 {counts}，并集合计 {len(top_stocks)} 只")
 
 
 def load_config() -> dict:
@@ -130,7 +150,13 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
 
     logger.info("\n[2/3] Value screening")
     progress.update(run_id, 'screening', f'价值筛选 {len(candidates)} 只...')
-    top_stocks = run_screener(config, candidates, run_id, run_date)
+    multi_strategy = _is_multi_strategy(config)
+    if multi_strategy:
+        logger.info("[筛选] multi_strategy=true，走 strategies.yaml 三池并集")
+    top_stocks = run_screener(config, candidates, run_id, run_date,
+                              multi_strategy=multi_strategy)
+    if multi_strategy:
+        _log_strategy_pool_sizes(top_stocks)
     progress.update(run_id, 'screened',
                     f'筛选完成 {len(top_stocks)} 只', ai_total=len(top_stocks))
 
