@@ -578,3 +578,45 @@ def test_veto_not_triggered_no_veto_field():
     stock = {"code": "600519", "name": "贵州茅台"}
     analysis = {"trade_strategy": {"signal": "BUY"}}
     assert check_veto_triggered(stock, analysis) is False
+
+
+def test_actions_summary_records_numeric_mismatch(monkeypatch, tmp_path):
+    """C3 聚合：analyses 中 numeric_mismatch 落 actions_summary，不阻断落库"""
+    from src.models import database as db_mod
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: db_path)
+    db_mod.init_database()
+    from src.models.ai_watchlist import AiWatchlistDAO, AiJournalDAO
+    AiWatchlistDAO().add("600519", "贵州茅台", "测试")
+
+    reviewer = WatchlistReviewer({
+        "ai_review": {"candidate_pool_weeks": 4, "watchlist_size": 5,
+                      "hard_rules": {}},
+        "ai": {"api_base": "https://example.com", "model": "test-free"}
+    })
+    result = {
+        "watchlist_actions": [
+            {"code": "600519", "action": "keep", "reason": "基本面稳定"}
+        ],
+        "new_watchlist": ["600519"],
+        "journal": {"title": "复盘", "content_md": "# 复盘\n600519 保持"},
+    }
+    analyses = {
+        "600519": {"analysis": "ROE 25%",
+                   "numeric_mismatch": [{"label": "ROE 25", "field": "roe_5y_avg",
+                                         "cited": 25.0, "reference": 15.2}]},
+    }
+    out = reviewer._validate_and_persist(
+        result, "run_test_mm", [], AiWatchlistDAO().get_all(), [],
+        analyses=analyses)
+    assert out["journal"] == result["journal"]
+    summ = json.loads(AiJournalDAO().get_latest()['actions_summary'])
+    assert summ['numeric_mismatch'] == {"total": 1, "codes": ["600519"]}
+    assert summ['keep'] == 1
+
+    # 无 mismatch 的旧数据 → total 0，照常落库
+    out2 = reviewer._validate_and_persist(
+        result, "run_test_mm2", [], AiWatchlistDAO().get_all(), [],
+        analyses={"600519": {"analysis": "ROE 15.2%"}})
+    summ2 = json.loads(AiJournalDAO().get_latest()['actions_summary'])
+    assert summ2['numeric_mismatch'] == {"total": 0, "codes": []}

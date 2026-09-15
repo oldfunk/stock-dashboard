@@ -334,5 +334,58 @@ class TestConsistencyEnforce:
         assert len(issues) == 2
 
 
+class TestNumericCitations:
+    """C3 数字抽检：命中/未命中/小数容差，warn-only 永不抛异常。"""
+
+    def _check(self, text, stock):
+        from src.analyzer.ai_analyzer import _check_numeric_citations
+        return _check_numeric_citations(text, stock)
+
+    def _stock(self, **kw):
+        s = {'roe_5y_avg': 15.2, 'pe': 28.5, 'pb': 3.1,
+             'gross_margin_5y_avg': 40.0, 'net_margin_5y_avg': 12.3,
+             'market_cap': 2000.0, 'debt_ratio': 35.0}
+        s.update(kw)
+        return s
+
+    def test_hit_no_mismatch(self):
+        mm = self._check(
+            '这家公司 ROE 15.2%，PE 28.5x，毛利率 40%，市值 2000亿。',
+            self._stock())
+        assert mm == []
+
+    def test_miss_records_mismatch(self):
+        mm = self._check('ROE 高达 25%，非常优秀。', self._stock())
+        assert len(mm) == 1
+        assert mm[0]['field'] == 'roe_5y_avg'
+        assert mm[0]['cited'] == 25.0
+        assert mm[0]['reference'] == 15.2
+
+    def test_decimal_tolerance(self):
+        # 小数舍入差异放行：库 12.3，正文 12.34
+        mm = self._check('净利率 12.34%。', self._stock())
+        assert mm == []
+
+    def test_bare_numbers_ignored(self):
+        # 无标签裸数字无法归因，不记账
+        mm = self._check('去年分红 3 次，覆盖 20 个省份。', self._stock())
+        assert mm == []
+
+    def test_missing_ref_skipped(self):
+        # 库无参照（N/A/None）→ 跳过不记账
+        mm = self._check('PE 28.5x，PB 3.1x。',
+                         self._stock(pe='N/A', pb=None))
+        assert mm == []
+
+    def test_negative_sign(self):
+        # 符号位：-1.72% 不得被抓成 1.72
+        mm = self._check('净利率 -1.72%，出现亏损。',
+                         self._stock(net_margin_5y_avg=-1.72))
+        assert mm == []
+        mm2 = self._check('净利率 1.72%。',
+                          self._stock(net_margin_5y_avg=-1.72))
+        assert len(mm2) == 1
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

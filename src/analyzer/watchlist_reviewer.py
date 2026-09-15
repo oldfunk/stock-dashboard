@@ -215,7 +215,8 @@ class WatchlistReviewer:
 
             # 4. 校验 + 落库
             validated = self._validate_and_persist(
-                result, run_id, forced_out, current, candidates
+                result, run_id, forced_out, current, candidates,
+                analyses=analyses,
             )
             return validated
 
@@ -448,7 +449,8 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
 
     def _validate_and_persist(self, result: dict, run_id: str,
                               forced_out: list[dict], current: list[dict],
-                              candidates: list[dict]) -> dict:
+                              candidates: list[dict],
+                              analyses: Optional[dict] = None) -> dict:
         """校验 LLM 输出 + 落库。
 
         校验规则：
@@ -556,7 +558,18 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
             
             if coverage_missing:
                 logger.warning(f"[复盘] journal 未覆盖池内股: {coverage_missing}")
-            
+
+            # C3 数字抽检聚合：只读已落库 ai_analysis 中的 numeric_mismatch，
+            # warn-only，不阻断落库
+            mm_codes = []
+            if analyses:
+                for code, a in analyses.items():
+                    items = (a or {}).get('numeric_mismatch') or []
+                    if items:
+                        mm_codes.append(code)
+            if mm_codes:
+                logger.warning(f"[复盘] 数字抽检偏离 {len(mm_codes)} 只: {mm_codes}")
+
             journal_dao = AiJournalDAO()
             journal_dao.save(
                 journal_date=action_date,
@@ -577,6 +590,8 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                     'details': action_details,
                     'model': result.get('model') if isinstance(result, dict) else None,
                     'coverage_missing': coverage_missing,
+                    'numeric_mismatch': {
+                        'total': len(mm_codes), 'codes': sorted(mm_codes)},
                 })
             )
 

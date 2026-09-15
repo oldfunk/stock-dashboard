@@ -13,6 +13,7 @@
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -350,6 +351,102 @@ def _check_output_consistency(result: dict) -> list[str]:
     if low and sig == 'BUY':
         issues.append(f"六关{','.join(low)}≤2 却给 BUY")
     return issues
+
+
+# ---------------------------------------------------------------------------
+# C3 数字抽检（warn-only）：AI 正文引用的 ROE/PE/估值数字是否与库一致
+# ---------------------------------------------------------------------------
+
+# 标签 → stock 字段（按优先序；命中任一即自洽，未命中记首字段为参照）
+_NUMERIC_LABEL_FIELDS = [
+    (('ROE', '净资产收益率'), ('roe_5y_avg', 'roe')),
+    (('PE', '市盈率'), ('pe',)),
+    (('PB', '市净率'), ('pb',)),
+    (('毛利率',), ('gross_margin_5y_avg', 'gross_margin')),
+    (('净利率',), ('net_margin_5y_avg', 'net_margin')),
+    (('ROIC',), ('roic_5y_avg',)),
+    (('资产负债率', '负债率'), ('debt_ratio',)),
+    (('市值',), ('market_cap',)),
+    (('股本稀释', '股本扩张'), ('share_dilution_5y',)),
+    (('利息覆盖', '利息保障'), ('intcov_5y_avg',)),
+]
+
+# 数字形态：可选符号位 + 千分位逗号/中文逗号/小数点
+_NUM = r'[+\-−–－＋]?[\d,，.]+'
+
+
+def _clean_cited_num(s: str):
+    """带逗号/中文逗号/各类正负号的数字串转 float，失败回 None。"""
+    s = s.replace(',', '').replace('，', '').strip()
+    for ch in ('−', '–', '－'):
+        s = s.replace(ch, '-')
+    s = s.replace('＋', '+')
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _ref_float(stock: dict, field: str):
+    """库参照值转 float；None/'N/A'/非数字 → None（跳过比对，不记账）。"""
+    v = stock.get(field)
+    if v is None:
+        return None
+    if isinstance(v, str):
+        if v.strip().upper() in ('N/A', 'NA', '-', ''):
+            return None
+        try:
+            return float(v.replace(',', '').strip())
+        except ValueError:
+            return None
+    if isinstance(v, bool):
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _check_numeric_citations(analysis_text, stock: dict) -> list:
+    """抽检 AI 正文带标签数字与库参照是否一致。
+
+    只认"标签+数字"（如 ROE 15.2%、PE 28x、市值 2000亿），
+    无标签裸数字无法归因，直接忽略，避免误报。
+    math.isclose(rel_tol=0.02, abs_tol=0.1)：小数舍入差异放行，
+    实质偏离才记 mismatch。返回 mismatch 列表（空=干净）。
+    纯函数，可单测；调用方 warn-only，永不阻断。
+    """
+    if not analysis_text or not isinstance(analysis_text, str):
+        return []
+    if not isinstance(stock, dict):
+        return []
+    mismatches = []
+    for labels, fields in _NUMERIC_LABEL_FIELDS:
+        refs = [(_ref_float(stock, f)) for f in fields]
+        refs = [r for r in refs if r is not None]
+        if not refs:
+            continue
+        label_alt = '(?:' + '|'.join(re.escape(l) for l in labels) + ')'
+        # 标签与数字之间允许 ≤8 个非数字字符（高达/达到/约/：等），
+        # 排除换行与表格竖线，避免跨单元格误归因
+        pat = re.compile(
+            label_alt + r'[^\d\n|]{0,8}?(' + _NUM + r')'
+            r'\s*(%|％|[xX倍]|亿)?'
+        )
+        for m in pat.finditer(analysis_text):
+            cited = _clean_cited_num(m.group(1))
+            if cited is None:
+                continue
+            if any(math.isclose(cited, r, rel_tol=0.02, abs_tol=0.1)
+                   for r in refs):
+                continue
+            mismatches.append({
+                'label': m.group(0).strip()[:24],
+                'field': fields[0],
+                'cited': cited,
+                'reference': refs[0],
+            })
+    return mismatches
 
 
 def _enforce_verdict_discipline(result: dict) -> dict:
@@ -856,6 +953,17 @@ class AiAnalyzer:
                 self._pool.record_quality(used_model, True)
             result = _enforce_verdict_discipline(result)
             result = _enforce_intrinsic_discipline(result, stock)
+            # C3 数字抽检：warn-only，只记账永不阻断（失败也不回 None）
+            try:
+                mm = _check_numeric_citations(
+                    result.get('analysis', ''), stock)
+            except Exception:
+                mm = []
+            result['numeric_mismatch'] = mm
+            if mm:
+                logger.warning(
+                    f"[数字抽检] {stock.get('code')} 正文引用与库偏离 "
+                    f"{len(mm)} 处: {mm}")
             result['model'] = used_model
         return result
 
