@@ -163,6 +163,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 起因：README 包含过时信息（stage marker 指向 nightly/20260914、kanban 列出已完成任务、gate.sh 引用本地脚本），缺少项目结构和贡献流程，新开发者难以入门。
 - 改了什么：README.md 全面重写——去掉过时的 stage marker/kanban 任务/数据源架构重复段；新增完整项目结构（树形图）；新增脚本表（补 run-once/retry_ai 等）；新增配置表（config.yaml 关键字段说明）；新增开发工作流（nightly 分支→合并→pi1）；精简数据源段指向 architecture.md；去掉 AI Berkshire 对照重复内容。
 - 验证：纯文档变更，无代码改动；全仓 pytest 不受影响。
+### 2026-09-15（M4a PaperBroker 撮合引擎，impl + verify）
+- 起因：PaperBroker 之前是 stub，委托只落库不撮合，无法验证"AI 信号→收益"的真实转化。
+- 改了什么：`src/paper/broker.py` 重写——`fill_order` 按市价撮合（含滑点）+ A 股费用全建模（佣金万 2.5 最低 5 元 / 印花税卖出千分之 0.5 / 过户费万 0.1）+ T+1 冻结/解冻 + 100 股整数倍校验 + 卖出可用持仓校验 + 风控闸（单股 ≤20% / 总仓 ≤80% / 回撤 -15% 禁买）+ `end_of_day` 日终处理（解冻 T+1 + 记录净值）+ `config.yaml` 新增 paper 交易配置段；`tests/paper/test_broker.py` 20 项单测（撮合/费用/T+1/风控/净值）。
+- 验证：20/20 passed；全仓 233 passed（+16 新测试），所有 failed/error 为环境缺依赖非代码 bug；改动文件 py_compile 通过；emoji 零命中。
 ### 2026-09-15（账本对齐：P0#1-3 与 P1#5-6 标记完成，纯文档）
 - 起因：账本「当前未完成项」仍把 P0#1 策略管线 / P0#2 标签 / P0#3 Tab / P1#5 摘要前置 / P1#6 操作指引标为待办，但代码已落地（`402cd5e` 后端 + `293e08d` Tab 已合入 main；`6256d58` 摘要透传 + `4495b9c` trade-guide 在 nightly/20260914 待合），真相源失真，后继迭代会重复造轮子。
 - 改了什么：仅 `docs/iteration-log.md` + `docs/handoff.md`——未完成项 P0#1-3 与 P1#5-6 勾为 [x] 并注提交号与日期；已完成清单追补三条；handoff「最后状态」重写为当前 main + nightly 状态，下一步指向 M2 收尾（orchestrator multi_strategy 开关）/ C3 / M4a；历史交接区追补不删。
