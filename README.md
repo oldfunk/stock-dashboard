@@ -59,7 +59,7 @@ stock-dashboard/
 │   ├── models/
 │   │   ├── database.py         # SQLite DAO（screening/analysis/paper 等）
 │   │   └── ai_watchlist.py     # 观察池 DAO
-│   ├── paper/                 # M4a 虚拟盘（规划中）
+│   ├── paper/                 # M4a 虚拟盘引擎
 │   │   └── broker.py           # BrokerAdapter 接口 + PaperBroker 桩
 │   ├── web/
 │   │   ├── routes.py           # FastAPI 路由
@@ -214,7 +214,7 @@ stock-dashboard/
 - **Web 看板** — FastAPI + Jinja2（单模板 `_stock_list.html` 被多页 include，样式写在 partial 内）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程）+ systemd 常驻
 - **验证** — `bash ~/work/gate.sh`（proot Debian Python 3.13 + pandas，基线 236 passed）
-- **虚拟盘（M4a 规划）** — 自研 `src/paper/` 引擎，详见 `paper-trading.md`
+- **虚拟盘（M4a）** — 自研 `src/paper/` 引擎：T+1 / 100 股整数倍 / A 股费用全建模 / 风控闸（单股 ≤20% · 总仓 ≤80% · 回撤 -15% 禁买），详见 `paper-trading.md`
 
 ---
 
