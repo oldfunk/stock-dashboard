@@ -8,11 +8,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 **终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段利用 AI Berkshire 项目作为核心算法和分析指导，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
 
-## 当前真实状态（2026-08-29）
+## 当前真实状态（2026-09-16）
 - 每日筛选 5527 → 20 候选：正常，周一至周五 15:30 由 `scheduler.py` 触发。
 - AI 分析：已提频至**每日**（原仅周五），随每日流水线触发，走 `FreeModelPool`（-free 模型自动发现+轮换）。
 - 实时行情/大盘：每 5 分钟更新，正常。
 - 周六复盘系统：`ai_watchlist` / `ai_journal` / `ai_watchlist_history` 在用，链路正常。
+- 纸盘交易（M4a 完成）：`src/paper/` 撮合+信号+调度闭环，每日 15:30 选股→AI 分析→纸盘自动执行，积累模拟交易数据。37 单测全过。
 - `deep_research` 表：已建但**当前未使用**（原 Hermes 投研 cron 已废弃，勿依赖）。表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成），代码层面无引用（`grep -rn` 无匹配），迁移记录缺失（说明为历史遗留）。
 - 已知隐患 `with_roe` UnboundLocalError：已修（提前初始化为 0）。
 - pi2 开发 venv：`markdown` 依赖错装为 `markdown-it-py`，本地 `import src.web.routes` 失败——agent 改完代码后用 **ssh pi1** 做冒烟测试，不要依赖 pi2 venv。
@@ -361,3 +362,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - `docs/roadmap.md` 升级为总路线（M1–M4d + mermaid 路线图 + 防回归门禁），原单股详情内容归档为子路线保留。
 - 想法/为什么：终极目标是 AI 接管投资决策，纸盘是"分析→操作"的第一座桥；先有图再有路，Hermes 后续迭代沿 M 线走，不再各自为政。
 - 冒烟：纯文档变更，无代码；emoji 零命中（本段无 emoji）。待 push 后 pi1 仅 git pull 同步，不重启服务。
+
+### 2026-09-16（M4a 纸盘撮合引擎 + 信号编排引擎）
+- **PaperBroker 撮合引擎**（`src/paper/broker.py`）：市场价+滑点成交、A 股费用（佣金万 2.5 最低 5 元、印花税卖出 0.5%、过户费 0.01%）、T+1 冻结/解冻、100 整手、卖出席位可用量检查、风控闸（单股 ≤20% 总资产、总仓位 ≤80%、强制止损 -15% 禁买）、`end_of_day` 净值记录。20 单测全过。
+- **信号编排引擎**（`src/paper/engine.py`）：解析 `ai_trade_strategy` JSON（`parse_trade_signal` 支持对象/数组/嵌套/空值）、生成待执行信号列表（`generate_signals_batch` 含 buy_zone 校验）、买入/卖出执行（`execute_signals` 含 confidence 仓位系数 高=1.0/中=0.6/低=0.3）、`run_paper_trading()` 主入口（读最新 screening_result + stock_analysis_history，写 paper_trade_signal + paper_order + paper_position + paper_account）。17 单测全过。
+- **scheduler 异步触发**（`src/scheduler.py`）：`_trigger_paper_trading_async()` 在 `_trigger_ai_analysis_async()` 完成后异步调用 `run_paper_trading()`，每日流水线自动执行。config.yaml 新增 `paper:` 配置段（初始现金/滑点/费用/仓位上限/风控阈值）。
+- 想法/为什么：M4a 三部曲（撮合→信号→调度）闭环，每日 15:30 选股→AI 分析→纸盘自动执行，积累模拟交易数据。风控闸严格（drawdown 用 `>` 不用 `>=`），engine 仓位预留滑点余量避免边界触发。
+- 冒烟：37 单测全过（broker 20 + engine 17），pi1 同步验证 `3ee992e`。
