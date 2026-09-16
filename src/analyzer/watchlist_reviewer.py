@@ -4,8 +4,9 @@
 
 对外暴露：
 - WatchlistReviewer 类：单次复盘入口 review()
-- 4 个硬规则检查函数：check_signal_avoid / check_roe_below /
-  check_price_above_buyzone / check_roe_collapse
+- 5 个硬规则检查函数：check_signal_avoid / check_roe_below /
+  check_price_above_buyzone / check_roe_collapse / check_veto_triggered
+- check_journal_coverage：B7 周报全覆盖校验（纯函数，warn-only）
 """
 
 import json
@@ -111,6 +112,21 @@ def check_veto_triggered(stock: dict, analysis: Optional[dict]) -> bool:
         if vc.get(key) is True:
             return True
     return False
+
+
+# ── B7 周报全覆盖校验（纯函数） ──
+
+def check_journal_coverage(pool_codes, content_md: str) -> list:
+    """深度版发布前校验：池内每个 code 都应在 journal 正文出现。
+
+    缺一只即记账（由调用方写入 actions_summary.coverage_missing），
+    warn-only，永不阻断落库（architecture.md §6 演进方向约束）。
+    """
+    if not pool_codes:
+        return []
+    if not content_md:
+        return sorted(pool_codes)
+    return sorted(c for c in pool_codes if c not in content_md)
 
 
 # ── 复盘引擎 ──
@@ -522,6 +538,9 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                 watchlist_dao.set_status(code, 'watch', reason, wu)
             elif action == 'keep':
                 watchlist_dao.update_reviewed(code)
+                # watch→core 回流：基本面确认无事，状态回到 core（B6a 状态机）
+                if current_map.get(code, {}).get('status') == 'watch':
+                    watchlist_dao.set_status(code, 'core', reason)
 
             history_dao.append(
                 code=code, name=name, action=action,
@@ -544,18 +563,9 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                          if a in ('add', 'keep', 'watch')}
             new_codes |= {s['code'] for s in current
                           if s['code'] not in final_actions}
-            
-            # 检查覆盖率：确保每只在池股票都在 journal 中出现
-            coverage_missing = []
-            if content_md:
-                # 简单实现：检查股票代码是否在内容中
-                for code in new_codes:
-                    if code not in content_md:
-                        coverage_missing.append(code)
-            else:
-                # 内容为空，全部算缺失
-                coverage_missing = list(new_codes)
-            
+
+            coverage_missing = check_journal_coverage(new_codes, content_md)
+
             if coverage_missing:
                 logger.warning(f"[复盘] journal 未覆盖池内股: {coverage_missing}")
 
