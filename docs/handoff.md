@@ -3,15 +3,17 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-17 nightly/20260917 已合已部署）
-- 分支：`main` = `d81082f`；废分支 `origin/nightly/20260916` 已删；pi1 已 pull + restart + 验证
-- 上线：`GET /paper` 只读虚拟盘面板 + B6/B7 coverage/watch（收编 d425b82，弃 53287aa）
-- 验证：pi1 全仓 297 passed 零失败；三端点 200；paper_* 五表已建；零新 Traceback；DB 备份 `stock_dashboard.db.bak20260917`
-- M4a 全链路（撮合+信号+scheduler+面板）闭环，每日 15:30 自动记数
+## 最后状态（2026-09-17 AI 修复 + UI 收敛已部署，待 Zen Key）
+- 分支：`main` = `fa09679`（nightly/20260917b 已合，已推）；pi1 已 pull + restart + 验证
+- 上线：ling 优先 + 429 Retry-After + 观察池卡片统一候选卡（摘要/评分/AI 行/trade 指引/历史/失败徽标）
+- 验证：pi1 全仓 307 passed 零失败；三端点 200；DB 备份 `stock_dashboard.db.bak0917b`
+- **阻塞**：ling live 调用 403 FreeTierError（免费层仅限 OpenCode 内用）——无 Key 则 AI 持续全败；已向用户索要 Zen Key，拿到后写 pi1 `.env` + restart 即恢复
+- 备忘：钉选 Tab JS 缺失（死按钮，后端完好），另起一轮
 
 ## 下一步方向
-1. M4b QLib 离线验证（PC/云跑 TopK 回测，只回流结论）或 M4a 深化（NAV 曲线 / 涨跌停重做）
-2. 周六 live 验证 B6/B7（watch 动作 + journal 新模板 + coverage 校验）
+1. 拿到 Zen Key → 写 pi1 `.env` → restart → 验证 AI 恢复（首要）
+2. 钉选 Tab JS 补齐（switchView/toggleWatch/加载渲染）
+3. 周六 live 验证 B6/B7；M4b QLib 回测
 
 ## 已知隐患
 - 82 只无 roic/fcf 股票可能是东财 API 无数据的小盘股（C2.5 永久兜底）
@@ -19,6 +21,7 @@
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
 
 ## 历史交接区（追加，不删）
+- 2026-09-17 AI 修复+UI 收敛已部署（ling 优先/Retry-After/观察池卡片统一，pi1 307 全过；发现 403 需 Zen Key）
 - 2026-09-17 nightly/20260917 已合已部署（/paper 面板上线 + B6/B7，pi1 297 全过，删废分支0916）
 - 2026-09-16 M4a 纸盘引擎：撮合+信号编排+scheduler 触发（37 单测，main 已合，pi1 已同步）
 - 2026-09-15 README 全面重写（项目结构/贡献流程/配置表）+ handoff 状态更新

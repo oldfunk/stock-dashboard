@@ -160,6 +160,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-17（AI 修复 + UI 收敛部署：ling 优先/Retry-After/观察池卡片统一，pi1 307 全过）
+- 根因（AI 十连败）：匿名免费额度 429 打爆——9/07 起 140 只全失败（`模型返回空/全部免费模型不可用`）；单只 20 次退避 ×20 只可跑数小时（午夜仍在跑）；最后成功是 9/04 `laguna-s-2.1-free`。
+- 改了什么：① `PREFERRED_ORDER` ling-3.0-flash-fin-free 置顶（自动发现+死亡轮换 fallback 不变，已验证有效）；② 429 尊重 `Retry-After`（上限 300s，缺省回退原档，新纯函数 `_retry_after_seconds`）；③ 观察池卡片收敛候选卡（头部摘要/评分拆解/AI 摘要行/trade-guide/历史时间线/AI 未分析徽标，池专属保留；附带修 `trade_parsed`/`ai_confidence` 历史回退缺失）+ routes enrichment 对齐；④ 单测 10 项（pool 排序/轮换/Retry-After/卡片三态渲染）。
+- 验证：pi1 全仓 307 passed；三端点 200；live 冒烟证实 pool 取到 ling 首位。
+- **关键发现（待 Key）**：live 调用 ling 返回 **403 FreeTierError（free tier 仅限 OpenCode 内使用）**——服务端匿名调用已被政策封死，Retry-After/轮换救不了；必须配 Zen API Key（`STOCK_AI_API_KEY` 进 pi1 `.env`，代码侧已就绪）才能恢复。已向用户索要。
+- 备注：`switchView`/`toggleWatch`/钉选加载 JS 在 index.html 缺失（钉选 Tab 现为死按钮），后端 API 完好，另起一轮修。
 ### 2026-09-17（nightly/20260917 合并部署：B6/B7 收编 + 纸盘面板上线，pi1 297 全过）
 - 合并：`nightly/20260917` fast-forward 入 main（`fee1ffc` + 单测修复 `d81082f`）；远端废分支 `nightly/20260916` 已删（`53287aa` 废弃，勿复活）。
 - 部署：pi1 备份 DB → pull → restart（paper_* 五表迁移成功）→ 三端点 200（/ /paper /journal）→ journalctl 零新 Traceback。
