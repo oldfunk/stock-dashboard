@@ -45,7 +45,8 @@ def test_paper_page_with_data(client):
     resp = client.get("/paper")
     assert resp.status_code == 200
     assert "600519" in resp.text
-    assert "560000.00" in resp.text
+    assert "1000000.00" in resp.text  # 账户可用现金（account.cash）
+    assert "1010000.00" in resp.text  # 最新净值总资产
     assert "10000.00" in resp.text
     assert "已报" in resp.text  # submitted 状态中文
 
