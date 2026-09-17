@@ -22,11 +22,15 @@ python -m src.main serve
 ### AI 配置（可选）
 
 ```env
-# .env（免费模型无需 Key，自动从 OpenCode Zen 发现可用 free 模型）
+# .env（OpenCode Zen 免费模型自动发现 + 故障轮换，见 FreeModelPool）
 STOCK_AI_MODEL=deepseek-v4-flash-free
 STOCK_AI_API_KEY=your_api_key_here          # 仅非免费模型需要
 STOCK_AI_API_BASE=https://opencode.ai/zen/v1
 ```
+
+> 现状（2026-09-17 实测）：Zen 免费通道自 9/07 起服务端不可用（403，
+> 免费层仅限 OpenCode 内使用），AI 分析连续失败；免 Key 备用通道
+> （`ai.fallback`，Pollinations）在 `nightly/20260917c` 待合。详见账本最新 Changelog。
 
 ### 生产部署（systemd）
 
@@ -59,19 +63,21 @@ stock-dashboard/
 │   ├── models/
 │   │   ├── database.py         # SQLite DAO（screening/analysis/paper 等）
 │   │   └── ai_watchlist.py     # 观察池 DAO
-│   ├── paper/                 # M4a 虚拟盘引擎
-│   │   └── broker.py           # BrokerAdapter 接口 + PaperBroker 桩
+│   ├── paper/                 # M4a 虚拟盘引擎（撮合+信号+调度闭环）
+│   │   ├── broker.py           # BrokerAdapter 接口 + PaperBroker（T+1/费用/风控）
+│   │   └── engine.py           # 信号编排：ai_trade_strategy → 下单/成交/日终净值
 │   ├── web/
-│   │   ├── routes.py           # FastAPI 路由
+│   │   ├── routes.py           # FastAPI 路由（含 /paper 只读虚拟盘面板）
 │   │   ├── templates/          # Jinja2 模板
-│   │   │   ├── index.html            # 首页（候选池 + 策略 Tab）
+│   │   │   ├── index.html            # 首页（AI 观察池 + 钉选 Tab）
 │   │   │   ├── stock_detail.html     # 详情页（4 标签页）
-│   │   │   ├── candidates.html       # 历史候选池
+│   │   │   ├── candidates.html       # 历史候选池（含策略 Tab）
 │   │   │   ├── watchlist_detail.html # 观察池详情
 │   │   │   ├── journal.html          # 投资日记
 │   │   │   ├── journal_compare.html  # 日记对比
-│   │   │   ├── _stock_list.html      # 共享候选卡 partial
-│   │   │   └── _watchlist_card.html  # 共享观察池卡 partial
+│   │   │   ├── paper.html            # 虚拟盘面板（账户/持仓/委托/净值）
+│   │   │   ├── _stock_list.html      # 候选卡 partial
+│   │   │   └── _watchlist_card.html  # 观察池卡 partial（与候选卡视觉收敛，池专属保留）
 │   │   └── static/             # CSS/JS 静态资源
 │   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
 │   ├── scheduler.py            # 内置定时调度（daemon 线程）
@@ -87,7 +93,7 @@ stock-dashboard/
 │   ├── check_upstream.py       # 上游数据月度巡检
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 236 passed）
+├── tests/                      # pytest（基线 307 passed，2026-09-17 pi1 全仓）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO + paper 表单测
@@ -112,7 +118,7 @@ stock-dashboard/
 
 **不靠排名，只靠及格线。** 基于 AI Berkshire 7 条门规的硬性指标过滤，结合 LLM 结构化分析，每只股票必须通过全部门规才能进入候选池。
 
-候选股展示 4 个结构化标签页（Analysis / Strategy / Risks / Trade），Trade 标签含 Signal + 置信度 + 买入区间 + 目标价 + 止损 + 止盈；首页新增策略 Tab（全部/成长/红利/反转）按 `strategy_tags` 过滤。
+候选股展示 4 个结构化标签页（Analysis / Strategy / Risks / Trade），Trade 标签含 Signal + 置信度 + 买入区间 + 目标价 + 止损 + 止盈；候选页策略 Tab（全部/成长/红利/反转）按 `strategy_tags` 过滤；首页观察池卡片已与候选卡视觉收敛（摘要/评分拆解/AI 行/trade 指引/历史时间线，池徽标保留）。
 
 ### 每日流水线（交易日 15:30，完整流程见 `architecture.md` §2）
 
@@ -121,8 +127,8 @@ stock-dashboard/
 2. AKShare 财务采集（yjbb + 深度补充，含兜底链 C2/C2.5）
 3. 历史财务采集 → financial_history → financial_summary（5y/10y 均值）
 4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只（含 strategy_tags）
-5. K 线拉取 → AI 分析（每日，失败可用 scripts/retry_ai.py 补跑）
-6. 每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal（B6/B7 模板，待 live 验证）
+5. K 线拉取 → AI 分析（每日；9/07 起 Zen 免费通道 403 全败，失败可用 scripts/retry_ai.py 补跑，备用通道待合）
+6. AI 分析后 → 纸盘交易（M4a：信号→委托→持仓→净值，面板 /paper）→ 每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal（B6/B7 模板，待 live 验证）
 ```
 
 ### AI Berkshire 7 条门规
@@ -210,11 +216,11 @@ stock-dashboard/
 
 - **数据采集** — httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情 API
 - **存储** — SQLite（WAL 模式，`data/db/stock_dashboard.db`）
-- **AI 分析** — OpenAI 兼容 API + OpenCode Zen 免费模型池（自动故障轮换，FreeModelPool）
-- **Web 看板** — FastAPI + Jinja2（单模板 `_stock_list.html` 被多页 include，样式写在 partial 内）
+- **AI 分析** — OpenAI 兼容 API + FreeModelPool（ling 金融模型优先 + 自动故障轮换 + 429 尊重 Retry-After；Zen 免费通道 9/07 起 403 不可用，免 Key 备用通道在 nightly 待合）
+- **Web 看板** — FastAPI + Jinja2（候选卡 `_stock_list.html` / 观察池卡 `_watchlist_card.html` 双 partial，视觉已收敛，样式各写在 partial 内）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程）+ systemd 常驻
-- **验证** — `bash ~/work/gate.sh`（proot Debian Python 3.13 + pandas，基线 236 passed）
-- **虚拟盘（M4a）** — 自研 `src/paper/` 引擎：T+1 / 100 股整数倍 / A 股费用全建模 / 风控闸（单股 ≤20% · 总仓 ≤80% · 回撤 -15% 禁买），详见 `paper-trading.md`
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-17 pi1 基线 307 passed）
+- **虚拟盘（M4a）** — 自研 `src/paper/` 引擎 + `/paper` 只读面板：T+1 / 100 股整数倍 / A 股费用全建模 / 风控闸（单股 ≤20% · 总仓 ≤80% · 回撤 -15% 禁买），详见 `paper-trading.md`
 
 ---
 
@@ -237,14 +243,14 @@ stock-dashboard/
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 236 passed 只升不降）
-3. 推送 nightly → 合并到 main → 同步 pi1
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 307 passed 只升不降，确切数见账本最新 Changelog）
+3. 推送 nightly → 用户批准后合并到 main → 同步 pi1
 4. 生产环境：`pi1 192.168.50.210` `stock-dashboard.service` :9527
 
 ### 约束
 
 - 单模块改动 + 单测 + 零 emoji（仅 → ↑ ↓ ✓）
-- `main` 受保护（pre-push 钩子硬拦），迭代在 `nightly/*`
+- 迭代在 `nightly/*`，合并到 `main` 需用户批准（规则见 `AGENTS.md`，agent 无权直推 main/重启服务）
 - 踩坑铁律 6 条：见 `iteration-log.md` §工程约定
 
 ### 文档约定
