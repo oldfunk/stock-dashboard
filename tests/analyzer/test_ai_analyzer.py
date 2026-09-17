@@ -463,5 +463,127 @@ class TestRetryAfter:
         assert _retry_after_seconds(self._resp({"retry-after": "9999"}), 60) == 300
 
 
+class TestFallbackChannel:
+    """免 Key 备用通道：主灭兜底、开关、失败语义。"""
+
+    def _analyzer(self, **fb):
+        from src.analyzer.ai_analyzer import AiAnalyzer
+        cfg = {"model": "test-free", "fallback": {"enabled": True, **fb}}
+        return AiAnalyzer(cfg)
+
+    def _fake_client(self, responses):
+        calls = []
+
+        class FakeResp:
+            def __init__(self, status_code, payload=None, headers=None):
+                self.status_code = status_code
+                self._payload = payload or {}
+                self.headers = headers or {}
+
+            def json(self):
+                return self._payload
+
+        class FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                calls.append(k.get("json", {}))
+                spec = responses[min(len(calls) - 1, len(responses) - 1)]
+                return FakeResp(*spec)
+
+        return FakeClient, calls
+
+    def _valid_doc(self):
+        import json
+        return json.dumps({
+            "analysis": "生意极好，现金流充沛，值得长期跟踪持有不动摇。",
+            "moat_evaluation": [
+                {"type": "品牌", "score": 4, "trend": "稳定", "evidence": "x"},
+                {"type": "网络效应", "score": 2, "trend": "稳定", "evidence": "x"},
+                {"type": "无形资产", "score": 3, "trend": "稳定", "evidence": "x"},
+                {"type": "成本优势", "score": 4, "trend": "稳定", "evidence": "x"},
+                {"type": "有效规模", "score": 2, "trend": "稳定", "evidence": "x"},
+            ],
+            "management_score": {"capital_allocation": 7,
+                                 "shareholder_friendliness": 6,
+                                 "summary": "稳健"},
+            "intrinsic_value": {"conservative": "1000亿", "base_case": "1500亿",
+                                "optimistic": "2000亿"},
+            "investment_strategy": "长期持有",
+            "trade_strategy": {"signal": "HOLD", "confidence": "中"},
+            "verdict": "灰色：估值合理但无折价",
+            "veto_checklist": {"triggered_count": 0},
+            "mirror_test": {"passed": True},
+            "checklist": {},
+            "reverse_thinking": "若消费降级则承压",
+        }, ensure_ascii=False)
+
+    def test_fallback_kicks_in_on_primary_failure(self, monkeypatch):
+        import httpx
+        import src.analyzer.ai_analyzer as mod
+        FakeClient, calls = self._fake_client([
+            (200, {"choices": [{"message": {"content": self._valid_doc()}}]}, {}),
+        ])
+        monkeypatch.setattr(httpx, "Client", FakeClient)
+        monkeypatch.setattr(mod, "_build_history_summary", lambda *a, **k: "")
+        an = self._analyzer()
+        monkeypatch.setattr(an, "_call_llm", lambda prompt: (None, None, None))
+        stock = {"code": "600519", "name": "贵州茅台", "score": 88.0}
+        result = an.analyze_stock(stock)
+        assert result is not None
+        assert result["model"] == "fallback/openai-fast"
+        assert len(calls) == 1
+        assert calls[0]["model"] == "openai-fast"
+
+    def test_fallback_disabled_skips(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **k):
+            raise AssertionError("fallback must not be called")
+
+        monkeypatch.setattr(httpx, "Client", _boom)
+        import src.analyzer.ai_analyzer as mod
+        monkeypatch.setattr(mod, "_build_history_summary", lambda *a, **k: "")
+        from src.analyzer.ai_analyzer import AiAnalyzer
+        an = AiAnalyzer({"model": "test-free",
+                         "fallback": {"enabled": False}})
+        monkeypatch.setattr(an, "_call_llm", lambda prompt: (None, None, None))
+        assert an.analyze_stock({"code": "600519", "name": "t"}) is None
+        assert an._last_error == "模型返回空/主备通道均不可用"
+
+    def test_fallback_all_fail_returns_none(self, monkeypatch):
+        import httpx
+        import time
+        FakeClient, calls = self._fake_client([(500, {}, {})] * 3)
+        monkeypatch.setattr(httpx, "Client", FakeClient)
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        an = self._analyzer(retries=2)
+        assert an._call_fallback_llm("prompt") == (None, None, None)
+        assert len(calls) == 2
+
+    def test_fallback_429_honors_retry_after(self, monkeypatch):
+        import httpx
+        import time
+        sleeps = []
+        FakeClient, calls = self._fake_client([
+            (429, {}, {"retry-after": "120"}),
+            (200, {"choices": [{"message": {"content": "0123456789abcdef"}}]}, {}),
+        ])
+        monkeypatch.setattr(httpx, "Client", FakeClient)
+        monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+        an = self._analyzer(retries=2)
+        content, used, _ = an._call_fallback_llm("prompt")
+        assert content == "0123456789abcdef"
+        assert used == "fallback/openai-fast"
+        assert sleeps and sleeps[0] == 120
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
