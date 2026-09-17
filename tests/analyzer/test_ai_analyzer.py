@@ -387,5 +387,81 @@ class TestNumericCitations:
         assert len(mm2) == 1
 
 
+class TestLingPriority:
+    """ling 金融模型优先 + 故障轮换（fallback 契约）。"""
+
+    def test_ling_is_first_preference(self):
+        from src.analyzer.ai_analyzer import FreeModelPool
+        assert FreeModelPool.PREFERRED_ORDER[0] == "ling-3.0-flash-fin-free"
+
+    def test_refresh_discovers_ling_first(self, monkeypatch):
+        from src.analyzer.ai_analyzer import FreeModelPool
+
+        class FakeResp:
+            status_code = 200
+
+            def json(self):
+                return {"data": [
+                    {"id": "deepseek-v4-flash-free"},
+                    {"id": "ling-3.0-flash-fin-free"},
+                    {"id": "gpt-5.5"},
+                ]}
+
+        class FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get(self, url, headers=None):
+                return FakeResp()
+
+        import httpx
+        monkeypatch.setattr(httpx, "Client", FakeClient)
+        p = FreeModelPool("http://127.0.0.1:9", None)
+        p._refresh()
+        assert p._pool[0] == "ling-3.0-flash-fin-free"
+        assert "gpt-5.5" not in p._pool  # 非 free 不进池
+        assert p.acquire() == "ling-3.0-flash-fin-free"
+
+    def test_dead_ling_falls_back_to_next(self):
+        from src.analyzer.ai_analyzer import FreeModelPool
+        import time
+        p = FreeModelPool("http://127.0.0.1:9", None)
+        p._pool = ["ling-3.0-flash-fin-free", "deepseek-v4-flash-free"]
+        p._last_refresh = time.time()
+        assert p.acquire() == "ling-3.0-flash-fin-free"
+        p.mark_dead("ling-3.0-flash-fin-free")
+        assert p.acquire() == "deepseek-v4-flash-free"
+
+
+class TestRetryAfter:
+    """429 尊重服务端 Retry-After。"""
+
+    def _resp(self, headers):
+        from types import SimpleNamespace
+        return SimpleNamespace(headers=headers)
+
+    def test_numeric_seconds(self):
+        from src.analyzer.ai_analyzer import _retry_after_seconds
+        assert _retry_after_seconds(self._resp({"retry-after": "120"}), 60) == 120
+
+    def test_missing_header_falls_back(self):
+        from src.analyzer.ai_analyzer import _retry_after_seconds
+        assert _retry_after_seconds(self._resp({}), 60) == 60
+
+    def test_invalid_header_falls_back(self):
+        from src.analyzer.ai_analyzer import _retry_after_seconds
+        assert _retry_after_seconds(self._resp({"retry-after": "soon"}), 45) == 45
+
+    def test_capped_at_300(self):
+        from src.analyzer.ai_analyzer import _retry_after_seconds
+        assert _retry_after_seconds(self._resp({"retry-after": "9999"}), 60) == 300
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

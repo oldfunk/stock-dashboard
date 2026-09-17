@@ -609,8 +609,9 @@ class FreeModelPool:
     如果模型调用失败，调用 mark_dead() 将其暂时黑名单，自动切换到下一个。
     """
 
-    # 偏好顺序：效果好的排前面
+    # 偏好顺序：金融模型优先，其余按效果排。未知新模型自动追加在后。
     PREFERRED_ORDER = [
+        "ling-3.0-flash-fin-free",
         "deepseek-v4-flash-free",
         "mimo-v2.5-free",
         "nemotron-3-ultra-free",
@@ -789,6 +790,21 @@ def get_model_pool(api_base: str, api_key: str = None) -> FreeModelPool:
     if _model_pool is None:
         _model_pool = FreeModelPool(api_base, api_key)
     return _model_pool
+
+
+def _retry_after_seconds(resp, default: int) -> int:
+    """解析 429 响应的 Retry-After（秒），上限 300。
+
+    缺失/非法时回落到 default（BACKOFF_SCHEDULE 当前档）。
+    纯函数，可单测；resp 只需有 .headers.get。
+    """
+    try:
+        raw = resp.headers.get("retry-after")
+        if raw is None:
+            return default
+        return max(0, min(int(float(str(raw).strip())), 300))
+    except (ValueError, TypeError, AttributeError):
+        return default
 
 
 class AiAnalyzer:
@@ -1078,6 +1094,7 @@ class AiAnalyzer:
                     return content, current_model, usage
 
                 # ── 非 200 状态码 ──
+                wait_s = BACKOFF_SCHEDULE[attempt]
                 should_rotate = self._is_fatal_model_error(resp)
                 if should_rotate:
                     self._mark_model_dead(current_model)
@@ -1085,6 +1102,8 @@ class AiAnalyzer:
                     logger.warning(
                         "[AI分析] HTTP %d (%s), 已轮换至新模型", resp.status_code, current_model)
                 elif resp.status_code == 429:
+                    # 尊重服务端 Retry-After，避免固定退避持续撞墙延长封禁
+                    wait_s = _retry_after_seconds(resp, BACKOFF_SCHEDULE[attempt])
                     self._log_rate_limit(resp, attempt, max_retries)
                     if self._note_429(current_model):
                         logger.warning(
@@ -1098,8 +1117,8 @@ class AiAnalyzer:
                 else:
                     logger.warning(
                         "[AI分析] HTTP %d, 退避 %ds (%s)",
-                        resp.status_code, BACKOFF_SCHEDULE[attempt], current_model)
-                time.sleep(BACKOFF_SCHEDULE[attempt])
+                        resp.status_code, wait_s, current_model)
+                time.sleep(wait_s)
 
             except httpx.TimeoutException:
                 consecutive_timeouts += 1
