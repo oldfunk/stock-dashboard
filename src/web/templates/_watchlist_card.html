@@ -23,10 +23,28 @@
             </div>
             <div class="wl-item-right">
                 {% if stock.model %}<span class="wl-tag">{{ stock.model }}</span>{% endif %}
+                {% if stock.ai_failed and not stock.ai_parsed %}<span class="wl-tag wl-tag-fail" title="AI 分析失败：{{ stock.ai_failure_reason }}">AI 未分析</span>{% endif %}
                 {% if stock.ai_confidence %}<span class="wl-tag wl-tag-gold">{{ stock.ai_confidence }}</span>{% endif %}
                 <span class="wl-tag">池{{ stock.review_count or 1 }}周</span>
             </div>
         </div>
+
+        {# ── 头部摘要（与候选卡同口径：护城河/管理层/估值） ── #}
+        {% if stock.moat_type or stock.mgmt_score or stock.iv_range %}
+        <div class="wl-ai-front" style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin:4px 0 2px;">
+            {% if stock.moat_type %}<span style="margin-right:12px;" title="护城河类型">护城河: {{ stock.moat_type }}</span>{% endif %}
+            {% if stock.mgmt_score %}
+                {% if stock.mgmt_score is mapping %}
+                <span style="margin-right:12px;" title="{{ stock.mgmt_score.summary or '' }}">管理层: 配置{{ stock.mgmt_score.capital_allocation }}/股东{{ stock.mgmt_score.shareholder_friendliness }}</span>
+                {% else %}<span style="margin-right:12px;">管理层: {{ stock.mgmt_score }}</span>{% endif %}
+            {% endif %}
+            {% if stock.iv_range %}
+                {% if stock.iv_range is mapping %}
+                <span title="{{ stock.iv_range.method or '' }}">估值: {{ stock.iv_range.conservative }}–{{ stock.iv_range.base_case }}–{{ stock.iv_range.optimistic }}亿{% if stock.iv_range.margin_of_safety %} (安全边际{{ stock.iv_range.margin_of_safety }}){% endif %}</span>
+                {% else %}<span>估值: {{ stock.iv_range }}</span>{% endif %}
+            {% endif %}
+        </div>
+        {% endif %}
 
         {# ── 指标行 ── #}
         <div class="wl-metrics">
@@ -101,6 +119,91 @@
         <div class="wl-reason">{{ stock.added_reason }}</div>
         {% endif %}
 
+        {# ── 评分拆解（与候选卡同结构，复用 toggleScoreDetail） ── #}
+        {% if stock.score_detail_parsed %}
+        <div class="score-detail">
+            <button class="score-detail-toggle" type="button" onclick="event.stopPropagation(); toggleScoreDetail('{{ stock.code }}')">
+                评分拆解 {{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}
+                <span class="caret" id="caret-{{ stock.code }}">↓</span>
+            </button>
+            <div id="sd-{{ stock.code }}" class="score-detail-body" style="display:none;" onclick="event.stopPropagation();">
+                {% set _w = {'roe': 'ROE', 'pe': '估值', 'growth': '增长', 'debt': '财务', 'margin': '毛利'} %}
+                {% for k, p in stock.score_detail_parsed.items() %}
+                    {% if k in ('roe', 'pe', 'growth', 'debt', 'margin') %}
+                    <div class="sd-row">
+                        <span class="sd-name">{{ _w[k] }}</span>
+                        <span class="sd-raw">{{ "%.1f"|format(p.raw) if p.raw is not none else '--' }}</span>
+                        <span class="sd-bar"><i style="width:{{ p.sub }}%;"></i></span>
+                        <span class="sd-sub">{{ p.sub }}</span>
+                        <span class="sd-w">{{ "%.2f"|format(p.weight) }}</span>
+                        <span class="sd-contrib">+{{ "%.2f"|format(p.contribution) }}</span>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+                {% if stock.score_detail_parsed.consistency_bonus is not none %}
+                <div class="sd-row sd-consistency">
+                    <span class="sd-name">一致性加分</span>
+                    <span class="sd-raw"></span>
+                    <span class="sd-bar"></span>
+                    <span class="sd-sub"></span>
+                    <span class="sd-w"></span>
+                    <span class="sd-contrib">+{{ stock.score_detail_parsed.consistency_bonus }}</span>
+                </div>
+                {% endif %}
+                <div class="sd-row sd-total">
+                    <span class="sd-name">总分</span>
+                    <span class="sd-raw"></span>
+                    <span class="sd-bar"></span>
+                    <span class="sd-sub"></span>
+                    <span class="sd-w"></span>
+                    <span class="sd-contrib">{{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── AI 摘要行（与候选卡同口径：护城河/管理层/结论/稳健区间） ── #}
+        {% if stock.ai_parsed %}
+        {% set _ai = stock.ai_parsed %}
+        {% set _moat = _ai.moat_evaluation[0] if _ai.moat_evaluation else None %}
+        {% set _mgmt = _ai.management_score %}
+        {% set _verdict = _ai.verdict %}
+        {% set _tiers = _ai.price_tiers %}
+        <div class="ai-summary">
+            <div class="ai-summary-row">
+                {% if _moat and _moat.type %}
+                <span class="ai-summary-item">
+                    <span class="ai-summary-label">护城河</span>
+                    <span class="ai-summary-value">{{ _moat.type }}{% if _moat.score %}（{{ _moat.score }}/5）{% endif %}</span>
+                </span>
+                {% endif %}
+                {% if _mgmt %}
+                <span class="ai-summary-item">
+                    <span class="ai-summary-label">管理层</span>
+                    <span class="ai-summary-value">配置{{ _mgmt.capital_allocation }}/10、股东{{ _mgmt.shareholder_friendliness }}/10</span>
+                </span>
+                {% endif %}
+                {% if _verdict %}
+                <span class="ai-summary-item ai-verdict-{{ 'pass' if '通过' in _verdict else ('fail' if '不通过' in _verdict else 'gray') }}">
+                    <span class="ai-summary-label">结论</span>
+                    <span class="ai-summary-value">{{ _verdict }}</span>
+                </span>
+                {% endif %}
+                {% if _tiers and _tiers.moderate %}
+                <span class="ai-summary-item">
+                    <span class="ai-summary-label">稳健区间</span>
+                    <span class="ai-summary-value">{{ _tiers.moderate.range }} → {{ _tiers.moderate.advice }}</span>
+                </span>
+                {% elif _ai.intrinsic_value and _ai.intrinsic_value.base_case %}
+                <span class="ai-summary-item">
+                    <span class="ai-summary-label">基准估值</span>
+                    <span class="ai-summary-value">{{ _ai.intrinsic_value.base_case }}亿</span>
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         {# ── AI 分析区域（默认折叠） ── #}
         {% if stock.ai_parsed %}
         <div class="wl-ai">
@@ -135,8 +238,89 @@
                         <div class="trade-cell"><div class="label">止损</div><div class="value">{{ stock.trade_parsed.stop_loss }}</div></div>
                         <div class="trade-cell"><div class="label">止盈</div><div class="value">{{ stock.trade_parsed.take_profit }}</div></div>
                     </div>
+                    {% if ts == 'BUY' and stock.trade_parsed.confidence %}
+                    <div class="trade-guide">BUY 置信度{{ stock.trade_parsed.confidence }}：现价在买入区间内，目标价 {{ stock.trade_parsed.target_price }}，止损 {{ stock.trade_parsed.stop_loss }}</div>
+                    {% elif ts == 'BUY' %}
+                    <div class="trade-guide">BUY：可分批建仓，注意控制仓位与止损</div>
+                    {% elif ts == 'HOLD' %}
+                    <div class="trade-guide">HOLD：持有观望，等待更明确信号</div>
+                    {% elif ts == 'AVOID' %}
+                    <div class="trade-guide">AVOID：当前估值偏高或基本面恶化，暂不介入</div>
+                    {% else %}
+                    <div class="trade-guide">{{ ts }}：以纪律为准，等待更明确信号</div>
+                    {% endif %}
+                    {% if stock.ai_parsed and stock.ai_parsed.verdict is string %}
+                    {% set _v = stock.ai_parsed.verdict %}
+                    {% set _vc = 'fail' if '不通过' in _v else ('pass' if '通过' in _v else 'gray') %}
+                    <div class="trade-cell" style="grid-column: 1 / -1;">
+                        <div class="label">结论</div>
+                        <div class="value signal-{{ 'buy' if _vc == 'pass' else ('avoid' if _vc == 'fail' else 'hold') }}">{{ _v }}</div>
+                    </div>
+                    {% endif %}
+                    {% if stock.ai_parsed and stock.ai_parsed.price_tiers %}
+                    <div class="trade-cell" style="grid-column: 1 / -1;">
+                        <div class="label">分层建议</div>
+                        <div class="value">
+                            {% for key, label in [('aggressive', '激进'), ('moderate', '稳健'), ('conservative', '保守')] %}
+                            {% if stock.ai_parsed.price_tiers[key] %}
+                            <div>{{ label }}：{{ stock.ai_parsed.price_tiers[key].advice }} {{ stock.ai_parsed.price_tiers[key].range }}</div>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
                     {% endif %}
                 </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── 历史分析时间线（与候选卡同结构，复用 toggleHistory） ── #}
+        {% if stock.analysis_history and stock.analysis_history|length > 0 %}
+        <div class="history-bar" onclick="event.stopPropagation();">
+            <button class="history-toggle" onclick="event.stopPropagation(); toggleHistory('{{ stock.code }}')">
+                历史分析 ({{ stock.analysis_history|length }}次)
+            </button>
+            <div id="hist-{{ stock.code }}" class="history-list" style="display:none;">
+                {% for h in stock.analysis_history %}
+                <div>
+                <div class="history-item" onclick="event.stopPropagation(); toggleHistDetail('{{ stock.code }}-{{ loop.index0 }}')">
+                    <span class="hist-date">{{ h.analysis_date }}</span>
+                    <span class="hist-score">Score {{ "%.0f"|format(h.score) if h.score else '--' }}</span>
+                    {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                    <span class="hist-status" style="color:var(--color-up);">有分析</span>
+                    {% else %}
+                    <span class="hist-status" style="color:var(--text-tertiary);">已尝试</span>
+                    {% endif %}
+                </div>
+                {% if h.ai_analysis and h.ai_analysis not in ['{}', ''] %}
+                <div id="hd-{{ stock.code }}-{{ loop.index0 }}" class="history-detail">
+                    <div class="hd-panel open">
+                        <div style="font-size:12px;line-height:1.6;">
+                            <strong>分析</strong><br>{{ h.hist_analysis[:300] }}{% if h.hist_analysis|length > 300 %}…{% endif %}
+                            <br><br>
+                            <strong>策略</strong><br>{{ h.hist_strategy }}
+                            <br><br>
+                            {% if h.hist_trade and h.hist_trade is mapping %}
+                            <strong>信号</strong>
+                            <span style="{% if h.hist_trade.signal == 'BUY' %}color:var(--color-up);font-weight:600;{% elif h.hist_trade.signal == 'AVOID' %}color:var(--red);font-weight:600;{% else %}color:var(--gold);font-weight:600;{% endif %}">
+                                {% if h.hist_trade.signal == 'BUY' %}买入{% elif h.hist_trade.signal == 'HOLD' %}持有{% elif h.hist_trade.signal == 'AVOID' %}回避{% else %}{{ h.hist_trade.signal }}{% endif %}
+                            </span>
+                            — 置信度: {{ h.hist_trade.confidence }}
+                            &nbsp;|&nbsp; 买入: {{ h.hist_trade.buy_zone }}
+                            &nbsp;|&nbsp; 目标: {{ h.hist_trade.target_price }}
+                            &nbsp;|&nbsp; 止损: {{ h.hist_trade.stop_loss }}
+                            {% endif %}
+                            {% if h.hist_mirror %}
+                            <br><br>
+                            <span style="font-size:11px;color:var(--text-tertiary);">[镜子: {{ h.hist_mirror }}]</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                </div>
+                {% endfor %}
             </div>
         </div>
         {% endif %}
@@ -151,3 +335,41 @@
     <p>周六 00:00 AI 自动复盘后，将在此处展示 5 只观察股。</p>
 </div>
 {% endif %}
+<style>
+/* 观察池卡片独占样式（单消费者 index.html；候选卡同名类样式见 _stock_list.html） */
+.wl-tag-fail {
+    background: #fce8e6;
+    color: var(--down, #c5221f);
+}
+.ai-summary {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--divider-thin);
+}
+.ai-summary-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 11px;
+}
+.ai-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.ai-summary-label {
+    color: var(--text-tertiary);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.ai-summary-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.ai-verdict-pass .ai-summary-value { color: var(--green, #137333); }
+.ai-verdict-fail .ai-summary-value { color: var(--red, #c5221f); }
+.ai-verdict-gray .ai-summary-value { color: var(--gold, #b06000); }
+</style>

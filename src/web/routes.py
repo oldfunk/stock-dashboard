@@ -372,6 +372,7 @@ async def index(request: Request):
         item['model'] = None
         item['ai_parsed'] = None
         item['trade_parsed'] = None
+        item['ai_confidence'] = None
         item['ai_failed'] = False
         item['mirror_counts'] = None
         item['mirror_total'] = 0
@@ -380,6 +381,9 @@ async def index(request: Request):
             try:
                 trade = json.loads(latest_hist['ai_trade_strategy'])
                 item['signal'] = trade.get('signal')
+                if item.get('trade_parsed') is None:
+                    item['trade_parsed'] = trade
+                item['ai_confidence'] = trade.get('confidence')
             except (json.JSONDecodeError, TypeError):
                 pass
         if latest_hist and latest_hist.get('ai_analysis'):
@@ -400,6 +404,7 @@ async def index(request: Request):
                 trade = json.loads(sr['ai_trade_strategy'])
                 item['signal'] = trade.get('signal')
                 item['trade_parsed'] = trade
+                item['ai_confidence'] = trade.get('confidence')
             except (json.JSONDecodeError, TypeError):
                 pass
         if not item['ai_parsed'] and sr and sr.get('ai_analysis'):
@@ -409,6 +414,20 @@ async def index(request: Request):
                 pass
         if sr:
             item['ai_failed'] = bool(sr.get('ai_failed') in (1, True, '1'))
+            item['ai_failure_reason'] = sr.get('ai_failure_reason') or None
+        else:
+            item['ai_failure_reason'] = None
+
+        # 分析摘要前置（与 _enrich_stocks 同口径，观察池卡片统一渲染）
+        item['moat_type'] = None
+        item['mgmt_score'] = None
+        item['iv_range'] = None
+        if isinstance(item.get('ai_parsed'), dict):
+            moats = item['ai_parsed'].get('moat_evaluation')
+            if isinstance(moats, list) and moats and isinstance(moats[0], dict):
+                item['moat_type'] = moats[0].get('type')
+            item['mgmt_score'] = item['ai_parsed'].get('management_score')
+            item['iv_range'] = item['ai_parsed'].get('intrinsic_value')
 
         # 分析历史时间线（最近5条）
         history = hist_dao.get_history(code, limit=5)
