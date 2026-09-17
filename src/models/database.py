@@ -1158,6 +1158,16 @@ class PaperOrderDAO:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        """最近委托（纸盘面板展示，含 blocked 风控拦截行）"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM paper_orders "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 class PaperTradeDAO:
     """纸盘成交 DAO（费用明细：佣金/印花税/过户费，§4.3）"""

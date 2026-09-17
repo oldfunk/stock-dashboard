@@ -160,6 +160,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+### 2026-09-17（nightly/20260917：收编 0916-B6/B7 + 纸盘只读面板，待合）
+- 起因：`origin/nightly/20260916` 分叉自旧 main，与已合 M4a 撞车——`53287aa` 基于 broker 桩重写撮合，直接合会删 `engine.py`/`test_engine.py`/scheduler 纸盘钩子（用户裁定：弃 53287aa 保 main，涨跌停以后按需重做）；`d425b82`（B6/B7 coverage 纯函数 + watch 回流）干净，已 cherry-pick 入本分支（`a6b4d2d`）。
+- 改了什么：① `GET /paper` 只读面板——账户四卡（现金/总资产/累计盈亏/净值日）+ 持仓表（含 snapshot 名称富集）+ 最近 50 委托表（blocked 显示"风控拦截"）+ "模拟交易·非实盘"横幅；纸盘表缺失时（pi1 未重启迁移）`sqlite3.OperationalError` 降级为空状态不 500；首页导航加"虚拟盘"入口。② `PaperOrderDAO.list_recent(limit)`（面板展示用，blocked 行可见，呼应 paper-trading.md"风控拦截面板可查"）。③ `tests/web/test_routes_paper.py` 4 单测（空态/有数/缺表降级/DAO 倒序）。
+- 验证：cherry-pick 的 7 单测全过；新 DAO 单测过；paper.html 离线 Jinja 三态渲染全过（未初始化/空/有数含已成+风控拦截）；改动文件 emoji 零新增；全仓 265 passed，其余 failed 全为本机环境（TestClient loopback 被沙箱拦截 + akshare 缺依赖，journal 等存量 web 用例同症）。
+- 待办：用户合分支 + pi1 pull + restart 后，跑 pi1 全仓验证 TestClient 三用例（本机跑不动），纸盘表自动建后面板有数。
 ### 2026-09-15（README 全面重写，纯文档）
 - 起因：README 包含过时信息（stage marker 指向 nightly/20260914、kanban 列出已完成任务、gate.sh 引用本地脚本），缺少项目结构和贡献流程，新开发者难以入门。
 - 改了什么：README.md 全面重写——去掉过时的 stage marker/kanban 任务/数据源架构重复段；新增完整项目结构（树形图）；新增脚本表（补 run-once/retry_ai 等）；新增配置表（config.yaml 关键字段说明）；新增开发工作流（nightly 分支→合并→pi1）；精简数据源段指向 architecture.md；去掉 AI Berkshire 对照重复内容。
