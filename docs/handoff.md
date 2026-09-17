@@ -3,27 +3,23 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-17 nightly/20260917 待合）
-- 分支：`nightly/20260917`（`a6b4d2d` 起，基于 main `67c2f42`），**只推 nightly，不碰 main/pi1**
-- 收编：cherry-pick `d425b82`（M3 B6/B7 coverage 纯函数 + watch 回流 + 7 单测）；`53287aa` 已裁定废弃（与 main M4a 重复实现，合会删 engine.py，涨跌停以后按需重做）
-- 新活：`GET /paper` 只读虚拟盘面板（账户/持仓/委托/净值 + 非实盘横幅 + 缺表降级）+ `PaperOrderDAO.list_recent` + 4 单测 + 首页导航入口
-- 验证：265 passed；paper.html 离线三态渲染过；TestClient 三用例本机跑不动（沙箱 loopback 拦截，存量同症），待合后 pi1 验证
-- M4a 纸盘基建：broker 撮合 + engine 信号 + scheduler 异步触发（main 已有，37 单测）
+## 最后状态（2026-09-17 nightly/20260917 已合已部署）
+- 分支：`main` = `d81082f`；废分支 `origin/nightly/20260916` 已删；pi1 已 pull + restart + 验证
+- 上线：`GET /paper` 只读虚拟盘面板 + B6/B7 coverage/watch（收编 d425b82，弃 53287aa）
+- 验证：pi1 全仓 297 passed 零失败；三端点 200；paper_* 五表已建；零新 Traceback；DB 备份 `stock_dashboard.db.bak20260917`
+- M4a 全链路（撮合+信号+scheduler+面板）闭环，每日 15:30 自动记数
 
-## 下一步方向（用户 review 合并后）
-1. 合本分支到 main，pi1 pull + restart（建 paper_* 表，纸盘开始记数），跑 pi1 全仓验证 TestClient 三用例
-2. M4b QLib 离线验证（PC/云跑 TopK 回测，只回流结论）或 M4a 深化（NAV 曲线 / 涨跌停重做）
-3. 周六 live 验证 B6/B7（watch 动作 + journal 新模板 + coverage 校验）
+## 下一步方向
+1. M4b QLib 离线验证（PC/云跑 TopK 回测，只回流结论）或 M4a 深化（NAV 曲线 / 涨跌停重做）
+2. 周六 live 验证 B6/B7（watch 动作 + journal 新模板 + coverage 校验）
 
 ## 已知隐患
 - 82 只无 roic/fcf 股票可能是东财 API 无数据的小盘股（C2.5 永久兜底）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"）
-- pi1 DB 尚无 paper_* 表（服务未重启迁移），/paper 在 pi1 现阶段显示"尚未初始化"属预期
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
-- `origin/nightly/20260916` 剩余 `53287aa` 已裁定废弃，勿合（合会删 engine.py）
 
 ## 历史交接区（追加，不删）
-- 2026-09-17 nightly/20260917 待合（收编0916-d425b82 + /paper 只读面板 + 4 单测，弃53287aa）
+- 2026-09-17 nightly/20260917 已合已部署（/paper 面板上线 + B6/B7，pi1 297 全过，删废分支0916）
 - 2026-09-16 M4a 纸盘引擎：撮合+信号编排+scheduler 触发（37 单测，main 已合，pi1 已同步）
 - 2026-09-15 README 全面重写（项目结构/贡献流程/配置表）+ handoff 状态更新
 - 2026-09-15 nightly/20260914 合并到 main（9 commits, +1463/-76, 22 files）

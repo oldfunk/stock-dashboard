@@ -160,7 +160,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
-### 2026-09-17（nightly/20260917：收编 0916-B6/B7 + 纸盘只读面板，待合）
+### 2026-09-17（nightly/20260917 合并部署：B6/B7 收编 + 纸盘面板上线，pi1 297 全过）
+- 合并：`nightly/20260917` fast-forward 入 main（`fee1ffc` + 单测修复 `d81082f`）；远端废分支 `nightly/20260916` 已删（`53287aa` 废弃，勿复活）。
+- 部署：pi1 备份 DB → pull → restart（paper_* 五表迁移成功）→ 三端点 200（/ /paper /journal）→ journalctl 零新 Traceback。
+- 验证：pi1 全仓 **297 passed 零失败**（含纸盘 4 单测；修过一个真单测 bug：现金断言误用 nav cash，实为 account.cash）。本地 TestClient 跑不动为沙箱 loopback 拦截，非代码问题。
+- 现状：/paper 在 pi1 已可访问（engine 每日 15:30 后有信号即记数）；下一轮方向见 handoff。
 - 起因：`origin/nightly/20260916` 分叉自旧 main，与已合 M4a 撞车——`53287aa` 基于 broker 桩重写撮合，直接合会删 `engine.py`/`test_engine.py`/scheduler 纸盘钩子（用户裁定：弃 53287aa 保 main，涨跌停以后按需重做）；`d425b82`（B6/B7 coverage 纯函数 + watch 回流）干净，已 cherry-pick 入本分支（`a6b4d2d`）。
 - 改了什么：① `GET /paper` 只读面板——账户四卡（现金/总资产/累计盈亏/净值日）+ 持仓表（含 snapshot 名称富集）+ 最近 50 委托表（blocked 显示"风控拦截"）+ "模拟交易·非实盘"横幅；纸盘表缺失时（pi1 未重启迁移）`sqlite3.OperationalError` 降级为空状态不 500；首页导航加"虚拟盘"入口。② `PaperOrderDAO.list_recent(limit)`（面板展示用，blocked 行可见，呼应 paper-trading.md"风控拦截面板可查"）。③ `tests/web/test_routes_paper.py` 4 单测（空态/有数/缺表降级/DAO 倒序）。
 - 验证：cherry-pick 的 7 单测全过；新 DAO 单测过；paper.html 离线 Jinja 三态渲染全过（未初始化/空/有数含已成+风控拦截）；改动文件 emoji 零新增；全仓 265 passed，其余 failed 全为本机环境（TestClient loopback 被沙箱拦截 + akshare 缺依赖，journal 等存量 web 用例同症）。
