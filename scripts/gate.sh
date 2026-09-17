@@ -11,7 +11,14 @@ rm -rf "$BASETEMP" 2>/dev/null || true
 mkdir -p "$BASETEMP"
 
 echo "=== Running full test suite ==="
-python -m pytest --tb=short -q --basetemp="$BASETEMP"
+# 优先用项目 venv（pi1），否则回退系统 python
+PYBIN="${PYTHON:-}"
+if [ -z "$PYBIN" ]; then
+    if [ -x ".venv/bin/python" ]; then PYBIN=".venv/bin/python";
+    elif command -v python3 >/dev/null 2>&1; then PYBIN="python3";
+    else PYBIN="python"; fi
+fi
+"$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP"
 EXIT_CODE=$?
 
 rm -rf "$BASETEMP" 2>/dev/null || true
