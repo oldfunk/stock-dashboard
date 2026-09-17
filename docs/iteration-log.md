@@ -164,6 +164,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 用户自推的 agent.md（Hermes 16:59 写在 origin/nightly/20260917 上，非 main）已用 patch 中继 cherry-pick 入 main（`be50625`，原作者保留），内容：AGENTS.md agent 上手稿 + scripts/gate.sh 全仓门禁。
 - README 全面如实化：Zen 免费通道 9/07 起 403 不可用（原"无需 Key"已删）+ paper 引擎/面板现状 + 观察池卡片收敛 + 策略 Tab 归属候选页 + 基线 307 + gate.sh 路径 + main 合并需批准（原"pre-push 硬拦"不实）。
 - 删远端已合分支 nightly/20260917（AGENTS.md 已入 main，无残留）+ nightly/20260917b（已合）；本地删同名 + 探针/bundle 临时文件；pi1 /tmp 已空。
+- gate.sh 修 interpreter 选择（优先 .venv，pi1 系统 python 无 pytest 原地失败）；pi1 `bash scripts/gate.sh` 全绿 **313 passed**（含 kline_fetcher，本地 ignore 仅因缺 pandas）。
 - 待办（用户定）：免费模型回头再搞（nightly/20260917c 保留，Pollinations 兜底已验证）；钉选 Tab JS 另起一轮。
 ### 2026-09-17（AI 修复 + UI 收敛部署：ling 优先/Retry-After/观察池卡片统一，pi1 307 全过）
 - 根因（AI 十连败）：匿名免费额度 429 打爆——9/07 起 140 只全失败（`模型返回空/全部免费模型不可用`）；单只 20 次退避 ×20 只可跑数小时（午夜仍在跑）；最后成功是 9/04 `laguna-s-2.1-free`。

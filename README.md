@@ -93,7 +93,7 @@ stock-dashboard/
 │   ├── check_upstream.py       # 上游数据月度巡检
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 307 passed，2026-09-17 pi1 全仓）
+├── tests/                      # pytest（基线 313 passed，2026-09-17 pi1 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO + paper 表单测
@@ -243,7 +243,7 @@ stock-dashboard/
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 307 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 313 passed 只升不降，确切数见账本最新 Changelog）
 3. 推送 nightly → 用户批准后合并到 main → 同步 pi1
 4. 生产环境：`pi1 192.168.50.210` `stock-dashboard.service` :9527
 
