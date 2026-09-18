@@ -175,7 +175,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 实测（pi1 服务端匿名）：ling/mimo/nemotron×2 → 403 FreeTierError（政策封死）；deepseek → 400 不可用；muse-spark×2 → 500 常态（复测非瞬时）；8 天日志零 200。结论：Zen 匿名通道 7/7 不可用，Retry-After/轮换救不了（用户已否决配 Key）。
 - 改了什么：`ai.fallback` 配置段（Pollinations OpenAI 兼容源，默认 openai-fast，可换）+ `AiAnalyzer._call_fallback_llm`（主灭后每股兜底 retries 次，429 照样尊重 Retry-After，`fallback/<model>` 落库溯源）+ `analyze_stock` 主备接线 + 4 单测。
 - 验证：单测 12/12；pi1 worktree 生产冒烟——真实 Berkshire prompt（5427 字）经 fallback 返回 1548 字中文金融分析 JSON，可解析（首轮合成 spam prompt 曾触发拒答，系探针伪影，已证伪）。
-- 状态：已合入 main（merge `0cd11df`），pi1 待部署。
+- 状态：已合入 main（merge `21615d2`）并部署 pi1（09-18 复测 gate 317 passed）。
 ### 2026-09-17（AI 修复 + UI 收敛部署：ling 优先/Retry-After/观察池卡片统一，pi1 307 全过）
 - 根因（AI 十连败）：匿名免费额度 429 打爆——9/07 起 140 只全失败（`模型返回空/全部免费模型不可用`）；单只 20 次退避 ×20 只可跑数小时（午夜仍在跑）；最后成功是 9/04 `laguna-s-2.1-free`。
 - 改了什么：① `PREFERRED_ORDER` ling-3.0-flash-fin-free 置顶（自动发现+死亡轮换 fallback 不变，已验证有效）；② 429 尊重 `Retry-After`（上限 300s，缺省回退原档，新纯函数 `_retry_after_seconds`）；③ 观察池卡片收敛候选卡（头部摘要/评分拆解/AI 摘要行/trade-guide/历史时间线/AI 未分析徽标，池专属保留；附带修 `trade_parsed`/`ai_confidence` 历史回退缺失）+ routes enrichment 对齐；④ 单测 10 项（pool 排序/轮换/Retry-After/卡片三态渲染）。
