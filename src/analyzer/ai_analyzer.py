@@ -844,6 +844,15 @@ class AiAnalyzer:
             self._pool = get_model_pool(self.api_base, self.api_key)
         else:
             self._pool = None
+        # 免 Key 备用通道（主池全灭时兜底，见 _call_fallback_llm）
+        fb = cfg.get('fallback') or {}
+        self._fb_enabled = bool(fb.get('enabled', True))
+        self._fb_base = (fb.get('api_base')
+                         or 'https://text.pollinations.ai/openai').rstrip('/')
+        self._fb_model = fb.get('model') or 'openai-fast'
+        self._fb_temperature = fb.get('temperature', 0.3)
+        self._fb_max_tokens = fb.get('max_tokens', 6000)
+        self._fb_retries = max(1, int(fb.get('retries', 2)))
         if not self.api_key and not self._is_free_model:
             logger.warning(
                 "[AI分析] 未设置 API Key（STOCK_AI_API_KEY / OPENAI_API_KEY），"
@@ -949,8 +958,13 @@ class AiAnalyzer:
 
         content, used_model, usage = self._call_llm(prompt)
         self._last_usage = usage  # 供调用方写入 ai_analysis_log
+        if not content and self._fb_enabled:
+            logger.info(f"[AI分析] 主通道全灭，{stock.get('code')} 走备用通道 "
+                        f"({self._fb_model})...")
+            content, used_model, usage = self._call_fallback_llm(prompt)
+            self._last_usage = usage
         if not content:
-            self._last_error = '模型返回空/全部免费模型不可用'
+            self._last_error = '模型返回空/主备通道均不可用'
             return None
         logger.info(f"[AI分析] 模型=[{used_model}] {stock.get('code')} {stock.get('name')}")
         result = parse_ai_response(content)
@@ -1145,6 +1159,54 @@ class AiAnalyzer:
 
         logger.error("[AI分析] 已达最大重试次数 %s，放弃 (末模型=%s)", max_retries, current_model)
         return None, current_model, None
+
+    def _call_fallback_llm(self, prompt: str) -> tuple[Optional[str], Optional[str], Optional[dict]]:
+        """免 Key 备用通道：主池全灭时每只股票兜底（轻量：retries 次）。
+
+        返回 (content, used_model, usage)，usage 恒为 None（备用源不记 token）。
+        used_model 形如 'fallback/<model>'，落库可溯源。
+        """
+        if not self._fb_enabled:
+            return None, None, None
+        url = f"{self._fb_base}/chat/completions"
+        for attempt in range(self._fb_retries):
+            try:
+                with httpx.Client(timeout=240.0) as client:
+                    resp = client.post(
+                        url,
+                        headers={'Content-Type': 'application/json'},
+                        json={'model': self._fb_model,
+                              'messages': [{'role': 'user', 'content': prompt}],
+                              'temperature': self._fb_temperature,
+                              'max_tokens': self._fb_max_tokens},
+                    )
+                if resp.status_code == 200:
+                    try:
+                        content = resp.json()['choices'][0]['message']['content']
+                    except (KeyError, IndexError, ValueError):
+                        content = None
+                    if content and len(content) >= 10:
+                        used = f"fallback/{self._fb_model}"
+                        logger.info("[AI分析] 备用通道成功 (%s)", used)
+                        return content, used, None
+                    logger.warning("[AI分析] 备用通道内容过短，重试 %d/%d",
+                                   attempt + 1, self._fb_retries)
+                elif resp.status_code == 429:
+                    wait_s = _retry_after_seconds(resp, 60)
+                    logger.warning("[AI分析] 备用通道限流，退避 %ds (%d/%d)",
+                                   wait_s, attempt + 1, self._fb_retries)
+                    time.sleep(wait_s)
+                    continue
+                else:
+                    logger.warning("[AI分析] 备用通道 HTTP %d (%d/%d)",
+                                   resp.status_code, attempt + 1, self._fb_retries)
+                time.sleep(30)
+            except (httpx.TimeoutException, httpx.RequestError) as e:
+                logger.warning("[AI分析] 备用通道网络错误: %s (%d/%d)",
+                               str(e)[:120], attempt + 1, self._fb_retries)
+                time.sleep(30)
+        logger.error("[AI分析] 备用通道 %d 次全败，放弃", self._fb_retries)
+        return None, None, None
 
     @staticmethod
     def _is_fatal_model_error(resp: httpx.Response) -> bool:

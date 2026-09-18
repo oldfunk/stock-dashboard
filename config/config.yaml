@@ -54,6 +54,14 @@ ai:
   model: "deepseek-v4-flash-free"   # 默认模型（自动发现+故障轮换，详见 ai_analyzer.FreeModelPool）
   temperature: 0.3
   max_tokens: 6000
+  # 免 Key 备用通道：主池全灭时每只股票兜底（默认 Pollinations，可配其它 OpenAI 兼容源）
+  fallback:
+    enabled: true
+    api_base: "https://text.pollinations.ai/openai"
+    model: "openai-fast"
+    temperature: 0.3
+    max_tokens: 6000
+    retries: 2
 
 # -------- Web 服务配置 --------
 web:
