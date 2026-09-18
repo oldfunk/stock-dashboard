@@ -29,14 +29,20 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · Op
 - 提交信息中文，写清「改了什么 + 为什么」
 - 改完更新 `docs/iteration-log.md`（勾掉 backlog + Changelog 追加）
 
+## 开工前
+
+开工前必须先读 `docs/handoff.md` + `docs/iteration-log.md` + `docs/architecture.md`。
+
 ## Git 工作流
 
 1. `git fetch origin && git rebase origin/main` 拉平上游
-2. 在 `nightly/YYYYMMDD` 分支上 commit（Hermes 作者）
+2. 在 `nightly/YYYYMMDD` 分支上 commit
 3. `git push origin HEAD`（只推 nightly，不碰 main）
 4. 多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
 
-**绝不**：在本地 main 上 commit、`git push origin main`、重启生产服务 `stock-dashboard.service`。pi1 部署由用户手动 pull + restart。
+**绝不**：在本地 main 上 commit、`git push origin main`、自动合并到 main、重启生产服务 `stock-dashboard.service`。所有合并到 main 的操作由用户手动执行。pi1 部署由用户手动 pull + restart。
+
+默认推送到 `nightly/*` 分支，永远不要自动合并到 main。
 
 ## 冒烟测试
 
