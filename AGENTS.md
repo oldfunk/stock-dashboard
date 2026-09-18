@@ -44,4 +44,12 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · Op
 
 ## 文档
 
-单一事实源：`docs/architecture.md`（架构真相源）、`docs/iteration-log.md`（迭代进程账）、`docs/roadmap.md`（总路线）。改系统前先读这些文件。
+单一事实源：docs/architecture.md（架构真相源）、docs/iteration-log.md（迭代进程账）、docs/roadmap.md（总路线）。改系统前先读这些文件。
+
+### 文档约定
+
+1. 所有设计文档放 docs/ 目录，文件名小写连字符（如 hermes-proxy-ai-analysis.md）
+2. 格式跟随现有文档：## 1. 编号章节 + 散文段落，不用表格、JSON 代码块、复选框
+3. 每篇文档头部写创建：日期 · 上游：来源文件 · 状态：方向/排期/完成
+4. 新文档先在 nightly/* 分支起草，用户批准后合入 main
+5. 不重复维护：同一信息只在一个文件里写，其他文件引用链接
