@@ -114,6 +114,31 @@ def check_veto_triggered(stock: dict, analysis: Optional[dict]) -> bool:
     return False
 
 
+def check_argument_drift(stock: dict, analysis: Optional[dict]) -> bool:
+    """规则 6: 论点漂移——入池理由含正面词但最新 AI 分析 signal=AVOID → 强制调出
+
+    入池理由（ai_watchlist.added_reason）是「低PE」「高ROE」「高质量」等正面描述，
+    但最新 AI 分析的 signal=AVOID，说明基本面已变，论点不再成立。
+    """
+    if not analysis:
+        return False
+    reason = stock.get('added_reason', '')
+    if not reason:
+        return False
+    trade = analysis.get('trade_strategy', {})
+    if isinstance(trade, str):
+        try:
+            trade = json.loads(trade)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    signal = trade.get('signal', '').upper()
+    if signal != 'AVOID':
+        return False
+    positive_keywords = ('低PE', '高ROE', '低估值', '高质量', '稳定',
+                         '成长', '护城河', '低估', '优质', '龙头')
+    return any(kw in reason for kw in positive_keywords)
+
+
 # ── B7 周报全覆盖校验（纯函数） ──
 
 def check_journal_coverage(pool_codes, content_md: str) -> list:
@@ -178,6 +203,10 @@ class WatchlistReviewer:
             if self.hard_rules_cfg.get('veto_triggered', True):
                 if check_veto_triggered(stock, analysis):
                     reasons.append('veto_triggered')
+
+            if self.hard_rules_cfg.get('argument_drift', True):
+                if check_argument_drift(stock, analysis):
+                    reasons.append('argument_drift')
 
             if reasons:
                 forced_out.append({
