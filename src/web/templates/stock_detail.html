@@ -465,18 +465,6 @@
     </section>
     {% endif %}
 
-    <!-- 3. 投资人笔记 -->
-    {% if ai_parsed.analysis %}
-    <section class="sd-section sd-note">
-        <h2 class="sd-section-title">投资人笔记</h2>
-        <div class="sd-note-body">
-            {% for paragraph in ai_parsed.analysis.split('\n') if paragraph.strip() %}
-            <p>{{ paragraph.strip() }}</p>
-            {% endfor %}
-        </div>
-    </section>
-    {% endif %}
-
     <!-- 3.5 六关 Checklist -->
     {% if ai_parsed.checklist %}
     {% set cl = ai_parsed.checklist %}
@@ -577,29 +565,6 @@
     </section>
     {% endif %}
 
-    <!-- 6.5 镜子测试 -->
-    {% if ai_parsed.mirror_test %}
-    {% set mt = ai_parsed.mirror_test %}
-    <section class="sd-section">
-        <h2 class="sd-section-title">镜子测试</h2>
-        <div class="sd-mirror">
-            {% if mt.statements %}
-            <ol class="sd-mirror-list">
-                {% for st in mt.statements %}
-                <li class="{{ 'sd-mirror-missing' if loop.index in (mt.missing or []) else '' }}">{{ st }}</li>
-                {% endfor %}
-            </ol>
-            {% endif %}
-            <div class="sd-mirror-verdict {{ 'sd-mirror-pass' if mt.passed else 'sd-mirror-fail' }}">
-                {% if mt.passed %}5 句话完整 - 通过{% else %}5 句话不完整 - 未通过（不买）{% endif %}
-            </div>
-            {% if mt.missing %}
-            <div class="sd-mirror-missing-note">缺失/敷衍句: {{ mt.missing|join(', ') }}</div>
-            {% endif %}
-        </div>
-    </section>
-    {% endif %}
-
     <!-- 6.7 快速否决红线 -->
     {% if ai_parsed.veto_checklist %}
     {% set vc = ai_parsed.veto_checklist %}
@@ -690,24 +655,6 @@
                 <span class="label">持有周期</span>
                 <span class="value">{{ trade_parsed.holding_period }}</span>
             </div>
-            {% endif %}
-        </div>
-    </section>
-    {% endif %}
-
-    <!-- 8. 逆向思考 -->
-    {% if ai_parsed.reverse_thinking %}
-    <section class="sd-section">
-        <h2 class="sd-section-title">逆向思考 — 什么情况下这家公司会死？</h2>
-        <div class="sd-reverse">
-            {% if ai_parsed.reverse_thinking is iterable and ai_parsed.reverse_thinking is not string %}
-            <ol>
-                {% for scenario in ai_parsed.reverse_thinking %}
-                <li>{{ scenario }}</li>
-                {% endfor %}
-            </ol>
-            {% else %}
-            <p>{{ ai_parsed.reverse_thinking }}</p>
             {% endif %}
         </div>
     </section>
@@ -883,108 +830,7 @@
         {% endif %}
     </section>
 
-    <!-- 11. 历次 AI 分析时间线 -->
-    <section class="sd-section">
-        <h2 class="sd-section-title">历次 AI 分析时间线</h2>
-        {% if analysis_history %}
-        {# 评分趋势 SVG 折线图（无依赖，纯 Jinja 生成） #}
-        {% set ns = namespace(points=[]) %}
-        {% set scores = [] %}
-        {% for h in analysis_history %}
-            {% if h.score is not none %}
-                {% set _ = scores.append(h.score) %}
-            {% endif %}
-        {% endfor %}
-        {% set max_score = (scores|max) if scores else 100 %}
-        {% set min_score = (scores|min) if scores else 0 %}
-        {% set score_range = (max_score - min_score) if max_score != min_score else 1 %}
-        {% set svg_w = 600 %}
-        {% set svg_h = 120 %}
-        {% set pad = 20 %}
-        {% set plot_w = svg_w - 2 * pad %}
-        {% set plot_h = svg_h - 2 * pad %}
-        {% set n = analysis_history|length %}
-        {% if n >= 2 %}
-        <div class="sd-score-chart">
-            <svg width="{{ svg_w }}" height="{{ svg_h }}" viewBox="0 0 {{ svg_w }} {{ svg_h }}">
-                <line x1="{{ pad }}" y1="{{ svg_h - pad }}" x2="{{ svg_w - pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
-                <line x1="{{ pad }}" y1="{{ pad }}" x2="{{ pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
-                {% for h in analysis_history|reverse %}
-                {% set i = loop.index0 %}
-                {% set x = pad + (plot_w * i / (n - 1)) if n > 1 else pad + plot_w / 2 %}
-                {% set y = svg_h - pad - (plot_h * (h.score - min_score) / score_range) if h.score is not none else svg_h - pad %}
-                {% set _ = ns.points.append(x ~ ',' ~ y) %}
-                <circle cx="{{ x }}" cy="{{ y }}" r="4" fill="var(--color-up)">
-                    <title>{{ h.analysis_date }} | 评分 {{ h.score }} | Signal {{ h.signal|default('--') }}</title>
-                </circle>
-                {% endfor %}
-                <polyline points="{{ ns.points|join(' ') }}" fill="none" stroke="var(--color-up)" stroke-width="2"/>
-            </svg>
-        </div>
-        {% endif %}
-
-        <div class="sd-timeline">
-            {% for h in analysis_history %}
-            {% set ai_obj = h.ai_analysis|from_json if h.ai_analysis else {} %}
-            {% set trade_obj = h.ai_trade_strategy|from_json if h.ai_trade_strategy else {} %}
-            {% set signal = (trade_obj.signal|upper) if trade_obj.get('signal') else '' %}
-            {% set prev = analysis_history[loop.index0 + 1] if loop.index0 < (analysis_history|length - 1) else none %}
-            {% set delta = (h.score - prev.score) if h.score and prev and prev.score else none %}
-            <div class="sd-timeline-item">
-                <div class="sd-timeline-date">{{ h.analysis_date }}</div>
-                <div class="sd-timeline-score">
-                    {{ h.score|default('--') }}
-                    {% if delta is not none %}
-                    {% set delta_cls = 'up' if delta > 0 else ('down' if delta < 0 else 'flat') %}
-                    {% set delta_sym = '↑' if delta > 0 else ('↓' if delta < 0 else '→') %}
-                    <span class="sd-score-delta {{ delta_cls }}">{{ delta_sym }}{{ delta|abs|round(1) }}</span>
-                    {% endif %}
-                </div>
-                <div>
-                    {% if signal == 'BUY' %}
-                    <span class="sd-signal-tag sd-signal-buy">买入</span>
-                    {% elif signal == 'HOLD' %}
-                    <span class="sd-signal-tag sd-signal-hold">持有</span>
-                    {% elif signal == 'AVOID' %}
-                    <span class="sd-signal-tag sd-signal-avoid">回避</span>
-                    {% else %}
-                    <span class="sd-signal-tag sd-signal-none">--</span>
-                    {% endif %}
-                </div>
-                <div class="sd-timeline-note" onclick="this.nextElementSibling.classList.toggle('open')">
-                    {{ ai_obj.analysis|default(h.ai_analysis)|truncate(120) }}
-                    <span class="sd-timeline-toggle">[展开]</span>
-                </div>
-                <div class="sd-timeline-detail">
-                    {% if ai_obj.analysis %}
-                    <p><span class="label">投资人笔记：</span>{{ ai_obj.analysis }}</p>
-                    {% endif %}
-                    {% if ai_obj.moat_evaluation %}
-                    <p><span class="label">护城河：</span>{{ ai_obj.moat_evaluation }}</p>
-                    {% endif %}
-                    {% if trade_obj.signal or trade_obj.buy_zone or trade_obj.target_price %}
-                    <p>
-                        <span class="label">交易策略：</span>
-                        {{ trade_obj.signal|default('--') }}
-                        {% if trade_obj.buy_zone %} | 买入区间 {{ trade_obj.buy_zone }}{% endif %}
-                        {% if trade_obj.target_price %} | 目标价 {{ trade_obj.target_price }}{% endif %}
-                        {% if trade_obj.stop_loss %} | 止损 {{ trade_obj.stop_loss }}{% endif %}
-                        {% if trade_obj.holding_period %} | 持有期 {{ trade_obj.holding_period }}{% endif %}
-                    </p>
-                    {% endif %}
-                    {% if ai_obj.intrinsic_value and ai_obj.intrinsic_value.method %}
-                    <p><span class="label">估值方法：</span>{{ ai_obj.intrinsic_value.method }}</p>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="sd-empty">暂无 AI 分析历史</p>
-        {% endif %}
-    </section>
-
-    <!-- 12. 在池状态 -->
+    <!-- 11. 在池状态 -->
     {% if in_watchlist %}
     <section class="sd-section">
         <h2 class="sd-section-title">在池状态</h2>

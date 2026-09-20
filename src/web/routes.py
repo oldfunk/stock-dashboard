@@ -465,9 +465,6 @@ async def index(request: Request):
         except Exception:
             pass
 
-    # 获取最新笔记摘要
-    ai_journal_latest = AiJournalDAO().get_latest()
-
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
@@ -478,7 +475,6 @@ async def index(request: Request):
         "run_log": run_log,
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
-        "ai_journal_latest": ai_journal_latest,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
@@ -1208,216 +1204,99 @@ async def watchlist_detail(request: Request, code: str):
 #     })
 
 
-@app.get("/api/journal/latest")
-async def api_journal_latest():
-    """最新笔记 JSON"""
-    journal = AiJournalDAO().get_latest()
-    if not journal:
-        raise HTTPException(status_code=404, detail="无笔记")
-    return journal
+# 投资笔记 API 已移除（2026-09-20 路线调整）
+# @app.get("/api/journal/latest")
+# async def api_journal_latest():
+#     """最新笔记 JSON"""
+#     journal = AiJournalDAO().get_latest()
+#     if not journal:
+#         raise HTTPException(status_code=404, detail="无笔记")
+#     return journal
 
 
-@app.get("/api/journal/list")
-async def api_journal_list():
-    """笔记列表（轻量，仅 date + title）"""
-    return AiJournalDAO().list_all()
+# @app.get("/api/journal/list")
+# async def api_journal_list():
+#     """笔记列表（轻量，仅 date + title）"""
+#     return AiJournalDAO().list_all()
 
 
-@app.get("/api/journal/{journal_date}")
-async def api_journal_by_date(journal_date: str):
-    """指定日期笔记 JSON（缺失 404，与 /latest 一致）"""
-    journal = AiJournalDAO().get_by_date(journal_date)
-    if not journal:
-        raise HTTPException(status_code=404, detail="Journal not found")
-    return journal
+# @app.get("/api/journal/{journal_date}")
+# async def api_journal_by_date(journal_date: str):
+#     """指定日期笔记 JSON（缺失 404，与 /latest 一致）"""
+#     journal = AiJournalDAO().get_by_date(journal_date)
+#     if not journal:
+#         raise HTTPException(status_code=404, detail="Journal not found")
+#     return journal
 
 
-def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:
-    """B5 论点漂移（实时计算）：打脸回归 + 池内股跨轮 Signal/verdict 翻转。
-    输入为两期 actions_summary 解析后的 dict；screening 跨轮取最近两轮。"""
-    drifts = []
-    cur_d = (current_json.get('details') or {}) if current_json else {}
-    prev_d = (previous_json.get('details') or {}) if previous_json else {}
-    cur_add = {i.get('code') for i in cur_d.get('add', []) if i.get('code')}
-    prev_out = {i.get('code') for i in prev_d.get('remove', []) if i.get('code')}
-    for code in sorted(cur_add & prev_out):
-        drifts.append({
-            "type": "re_entry",
-            "message": f"打脸回归：{code} 上期调出本期调回，检查当初调出理由是否站得住",
-            "severity": "warning",
-        })
-    # 跨轮 Signal/verdict 翻转（池内相关股）
-    pool_codes = set()
-    for d in (cur_d, prev_d):
-        for a in ('add', 'remove', 'keep', 'watch'):
-            for i in d.get(a, []):
-                if i.get('code'):
-                    pool_codes.add(i.get('code'))
-    if not pool_codes:
-        return drifts
-    run_ids = _latest_two_run_ids()
-    if len(run_ids) < 2:
-        return drifts
-    prev_rows = {r['code']: r for r in
-                 ScreeningResultDAO().get_results_for_run(run_ids[1])}
-    cur_rows = {r['code']: r for r in
-                ScreeningResultDAO().get_results_for_run(run_ids[0])}
-    for code in sorted(pool_codes):
-        p, c = prev_rows.get(code), cur_rows.get(code)
-        if not p or not c:
-            continue
-        ps = _trade_signal(p)
-        cs = _trade_signal(c)
-        if ps and cs and ps != cs:
-            drifts.append({
-                "type": "signal_flip",
-                "message": f"Signal 反转：{code} 上轮 {ps} → 本轮 {cs}",
-                "severity": "warning",
-            })
-        pv, cv = _ai_verdict(p), _ai_verdict(c)
-        if pv and cv and pv != cv:
-            drifts.append({
-                "type": "verdict_flip",
-                "message": f"结论反转：{code} 上轮 {pv} → 本轮 {cv}",
-                "severity": "warning",
-            })
-    return drifts
+# _detect_pool_drift 已移除（仅被已注释的 journal conflicts 路由调用）
 
 
-def _latest_two_run_ids() -> list[str]:
-    with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT run_id FROM screening_result "
-            "ORDER BY run_date DESC, run_id DESC LIMIT 2").fetchall()
-    return [r[0] for r in rows]
+# 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
+# @app.get("/api/journal/{journal_date}/conflicts")
+# async def api_journal_conflicts(journal_date: str):
+#     """笔记矛盾检测分析"""
+#     journal = AiJournalDAO().get_by_date(journal_date)
+#     if not journal:
+#         return {"error": "Journal not found"}
+#     
+#     previous = AiJournalDAO().get_previous(journal_date)
+#     
+#     if not previous:
+#         return {"has_conflicts": False, "message": "第一期笔记，无可对比"}
+#     
+#     # 简单的矛盾检测逻辑
+#     conflicts = []
+#     
+#     # 检查标题变化
+#     if journal['title'] != previous['title']:
+#         conflicts.append({
+#             "type": "title_change",
+#             "message": f"标题从 '{previous['title']}' 变为 '{journal['title']}'",
+#             "severity": "info"
+#         })
+#     
+#     # 检查内容长度变化
+#     content_length_change = len(journal['content_md']) - len(previous['content_md'])
+#     if abs(content_length_change) > 500:
+# 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
 
 
-def _trade_signal(row: dict):
-    try:
-        t = row.get('ai_trade_strategy')
-        return (json.loads(t) if isinstance(t, str) else t or {}).get('signal')
-    except Exception:
-        return None
-
-
-def _ai_verdict(row: dict):
-    try:
-        a = row.get('ai_analysis')
-        return (json.loads(a) if isinstance(a, str) else a or {}).get('verdict')
-    except Exception:
-        return None
-
-
-@app.get("/api/journal/{journal_date}/conflicts")
-async def api_journal_conflicts(journal_date: str):
-    """笔记矛盾检测分析"""
-    journal = AiJournalDAO().get_by_date(journal_date)
-    if not journal:
-        return {"error": "Journal not found"}
-    
-    previous = AiJournalDAO().get_previous(journal_date)
-    
-    if not previous:
-        return {"has_conflicts": False, "message": "第一期笔记，无可对比"}
-    
-    # 简单的矛盾检测逻辑
-    conflicts = []
-    
-    # 检查标题变化
-    if journal['title'] != previous['title']:
-        conflicts.append({
-            "type": "title_change",
-            "message": f"标题从 '{previous['title']}' 变为 '{journal['title']}'",
-            "severity": "info"
-        })
-    
-    # 检查内容长度变化
-    content_length_change = len(journal['content_md']) - len(previous['content_md'])
-    if abs(content_length_change) > 500:
-        direction = "增加" if content_length_change > 0 else "减少"
-        conflicts.append({
-            "type": "content_length_change",
-            "message": f"内容长度{direction} {abs(content_length_change)} 字符",
-            "severity": "info"
-        })
-    
-    # 检查模型变化
-    current_actions = journal['actions_summary']
-    previous_actions = previous['actions_summary']
-    
-    if current_actions and previous_actions:
-        try:
-            current_json = json.loads(current_actions)
-            previous_json = json.loads(previous_actions)
-            
-            if current_json.get('model') != previous_json.get('model'):
-                conflicts.append({
-                    "type": "model_change",
-                    "message": f"分析模型从 {previous_json.get('model', '未知')} 变为 {current_json.get('model', '未知')}",
-                    "severity": "info"
-                })
-        except:
-            pass
-    
-    # 检查市场环境变化
-    if journal['market_snapshot'] != previous['market_snapshot']:
-        conflicts.append({
-            "type": "market_change",
-            "message": "市场环境发生变化",
-            "severity": "info"
-        })
-
-    # B5 论点漂移：打脸回归 + 池内股跨轮 Signal/verdict 翻转（实时计算，免新表）
-    try:
-        conflicts.extend(_detect_pool_drift(current_json, previous_json))
-    except Exception:
-        pass
-
-    return {
-        "has_conflicts": len(conflicts) > 0,
-        "conflicts": conflicts,
-        "previous_date": previous['journal_date'],
-        "current_date": journal['journal_date']
-    }
-
-
-@app.get("/paper", response_class=HTMLResponse)
-async def paper_page(request: Request):
-    """虚拟盘面板（只读）：账户 + 持仓 + 最近委托 + 最新净值。
-
-    纸盘表缺失时（如服务尚未重启迁移）降级为空状态，不 500。
-    """
-    import sqlite3
-    from src.models.database import (
-        PaperAccountDAO, PaperOrderDAO, PaperPositionDAO, PaperNavDAO,
-        StockSnapshotDAO,
-    )
-    paper_ready = True
-    account, positions, orders, nav_latest = None, [], [], None
-    try:
-        account = PaperAccountDAO().get()
-        positions = PaperPositionDAO().list_all()
-        orders = PaperOrderDAO().list_recent(limit=50)
-        nav_latest = PaperNavDAO().get_latest()
-        snap_dao = StockSnapshotDAO()
-        for p in positions:
-            snap = snap_dao.get_by_code(p["code"])
-            p["name"] = (snap or {}).get("name") or ""
-    except sqlite3.OperationalError:
-        paper_ready = False
-        account, positions, orders, nav_latest = None, [], [], None
-    config = load_config()
-    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-    return templates.TemplateResponse(request, "paper.html", {
-        "request": request,
-        "page_title": page_title,
-        "paper_ready": paper_ready,
-        "account": account,
-        "positions": positions,
-        "orders": orders,
-        "nav_latest": nav_latest,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+# 虚拟盘路由已移除（2026-09-20 路线调整，量化交易系统归档）
+# @app.get("/paper", response_class=HTMLResponse)
+# async def paper_page(request: Request):
+#     """虚拟盘面板（只读）：账户 + 持仓 + 最近委托 + 最新净值。"""
+#     import sqlite3
+#     from src.models.database import (
+#         PaperAccountDAO, PaperOrderDAO, PaperPositionDAO, PaperNavDAO,
+#         StockSnapshotDAO,
+#     )
+#     paper_ready = True
+#     account, positions, orders, nav_latest = None, [], [], None
+#     try:
+#         account = PaperAccountDAO().get()
+#         positions = PaperPositionDAO().list_all()
+#         orders = PaperOrderDAO().list_recent(limit=50)
+#         nav_latest = PaperNavDAO().get_latest()
+#         snap_dao = StockSnapshotDAO()
+#         for p in positions:
+#             snap = snap_dao.get_by_code(p["code"])
+#             p["name"] = (snap or {}).get("name") or ""
+#     except sqlite3.OperationalError:
+#         paper_ready = False
+#         account, positions, orders, nav_latest = None, [], [], None
+#     config = load_config()
+#     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+#     return templates.TemplateResponse(request, "paper.html", {
+#         "request": request,
+#         "page_title": page_title,
+#         "paper_ready": paper_ready,
+#         "account": account,
+#         "positions": positions,
+#         "orders": orders,
+#         "nav_latest": nav_latest,
+#         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+#     })
 
 
 def run_server():
