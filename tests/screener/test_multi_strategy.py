@@ -1,6 +1,6 @@
 """多策略筛选模式单测：三策略独立候选池 + strategy_tags 落库。
 
-覆盖任务 t_201d5665：
+覆盖任务 M2-2：
 - test_multi_strategy_screening：score_candidates(multi_strategy=True)
   按 strategies.yaml 三策略阈值输出独立 Top-N 池，strategy_tags 为全量命中标签
 - test_strategy_tags_persistence：strategy_tags 经 save_batch →
@@ -76,24 +76,32 @@ def _base_config():
 
 
 def _demo_strategies():
-    """与 config/strategies.yaml 同口径的注入式策略（单测不依赖文件内容漂移）。"""
+    """与 config/strategies.yaml 同口径的注入式策略（单测不依赖文件内容漂移）。
+
+    注意：扁平结构，阈值直接在策略根下，无 thresholds 子键。
+    """
     return {
-        'growth': {'thresholds': {
-            'roe_avg_5y_min': 0.15, 'pe_max': 25.0, 'gross_margin_min': 0.30,
-            'net_margin_min': 0.10, 'debt_ratio_max': 0.50}},
-        'dividend': {'thresholds': {
-            'roe_avg_5y_min': 0.08, 'pe_max': 20.0, 'gross_margin_min': 0.15,
-            'net_margin_min': 0.05, 'debt_ratio_max': 0.60,
-            'dividend_yield_min': 0.04}},
-        'turnaround': {'thresholds': {
-            'roe_avg_5y_min': 0.05, 'pe_max': 15.0, 'gross_margin_min': 0.10,
-            'net_margin_min': 0.03, 'debt_ratio_max': 0.70}},
+        'growth': {
+            'roe_avg_5y_min': 15, 'pe_max': 50, 'gross_margin_min': 25,
+            'net_margin_min': 10, 'debt_ratio_max': 60,
+            'fcf_yield_min': 0.03,
+        },
+        'dividend': {
+            'roe_avg_5y_min': 12, 'pe_max': 20, 'gross_margin_min': 15,
+            'net_margin_min': 5, 'debt_ratio_max': 50,
+            'dividend_yield_min': 4, 'fcf_yield_min': 0.02,
+        },
+        'turnaround': {
+            'roe_avg_5y_min': 5, 'pe_max': 15, 'gross_margin_min': 10,
+            'net_margin_min': 3, 'debt_ratio_max': 70,
+            'fcf_yield_min': 0.01, 'debt_to_equity_max': 2.0,
+        },
     }
 
 
 class TestMultiStrategyScreening:
     def test_multi_strategy_screening(self):
-        a = _base_stock(code='AAA', name='全能')
+        a = _base_stock(code='AAA', name='全能', fcf_5y_sum=150_000_000_00)
         b = _base_stock(code='BBB', name='红利反转',
                         gross_margin=20.0, gross_margin_5y_avg=20.0)
         c = _base_stock(code='CCC', name='高估', pe=25.0)
@@ -127,10 +135,10 @@ class TestMultiStrategyScreening:
 
     def test_load_strategies_reads_yaml(self):
         cfg = load_strategies()
-        assert set(cfg) >= {'growth', 'dividend', 'turnaround'}
-        assert cfg['growth']['thresholds']['gross_margin_min'] == 0.30
-        assert cfg['dividend']['thresholds']['dividend_yield_min'] == 0.04
-        assert cfg['turnaround']['thresholds']['pe_max'] == 15.0
+        assert set(cfg) == {'growth', 'dividend', 'turnaround'}
+        assert cfg['growth']['gross_margin_min'] == 25
+        assert cfg['dividend']['dividend_yield_min'] == 4
+        assert cfg['turnaround']['pe_max'] == 15
 
 
 class TestStrategyTagsPersistence:

@@ -119,6 +119,14 @@
         <div class="wl-reason">{{ stock.added_reason }}</div>
         {% endif %}
 
+        {# ── 监控条件标签 ── #}
+        {% if stock.monitor_condition %}
+        <div class="wl-monitor-tag" title="监控条件：{{ stock.monitor_condition }}">
+            <span class="wl-monitor-icon">🔔</span>
+            <span class="wl-monitor-text">{{ stock.monitor_condition }}</span>
+        </div>
+        {% endif %}
+
         {# ── 评分拆解（与候选卡同结构，复用 toggleScoreDetail） ── #}
         {% if stock.score_detail_parsed %}
         <div class="score-detail">
@@ -372,4 +380,20 @@
 .ai-verdict-pass .ai-summary-value { color: var(--green, #137333); }
 .ai-verdict-fail .ai-summary-value { color: var(--red, #c5221f); }
 .ai-verdict-gray .ai-summary-value { color: var(--gold, #b06000); }
+
+/* 监控条件标签 */
+.wl-monitor-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 4px 0;
+    padding: 2px 8px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #856404;
+}
+.wl-monitor-icon { font-size: 12px; }
+.wl-monitor-text { font-family: monospace; }
 </style>

@@ -81,6 +81,22 @@ class AiWatchlistDAO:
                  if confidence else (now_cn().strftime("%Y-%m-%d"), code))
             )
 
+    def update_monitor_condition(self, code: str, condition: str) -> bool:
+        """更新监控条件（JSON 字符串）。condition 为 None 时清空。"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "UPDATE ai_watchlist SET monitor_condition = ? WHERE code = ?",
+                (condition, code))
+            return cur.rowcount > 0
+
+    def get_monitor_condition(self, code: str) -> Optional[str]:
+        """读取监控条件 JSON 字符串，无则返回 None"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT monitor_condition FROM ai_watchlist WHERE code = ?",
+                (code,)).fetchone()
+        return row[0] if row else None
+
     def clear(self):
         """清空观察池（首次初始化或重置时用）"""
         with db_conn() as conn:

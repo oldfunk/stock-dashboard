@@ -63,6 +63,23 @@ ai:
     max_tokens: 6000
     retries: 2
 
+# -------- Hermes 代理 AI 分析（通用，任何 Hermes 实例可接入） --------
+# 主通道：付费 API（OpenRouter 等），优先使用
+# 降级通道：免费 API（Pollinations 等），主通道失败时兜底
+# api_key 不存 Git，在 .env 或本地配置中设置
+hermes_proxy:
+  primary:
+    api_base: "https://openrouter.ai/api/v1"
+    model: "anthropic/claude-sonnet-5"
+    api_key: null
+    timeout: 300
+  fallback:
+    api_base: "https://text.pollinations.ai/openai"
+    model: "openai-fast"
+    api_key: null
+    timeout: 300
+    retries: 2
+
 # -------- Web 服务配置 --------
 web:
   host: "0.0.0.0"
@@ -102,3 +119,4 @@ ai_review:
     price_above_buyzone_pct: 20    # 越出买入区上限百分比
     roe_collapse_pp: 10            # ROE 同比下降 pp
     veto_triggered: true            # AI 快速否决红线（一票否决）触发强制调出
+    argument_drift: true            # 论点漂移（入池理由正面词 + AVOID）强制调出

@@ -1071,6 +1071,25 @@ async def api_watchlist_remove(code: str):
     return {"ok": True, "code": code}
 
 
+@app.get("/api/watchlist/{code}/monitor")
+async def api_watchlist_monitor_get(code: str):
+    """读取监控条件（JSON 字符串）"""
+    cond = AiWatchlistDAO().get_monitor_condition(code)
+    return {"code": code, "monitor_condition": cond}
+
+
+@app.post("/api/watchlist/{code}/monitor")
+async def api_watchlist_monitor_update(code: str, body: dict):
+    """更新监控条件。body: {"monitor_condition": "{...}" 或 null 清空"""
+    cond = body.get("monitor_condition")
+    if cond is not None and not isinstance(cond, str):
+        raise HTTPException(status_code=400, detail="monitor_condition 必须为 JSON 字符串或 null")
+    ok = AiWatchlistDAO().update_monitor_condition(code, cond)
+    if not ok:
+        raise HTTPException(status_code=404, detail="股票不在观察池")
+    return {"ok": True, "code": code, "monitor_condition": cond}
+
+
 # ── AI 观察池 + 投资笔记 ──────────────────────────────────────
 
 @app.get("/api/ai-watchlist")

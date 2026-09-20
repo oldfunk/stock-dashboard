@@ -616,7 +616,7 @@ class ValueScreener:
             cfg = (strategies or {}).get(name)
             if not cfg:
                 continue
-            thresholds = cfg.get('thresholds', {})
+            thresholds = cfg
             pool = []
             for c in candidates:
                 reasons = self.check_criteria(dict(c))
