@@ -1,7 +1,7 @@
 # Stock Dashboard — AI 驱动的 A 股价值投资选股看板
 
 > 全自动 · 量化筛选 + 结构化 AI 分析 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
-> 最终目标：让 AI 接管投资决策（见 `docs/roadmap.md`）
+> 开发重心：价值投资分析面板优化（P1 面板深化 → P2 体验优化），量化交易系统已归档
 
 ---
 
@@ -61,23 +61,18 @@ stock-dashboard/
 │   │   ├── ai_analyzer.py      # LLM 结构化分析 + FreeModelPool
 │   │   └── watchlist_reviewer.py # AI 观察池复盘（周六）
 │   ├── models/
-│   │   ├── database.py         # SQLite DAO（screening/analysis/paper 等）
+│   │   ├── database.py         # SQLite DAO（screening/analysis 等）
 │   │   └── ai_watchlist.py     # 观察池 DAO
-│   ├── paper/                 # M4a 虚拟盘引擎（撮合+信号+调度闭环）
-│   │   ├── broker.py           # BrokerAdapter 接口 + PaperBroker（T+1/费用/风控）
-│   │   └── engine.py           # 信号编排：ai_trade_strategy → 下单/成交/日终净值
 │   ├── web/
-│   │   ├── routes.py           # FastAPI 路由（含 /paper 只读虚拟盘面板）
+│   │   ├── routes.py           # FastAPI 路由
 │   │   ├── templates/          # Jinja2 模板
-│   │   │   ├── index.html            # 首页（AI 观察池 + 钉选 Tab）
-│   │   │   ├── stock_detail.html     # 详情页（4 标签页）
-│   │   │   ├── candidates.html       # 历史候选池（含策略 Tab）
+│   │   │   ├── index.html            # 首页（候选股总览 + AI 观察池 + 钉选 Tab）
+│   │   │   ├── stock_detail.html     # 详情页（AI 分析 + 估值 + 历史时间线）
 │   │   │   ├── watchlist_detail.html # 观察池详情
 │   │   │   ├── journal.html          # 投资日记
 │   │   │   ├── journal_compare.html  # 日记对比
-│   │   │   ├── paper.html            # 虚拟盘面板（账户/持仓/委托/净值）
 │   │   │   ├── _stock_list.html      # 候选卡 partial
-│   │   │   └── _watchlist_card.html  # 观察池卡 partial（与候选卡视觉收敛，池专属保留）
+│   │   │   └── _watchlist_card.html  # 观察池卡 partial
 │   │   └── static/             # CSS/JS 静态资源
 │   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
 │   ├── scheduler.py            # 内置定时调度（daemon 线程）
@@ -93,19 +88,17 @@ stock-dashboard/
 │   ├── check_upstream.py       # 上游数据月度巡检
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 317 passed，2026-09-18 pi1 gate 全绿）
+├── tests/                      # pytest（基线 319 passed，2026-09-20 pi1 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
-│   ├── models/                 # DAO + paper 表单测
-│   ├── paper/                  # Broker 单测
+│   ├── models/                 # DAO 表单测
 │   └── web/                    # 路由 + 模板渲染单测
 ├── data/db/                    # SQLite 数据库（gitignore）
 ├── docs/
 │   ├── architecture.md         # 架构真相源
-│   ├── roadmap.md              # 总路线 M1–M4d
+│   ├── roadmap.md              # 总路线（P1 面板深化 → P2 体验优化）
 │   ├── iteration-log.md        # 迭代进程账（Hermes 上下文源）
 │   ├── handoff.md              # 班次交接速览
-│   ├── paper-trading.md        # 虚拟盘/量化接入选型
 │   └── strategies-dry-run.md   # 多策略 dry-run 文档
 └── tools/berkshire/            # 上游 AI Berkshire 对照工具
 ```
@@ -118,7 +111,7 @@ stock-dashboard/
 
 **不靠排名，只靠及格线。** 基于 AI Berkshire 7 条门规的硬性指标过滤，结合 LLM 结构化分析，每只股票必须通过全部门规才能进入候选池。
 
-候选股展示 4 个结构化标签页（Analysis / Strategy / Risks / Trade），Trade 标签含 Signal + 置信度 + 买入区间 + 目标价 + 止损 + 止盈；候选页策略 Tab（全部/成长/红利/反转）按 `strategy_tags` 过滤；首页观察池卡片已与候选卡视觉收敛（摘要/评分拆解/AI 行/trade 指引/历史时间线，池徽标保留）。
+候选股展示 4 个结构化标签页（Analysis / Strategy / Risks / Trade），Trade 标签含 Signal + 置信度 + 买入区间 + 目标价 + 止损 + 止盈；首页观察池卡片已与候选卡视觉收敛（摘要/评分拆解/AI 行/trade 指引/历史时间线，池徽标保留）。
 
 ### 每日流水线（交易日 15:30，完整流程见 `architecture.md` §2）
 
@@ -126,9 +119,9 @@ stock-dashboard/
 1. 腾讯行情 → 全 A 股行情 → 初筛预过滤
 2. AKShare 财务采集（yjbb + 深度补充，含兜底链 C2/C2.5）
 3. 历史财务采集 → financial_history → financial_summary（5y/10y 均值）
-4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只（含 strategy_tags）
+4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只
 5. K 线拉取 → AI 分析（每日；Zen 免费通道 403 不可用，走免 Key 备用通道；失败可用 scripts/retry_ai.py 补跑）
-6. AI 分析后 → 纸盘交易（M4a：信号→委托→持仓→净值，面板 /paper）→ 每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal（B6/B7 模板，待 live 验证）
+6. 每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal（B6/B7 模板，待 live 验证）
 ```
 
 ### AI Berkshire 7 条门规
@@ -219,8 +212,7 @@ stock-dashboard/
 - **AI 分析** — OpenAI 兼容 API + FreeModelPool（ling 金融模型优先 + 自动故障轮换 + 429 尊重 Retry-After；Zen 免费通道 9/07 起 403 不可用，免 Key 备用通道已部署）
 - **Web 看板** — FastAPI + Jinja2（候选卡 `_stock_list.html` / 观察池卡 `_watchlist_card.html` 双 partial，视觉已收敛，样式各写在 partial 内）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-18 pi1 基线 317 passed）
-- **虚拟盘（M4a）** — 自研 `src/paper/` 引擎 + `/paper` 只读面板：T+1 / 100 股整数倍 / A 股费用全建模 / 风控闸（单股 ≤20% · 总仓 ≤80% · 回撤 -15% 禁买），详见 `paper-trading.md`
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-20 pi1 基线 319 passed）
 
 ---
 
@@ -260,7 +252,6 @@ stock-dashboard/
 | 文档 | 定位 |
 |---|---|
 | `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S7 |
-| `docs/roadmap.md` | 总路线 M1–M4d |
+| `docs/roadmap.md` | 总路线（P1 面板深化 → P2 体验优化） |
 | `docs/iteration-log.md` | 迭代进程账（Hermes agent 上下文源，含 backlog） |
 | `docs/handoff.md` | 班次交接速览（历史追加不删） |
-| `docs/paper-trading.md` | 虚拟盘/量化接入选型 |
