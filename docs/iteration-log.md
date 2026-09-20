@@ -400,3 +400,18 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - **scheduler 异步触发**（`src/scheduler.py`）：`_trigger_paper_trading_async()` 在 `_trigger_ai_analysis_async()` 完成后异步调用 `run_paper_trading()`，每日流水线自动执行。config.yaml 新增 `paper:` 配置段（初始现金/滑点/费用/仓位上限/风控阈值）。
 - 想法/为什么：M4a 三部曲（撮合→信号→调度）闭环，每日 15:30 选股→AI 分析→纸盘自动执行，积累模拟交易数据。风控闸严格（drawdown 用 `>` 不用 `>=`），engine 仓位预留滑点余量避免边界触发。
 - 冒烟：37 单测全过（broker 20 + engine 17），pi1 同步验证 `3ee992e`。
+
+### 2026-09-20（M2 策略分化 + M3 持有纪律 + t4 Hermes 代理 + t5 回测 + t6 live 验证）
+
+- **M2-1**：`config/strategies.yaml` 重写为扁平阈值结构（growth/dividend/turnaround），`value_screener.score_candidates` 适配扁平结构。5 单测通过。
+- **M2-2/M2-3**：orchestrator 多策略集成已验证（`_is_multi_strategy` → `run_screener` → `_log_strategy_pool_sizes`），3 单测通过。
+- **M3-1**：`watchlist_reviewer.py` 新增 `check_argument_drift()`——入池理由含正面词（低PE/高ROE/优质等）且 signal=AVOID → 标记漂移强制调出。`_apply_hard_rules()` 集成。10 单测通过。
+- **M3-2a**：`ai_watchlist` 表新增 `monitor_condition` 字段（TEXT），`AiWatchlistDAO` 新增 `update_monitor_condition()` / `get_monitor_condition()`。6 单测通过。
+- **M3-2b**：`watchlist_reviewer.py` 新增 `_check_monitor_conditions()` / `_get_metric_value()` / `_compare()`，支持 pe/roe/gross_margin/net_margin/debt_ratio/dividend_yield/roe_volatility/fcf_yield/current_price 九种指标，lt/le/gt/ge/eq 五种操作符。触发写入 `ai_watchlist_history`（action=monitor_triggered）。15 单测通过。
+- **M3-2c**：`_watchlist_card.html` 新增监控条件标签（黄色背景 + JSON 文本）。
+- **M3-2d**：`routes.py` 新增 `GET/POST /api/watchlist/{code}/monitor` 端点。5 单测通过。
+- **t4**：`src/hermes_proxy/server.py` 通用 Hermes 代理服务（FastAPI + `/api/analyze` + `/api/health`），主通道+降级通道双通道。`config.yaml` 新增 `hermes_proxy` 段。5 单测通过。不修改 pi2 任何文件。
+- **t5**：`scripts/backtest_topk.py` TopK 离线回测脚本，支持日/周/月再平衡，输出 JSON 报告。
+- **t6**：pi1 live 验证——中邮科技 PE=-45.2 < 20 触发监控条件，history 记录已写入。端到端链路验证通过。
+- 想法/为什么：M2 三策略分流为后续策略差异化打基础；M3 论点漂移 + 监控条件让观察池从被动展示变为主动预警；t4 通用代理服务让任何 Hermes 实例都能接入 AI 分析，不绑定特定设备。
+- 冒烟：全部单测通过（M2: 10, M3-1: 10, M3-2a: 6, M3-2b: 15, M3-2d: 5, t4: 5），pi1 live 验证通过。
