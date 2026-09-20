@@ -1191,55 +1191,21 @@ async def watchlist_detail(request: Request, code: str):
     })
 
 
-@app.get("/journal", response_class=HTMLResponse)
-async def journal_page(request: Request):
-    """投资笔记页（默认显示最新一篇）"""
-    latest = AiJournalDAO().get_latest()
-    history_list = AiJournalDAO().list_all()
-    config = load_config()
-    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-    return templates.TemplateResponse(request, "journal.html", {
-        "request": request,
-        "page_title": page_title,
-        "journal": latest,
-        "history_list": history_list,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
-
-
-@app.get("/journal/{journal_date}", response_class=HTMLResponse)
-async def journal_by_date(request: Request, journal_date: str):
-    """指定日期笔记页"""
-    journal = AiJournalDAO().get_by_date(journal_date)
-    history_list = AiJournalDAO().list_all()
-    config = load_config()
-    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-    return templates.TemplateResponse(request, "journal.html", {
-        "request": request,
-        "page_title": page_title,
-        "journal": journal,
-        "history_list": history_list,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
-
-
-@app.get("/journal/compare/{journal_date1}/{journal_date2}", response_class=HTMLResponse)
-async def journal_compare(request: Request, journal_date1: str, journal_date2: str):
-    """历史笔记对比页"""
-    journal1 = AiJournalDAO().get_by_date(journal_date1)
-    journal2 = AiJournalDAO().get_by_date(journal_date2)
-    history_list = AiJournalDAO().list_all()
-    config = load_config()
-    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-    
-    return templates.TemplateResponse(request, "journal_compare.html", {
-        "request": request,
-        "page_title": page_title,
-        "journal1": journal1,
-        "journal2": journal2,
-        "history_list": history_list,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+# 投资笔记路由已移除（2026-09-20 路线调整，AI 分析缩减为 API 接口）
+# @app.get("/journal", response_class=HTMLResponse)
+# async def journal_page(request: Request):
+#     """投资笔记页（默认显示最新一篇）"""
+#     latest = AiJournalDAO().get_latest()
+#     history_list = AiJournalDAO().list_all()
+#     config = load_config()
+#     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+#     return templates.TemplateResponse(request, "journal.html", {
+#         "request": request,
+#         "page_title": page_title,
+#         "journal": latest,
+#         "history_list": history_list,
+#         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+#     })
 
 
 @app.get("/api/journal/latest")
