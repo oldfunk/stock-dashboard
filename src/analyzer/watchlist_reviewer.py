@@ -246,6 +246,9 @@ class WatchlistReviewer:
             # 历史财务（用于 ROE 同比判断）
             self._inject_history_roe(current)
 
+            # 注入 stock_snapshot 财务字段（PE/ROE/毛利率等，监控条件检查需要）
+            self._inject_snapshot_financials(current)
+
             # 2. 硬规则预过滤
             forced_out = self._apply_hard_rules(current, analyses)
 
@@ -791,6 +794,20 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                 except (json.JSONDecodeError, TypeError):
                     pass
         return analyses
+
+    def _inject_snapshot_financials(self, stocks: list[dict]):
+        """注入 stock_snapshot 财务字段（PE/ROE/毛利率等，监控条件检查需要）"""
+        from src.models.database import StockSnapshotDAO
+        dao = StockSnapshotDAO()
+        for s in stocks:
+            row = dao.get_by_code(s['code'])
+            if row:
+                for field in ('pe', 'pb', 'roe', 'roe_5y_avg', 'gross_margin',
+                              'gross_margin_5y_avg', 'net_margin', 'net_margin_5y_avg',
+                              'debt_ratio', 'dividend_yield', 'roe_volatility',
+                              'fcf_5y_sum', 'market_cap', 'current_price'):
+                    if row.get(field) is not None:
+                        s[field] = row[field]
 
     def _inject_history_roe(self, stocks: list[dict]):
         """注入历史 ROE（用于 ROE 同比判断）"""
