@@ -235,7 +235,8 @@ class MarketScheduler:
             self._trigger_ai_analysis_async(config)
 
             # AI 分析完成后触发纸盘交易
-            self._trigger_paper_trading_async(config)
+            # 纸盘交易已归档，不再自动触发
+            # self._trigger_paper_trading_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
@@ -409,18 +410,5 @@ class MarketScheduler:
         logger.info("[调度器] AI 分析已在后台启动")
 
     def _trigger_paper_trading_async(self, config: dict):
-        """AI 分析完成后异步触发纸盘交易"""
-        def _run_paper():
-            try:
-                from src.paper.engine import run_paper_trading
-                result = run_paper_trading(config=config)
-                if result.get("executions"):
-                    filled = sum(1 for e in result["executions"]
-                                 if e["action"] == "filled")
-                    logger.info(f"[调度器] 纸盘交易完成: {filled} 笔成交")
-            except Exception as e:
-                logger.warning(f"[调度器] 纸盘交易异常: {e}")
-
-        t = threading.Thread(target=_run_paper, daemon=True)
-        t.start()
-        logger.info("[调度器] 纸盘交易已在后台启动")
+        """纸盘交易已归档，不再自动触发。此方法已禁用。"""
+        logger.info("[调度器] 纸盘交易已归档，跳过本地触发")

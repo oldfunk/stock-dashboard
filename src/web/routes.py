@@ -1278,43 +1278,7 @@ async def api_journal_by_date(journal_date: str):
 # 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
 
 
-@app.get("/paper", response_class=HTMLResponse)
-async def paper_page(request: Request):
-    """虚拟盘面板（只读）：账户 + 持仓 + 最近委托 + 最新净值。
-
-    纸盘表缺失时（如服务尚未重启迁移）降级为空状态，不 500。
-    """
-    import sqlite3
-    from src.models.database import (
-        PaperAccountDAO, PaperOrderDAO, PaperPositionDAO, PaperNavDAO,
-        StockSnapshotDAO,
-    )
-    paper_ready = True
-    account, positions, orders, nav_latest = None, [], [], None
-    try:
-        account = PaperAccountDAO().get()
-        positions = PaperPositionDAO().list_all()
-        orders = PaperOrderDAO().list_recent(limit=50)
-        nav_latest = PaperNavDAO().get_latest()
-        snap_dao = StockSnapshotDAO()
-        for p in positions:
-            snap = snap_dao.get_by_code(p["code"])
-            p["name"] = (snap or {}).get("name") or ""
-    except sqlite3.OperationalError:
-        paper_ready = False
-        account, positions, orders, nav_latest = None, [], [], None
-    config = load_config()
-    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-    return templates.TemplateResponse(request, "paper.html", {
-        "request": request,
-        "page_title": page_title,
-        "paper_ready": paper_ready,
-        "account": account,
-        "positions": positions,
-        "orders": orders,
-        "nav_latest": nav_latest,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+# 虚拟盘路由已移除（2026-09-20 路线调整，量化交易系统归档）
 
 
 def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:
