@@ -95,18 +95,18 @@ schedule:
   # 大盘数据更新间隔（分钟）
   market_index_interval: 30
 
-# -------- 纸盘交易配置（M4a） --------
-paper:
-  initial_cash: 1000000            # 初始资金（默认 100 万）
-  slippage_pct: 0.1                # 滑点百分比（默认 0.1%）
-  commission_rate: 0.00025         # 佣金费率（万 2.5）
-  commission_min: 5.0              # 佣金最低（元）
-  stamp_tax_rate: 0.005            # 印花税率（卖出千分之 0.5）
-  transfer_fee_rate: 0.00001       # 过户费率（万 0.1）
-  max_position_pct: 20             # 单股最大仓位占比（%）
-  max_total_position_pct: 80       # 最大总仓位占比（%）
-  force_stop_loss_pct: -7          # 个股浮亏强制离场阈值（%）
-  force_drawdown_pct: -15          # 账户回撤禁买阈值（%）
+# -------- 纸盘交易配置（已归档到 src/paper/_legacy/） --------
+# paper:
+#   initial_cash: 1000000            # 初始资金（默认 100 万）
+#   slippage_pct: 0.1                # 滑点百分比（默认 0.1%）
+#   commission_rate: 0.00025         # 佣金费率（万 2.5）
+#   commission_min: 5.0              # 佣金最低（元）
+#   stamp_tax_rate: 0.005            # 印花税率（卖出千分之 0.5）
+#   transfer_fee_rate: 0.00001       # 过户费率（万 0.1）
+#   max_position_pct: 20             # 单股最大仓位占比（%）
+#   max_total_position_pct: 80       # 最大总仓位占比（%）
+#   force_stop_loss_pct: -7          # 个股浮亏强制离场阈值（%）
+#   force_drawdown_pct: -15          # 账户回撤禁买阈值（%）
 
 # -------- AI 观察池复盘配置 --------
 ai_review:
