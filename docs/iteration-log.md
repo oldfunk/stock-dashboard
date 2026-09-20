@@ -71,12 +71,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 221+ passed）
+- 全仓 pytest 零失败（基线 317 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S7 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
 - 提交到 nightly 分支，不直接 push main
-- pi1 部署由用户手动 pull+restart，Hermes 不触发
+- pi1 部署：合并获批后由 agent 同步（pull + restart + 冒烟验证）
 
 ## 分析能力方向（2026-09-04 用户定调）
 
@@ -100,8 +100,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ## 工程约定
 - 零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 - 每次迭代只做一件小而实的事，不求大改大动；禁止一次性改多个无关模块。
-- 改动必须冒烟测试：`ssh pi@192.168.50.210 "cd /home/pi/stock-dashboard && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误；可跑 `python scripts/scan_emoji.py`（仓库根）确认零 emoji。
-- **绝不重启生产服务** `stock-dashboard.service`；部署由用户手动 pull+restart。
+- 改动必须冒烟测试：`ssh pi@192.168.50.210 "cd /home/pi/stock-dashboard && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误；改动零 emoji（仅允许 → ↑ ↓ ✓）。
+- **部署**：默认推 nightly 分支、永不自动合并；合并获批后由 agent 同步 pi1（pull + restart + 冒烟验证）。
 - 提交信息中文，写清「改了什么 + 为什么（想法）」。
 - 改完：更新本账（勾掉 backlog 项、Changelog 追加）+ 推 Discord 简报。
 - **git 工作流硬约定（防污染 main）**：每晚迭代在**当前 nightly 分支**上继续（开头 `git fetch origin && git rebase origin/main` 拉平上游，再 commit），commit 后 `git push origin HEAD`。**绝不在本地 `main` 上 commit，绝不 `git push origin main`**。push 后保持 HEAD 在 nightly 分支，勿切回 main（本地 main 由用户/合并流程管理）。多日累积都落在同一个 nightly 分支，审计时一次性 `git log origin/main..HEAD --stat` 即可。
@@ -160,6 +160,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
 
 ## 变更记录（Changelog）
+
+### 2026-09-18（文档复检修正：handoff 冲突标记 + AGENTS.md/README/账本校订）
+- 起因：复检 AGENTS.md 时暴露 handoff.md 残留合并冲突标记（21615d2 合并解决不净，已随 main 到 pi1）+ README/AGENTS.md/账本多处过时。
+- 改了什么：① handoff.md 清冲突标记、刷新三段；② AGENTS.md 校订（基线 317、run 命令语义、部署流程、文档约定）；③ README 校正（run-once→run、基线 317、通道状态）；④ 账本约定同步部署流程。
+- 验证：全仓 grep 无残留冲突标记；pi1 gate.sh 317 passed 全绿（09-18 复测）；纯文档变更，分支 nightly/20260918 待合。
 ### 2026-09-17（收尾：AGENTS.md 入 main + README 如实化 + 删已合分支）
 - 用户自推的 agent.md（Hermes 16:59 写在 origin/nightly/20260917 上，非 main）已用 patch 中继 cherry-pick 入 main（`be50625`，原作者保留），内容：AGENTS.md agent 上手稿 + scripts/gate.sh 全仓门禁。
 - README 全面如实化：Zen 免费通道 9/07 起 403 不可用（原"无需 Key"已删）+ paper 引擎/面板现状 + 观察池卡片收敛 + 策略 Tab 归属候选页 + 基线 307 + gate.sh 路径 + main 合并需批准（原"pre-push 硬拦"不实）。
@@ -170,7 +175,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 实测（pi1 服务端匿名）：ling/mimo/nemotron×2 → 403 FreeTierError（政策封死）；deepseek → 400 不可用；muse-spark×2 → 500 常态（复测非瞬时）；8 天日志零 200。结论：Zen 匿名通道 7/7 不可用，Retry-After/轮换救不了（用户已否决配 Key）。
 - 改了什么：`ai.fallback` 配置段（Pollinations OpenAI 兼容源，默认 openai-fast，可换）+ `AiAnalyzer._call_fallback_llm`（主灭后每股兜底 retries 次，429 照样尊重 Retry-After，`fallback/<model>` 落库溯源）+ `analyze_stock` 主备接线 + 4 单测。
 - 验证：单测 12/12；pi1 worktree 生产冒烟——真实 Berkshire prompt（5427 字）经 fallback 返回 1548 字中文金融分析 JSON，可解析（首轮合成 spam prompt 曾触发拒答，系探针伪影，已证伪）。
-- 状态：已合入 main（merge `0cd11df`），pi1 待部署。
+- 状态：已合入 main（merge `21615d2`）并部署 pi1（09-18 复测 gate 317 passed）。
 ### 2026-09-17（AI 修复 + UI 收敛部署：ling 优先/Retry-After/观察池卡片统一，pi1 307 全过）
 - 根因（AI 十连败）：匿名免费额度 429 打爆——9/07 起 140 只全失败（`模型返回空/全部免费模型不可用`）；单只 20 次退避 ×20 只可跑数小时（午夜仍在跑）；最后成功是 9/04 `laguna-s-2.1-free`。
 - 改了什么：① `PREFERRED_ORDER` ling-3.0-flash-fin-free 置顶（自动发现+死亡轮换 fallback 不变，已验证有效）；② 429 尊重 `Retry-After`（上限 300s，缺省回退原档，新纯函数 `_retry_after_seconds`）；③ 观察池卡片收敛候选卡（头部摘要/评分拆解/AI 摘要行/trade-guide/历史时间线/AI 未分析徽标，池专属保留；附带修 `trade_parsed`/`ai_confidence` 历史回退缺失）+ routes enrichment 对齐；④ 单测 10 项（pool 排序/轮换/Retry-After/卡片三态渲染）。

@@ -12,7 +12,7 @@ git clone https://github.com/oldfunk/stock-dashboard.git
 cd stock-dashboard
 
 # 安装依赖
-pip install -r requirements.txt 2>/dev/null || pip install akshare fastapi uvicorn jinja2 httpx python-dotenv schedule
+pip install -e .
 
 # 启动 Web + 内置调度器
 python -m src.main serve
@@ -28,9 +28,9 @@ STOCK_AI_API_KEY=your_api_key_here          # 仅非免费模型需要
 STOCK_AI_API_BASE=https://opencode.ai/zen/v1
 ```
 
-> 现状（2026-09-17 实测）：Zen 免费通道自 9/07 起服务端不可用（403，
-> 免费层仅限 OpenCode 内使用），AI 分析连续失败；免 Key 备用通道
-> （`ai.fallback`，Pollinations）在 `nightly/20260917c` 待合。详见账本最新 Changelog。
+> 现状（2026-09-18）：Zen 免费通道自 9/07 起服务端不可用（403，
+> 免费层仅限 OpenCode 内使用）；免 Key 备用通道（`ai.fallback`，Pollinations）
+> 已合入 main 并部署 pi1。详见账本最新 Changelog。
 
 ### 生产部署（systemd）
 
@@ -82,7 +82,7 @@ stock-dashboard/
 │   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
 │   ├── scheduler.py            # 内置定时调度（daemon 线程）
 │   ├── config.py               # YAML 配置加载
-│   └── main.py                 # 入口（serve / run-once）
+│   └── main.py                 # 入口（serve / run）
 ├── scripts/
 │   ├── stock-ai-slow-feed.sh   # 全量流水线（采集+筛选+AI）
 │   ├── run_pipeline.py         # 同上，Python 版
@@ -93,7 +93,7 @@ stock-dashboard/
 │   ├── check_upstream.py       # 上游数据月度巡检
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 313 passed，2026-09-17 pi1 gate 全绿）
+├── tests/                      # pytest（基线 317 passed，2026-09-18 pi1 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO + paper 表单测
@@ -127,7 +127,7 @@ stock-dashboard/
 2. AKShare 财务采集（yjbb + 深度补充，含兜底链 C2/C2.5）
 3. 历史财务采集 → financial_history → financial_summary（5y/10y 均值）
 4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只（含 strategy_tags）
-5. K 线拉取 → AI 分析（每日；9/07 起 Zen 免费通道 403 全败，失败可用 scripts/retry_ai.py 补跑，备用通道待合）
+5. K 线拉取 → AI 分析（每日；Zen 免费通道 403 不可用，走免 Key 备用通道；失败可用 scripts/retry_ai.py 补跑）
 6. AI 分析后 → 纸盘交易（M4a：信号→委托→持仓→净值，面板 /paper）→ 每周六：AI 复盘 → ai_watchlist（5 只）+ ai_journal（B6/B7 模板，待 live 验证）
 ```
 
@@ -181,7 +181,7 @@ stock-dashboard/
 | 命令 | 用途 |
 |---|---|
 | `python -m src.main serve` | 启动 Web + 内置调度器 |
-| `python -m src.main run-once` | 执行一次完整流水线（采集→筛选→AI） |
+| `python -m src.main run` | 执行一次采集 + 筛选（不含 AI 分析） |
 | `bash scripts/stock-ai-slow-feed.sh` | 全量脚本（采集 + 筛选 + AI 分析） |
 | `python3 scripts/retry_ai.py` | 补跑最新 run 中失败的 AI 分析 |
 | `python3 scripts/retry_ai.py --all-failed` | 扫所有 run 里的失败记录 |
@@ -205,7 +205,7 @@ stock-dashboard/
 | `strategies.yaml` | growth/dividend/turnaround 三策略阈值 + alpha_criteria + exit_triggers |
 | `schedule.daily_update_time` | 每日运行时间（默认 15:30） |
 | `web.port` | 看板端口（默认 9527） |
-| `ai.*` | LLM API 配置（默认 OpenCode Zen 免费模型池） |
+| `ai.*` | LLM API 配置（Zen 主通道 + `ai.fallback` 免 Key 备用通道） |
 | `ai_review.*` | 周六 AI 复盘配置（观察池容量、硬规则） |
 
 本地覆盖：`config/local.yaml`（gitignore），YAML 合并到 config.yaml。
@@ -216,10 +216,10 @@ stock-dashboard/
 
 - **数据采集** — httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情 API
 - **存储** — SQLite（WAL 模式，`data/db/stock_dashboard.db`）
-- **AI 分析** — OpenAI 兼容 API + FreeModelPool（ling 金融模型优先 + 自动故障轮换 + 429 尊重 Retry-After；Zen 免费通道 9/07 起 403 不可用，免 Key 备用通道在 nightly 待合）
+- **AI 分析** — OpenAI 兼容 API + FreeModelPool（ling 金融模型优先 + 自动故障轮换 + 429 尊重 Retry-After；Zen 免费通道 9/07 起 403 不可用，免 Key 备用通道已部署）
 - **Web 看板** — FastAPI + Jinja2（候选卡 `_stock_list.html` / 观察池卡 `_watchlist_card.html` 双 partial，视觉已收敛，样式各写在 partial 内）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-17 pi1 基线 307 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-18 pi1 基线 317 passed）
 - **虚拟盘（M4a）** — 自研 `src/paper/` 引擎 + `/paper` 只读面板：T+1 / 100 股整数倍 / A 股费用全建模 / 风控闸（单股 ≤20% · 总仓 ≤80% · 回撤 -15% 禁买），详见 `paper-trading.md`
 
 ---
@@ -243,14 +243,14 @@ stock-dashboard/
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 313 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 317 passed 只升不降，确切数见账本最新 Changelog）
 3. 推送 nightly → 用户批准后合并到 main → 同步 pi1
 4. 生产环境：`pi1 192.168.50.210` `stock-dashboard.service` :9527
 
 ### 约束
 
 - 单模块改动 + 单测 + 零 emoji（仅 → ↑ ↓ ✓）
-- 迭代在 `nightly/*`，合并到 `main` 需用户批准（规则见 `AGENTS.md`，agent 无权直推 main/重启服务）
+- 迭代在 `nightly/*`，合并到 `main` 需用户批准（规则见 `AGENTS.md`：默认推分支、永不自动合并；合并须用户批准，合并后由 agent 同步 pi1）
 - 踩坑铁律 6 条：见 `iteration-log.md` §工程约定
 
 ### 文档约定
