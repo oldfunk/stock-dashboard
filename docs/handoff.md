@@ -3,18 +3,20 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-20：M2/M3/t4/t5/t6 全部完成，已合 main + 同步 pi1）
-- 分支：main = `91457eb`（合并 nightly/20260919 全部改动）；nightly/20260919 已合
+## 最后状态（2026-09-20：路线调整完成，聚焦价值投资分析面板）
+- 分支：main = `24c83c9`（AGENTS.md 新增验证规则）；nightly/20260920 已归档 AI 分析和纸盘交易代码
 - pi1：已同步 main，gate.sh 360 passed 全绿；服务运行正常
-- 完成项：M2 策略分化（strategies.yaml 三池）、M3 论点漂移 + 监控条件全链路、t4 通用 Hermes 代理服务、t5 TopK 回测脚本、t6 pi1 验证
-- 用户定：AI 分析迁 pi2 Hermes 代理执行（见 `docs/hermes-proxy-ai-analysis.md`），旧 FreeModelPool 归档；全局约定：默认推 nightly 分支、永不自动合并、合并后同步 pi1
+- 完成项：M2 策略分化、M3 论点漂移 + 监控条件、t4 通用 Hermes 代理 API、t5 TopK 回测脚本、t6 pi1 验证
+- 路线调整：移除 M4a/M4b/M4c/M4d 量化交易路线，AI 分析缩减为 API 接口，面板只负责展示
+- 归档：`src/paper/_legacy/`（纸盘交易）、`src/analyzer/_legacy/`（本地 AI 分析）
+- 用户定：AI 分析由外部 Hermes 代理执行，面板不触发；全局约定：默认推 nightly 分支、永不自动合并、合并后同步 pi1
 - 阻塞更新：Zen Key 不配了（用户否决）；免费模型仅限 OpenCode 内部使用，外部不可用
 
 ## 下一步方向
-1. pi2 按 `docs/hermes-proxy-ai-analysis.md` 开发 Hermes 代理服务（本仓库已实现通用骨架 `src/hermes_proxy/`）
-2. 周六 live 验证 B6/B7 完整 review() 流程（需 pi1 安装 httpx）
-3. M4b QLib 离线回测（`scripts/backtest_topk.py` 已实现，待跑实际数据）
-4. 钉选 Tab JS 补齐（switchView/toggleWatch/加载渲染）
+1. P1 面板深化（目标 11 月）：评分体系透明化、AI 笔记增强、时间线交互、详情页体验优化
+2. P2 体验优化（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
+3. 外部 Hermes 代理接入 AI 分析（`src/hermes_proxy/` 已实现通用 API 接口）
+4. 周六 live 验证完整 review() 流程（pi1 httpx 已安装）
 
 ## 已知隐患
 - 82 只无 roic/fcf 股票可能是东财 API 无数据的小盘股（C2.5 永久兜底）
