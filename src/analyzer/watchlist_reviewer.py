@@ -220,6 +220,12 @@ class WatchlistReviewer:
             # 2. 硬规则预过滤
             forced_out = self._apply_hard_rules(current, analyses)
 
+            # 2b. 监控条件检查（B6/B7）
+            monitor_triggered = self._check_monitor_conditions(current, analyses)
+            if monitor_triggered:
+                logger.info(f"[复盘] 监控条件触发 {len(monitor_triggered)} 只: "
+                            f"{[t['code'] for t in monitor_triggered]}")
+
             # 3. 调用 LLM
             prompt = self._build_prompt(
                 current, candidates, analyses, market, forced_out
@@ -463,6 +469,95 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
         logger.error("[复盘] 已达最大重试次数，放弃")
         return None
 
+    def _check_monitor_conditions(self, current: list[dict],
+                                  analyses: dict[str, dict]) -> list[dict]:
+        """检查监控条件，返回触发的条件列表。
+
+        条件格式：{"metric": "pe", "operator": "lt", "threshold": 10}
+        支持的 metric：pe, roe, gross_margin, net_margin, debt_ratio,
+          dividend_yield, roe_volatility, fcf_yield, current_price
+        支持的 operator：lt, le, gt, ge, eq
+        """
+        triggered = []
+        for stock in current:
+            code = stock['code']
+            cond_json = stock.get('monitor_condition')
+            if not cond_json:
+                continue
+            try:
+                cond = json.loads(cond_json)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            metric = cond.get('metric')
+            op = cond.get('operator')
+            threshold = cond.get('threshold')
+            if not metric or op is None or threshold is None:
+                continue
+            # 从 analysis 或 stock 本身取指标值
+            analysis = analyses.get(code, {})
+            value = self._get_metric_value(metric, stock, analysis)
+            if value is None:
+                continue
+            if self._compare(value, op, threshold):
+                triggered.append({
+                    'code': code,
+                    'name': stock.get('name', ''),
+                    'metric': metric,
+                    'operator': op,
+                    'threshold': threshold,
+                    'actual_value': value,
+                })
+        return triggered
+
+    def _get_metric_value(self, metric: str, stock: dict,
+                          analysis: dict) -> Optional[float]:
+        """从 stock/analysis 中提取指标值"""
+        # 优先从 analysis 的 trade_strategy 取
+        trade = analysis.get('trade_strategy', {})
+        if isinstance(trade, str):
+            try:
+                trade = json.loads(trade)
+            except (json.JSONDecodeError, TypeError):
+                trade = {}
+        # 从 trade_strategy 取估值相关
+        if metric == 'pe':
+            return trade.get('pe') or stock.get('pe')
+        if metric == 'roe':
+            return stock.get('roe') or stock.get('roe_5y_avg')
+        if metric == 'gross_margin':
+            return stock.get('gross_margin') or stock.get('gross_margin_5y_avg')
+        if metric == 'net_margin':
+            return stock.get('net_margin') or stock.get('net_margin_5y_avg')
+        if metric == 'debt_ratio':
+            return stock.get('debt_ratio')
+        if metric == 'dividend_yield':
+            return stock.get('dividend_yield')
+        if metric == 'roe_volatility':
+            return stock.get('roe_volatility')
+        if metric == 'fcf_yield':
+            fcf = stock.get('fcf_5y_sum')
+            mc = stock.get('market_cap')
+            if fcf is not None and mc:
+                return fcf / 5 / (mc * 1e8)
+            return None
+        if metric == 'current_price':
+            return stock.get('current_price')
+        return None
+
+    def _compare(self, value: float, op: str, threshold: float) -> bool:
+        """比较操作符"""
+        if op == 'lt':
+            return value < threshold
+        if op == 'le':
+            return value <= threshold
+        if op == 'gt':
+            return value > threshold
+        if op == 'ge':
+            return value >= threshold
+        if op == 'eq':
+            return value == threshold
+        return False
+
     def _validate_and_persist(self, result: dict, run_id: str,
                               forced_out: list[dict], current: list[dict],
                               candidates: list[dict],
@@ -546,6 +641,17 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                 code=code, name=name, action=action,
                 reason=reason, review_run_id=run_id, action_date=action_date
             )
+
+        # 3b. 监控条件触发记录（B6/B7）
+        monitor_triggered = self._check_monitor_conditions(current, analyses)
+        if monitor_triggered:
+            for t in monitor_triggered:
+                history_dao.append(
+                    code=t['code'], name=t['name'],
+                    action='monitor_triggered',
+                    reason=f"监控条件触发: {t['metric']} {t['operator']} {t['threshold']} (实际值 {t['actual_value']})",
+                    review_run_id=run_id, action_date=action_date
+                )
 
         # 4. 笔记落库 + 覆盖率校验
         if journal and journal.get('title'):
