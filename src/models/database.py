@@ -363,6 +363,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status_reason', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'watch_until', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_watchlist', 'monitor_condition', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
