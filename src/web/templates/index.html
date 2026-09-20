@@ -1136,8 +1136,6 @@
             </div>
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
             <a href="/candidates" class="nav-link">候选股总览 &rarr;</a>
-            <a href="/journal" class="nav-link">投资笔记</a>
-            <a href="/paper" class="nav-link">虚拟盘</a>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
             <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
@@ -1228,12 +1226,6 @@
         {% with watchlist = ai_watchlist %}
         {% include '_watchlist_card.html' %}
         {% endwith %}
-        {% if ai_journal_latest %}
-        <div class="journal-link">
-            <strong>本周笔记:</strong> {{ ai_journal_latest.title }}
-            &mdash; <a href="/journal">查看全文 &rarr;</a>
-        </div>
-        {% endif %}
     </div>
     <div class="stock-list" id="watchlistContainer" style="display:none;">
         <div style="padding:40px;text-align:center;color:var(--text-tertiary);">
