@@ -156,6 +156,8 @@ class TestBuildHistorySummary:
     def test_no_history_returns_empty(self):
         """无历史记录时返回空字符串"""
         from src.analyzer.ai_analyzer import _build_history_summary
+        from src.models import database as db_mod
+        db_mod.init_database()
         result = _build_history_summary("NEVER_EXISTS_999999", limit=3)
         assert result == ""
 
