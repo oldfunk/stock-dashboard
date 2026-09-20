@@ -232,12 +232,10 @@ class MarketScheduler:
             self._fetch_kline_daily()
 
             # 流水线成功后每日触发 AI 分析（不再仅限周五，避免研报滞后 1-4 天）
-            # AI 分析已移至外部 Hermes 代理，面板只负责展示
-            # self._trigger_ai_analysis_async(config)
+            self._trigger_ai_analysis_async(config)
 
             # AI 分析完成后触发纸盘交易
-            # 纸盘交易已归档，不再自动触发
-            # self._trigger_paper_trading_async(config)
+            self._trigger_paper_trading_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
@@ -292,7 +290,7 @@ class MarketScheduler:
     def _run_review(self):
         """后台跑复盘，不阻塞主调度循环"""
         try:
-            from src.analyzer._legacy.watchlist_reviewer import WatchlistReviewer
+            from src.analyzer.watchlist_reviewer import WatchlistReviewer
             from src.models.database import RunLogDAO
             from src.config import load_config
 
@@ -333,9 +331,96 @@ class MarketScheduler:
             self._review_in_progress = False
 
     def _trigger_ai_analysis_async(self, config: dict):
-        """AI 分析已移至外部 Hermes 代理，面板只负责展示。此方法已禁用。"""
-        logger.info("[调度器] AI 分析已移至外部 Hermes 代理，跳过本地触发")
+        """在后台线程中异步触发 AI 分析（全量模式）"""
+        import threading
+        
+        def _run_ai_analysis():
+            try:
+                from src.analyzer.ai_analyzer import analyze_batch
+                from src.models.database import (
+                    ScreeningResultDAO, RunLogDAO, PipelineProgressDAO
+                )
+                
+                # 获取最新完成的 run_id
+                run_id = RunLogDAO().get_latest_completed_run_id()
+                if not run_id:
+                    logger.warning("[AI分析] 无完成的流水线，跳过")
+                    return
+                
+                stocks = ScreeningResultDAO().get_results_for_run(run_id)
+                if not stocks:
+                    logger.warning("[AI分析] 无筛选结果，跳过")
+                    return
+                
+                # 富集财务历史数据（同 run_ai_analysis.py）
+                from src.models.database import FinancialSummaryDAO
+                fs_dao = FinancialSummaryDAO()
+                for s in stocks:
+                    fs = fs_dao.get(s['code'])
+                    if fs:
+                        for k, v in fs.items():
+                            if k not in ('stock_code', 'updated_at') and v is not None:
+                                s[k] = v
+                
+                logger.info(f"[调度器] 启动 AI 分析 {len(stocks)} 只股票...")
+                
+                # 进度回调：更新 pipeline_progress
+                def on_progress(ai_done: int, ai_failed: int, idx: int):
+                    PipelineProgressDAO().update(
+                        run_id, 
+                        ai_done=ai_done, 
+                        ai_failed=ai_failed
+                    )
+                
+                analyzed_ok, analyzed_failed = analyze_batch(
+                    stocks, run_id, interval_seconds=60, on_progress=on_progress
+                )
+                logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
+                
+                # 发送Discord通知（如果配置了webhook）
+                if analyzed_failed > 0:
+                    from src.notifications.discord_notifier import get_discord_notifier
+                    notifier = get_discord_notifier()
+                    if notifier:
+                        # 获取失败原因
+                        from src.models.database import ScreeningResultDAO
+                        failed_stocks = ScreeningResultDAO().get_results_for_run(run_id, limit=100)
+                        failed_reasons = []
+                        for stock in failed_stocks:
+                            if stock.get('ai_failed'):
+                                reason = stock.get('ai_failure_reason', '未知原因')
+                                failed_reasons.append(f"{stock['name']}({stock['code']}): {reason}")
+                        
+                        notifier.send_ai_failure_notification(
+                            run_id=run_id,
+                            failed_count=analyzed_failed,
+                            failed_reasons=failed_reasons,
+                            total_count=len(stocks)
+                        )
+                
+                # 回写本次分析的 run_log.analyzed_count，保持运行记录完整
+                RunLogDAO().update_analyzed_count(run_id, analyzed_ok)
+            except Exception as e:
+                logger.warning(f"[调度器] AI 分析异常: {e}")
+        
+        # 后台线程执行，不阻塞主调度循环
+        t = threading.Thread(target=_run_ai_analysis, daemon=True)
+        t.start()
+        logger.info("[调度器] AI 分析已在后台启动")
 
     def _trigger_paper_trading_async(self, config: dict):
-        """纸盘交易已归档，不再自动触发。此方法已禁用。"""
-        logger.info("[调度器] 纸盘交易已归档，跳过本地触发")
+        """AI 分析完成后异步触发纸盘交易"""
+        def _run_paper():
+            try:
+                from src.paper.engine import run_paper_trading
+                result = run_paper_trading(config=config)
+                if result.get("executions"):
+                    filled = sum(1 for e in result["executions"]
+                                 if e["action"] == "filled")
+                    logger.info(f"[调度器] 纸盘交易完成: {filled} 笔成交")
+            except Exception as e:
+                logger.warning(f"[调度器] 纸盘交易异常: {e}")
+
+        t = threading.Thread(target=_run_paper, daemon=True)
+        t.start()
+        logger.info("[调度器] 纸盘交易已在后台启动")

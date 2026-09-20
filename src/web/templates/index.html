@@ -769,7 +769,108 @@
             .knowledge-panel { width: 100%; position: static; }
         }
 
-        /* ========== History Bar (已禁用，AI 分析缩减为 API 接口) ========== */
+        /* ========== History Bar ========== */
+        .history-bar {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--divider-thin);
+        }
+
+        .history-toggle {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border-width: 0;
+            cursor: pointer;
+            padding: 2px 0;
+            transition: color 0.15s;
+        }
+
+        .history-toggle:hover {
+            color: var(--text-secondary);
+        }
+
+        .history-list {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .history-item {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 3px 6px;
+            border-radius: var(--radius-sm);
+            transition: background 0.1s;
+        }
+        .history-item:hover { background: var(--bg-hover); }
+
+        .history-detail {
+            display: none;
+            margin: 4px 0 6px 0;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+        .history-detail.open { display: block; }
+        .history-detail .hd-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--divider-thin);
+        }
+        .history-detail .hd-tab {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .history-detail .hd-tab:hover { color: var(--text-secondary); }
+        .history-detail .hd-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .history-detail .hd-panel { display: none; }
+        .history-detail .hd-panel.open { display: block; }
+        .history-detail .trade-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .history-detail .trade-cell {
+            background: var(--bg-secondary);
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+        }
+        .history-detail .trade-cell .label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .history-detail .trade-cell .value {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+
+        /* ========== Knowledge Panel ========== */
         }
 
         .hist-date {
@@ -1038,6 +1139,8 @@
             </div>
             <span class="last-updated" id="lastUpdated">{{ now }}</span>
             <a href="/candidates" class="nav-link">候选股总览 &rarr;</a>
+            <a href="/journal" class="nav-link">投资笔记</a>
+            <a href="/paper" class="nav-link">虚拟盘</a>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Toggle dark mode">&#9681;</button>
             <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
@@ -1128,6 +1231,12 @@
         {% with watchlist = ai_watchlist %}
         {% include '_watchlist_card.html' %}
         {% endwith %}
+        {% if ai_journal_latest %}
+        <div class="journal-link">
+            <strong>本周笔记:</strong> {{ ai_journal_latest.title }}
+            &mdash; <a href="/journal">查看全文 &rarr;</a>
+        </div>
+        {% endif %}
     </div>
     <div class="stock-list" id="watchlistContainer" style="display:none;">
         <div style="padding:40px;text-align:center;color:var(--text-tertiary);">
@@ -1357,6 +1466,22 @@
         var show = body.style.display === 'none';
         body.style.display = show ? 'block' : 'none';
         if (caret) caret.textContent = show ? '-' : '+';
+    }
+
+    // ========== History Toggle ==========
+    function toggleHistory(code) {
+        var el = document.getElementById('hist-' + code);
+        if (el) {
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
+
+    // ========== History Detail Toggle ==========
+    function toggleHistDetail(id) {
+        var el = document.getElementById('hd-' + id);
+        if (el) {
+            el.classList.toggle('open');
+        }
     }
 
     // ========== Score Detail Toggle ==========

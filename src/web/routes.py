@@ -465,6 +465,9 @@ async def index(request: Request):
         except Exception:
             pass
 
+    # 获取最新笔记摘要
+    ai_journal_latest = AiJournalDAO().get_latest()
+
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
@@ -475,6 +478,7 @@ async def index(request: Request):
         "run_log": run_log,
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
+        "ai_journal_latest": ai_journal_latest,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
@@ -1187,31 +1191,79 @@ async def watchlist_detail(request: Request, code: str):
     })
 
 
-# 投资笔记路由已移除（2026-09-20 路线调整，AI 分析缩减为 API 接口）
-# @app.get("/journal", response_class=HTMLResponse)
-# async def journal_page(request: Request):
-#     """投资笔记页（默认显示最新一篇）"""
-#     latest = AiJournalDAO().get_latest()
-#     history_list = AiJournalDAO().list_all()
-#     config = load_config()
-#     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-#     return templates.TemplateResponse(request, "journal.html", {
-#         "request": request,
-#         "page_title": page_title,
-#         "journal": latest,
-#         "history_list": history_list,
-#         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-#     })
+@app.get("/journal", response_class=HTMLResponse)
+async def journal_page(request: Request):
+    """投资笔记页（默认显示最新一篇）"""
+    latest = AiJournalDAO().get_latest()
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "journal.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal": latest,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
 
-# 投资笔记 API 已移除（2026-09-20 路线调整）
-# @app.get("/api/journal/latest")
-# async def api_journal_latest():
-#     """最新笔记 JSON"""
-#     journal = AiJournalDAO().get_latest()
-#     if not journal:
-#         raise HTTPException(status_code=404, detail="无笔记")
-#     return journal
+@app.get("/journal/{journal_date}", response_class=HTMLResponse)
+async def journal_by_date(request: Request, journal_date: str):
+    """指定日期笔记页"""
+    journal = AiJournalDAO().get_by_date(journal_date)
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "journal.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal": journal,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/journal/compare/{journal_date1}/{journal_date2}", response_class=HTMLResponse)
+async def journal_compare(request: Request, journal_date1: str, journal_date2: str):
+    """历史笔记对比页"""
+    journal1 = AiJournalDAO().get_by_date(journal_date1)
+    journal2 = AiJournalDAO().get_by_date(journal_date2)
+    history_list = AiJournalDAO().list_all()
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    
+    return templates.TemplateResponse(request, "journal_compare.html", {
+        "request": request,
+        "page_title": page_title,
+        "journal1": journal1,
+        "journal2": journal2,
+        "history_list": history_list,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/api/journal/latest")
+async def api_journal_latest():
+    """最新笔记 JSON"""
+    journal = AiJournalDAO().get_latest()
+    if not journal:
+        raise HTTPException(status_code=404, detail="无笔记")
+    return journal
+
+
+@app.get("/api/journal/list")
+async def api_journal_list():
+    """笔记列表（轻量，仅 date + title）"""
+    return AiJournalDAO().list_all()
+
+
+@app.get("/api/journal/{journal_date}")
+async def api_journal_by_date(journal_date: str):
+    """指定日期笔记 JSON（缺失 404，与 /latest 一致）"""
+    journal = AiJournalDAO().get_by_date(journal_date)
+    if not journal:
+        raise HTTPException(status_code=404, detail="Journal not found")
+    return journal
 
 
 # @app.get("/api/journal/list")
@@ -1262,33 +1314,43 @@ async def watchlist_detail(request: Request, code: str):
 # 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
 
 
-# 虚拟盘路由已移除（2026-09-20 路线调整，量化交易系统归档）
-# @app.get("/paper", response_class=HTMLResponse)
-# async def paper_page(request: Request):
-#     """虚拟盘面板（只读）：账户 + 持仓 + 最近委托 + 最新净值。"""
-#     import sqlite3
-#     from src.models.database import (
-#         PaperAccountDAO, PaperOrderDAO, PaperPositionDAO, PaperNavDAO,
-#         StockSnapshotDAO,
-#     )
-#     paper_ready = True
-#     account, positions, orders, nav_latest = None, [], [], None
-#     try:
-#         account = PaperAccountDAO().get()
-#         positions = PaperPositionDAO().list_all()
-#         orders = PaperOrderDAO().list_recent(limit=50)
-#         nav_latest = PaperNavDAO().get_latest()
-#         snap_dao = StockSnapshotDAO()
-#         for p in positions:
-#             snap = snap_dao.get_by_code(p["code"])
-#             p["name"] = (snap or {}).get("name") or ""
-#     except sqlite3.OperationalError:
-#         paper_ready = False
-#         account, positions, orders, nav_latest = None, [], [], None
-#     config = load_config()
-#     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
-#     return templates.TemplateResponse(request, "paper.html", {
-#         "request": request,
+@app.get("/paper", response_class=HTMLResponse)
+async def paper_page(request: Request):
+    """虚拟盘面板（只读）：账户 + 持仓 + 最近委托 + 最新净值。
+
+    纸盘表缺失时（如服务尚未重启迁移）降级为空状态，不 500。
+    """
+    import sqlite3
+    from src.models.database import (
+        PaperAccountDAO, PaperOrderDAO, PaperPositionDAO, PaperNavDAO,
+        StockSnapshotDAO,
+    )
+    paper_ready = True
+    account, positions, orders, nav_latest = None, [], [], None
+    try:
+        account = PaperAccountDAO().get()
+        positions = PaperPositionDAO().list_all()
+        orders = PaperOrderDAO().list_recent(limit=50)
+        nav_latest = PaperNavDAO().get_latest()
+        snap_dao = StockSnapshotDAO()
+        for p in positions:
+            snap = snap_dao.get_by_code(p["code"])
+            p["name"] = (snap or {}).get("name") or ""
+    except sqlite3.OperationalError:
+        paper_ready = False
+        account, positions, orders, nav_latest = None, [], [], None
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "paper.html", {
+        "request": request,
+        "page_title": page_title,
+        "paper_ready": paper_ready,
+        "account": account,
+        "positions": positions,
+        "orders": orders,
+        "nav_latest": nav_latest,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 #         "page_title": page_title,
 #         "paper_ready": paper_ready,
 #         "account": account,
