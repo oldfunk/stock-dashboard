@@ -3,22 +3,24 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-18：0917c 已部署 pi1；文档复检修正待合）
-- 分支：`nightly/20260918`（AGENTS.md 复检 + handoff 冲突标记修复 + README 校正）待合；main = `dc57eb2`（0917c 备用通道 + Hermes 代理开发规范已入）
-- pi1：0917c 已部署（pull + restart），gate.sh 317 passed 全绿；import 冒烟通过；服务运行正常
+## 最后状态（2026-09-20：M2/M3/t4/t5/t6 全部完成，已合 main + 同步 pi1）
+- 分支：main = `91457eb`（合并 nightly/20260919 全部改动）；nightly/20260919 已合
+- pi1：已同步 main，gate.sh 360 passed 全绿；服务运行正常
+- 完成项：M2 策略分化（strategies.yaml 三池）、M3 论点漂移 + 监控条件全链路、t4 通用 Hermes 代理服务、t5 TopK 回测脚本、t6 pi1 验证
 - 用户定：AI 分析迁 pi2 Hermes 代理执行（见 `docs/hermes-proxy-ai-analysis.md`），旧 FreeModelPool 归档；全局约定：默认推 nightly 分支、永不自动合并、合并后同步 pi1
 - 阻塞更新：Zen Key 不配了（用户否决）；免费模型仅限 OpenCode 内部使用，外部不可用
 
 ## 下一步方向
-1. 合并 `nightly/20260918`（文档复检修正）→ 同步 pi1（首要）
-2. pi2 按 `docs/hermes-proxy-ai-analysis.md` 开发 Hermes 代理服务
-3. 周六 live 验证 B6/B7；M4b QLib 回测
+1. pi2 按 `docs/hermes-proxy-ai-analysis.md` 开发 Hermes 代理服务（本仓库已实现通用骨架 `src/hermes_proxy/`）
+2. 周六 live 验证 B6/B7 完整 review() 流程（需 pi1 安装 httpx）
+3. M4b QLib 离线回测（`scripts/backtest_topk.py` 已实现，待跑实际数据）
 4. 钉选 Tab JS 补齐（switchView/toggleWatch/加载渲染）
 
 ## 已知隐患
 - 82 只无 roic/fcf 股票可能是东财 API 无数据的小盘股（C2.5 永久兜底）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"）
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
+- pi1 venv 缺 httpx（已安装），完整 review() 流程待验证
 
 ## 历史交接区（追加，不删）
 - 2026-09-18 文档复检：修复 handoff 残留冲突标记（21615d2 合并遗留）+ AGENTS.md 校订（基线 317/运行命令/交接段）+ README 校正（run-once→run、基线 313→317），分支 nightly/20260918 待合
