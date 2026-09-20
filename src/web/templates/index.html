@@ -1213,10 +1213,11 @@
     <!-- Stock Results -->
     <div class="section-header">
         <div class="view-tabs">
-            <button class="view-tab active" onclick="switchView('watchlist-ai', event)">AI 观察池</button>
+            <button class="view-tab active" onclick="switchView('candidates', event)">候选股总览</button>
+            <button class="view-tab" onclick="switchView('watchlist-ai', event)">AI 观察池</button>
             <button class="view-tab" onclick="switchView('watchlist', event)">钉选股票 <span id="watchCount"></span></button>
         </div>
-        <span class="section-count" id="aiWatchCount">{{ ai_watchlist|length if ai_watchlist else 0 }} 只</span>
+        <span class="section-count" id="aiWatchCount">{{ stocks|length if stocks else 0 }} 只</span>
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="搜索代码/名称..." />
             <button onclick="searchStocks()">搜索</button>
@@ -1226,8 +1227,22 @@
 
     <div class="dashboard-layout">
     <div class="dashboard-main">
+    <!-- 候选股总览（默认视图） -->
+    <div id="candidatesContainer">
+        {% if stocks %}
+        <div class="stock-list">
+            {% include '_stock_list.html' %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">&#9678;</div>
+            <h2>暂无分析记录</h2>
+            <p>交易日下午15:30自动运行筛选流水线，<br>分析过的股票会累积显示在此处。</p>
+        </div>
+        {% endif %}
+    </div>
     <!-- AI 观察池卡片 -->
-    <div id="watchlistAiContainer">
+    <div id="watchlistAiContainer" style="display:none;">
         {% with watchlist = ai_watchlist %}
         {% include '_watchlist_card.html' %}
         {% endwith %}

@@ -17,14 +17,21 @@ function switchView(view, event) {
     }
     var aiContainer = document.getElementById('watchlistAiContainer');
     var watchlist = document.getElementById('watchlistContainer');
-    if (!aiContainer || !watchlist) return;
+    var candidates = document.getElementById('candidatesContainer');
+    if (!aiContainer || !watchlist || !candidates) return;
     if (view === 'watchlist-ai') {
         aiContainer.style.display = '';
         watchlist.style.display = 'none';
+        candidates.style.display = 'none';
     } else if (view === 'watchlist') {
         aiContainer.style.display = 'none';
         watchlist.style.display = '';
+        candidates.style.display = 'none';
         loadWatchlist();
+    } else if (view === 'candidates') {
+        aiContainer.style.display = 'none';
+        watchlist.style.display = 'none';
+        candidates.style.display = '';
     }
 }
 
