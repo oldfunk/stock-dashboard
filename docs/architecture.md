@@ -1,6 +1,6 @@
 # Stock Dashboard — 系统架构
 
-> 创建：2026-09-12 · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` / `paper-trading.md` 的上游依据）
+> 创建：2026-09-12 · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
 > 改本系统前先读本文件。模块边界变更必须同步更新本文件 + 对应单测。
 
 ## 1. 系统结构图
@@ -123,3 +123,4 @@ AI 分析由外部 Hermes 代理执行，面板只负责展示结果。周六复
 - **P2 体验优化**（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
 - **AI 分析**：由外部 Hermes 代理执行，面板只负责展示。`src/hermes_proxy/` 提供通用 API 接口
 - **已归档**：`src/paper/_legacy/`（纸盘交易）、`src/analyzer/_legacy/`（本地 AI 分析）
+- **量化交易系统**：不再开发，纸盘交易已归档

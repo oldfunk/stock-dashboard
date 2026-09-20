@@ -3,12 +3,14 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-20：路线调整完成，聚焦价值投资分析面板）
-- 分支：main = `24c83c9`（AGENTS.md 新增验证规则）；nightly/20260920 已归档 AI 分析和纸盘交易代码
-- pi1：已同步 main，gate.sh 360 passed 全绿；服务运行正常
+## 最后状态（2026-09-20：清理完成，聚焦价值投资分析面板）
+- 分支：main = `2cd7b84`（删除 test_routes_paper.py）；工作区干净
+- pi1：已同步 main，gate.sh 319 passed 全绿；服务运行正常
 - 完成项：M2 策略分化、M3 论点漂移 + 监控条件、t4 通用 Hermes 代理 API、t5 TopK 回测脚本、t6 pi1 验证
 - 路线调整：移除 M4a/M4b/M4c/M4d 量化交易路线，AI 分析缩减为 API 接口，面板只负责展示
 - 归档：`src/paper/_legacy/`（纸盘交易）、`src/analyzer/_legacy/`（本地 AI 分析）
+- 清理：删除 src/paper/ 目录、/paper 路由、策略分类 tab、候选股导航链接、data-tags 属性
+- 恢复：AI 分析功能（journal/paper 路由、scheduler 触发、前端展示）
 - 用户定：AI 分析由外部 Hermes 代理执行，面板不触发；全局约定：默认推 nightly 分支、永不自动合并、合并后同步 pi1
 - 阻塞更新：Zen Key 不配了（用户否决）；免费模型仅限 OpenCode 内部使用，外部不可用
 

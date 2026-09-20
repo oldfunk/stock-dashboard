@@ -415,3 +415,14 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - **t6**：pi1 live 验证——中邮科技 PE=-45.2 < 20 触发监控条件，history 记录已写入。端到端链路验证通过。
 - 想法/为什么：M2 三策略分流为后续策略差异化打基础；M3 论点漂移 + 监控条件让观察池从被动展示变为主动预警；t4 通用代理服务让任何 Hermes 实例都能接入 AI 分析，不绑定特定设备。
 - 冒烟：全部单测通过（M2: 10, M3-1: 10, M3-2a: 6, M3-2b: 15, M3-2d: 5, t4: 5），pi1 live 验证通过。
+
+### 2026-09-20（清理：移除虚拟盘、策略分类 tab、候选股合并到主页）
+
+- **移除虚拟盘功能**：删除 `src/paper/` 目录（broker.py、engine.py、__init__.py）、`/paper` 路由、`tests/paper/` 和 `test_routes_paper.py`、config.yaml 中的 paper 配置段、scheduler.py 中的纸盘交易触发逻辑
+- **移除策略分类 tab**：删除 `_stock_list.html` 中的策略 tab（全部/成长/红利/反转）和 `switchStrategyTab` JS 函数、`data-tags` 属性
+- **候选股总览合并到主页**：index.html 新增"候选股总览"视图 tab（默认激活），包含 `_stock_list.html`；routes.py index() 合并候选股数据源（最新筛选 + 历史分析）；watchlist.js switchView 支持 'candidates' 视图切换
+- **移除导航链接**：删除 index.html 导航栏中的"候选股总览"和"虚拟盘"链接
+- **恢复 AI 分析功能**：恢复 `src/analyzer/ai_analyzer.py` 和 `watchlist_reviewer.py`、journal 和 paper 路由、scheduler 中的 AI 分析触发逻辑、前端模板中的 AI 分析展示区域（投资人笔记、镜子测试、逆向思考、历史分析时间线）
+- **修复模板语法错误**：stock_detail.html 移除多余的 endif 注释；恢复 `_detect_pool_drift` 函数和 `/api/journal/{journal_date}/conflicts` 端点
+- 想法/为什么：纸盘交易系统已归档，不再开发量化交易；策略分类 tab 对单策略筛选无意义；候选股总览合并到主页便于查看；AI 分析功能恢复，面板只负责展示
+- 冒烟：319 passed, 0 failed（本地 + pi1 验证通过）
