@@ -22,3 +22,6 @@ stock-dashboard = "src.main:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["*_legacy"]
