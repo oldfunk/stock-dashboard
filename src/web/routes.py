@@ -1054,6 +1054,161 @@ async def api_watchlist_monitor_update(code: str, body: dict):
     return {"ok": True, "code": code, "monitor_condition": cond}
 
 
+# ── 钉选股票投资笔记（AI 可访问） ──────────────────────────────
+
+@app.get("/api/watchlist/{code}/notes")
+async def api_watchlist_notes_get(code: str, limit: int = 10):
+    """获取某只钉选股的投资笔记列表（AI 或用户提交）"""
+    notes = WatchlistDAO().list_notes(code, limit=limit)
+    return {"code": code, "notes": notes}
+
+
+@app.post("/api/watchlist/{code}/notes")
+async def api_watchlist_notes_add(code: str, body: dict):
+    """添加投资笔记（AI 或用户提交）
+    
+    body: {"note": "...", "note_type": "weekly/analysis/user"}
+    """
+    note = body.get("note")
+    if not note or not isinstance(note, str):
+        raise HTTPException(status_code=400, detail="note 必须为非空字符串")
+    note_type = body.get("note_type", "weekly")
+    if note_type not in ("weekly", "analysis", "user"):
+        raise HTTPException(status_code=400, detail="note_type 必须为 weekly/analysis/user")
+    ok = WatchlistDAO().add_note(code, note, note_type)
+    if not ok:
+        raise HTTPException(status_code=500, detail="添加笔记失败")
+    return {"ok": True, "code": code, "note_type": note_type}
+
+
+@app.get("/api/watchlist/notes")
+async def api_watchlist_all_notes(limit: int = 50):
+    """获取所有钉选股的投资笔记（便于 AI 批量获取）"""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM watchlist_notes ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    return {"notes": [dict(r) for r in rows]}
+
+
+@app.get("/api/watchlist/{code}/full")
+async def api_watchlist_full(code: str):
+    """获取钉选股的完整数据（一次性获取所有信息供 AI 分析）
+
+    返回：
+    - 基本信息：code, name, added_at, note, latest_price, last_signal
+    - 实时行情：current_price, change_percent, change_amount
+    - 财务指标：pe, pb, roe, debt_ratio, market_cap, revenue_growth, profit_growth, gross_margin, net_margin
+    - AI 分析：ai_parsed（完整 JSON）, trade_parsed, model, ai_failed
+    - 分析历史：analysis_history（最近 5 条）
+    - 投资笔记：notes（最近 10 条）
+    """
+    from src.models.database import (
+        WatchlistDAO, StockSnapshotDAO, ScreeningResultDAO,
+        StockAnalysisHistoryDAO, FinancialSummaryDAO, RunLogDAO
+    )
+    from src.utils import now_cn
+
+    # 1. 基本信息
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM watchlist WHERE code = ?", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="股票不在钉选列表")
+    item = dict(row)
+
+    # 2. 实时行情
+    realtime = get_realtime_cache()
+    if code in realtime:
+        item['current_price'] = realtime[code].get('current_price')
+        item['change_percent'] = realtime[code].get('change_percent')
+        item['change_amount'] = realtime[code].get('change_amount')
+    else:
+        item['current_price'] = None
+        item['change_percent'] = None
+        item['change_amount'] = None
+
+    # 3. 财务指标（screening_result + stock_snapshot 降级）
+    sr = ScreeningResultDAO().get_latest_for_code(code)
+    snap = StockSnapshotDAO().get_by_code(code)
+    item['pe'] = sr.get('pe') if sr else (snap.get('pe') if snap else None)
+    item['pb'] = sr.get('pb') if sr else (snap.get('pb') if snap else None)
+    item['roe'] = sr.get('roe') if sr else (snap.get('roe') if snap else None)
+    item['debt_ratio'] = sr.get('debt_ratio') if sr else (snap.get('debt_ratio') if snap else None)
+    item['market_cap'] = sr.get('market_cap') if sr else (snap.get('market_cap') if snap else None)
+    item['revenue_growth'] = sr.get('revenue_growth') if sr else None
+    item['profit_growth'] = sr.get('profit_growth') if sr else None
+    item['gross_margin'] = sr.get('gross_margin') if sr else None
+    item['net_margin'] = sr.get('net_margin') if sr else None
+    item['score'] = sr.get('score') if sr else None
+    item['reason'] = sr.get('reason') if sr else None
+
+    # 4. AI 分析（优先历史，降级到 screening_result）
+    hist_dao = StockAnalysisHistoryDAO()
+    latest_hist = hist_dao.get_latest_for_code(code)
+    item['signal'] = None
+    item['model'] = None
+    item['ai_parsed'] = None
+    item['trade_parsed'] = None
+    item['ai_confidence'] = None
+    item['ai_failed'] = False
+
+    if latest_hist and latest_hist.get('ai_trade_strategy'):
+        try:
+            trade = json.loads(latest_hist['ai_trade_strategy'])
+            item['signal'] = trade.get('signal')
+            item['trade_parsed'] = trade
+            item['ai_confidence'] = trade.get('confidence')
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if latest_hist and latest_hist.get('ai_analysis'):
+        try:
+            analysis = json.loads(latest_hist['ai_analysis'])
+            item['ai_parsed'] = analysis
+            item['model'] = analysis.get('model')
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not item['signal'] and sr and sr.get('ai_trade_strategy'):
+        try:
+            trade = json.loads(sr['ai_trade_strategy'])
+            item['signal'] = trade.get('signal')
+            item['trade_parsed'] = trade
+            item['ai_confidence'] = trade.get('confidence')
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not item['ai_parsed'] and sr and sr.get('ai_analysis'):
+        try:
+            item['ai_parsed'] = json.loads(sr['ai_analysis'])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if sr:
+        item['ai_failed'] = bool(sr.get('ai_failed') in (1, True, '1'))
+        item['ai_failure_reason'] = sr.get('ai_failure_reason') or None
+
+    # 5. 分析历史时间线（最近 5 条）
+    history = hist_dao.get_history(code, limit=5)
+    parsed_history = []
+    for h in history:
+        if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
+            try:
+                ai_obj = json.loads(h['ai_analysis'])
+                h['hist_analysis'] = ai_obj.get('analysis', '') or ''
+                h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
+                h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
+            except Exception:
+                pass
+        parsed_history.append(h)
+    item['analysis_history'] = parsed_history
+
+    # 6. 投资笔记
+    notes = WatchlistDAO().list_notes(code, limit=10)
+    item['notes'] = notes
+
+    return item
+
+
 # ── AI 观察池 + 投资笔记 ──────────────────────────────────────
 
 @app.get("/api/ai-watchlist")

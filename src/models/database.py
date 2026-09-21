@@ -279,6 +279,16 @@ CREATE TABLE IF NOT EXISTS ai_journal (
 );
 CREATE INDEX IF NOT EXISTS idx_journal_date ON ai_journal(journal_date);
 
+-- 钉选股票投资笔记（AI 或用户提交）
+CREATE TABLE IF NOT EXISTS watchlist_notes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT NOT NULL,
+    note            TEXT NOT NULL,
+    note_type       TEXT NOT NULL DEFAULT 'weekly',  -- weekly/analysis/user
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_notes_code ON watchlist_notes(code);
+
 -- M4a 纸盘（paper-trading.md §4.1，复用现有 DB，零新依赖，金额单位均为元）
 CREATE TABLE IF NOT EXISTS paper_account (
     id INTEGER PRIMARY KEY,              -- 单账户固定 id=1
@@ -1017,8 +1027,28 @@ class WatchlistDAO:
                 (signal, now_cn().isoformat(), code)
             )
 
+    def add_note(self, code: str, note: str, note_type: str = "weekly") -> bool:
+        """添加投资笔记（AI 或用户）"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO watchlist_notes (code, note, note_type, created_at) VALUES (?, ?, ?, ?)",
+                (code, note, note_type, now_cn().isoformat())
+            )
+            return cur.rowcount > 0
 
-class KlineDAO:
+    def list_notes(self, code: str, limit: int = 10) -> list[dict]:
+        """获取某只股票的投资笔记列表"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM watchlist_notes WHERE code = ? ORDER BY created_at DESC LIMIT ?",
+                (code, limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def clear(self):
+        """清空钉选"""
+        with db_conn() as conn:
+            conn.execute("DELETE FROM watchlist")
     """K线日线数据 DAO"""
 
     def upsert_many(self, code: str, records: list[dict]) -> int:
