@@ -174,7 +174,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   9. 从未校准 → 属实，无数据可校（成功 BUY 样本≈0），仅记 backlog，不写代码。
   10. 无日期 → 属实，已修：分析日期/快照日期/大盘背景/ST 全部注入。
 - 精简：删除纸盘 schema 建表 + 列守卫 + 5 个 Paper*DAO + `test_paper_tables.py`（新库验证无 paper 表、不 crash；存量库残留表只读保留）；`tests/paper/__init__` 早前已删。
-- 验证：新 6+4 单测本地过；analyzer/ai_proxy/受影响 web 共 152 passed；全仓待 pi1 gate。
+- 验证：新 6+4 单测本地过；analyzer/ai_proxy/受影响 web 共 152 passed；pi1 worktree 全仓 **323 passed** 零回归（基线 317 + 新增）。
 
 ### 2026-09-21（合并部署 nightly/20260921：ff 入 main，pi1 重启验证全绿）
 - 合并：`nightly/20260921`（3 commits）fast-forward 入 main（`ac62476`），经 pi1 中继推送（本地直连故障仍在）。
