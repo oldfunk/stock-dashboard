@@ -3,14 +3,14 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-21 去 AI 内联 + 去 Hermes 化，分支 nightly/20260921 待合）
-- 分支：`nightly/20260921`（基于 main `8875e36`），只推分支，未动 main/pi1
-- 内容：两列表卡片去 AI 内联（+死 JS/CSS/监控标签 emoji 修）/ 调度停本地 AI 触发 / routes 清尸体 + 删 candidates 页 / `hermes_proxy`→`ai_proxy` / 文档历史包袱清理（基线统 317、账本状态重写、README 按现状修）
-- 验证：pi1 worktree 全仓 **317 passed** 零回归；py_compile 全过；服务 active（未重启，展示/注释/死码变更下次 deploy 生效）
-- 外部 AI 不绑定实现（作者自用 Hermes）；`hermes` CLI/cron 系平台专名保留；消费方接线待排期
+## 最后状态（2026-09-21 nightly/20260921 已合已部署）
+- 分支：`main` = `ac62476`（ff 合并）；远端 `nightly/20260921` 待删；pi1 已 pull + restart + 验证
+- 上线：列表卡片去 AI 内联 / 调度停本地 AI 触发 / `ai_proxy` 改名 / 文档清包袱（基线 317）
+- 验证：pi1 gate **317 passed**；三端点 200（`/`、`/api/status`、`/journal`）；`/candidates` 按预期 404；日志零 Traceback；DB 备份 `stock_dashboard.db.bak0921`
+- 注意：本地 AI 自动触发已停——明日起不再有每日 AI 失败循环；外部 AI 消费方待排期
 
 ## 下一步方向
-1. 用户批准后合本分支 → pi1 pull + gate（展示/注释/死码变更，可不重启，下次 deploy 顺带生效）
+1. 删远端 `nightly/20260921`（已合，无残留）
 2. 外部 AI 消费方排期（取数/写回接线，见 `docs/ai-proxy-ai-analysis.md` §5）
 3. P1 面板深化；周六复盘 LLM 决议现状已记账（失败整轮跳过）
 
@@ -18,9 +18,10 @@
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
-- pi1 落后 main 2 commits（`a4c4b66` 定时任务文档 + `8875e36` setup-cron.sh；笔记 API `a2ac30d` pi1 已有）
+- pi1 落后 main 2 commits 的状态已消除（本次已同步到最新）
 
 ## 历史交接区（追加，不删）
+- 2026-09-21 nightly/20260921 已合已部署（去 AI 内联 + ai_proxy 改名 + 文档清包袱，pi1 gate 317 全绿）
 - 2026-09-21 去 AI 内联 + 去 Hermes 化待合（nightly/20260921：卡片去 AI/停本地触发/ai_proxy 改名/文档清包袱）
 - 2026-09-18 文档复检：修复 handoff 残留冲突标记（21615d2 合并遗留）+ AGENTS.md 校订（基线 317/运行命令/交接段）+ README 校正（run-once→run、基线 313→317），分支 nightly/20260918 待合
 - 2026-09-17 收尾（AGENTS.md 入 main + README 如实化 + 删 0917/0917b + 0917c 已合）

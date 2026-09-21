@@ -161,6 +161,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
+### 2026-09-21（合并部署 nightly/20260921：ff 入 main，pi1 重启验证全绿）
+- 合并：`nightly/20260921`（3 commits）fast-forward 入 main（`ac62476`），经 pi1 中继推送（本地直连故障仍在）。
+- 部署：pi1 备份 DB（`stock_dashboard.db.bak0921`）→ pull → restart（模板/路由/scheduler 变更需重启生效）→ 服务 active。
+- 验证：gate **317 passed**；`/`、`/api/status`、`/journal` 全 200；`/candidates` 按预期 404；journalctl 零 Traceback；今日流水线 `20260921_153011` completed(20) 未受影响。
+- 遗留：远端 `nightly/20260921` 待删；外部 AI 消费方待排期。
 ### 2026-09-21（去 AI 内联 + 去 Hermes 化 + 文档历史包袱清理，用户定调）
 - 起因：用户定调——外部 AI 只走 API（分析+笔记），股票列表下方不再直接展示 AI 分析；外部 AI 不绑定 Hermes（作者自用 Hermes）。另审计发现文档与代码多处历史包袱（基线 317/319/360+ 打架、虚构 `_legacy` 归档、账本状态停留 09-16、scheduler 仍在本地触发已死的 AI）。
 - 改了什么（分支 nightly/20260921）：
