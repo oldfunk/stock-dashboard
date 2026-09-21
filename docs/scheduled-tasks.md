@@ -1,7 +1,7 @@
 # 定时任务配置（Hermes 自动执行）
 
 > 创建：2026-09-20 · 上游：`architecture.md` · 状态：设计中
-> 本文件定义 Hermes 定时任务的结构化配置。Hermes 读取本文件 → 创建 kanban 任务 → 执行 → 输出报告。
+> 本文件定义 Hermes 定时任务的结构化配置。Hermes 读取本文件 → 执行 → 输出报告到 `docs/reports/`。
 
 ## 任务列表
 
@@ -14,7 +14,6 @@
 | **执行内容** | 1. 检查流水线运行状态（最近 run_log）<br>2. 数据质量检查（screening_result 覆盖率、stock_snapshot 更新）<br>3. 服务健康检查（systemctl is-active、API 响应）<br>4. 异常检测（失败 run、缺失数据） |
 | **输出格式** | `docs/reports/daily-YYYYMMDD.md` |
 | **完成标准** | 报告文件存在，包含：运行状态、数据质量、服务健康、异常列表 |
-| **kanban 任务** | 自动创建，assignee=default，priority=1 |
 
 ### 2. 每周复盘（weekly-review）
 
@@ -25,7 +24,6 @@
 | **执行内容** | 1. 观察池复盘（WatchlistReviewer.review()）<br>2. 论点漂移检测（_detect_pool_drift）<br>3. 投资笔记撰写（ai_journal 新增条目）<br>4. 候选股表现分析（本周 vs 上周评分变化） |
 | **输出格式** | `docs/reports/weekly-YYYYMMDD.md` |
 | **完成标准** | 报告文件存在，包含：观察池状态、漂移检测结果、投资笔记链接、候选股表现 |
-| **kanban 任务** | 自动创建，assignee=default，priority=2 |
 
 ### 3. 每月分析（monthly-analysis）
 
@@ -36,7 +34,6 @@
 | **执行内容** | 1. 候选股表现分析（本月筛选结果 vs 历史）<br>2. 策略有效性评估（多策略命中分布）<br>3. 数据源健康度（S1-S7 可用性）<br>4. 系统资源使用（DB 大小、日志量） |
 | **输出格式** | `docs/reports/monthly-YYYYMM.md` |
 | **完成标准** | 报告文件存在，包含：候选股表现、策略评估、数据源健康、资源使用 |
-| **kanban 任务** | 自动创建，assignee=default，priority=3 |
 
 ## 报告模板
 
@@ -154,10 +151,8 @@
 ## Hermes 执行流程
 
 1. **读取本文件** → 解析任务配置
-2. **创建 kanban 任务** → 每个任务一个卡片
-3. **执行任务** → 调用对应函数/脚本
-4. **生成报告** → 写入 `docs/reports/`
-5. **更新 kanban** → 标记完成，附报告链接
+2. **执行任务** → 调用对应函数/脚本
+3. **生成报告** → 写入 `docs/reports/`，末尾记录执行状态
 
 ## 约束
 
