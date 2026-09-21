@@ -430,24 +430,6 @@
             margin-top: 6px;
         }
 
-        .stock-model {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            background: var(--bg-tertiary, var(--bg-primary));
-            padding: 2px 6px;
-            border-radius: var(--radius-sm);
-            margin-top: 6px;
-            margin-left: 4px;
-            border: 1px solid var(--border-color, #2a2f3a);
-        }
-        .stock-ai-fail {
-            color: var(--red, #c5221f);
-            background: rgba(197,34,31,0.10);
-            border-color: rgba(197,34,31,0.35);
-        }
-
         .score-detail {
             margin-top: 8px;
             border: 1px solid var(--border-color, #2a2f3a);
@@ -561,106 +543,7 @@
             border-top: 1px solid var(--divider-thin);
         }
 
-        /* ========== AI Section ========== */
-        .ai-section {
-            margin-top: 8px;
-            padding-top: 10px;
-            border-top: 1px solid var(--divider-thin);
-        }
-
-        .ai-tabs {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 10px;
-        }
-
-        .ai-tab {
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            background: none;
-            border-width: 0;
-            cursor: pointer;
-            padding: 3px 0;
-            border-bottom: 2px solid transparent;
-            transition: color 0.15s, border-color 0.15s;
-        }
-
-        .ai-tab:hover {
-            color: var(--text-secondary);
-        }
-
-        .ai-tab.active {
-            color: var(--accent);
-            border-bottom-color: var(--accent);
-        }
-
-        .ai-panel {
-            font-size: 12px;
-            line-height: 1.7;
-            color: var(--text-secondary);
-        }
-
-        .ai-panel p {
-            margin-bottom: 6px;
-        }
-
-        .ai-panel strong {
-            color: var(--text-primary);
-            font-weight: 500;
-        }
-
-        .ai-text {
-            white-space: pre-wrap;
-            line-height: 1.8;
-        }
-
-        .trade-signal {
-            grid-column: span 2;
-        }
-        .signal-buy {
-            color: var(--color-up) !important;
-            font-weight: 600;
-            font-size: 14px !important;
-        }
-        .signal-hold {
-            color: var(--color-warn) !important;
-            font-weight: 600;
-            font-size: 14px !important;
-        }
-        .signal-avoid {
-            color: var(--color-down) !important;
-            font-weight: 600;
-            font-size: 14px !important;
-        }
-
-        .trade-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-top: 9px;
-        }
-
-        .trade-cell {
-            padding: 10px 12px;
-            background: var(--bg-tertiary);
-            border-radius: var(--radius-sm);
-        }
-
-        .trade-cell .label {
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin-bottom: 3px;
-        }
-
-        .trade-cell .value {
-            font-size: 12px;
-            color: var(--text-primary);
-            line-height: 1.4;
-        }
+        /* ========== AI 内联展示已移除（2026-09-21）：分析由外部 AI 通过 API 消费数据后输出 ========== */
 
         /* ========== Empty State ========== */
         .empty-state {
@@ -769,123 +652,8 @@
             .knowledge-panel { width: 100%; position: static; }
         }
 
-        /* ========== History Bar ========== */
-        .history-bar {
-            margin-top: 8px;
-            padding-top: 6px;
-            border-top: 1px solid var(--divider-thin);
-        }
-
-        .history-toggle {
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            background: none;
-            border-width: 0;
-            cursor: pointer;
-            padding: 2px 0;
-            transition: color 0.15s;
-        }
-
-        .history-toggle:hover {
-            color: var(--text-secondary);
-        }
-
-        .history-list {
-            margin-top: 6px;
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .history-item {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            font-size: 11px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            padding: 3px 6px;
-            border-radius: var(--radius-sm);
-            transition: background 0.1s;
-        }
-        .history-item:hover { background: var(--bg-hover); }
-
-        .history-detail {
-            display: none;
-            margin: 4px 0 6px 0;
-            padding: 10px 12px;
-            background: var(--bg-tertiary);
-            border-radius: var(--radius-sm);
-            font-size: 12px;
-            line-height: 1.65;
-            color: var(--text-secondary);
-        }
-        .history-detail.open { display: block; }
-        .history-detail .hd-tabs {
-            display: flex;
-            gap: 0;
-            margin-bottom: 8px;
-            border-bottom: 1px solid var(--divider-thin);
-        }
-        .history-detail .hd-tab {
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-tertiary);
-            background: none;
-            border: none;
-            border-bottom: 2px solid transparent;
-            padding: 4px 10px;
-            cursor: pointer;
-            transition: color 0.15s, border-color 0.15s;
-        }
-        .history-detail .hd-tab:hover { color: var(--text-secondary); }
-        .history-detail .hd-tab.active {
-            color: var(--accent);
-            border-bottom-color: var(--accent);
-        }
-        .history-detail .hd-panel { display: none; }
-        .history-detail .hd-panel.open { display: block; }
-        .history-detail .trade-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            margin-top: 6px;
-        }
-        .history-detail .trade-cell {
-            background: var(--bg-secondary);
-            padding: 6px 8px;
-            border-radius: var(--radius-sm);
-        }
-        .history-detail .trade-cell .label {
-            font-size: 10px;
-            color: var(--text-tertiary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .history-detail .trade-cell .value {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-top: 2px;
-        }
-
+        /* ========== History Bar 已移除（2026-09-21）：历史 AI 文本不再内联展示 ========== */
         /* ========== Knowledge Panel ========== */
-        }
-
-        .hist-date {
-            font-weight: 500;
-            color: var(--text-primary);
-            min-width: 80px;
-        }
-
-        .hist-score {
-            color: var(--text-tertiary);
-            min-width: 60px;
-        }
-
-        .hist-status {
-            font-size: 10px;
         }
 
         /* ========== Footer ========== */
@@ -909,7 +677,6 @@
             .stock-row { flex-direction: column; }
             .stock-info { flex: none; }
             .stock-metrics { gap: 12px; }
-            .trade-grid { grid-template-columns: repeat(2, 1fr); }
         }
 
         @media (max-width: 600px) {
@@ -972,16 +739,6 @@
             font-weight: 500;
             color: var(--text-primary);
         }
-        .wl-signal {
-            font-size: 11px;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 3px;
-        }
-        .wl-signal-buy { background: var(--color-up); color: var(--text-on-green); }
-        .wl-signal-hold { background: transparent; border: 1px solid var(--text-tertiary); color: var(--text-secondary); }
-        .wl-signal-avoid { background: transparent; border: 1px dashed var(--red); color: var(--red); }
-        .wl-signal-none { color: var(--text-tertiary); }
         .wl-score {
             font-size: 12px;
             font-weight: 600;
@@ -994,7 +751,6 @@
             background: var(--bg-tertiary);
             color: var(--text-secondary);
         }
-        .wl-tag-gold { background: var(--gold-bg); color: var(--gold); }
         .wl-metrics {
             display: flex;
             flex-wrap: wrap;
@@ -1048,27 +804,7 @@
             margin-bottom: 6px;
             line-height: 1.5;
         }
-        .wl-ai-toggle {
-            font-size: 12px;
-            color: var(--text-secondary);
-            background: none;
-            border: 1px solid var(--divider-thin);
-            border-radius: var(--radius-sm);
-            padding: 4px 10px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .wl-ai-toggle:hover { background: var(--bg-tertiary); }
-        .wl-ai-body {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--divider-thin);
-        }
-        .wl-ai-tabs {
-            display: flex;
-            gap: 0;
-            margin-bottom: 8px;
-        }
+        /* AI 折叠区样式已移除（2026-09-21）；监控标签样式见 _watchlist_card.html */
 
         @media (max-width: 768px) {
             .wl-metrics { gap: 4px 12px; }
@@ -1471,32 +1207,6 @@
 
     setColorScheme(getPreferredColorScheme());
 
-    // ========== Watchlist AI Toggle ==========
-    function toggleWlAi(code) {
-        var body = document.getElementById('wl-ai-body-' + code);
-        var caret = document.getElementById('wl-caret-' + code);
-        if (!body) return;
-        var show = body.style.display === 'none';
-        body.style.display = show ? 'block' : 'none';
-        if (caret) caret.textContent = show ? '-' : '+';
-    }
-
-    // ========== History Toggle ==========
-    function toggleHistory(code) {
-        var el = document.getElementById('hist-' + code);
-        if (el) {
-            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
-        }
-    }
-
-    // ========== History Detail Toggle ==========
-    function toggleHistDetail(id) {
-        var el = document.getElementById('hd-' + id);
-        if (el) {
-            el.classList.toggle('open');
-        }
-    }
-
     // ========== Score Detail Toggle ==========
     function toggleScoreDetail(code) {
         var el = document.getElementById('sd-' + code);
@@ -1512,37 +1222,11 @@
         }
     }
 
-    // ========== History Detail Tab Switch ==========
-    function switchHistTab(btn, targetId) {
-        var detail = btn.closest('.history-detail');
-        detail.querySelectorAll('.hd-panel').forEach(function(el) {
-            el.classList.remove('open');
-        });
-        detail.querySelectorAll('.hd-tab').forEach(function(el) {
-            el.classList.remove('active');
-        });
-        document.getElementById(targetId).classList.add('open');
-        btn.classList.add('active');
-    }
-
     // ========== Knowledge Panel Toggle ==========
     function toggleKP(titleEl) {
         var body = titleEl.nextElementSibling;
         titleEl.classList.toggle('open');
         body.classList.toggle('open');
-    }
-
-    // ========== Tab Switching ==========
-    function switchTab(btn, targetId) {
-        const section = btn.closest('.ai-section');
-        section.querySelectorAll('.tab-content').forEach(function(el) {
-            el.style.display = 'none';
-        });
-        section.querySelectorAll('.ai-tab').forEach(function(el) {
-            el.classList.remove('active');
-        });
-        document.getElementById(targetId).style.display = 'block';
-        btn.classList.add('active');
     }
 
     // ========== Auto-Refresh via JSON API ==========
