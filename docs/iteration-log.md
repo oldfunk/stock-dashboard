@@ -161,6 +161,21 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
+### 2026-09-21（分析师审查整改 T1+T2：数据质量标注/估值去硬编码/纸盘 schema 清理/笔记来源列，分支 nightly/20260921b）
+- 起因：外部分析师审阅代码后提出 10 条 critique（按判断力影响排序），用户定调——Berkshire 只当参考、不照搬缝合；逐条验真后修复 + 精简。本轮先做可独立交付部分；触及纪律行为（mirror/一致性熔断）与复盘跨期留待下一轮。
+- 逐条验真结论：
+  1. 数据无质量标注 → 属实，已修：新增 `_data_quality_facts/_text`（来源/日期/覆盖区间/上市年限/ST/缺失清单/大盘），注入 prompt、随结果落库（`result['data_quality']）、经 `_enrich_stocks` 透传 API（外部 AI 可用）；批上下文 `_attach_batch_context`（run_id/快照字段/大盘，失败不阻断）。
+  2. prompt 表演框架 → 部分属实：估值规则已改（见下）；禁令/mirror/一致性熔断暂留，下一轮处理。
+  3. 估值硬编码倍数 → 属实，已修：规则 4 改为 AI 按商业模式自选方法 + 写假设与局限；`intrinsic_value` 结构不变（解析兼容）。
+  4/5. 镜子填空 + 一致性循环 → 属实，下一轮（改熔断为警告记账，动 B2 纪律需单测同到）。
+  6. 信息丰富度无年限锚 → 属实，已修：`data_years/ro_5y_count/list_date` 已注入，规则 7"上市不足 3 年"首次可判定。
+  7. 模型不可控 + 无版本记录 → 半错：`model` 列 08-23 已有，本地触发已停；本轮补笔记 `model` 列（外部 AI 必填溯源）+ 迁移守卫。
+  8. 无跨期校验 → 半错：B5 漂移 + conflicts 接口 live 完好（分析师看的是旧代码，正说明表述不清）；reviewer 单期复盘缺口留待下一轮。
+  9. 从未校准 → 属实，无数据可校（成功 BUY 样本≈0），仅记 backlog，不写代码。
+  10. 无日期 → 属实，已修：分析日期/快照日期/大盘背景/ST 全部注入。
+- 精简：删除纸盘 schema 建表 + 列守卫 + 5 个 Paper*DAO + `test_paper_tables.py`（新库验证无 paper 表、不 crash；存量库残留表只读保留）；`tests/paper/__init__` 早前已删。
+- 验证：新 6+4 单测本地过；analyzer/ai_proxy/受影响 web 共 152 passed；全仓待 pi1 gate。
+
 ### 2026-09-21（合并部署 nightly/20260921：ff 入 main，pi1 重启验证全绿）
 - 合并：`nightly/20260921`（3 commits）fast-forward 入 main（`ac62476`），经 pi1 中继推送（本地直连故障仍在）。
 - 部署：pi1 备份 DB（`stock_dashboard.db.bak0921`）→ pull → restart（模板/路由/scheduler 变更需重启生效）→ 服务 active。
