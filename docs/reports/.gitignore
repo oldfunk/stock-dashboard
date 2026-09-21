@@ -1,0 +1,5 @@
+# 定时任务报告输出目录（见 docs/scheduled-tasks.md）。
+# 每日巡检 → daily-YYYYMMDD.md；每周复盘 → weekly-YYYYMMDD.md；每月分析 → monthly-YYYYMM.md。
+# 由 Hermes 定时任务写入，报告文件本身不进 Git（保留目录结构）。
+*.md
+!.gitkeep

@@ -46,12 +46,13 @@ screener:
   # 并集持久化；false 保持原有单策略行为不变
   multi_strategy: false
 
-# -------- AI 分析配置 --------
+# -------- AI 分析配置（本地触发已停用，见 scheduler；分析由外部 AI 执行） --------
 ai:
-  # LLM API 配置 (OpenAI 兼容)
-  provider: "opencode-zen"           # OpenCode Zen
+  # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
+  # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
+  provider: "opencode-zen"           # OpenCode Zen（已不可用，保留作记录）
   api_base: "https://opencode.ai/zen/v1"
-  model: "deepseek-v4-flash-free"   # 默认模型（自动发现+故障轮换，详见 ai_analyzer.FreeModelPool）
+  model: "deepseek-v4-flash-free"   # 默认模型（该模型已下线；本地分析停用，此值暂不生效）
   temperature: 0.3
   max_tokens: 6000
   # 免 Key 备用通道：主池全灭时每只股票兜底（默认 Pollinations，可配其它 OpenAI 兼容源）
@@ -63,11 +64,11 @@ ai:
     max_tokens: 6000
     retries: 2
 
-# -------- Hermes 代理 AI 分析（通用，任何 Hermes 实例可接入） --------
+# -------- 外部 AI 代理（通用，不绑定具体 AI 实现；作者自用 Hermes 接入） --------
 # 主通道：付费 API（OpenRouter 等），优先使用
 # 降级通道：免费 API（Pollinations 等），主通道失败时兜底
 # api_key 不存 Git，在 .env 或本地配置中设置
-hermes_proxy:
+ai_proxy:
   primary:
     api_base: "https://openrouter.ai/api/v1"
     model: "anthropic/claude-sonnet-5"

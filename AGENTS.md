@@ -13,7 +13,7 @@ python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 
 ## 技术栈
 
-Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · LLM 分析（OpenAI 兼容 API；Zen 免费通道不可用，迁移计划见 `docs/hermes-proxy-ai-analysis.md`）· 内置 scheduler daemon 线程。
+Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI 分析由外部 AI 执行（通用协议见 `docs/ai-proxy-ai-analysis.md`；本地 LLM 通道不可用）· 内置 scheduler daemon 线程。
 
 ## 架构
 
@@ -59,6 +59,6 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · LL
 ### 文档约定
 
 1. 文档放 `docs/`，文件名英文小写连字符（如 hermes-proxy-ai-analysis.md）
-2. 格式跟随现有文档（参考 architecture.md、paper-trading.md），勿自创版式：`> 创建：日期 · 上游：来源 · 状态：…` 头部元信息行 + `## N.` 编号章节；表格、代码块按需
+2. 格式跟随现有文档（参考 architecture.md），勿自创版式：`> 创建：日期 · 上游：来源 · 状态：…` 头部元信息行 + `## N.` 编号章节；表格、代码块按需
 3. 新文档先在 `nightly/*` 分支起草，用户批准后合入 main
 4. 不重复维护：同一信息只写一处，其他文件引用链接

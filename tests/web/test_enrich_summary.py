@@ -82,8 +82,9 @@ def test_enrich_summary_fields_malformed(monkeypatch):
     assert s["iv_range"] is None
 
 
-def test_stock_list_template_renders_summary(monkeypatch):
-    """_stock_list.html 有值渲染摘要块、NULL 行不渲染"""
+def test_stock_list_template_renders_no_ai(monkeypatch):
+    """_stock_list.html 不再内联 AI（2026-09-21 方向）：即使透传字段齐全，
+    摘要块/分析区也不渲染；数据（代码/评分/指标）正常渲染"""
     import src.web.routes as routes
 
     full = {"code": "000001", "name": "平安银行", "score": 80, "model": "m",
@@ -101,11 +102,12 @@ def test_stock_list_template_renders_summary(monkeypatch):
             "iv_range": {"conservative": "500", "base_case": "650",
                          "optimistic": "800", "margin_of_safety": "20%",
                          "method": "Owner Earnings × 12倍"}}
-    null_row = dict(full, code="000002", moat_type=None, mgmt_score=None, iv_range=None)
 
     html = routes.templates.get_template("_stock_list.html").render(
-        {"stocks": [full, null_row], "request": None})
-    assert "护城河: 转换成本" in html
-    assert "管理层: 配置7/股东8" in html
-    assert "估值: 500–650–800亿" in html
-    assert html.count('class="ai-summary"') == 1
+        {"stocks": [full], "request": None})
+    assert "护城河" not in html
+    assert "ai-summary" not in html
+    assert "trade-grid" not in html
+    assert "history-bar" not in html
+    assert "000001" in html
+    assert "80" in html

@@ -3,30 +3,25 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-20：清理完成，聚焦价值投资分析面板）
-- 分支：main = `2cd7b84`（删除 test_routes_paper.py）；工作区干净
-- pi1：已同步 main，gate.sh 319 passed 全绿；服务运行正常
-- 完成项：M2 策略分化、M3 论点漂移 + 监控条件、t4 通用 Hermes 代理 API、t5 TopK 回测脚本、t6 pi1 验证
-- 路线调整：移除 M4a/M4b/M4c/M4d 量化交易路线，AI 分析缩减为 API 接口，面板只负责展示
-- 归档：`src/paper/_legacy/`（纸盘交易）、`src/analyzer/_legacy/`（本地 AI 分析）
-- 清理：删除 src/paper/ 目录、/paper 路由、策略分类 tab、候选股导航链接、data-tags 属性
-- 恢复：AI 分析功能（journal/paper 路由、scheduler 触发、前端展示）
-- 用户定：AI 分析由外部 Hermes 代理执行，面板不触发；全局约定：默认推 nightly 分支、永不自动合并、合并后同步 pi1
-- 阻塞更新：Zen Key 不配了（用户否决）；免费模型仅限 OpenCode 内部使用，外部不可用
+## 最后状态（2026-09-21 去 AI 内联 + 去 Hermes 化，分支 nightly/20260921 待合）
+- 分支：`nightly/20260921`（基于 main `8875e36`），只推分支，未动 main/pi1
+- 内容：两列表卡片去 AI 内联（+死 JS/CSS/🔔emoji 修）/ 调度停本地 AI 触发 / routes 清尸体 + 删 candidates 页 / `hermes_proxy`→`ai_proxy` / 文档历史包袱清理（基线统 317、账本状态重写、README 按现状修）
+- 验证：无 AI 内联不变量单测本地过；待 pi1 gate + 冒烟（不重启）
+- 外部 AI 不绑定实现（作者自用 Hermes）；`hermes` CLI/cron 系平台专名保留；消费方接线待排期
 
 ## 下一步方向
-1. P1 面板深化（目标 11 月）：评分体系透明化、AI 笔记增强、时间线交互、详情页体验优化
-2. P2 体验优化（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
-3. 外部 Hermes 代理接入 AI 分析（`src/hermes_proxy/` 已实现通用 API 接口）
-4. 周六 live 验证完整 review() 流程（pi1 httpx 已安装）
+1. 用户批准后合本分支 → pi1 pull + gate（展示/注释/死码变更，可不重启，下次 deploy 顺带生效）
+2. 外部 AI 消费方排期（取数/写回接线，见 `docs/ai-proxy-ai-analysis.md` §5）
+3. P1 面板深化；周六复盘 LLM 决议现状已记账（失败整轮跳过）
 
 ## 已知隐患
-- 82 只无 roic/fcf 股票可能是东财 API 无数据的小盘股（C2.5 永久兜底）
-- AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"）
+- 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
+- AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
-- pi1 venv 缺 httpx（已安装），完整 review() 流程待验证
+- pi1 落后 main 2 commits（`a4c4b66` 定时任务文档 + `8875e36` setup-cron.sh；笔记 API `a2ac30d` pi1 已有）
 
 ## 历史交接区（追加，不删）
+- 2026-09-21 去 AI 内联 + 去 Hermes 化待合（nightly/20260921：卡片去 AI/停本地触发/ai_proxy 改名/文档清包袱）
 - 2026-09-18 文档复检：修复 handoff 残留冲突标记（21615d2 合并遗留）+ AGENTS.md 校订（基线 317/运行命令/交接段）+ README 校正（run-once→run、基线 313→317），分支 nightly/20260918 待合
 - 2026-09-17 收尾（AGENTS.md 入 main + README 如实化 + 删 0917/0917b + 0917c 已合）
 - 2026-09-17 备用通道 nightly/20260917c（Zen 全灭实证 + Pollinations 兜底 + 生产冒烟通过）

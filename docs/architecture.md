@@ -11,7 +11,7 @@ flowchart TB
         AK[AKShare 接口群]
         EM[东财 datacenter 直连]
         TX[腾讯/新浪 行情]
-        HP[Hermes 代理 API<br/>src/hermes_proxy/]
+        HP[外部 AI 代理协议<br/>src/ai_proxy/]
     end
 
     subgraph PI[pi1 · stock-dashboard.service :9527]
@@ -53,7 +53,7 @@ flowchart LR
     L --> N[K线拉取<br/>池 + Top25]
 ```
 
-AI 分析由外部 Hermes 代理执行，面板只负责展示结果。周六复盘由 `WatchlistReviewer.review()` 触发（硬规则 + LLM 决议 → `ai_watchlist` / `ai_journal`）。
+AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实现），面板只负责展示数据与外部 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（硬规则 + 监控条件本地执行；LLM 决议依赖已死通道，失败时整轮跳过，待外部 AI 消费方排期 → `ai_watchlist` / `ai_journal`）。
 
 ## 3. 模块边界（跨层调用禁令）
 
@@ -61,11 +61,11 @@ AI 分析由外部 Hermes 代理执行，面板只负责展示结果。周六复
 |---|---|---|---|
 | `collector/` | 原始数据抓取 + 落库前清洗 | `models/`（DAO） | 不得做打分/决策；不得直写展示字段 |
 | `screener/` | 7 门 + 豁免 + 五维打分 | `models/`（只读 summary/snapshot） | 不得调 AKShare；不得调 LLM |
-| `analyzer/` | 已归档到 `_legacy/`，不再使用 | — | — |
-| `scheduler.py` | 定时触发 + 并发 guard | `orchestrator` | 不得含业务逻辑（只做触发 + 防重入） |
+| `analyzer/` | 本地分析（pipeline 已停用触发；手动脚本可用） | `models/` | 不得被 pipeline 调用 LLM |
+| `scheduler.py` | 定时触发 + 并发 guard | `orchestrator` | 不得含业务逻辑（只做触发 + 防重入）；不得触发本地 AI 分析 |
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
-| `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外） |
-| `hermes_proxy/` | 通用 AI 分析 API 接口 | 外部 LLM API | 面板不触发，只提供接口 |
+| `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
+| `ai_proxy/` | 外部 AI 通用代理协议（参考实现） | 外部 LLM API | 面板不触发，只提供接口；不绑定具体 AI 实现 |
 
 ## 4. 数据表清单（现状）
 
@@ -112,7 +112,7 @@ AI 分析由外部 Hermes 代理执行，面板只负责展示结果。周六复
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 360+ passed，基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 317 passed，2026-09-21 pi1 gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - pi1 只接受 `main` 分支部署；Hermes 只提交 GitHub 不部署（见 iteration-log 约束）。
@@ -121,6 +121,6 @@ AI 分析由外部 Hermes 代理执行，面板只负责展示结果。周六复
 
 - **P1 面板深化**（目标 11 月）：评分体系透明化、AI 笔记增强、时间线交互、详情页体验优化
 - **P2 体验优化**（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
-- **AI 分析**：由外部 Hermes 代理执行，面板只负责展示。`src/hermes_proxy/` 提供通用 API 接口
-- **已归档**：`src/paper/_legacy/`（纸盘交易）、`src/analyzer/_legacy/`（本地 AI 分析）
+- **AI 分析**：由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实现），面板只负责展示数据与外部 AI 笔记。通用协议见 `src/ai_proxy/` + `docs/ai-proxy-ai-analysis.md`
+- **已删除**：`src/paper/`（纸盘交易，git 历史可查）；`src/analyzer/` 保留（本地触发已停用，仅手动脚本可用）
 - **量化交易系统**：不再开发，纸盘交易已归档

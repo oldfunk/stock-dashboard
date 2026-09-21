@@ -231,10 +231,10 @@ class MarketScheduler:
             # 流水线后追加 K 线数据拉取
             self._fetch_kline_daily()
 
-            # 流水线成功后每日触发 AI 分析（不再仅限周五，避免研报滞后 1-4 天）
-            self._trigger_ai_analysis_async(config)
+            # AI 分析改由外部 AI 执行（读 API/库 → 写笔记），面板不再本地触发
+            # （2026-09-21 方向；本地 Zen/备用通道已确认不可用，触发只会空转失败）
+            # self._trigger_ai_analysis_async(config)
 
-            # AI 分析完成后触发纸盘交易
             # 纸盘交易已归档，不再自动触发
             # self._trigger_paper_trading_async(config)
         except Exception as e:
@@ -408,7 +408,3 @@ class MarketScheduler:
         t = threading.Thread(target=_run_ai_analysis, daemon=True)
         t.start()
         logger.info("[调度器] AI 分析已在后台启动")
-
-    def _trigger_paper_trading_async(self, config: dict):
-        """纸盘交易已归档，不再自动触发。此方法已禁用。"""
-        logger.info("[调度器] 纸盘交易已归档，跳过本地触发")

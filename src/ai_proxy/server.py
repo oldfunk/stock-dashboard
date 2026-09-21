@@ -1,7 +1,7 @@
-"""Hermes 代理服务主模块
+"""外部 AI 代理服务主模块（通用，不绑定具体 AI 实现；作者自用 Hermes 接入）
 
 提供 POST /api/analyze 端点，接收股票数据 → 调 LLM → 返回结构化 JSON。
-配置通过 config.yaml 的 hermes_proxy 段读取，不硬编码任何设备地址。
+配置通过 config.yaml 的 ai_proxy 段读取，不硬编码任何设备地址。
 """
 
 import json
@@ -16,19 +16,19 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Hermes Proxy AI Analysis", version="1.0.0")
+app = FastAPI(title="AI Proxy Analysis", version="1.0.0")
 
 
 # ── 配置加载 ──
 
 def load_config(config_path: str = "config/config.yaml") -> dict:
-    """加载 config.yaml 中的 hermes_proxy 段"""
+    """加载 config.yaml 中的 ai_proxy 段"""
     try:
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError):
         cfg = {}
-    return cfg.get("hermes_proxy", {})
+    return cfg.get("ai_proxy", {})
 
 
 # ── 请求/响应模型 ──
@@ -149,7 +149,7 @@ async def api_analyze(req: AnalyzeRequest):
             usage=result["usage"],
         )
     except Exception as e:
-        logger.warning(f"[HermesProxy] 主通道失败: {e}")
+        logger.warning(f"[AiProxy] 主通道失败: {e}")
 
     # 降级通道
     if fallback.get("api_base"):
@@ -168,7 +168,7 @@ async def api_analyze(req: AnalyzeRequest):
                 usage=result["usage"],
             )
         except Exception as e:
-            logger.error(f"[HermesProxy] 降级通道也失败: {e}")
+            logger.error(f"[AiProxy] 降级通道也失败: {e}")
 
     return AnalyzeResponse(
         status="error",
@@ -180,7 +180,7 @@ async def api_analyze(req: AnalyzeRequest):
 @app.get("/api/health")
 async def api_health():
     """健康检查"""
-    return {"status": "ok", "service": "hermes_proxy"}
+    return {"status": "ok", "service": "ai_proxy"}
 
 
 if __name__ == "__main__":

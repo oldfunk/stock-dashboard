@@ -322,10 +322,9 @@ async def index(request: Request):
     # 排序：score 降序（高分在前），score 相同按 code 升序
     stocks.sort(key=lambda s: (-(s.get('score') or 0), s['code']))
 
-    # 获取 AI 观察池 + 合并实时行情 + 最近 AI Signal
+    # 获取 AI 观察池 + 合并实时行情 + 指标（只展示数据；AI 分析由外部 AI 通过 API 消费，2026-09-21 方向）
     ai_watchlist = AiWatchlistDAO().get_all()
     realtime = get_realtime_cache()
-    hist_dao = StockAnalysisHistoryDAO()
     snap_dao = StockSnapshotDAO()
     sr_dao = ScreeningResultDAO()
     fs_dao = FinancialSummaryDAO()
@@ -389,83 +388,9 @@ async def index(request: Request):
             if item.get('profit_growth') is None:
                 item['profit_growth'] = snap.get('profit_growth')
 
-        # AI 分析（优先分析历史，降级到 screening_result）
-        item['signal'] = None
-        item['model'] = None
-        item['ai_parsed'] = None
-        item['trade_parsed'] = None
-        item['ai_confidence'] = None
-        item['ai_failed'] = False
-        item['mirror_counts'] = None
-        item['mirror_total'] = 0
-        latest_hist = hist_dao.get_latest_for_code(code)
-        if latest_hist and latest_hist.get('ai_trade_strategy'):
-            try:
-                trade = json.loads(latest_hist['ai_trade_strategy'])
-                item['signal'] = trade.get('signal')
-                if item.get('trade_parsed') is None:
-                    item['trade_parsed'] = trade
-                item['ai_confidence'] = trade.get('confidence')
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if latest_hist and latest_hist.get('ai_analysis'):
-            try:
-                analysis = json.loads(latest_hist['ai_analysis'])
-                item['ai_parsed'] = analysis
-                item['model'] = analysis.get('model')
-                mc = analysis.get('mirror_counts')
-                if mc is not None:
-                    item['mirror_counts'] = str(mc)
-                    import re as _re
-                    nums = _re.findall(r'\d+', str(mc).split()[0] if ' ' in str(mc) else str(mc))
-                    item['mirror_total'] = sum(int(n) for n in nums) if nums else 0
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if not item['signal'] and sr and sr.get('ai_trade_strategy'):
-            try:
-                trade = json.loads(sr['ai_trade_strategy'])
-                item['signal'] = trade.get('signal')
-                item['trade_parsed'] = trade
-                item['ai_confidence'] = trade.get('confidence')
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if not item['ai_parsed'] and sr and sr.get('ai_analysis'):
-            try:
-                item['ai_parsed'] = json.loads(sr['ai_analysis'])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if sr:
-            item['ai_failed'] = bool(sr.get('ai_failed') in (1, True, '1'))
-            item['ai_failure_reason'] = sr.get('ai_failure_reason') or None
-        else:
-            item['ai_failure_reason'] = None
-
-        # 分析摘要前置（与 _enrich_stocks 同口径，观察池卡片统一渲染）
-        item['moat_type'] = None
-        item['mgmt_score'] = None
-        item['iv_range'] = None
-        if isinstance(item.get('ai_parsed'), dict):
-            moats = item['ai_parsed'].get('moat_evaluation')
-            if isinstance(moats, list) and moats and isinstance(moats[0], dict):
-                item['moat_type'] = moats[0].get('type')
-            item['mgmt_score'] = item['ai_parsed'].get('management_score')
-            item['iv_range'] = item['ai_parsed'].get('intrinsic_value')
-
-        # 分析历史时间线（最近5条）
-        history = hist_dao.get_history(code, limit=5)
-        parsed_history = []
-        for h in history:
-            if h.get('ai_analysis') and h['ai_analysis'] not in ['{}', '']:
-                try:
-                    ai_obj = json.loads(h['ai_analysis'])
-                    h['hist_analysis'] = ai_obj.get('analysis', '') or ''
-                    h['hist_strategy'] = ai_obj.get('investment_strategy', '') or ''
-                    h['hist_trade'] = ai_obj.get('trade_strategy', {}) or {}
-                    h['hist_mirror'] = ai_obj.get('mirror_counts', '') or ''
-                except Exception:
-                    pass
-            parsed_history.append(h)
-        item['analysis_history'] = parsed_history
+        # 注：AI 分析字段（signal/ai_parsed/trade_parsed/分析历史/摘要前置）已于 2026-09-21
+        # 从观察池 enrichment 移除——外部 AI 通过 /api/watchlist/{code}/full 等接口自取，
+        # 列表卡片只展示数据。历史 AI 文本由外部 AI 读库追溯。
 
         # 财务历史汇总（5y/10y）
         try:
@@ -501,17 +426,6 @@ async def index(request: Request):
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
         "ai_journal_latest": ai_journal_latest,
-        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
-    })
-
-
-# 候选股总览已合并到主页 index()，此路由保留用于向后兼容（重定向到首页）
-@app.get("/candidates", response_class=HTMLResponse)
-async def candidates(request: Request):
-    """候选股总览页 — 已合并到主页，此路由保留用于向后兼容"""
-    return templates.TemplateResponse(request, "index.html", {
-        "request": request,
-        "page_title": load_config().get('web', {}).get('page_title', '价值投资选股看板'),
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
@@ -1385,55 +1299,7 @@ async def api_journal_by_date(journal_date: str):
     return journal
 
 
-# @app.get("/api/journal/list")
-# async def api_journal_list():
-#     """笔记列表（轻量，仅 date + title）"""
-#     return AiJournalDAO().list_all()
-
-
-# @app.get("/api/journal/{journal_date}")
-# async def api_journal_by_date(journal_date: str):
-#     """指定日期笔记 JSON（缺失 404，与 /latest 一致）"""
-#     journal = AiJournalDAO().get_by_date(journal_date)
-#     if not journal:
-#         raise HTTPException(status_code=404, detail="Journal not found")
-#     return journal
-
-
-# _detect_pool_drift 已移除（仅被已注释的 journal conflicts 路由调用）
-
-
-# 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
-# @app.get("/api/journal/{journal_date}/conflicts")
-# async def api_journal_conflicts(journal_date: str):
-#     """笔记矛盾检测分析"""
-#     journal = AiJournalDAO().get_by_date(journal_date)
-#     if not journal:
-#         return {"error": "Journal not found"}
-#     
-#     previous = AiJournalDAO().get_previous(journal_date)
-#     
-#     if not previous:
-#         return {"has_conflicts": False, "message": "第一期笔记，无可对比"}
-#     
-#     # 简单的矛盾检测逻辑
-#     conflicts = []
-#     
-#     # 检查标题变化
-#     if journal['title'] != previous['title']:
-#         conflicts.append({
-#             "type": "title_change",
-#             "message": f"标题从 '{previous['title']}' 变为 '{journal['title']}'",
-#             "severity": "info"
-#         })
-#     
-#     # 检查内容长度变化
-#     content_length_change = len(journal['content_md']) - len(previous['content_md'])
-#     if abs(content_length_change) > 500:
-# 投资笔记矛盾检测 API 已移除（2026-09-20 路线调整）
-
-
-# 虚拟盘路由已移除（2026-09-20 路线调整，量化交易系统归档）
+# 注：已移除路由的注释尸体于 2026-09-21 清理（git 历史可查）；B5 漂移逻辑见下方 live 的 _detect_pool_drift。
 
 
 def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:

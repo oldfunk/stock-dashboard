@@ -1,4 +1,4 @@
-"""t4: Hermes 代理服务单测。
+"""t4: 外部 AI 代理服务单测。
 
 覆盖：
 - /api/analyze 端点（mock LLM 响应）
@@ -11,7 +11,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from src.hermes_proxy.server import app
+from src.ai_proxy.server import app
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def _req():
     }
 
 
-class TestHermesProxy:
+class TestAiProxy:
     def test_health(self, client):
         """健康检查"""
         resp = client.get("/api/health")
@@ -58,7 +58,7 @@ class TestHermesProxy:
                 "model": "test-model",
                 "usage": {"tokens": 100, "cost_usd": 0.01},
             }
-        monkeypatch.setattr("src.hermes_proxy.server._call_llm", mock_call_llm)
+        monkeypatch.setattr("src.ai_proxy.server._call_llm", mock_call_llm)
         resp = client.post("/api/analyze", json=_req())
         assert resp.status_code == 200
         data = resp.json()
@@ -81,7 +81,7 @@ class TestHermesProxy:
                     "model": "fallback-model",
                     "usage": {"tokens": 50},
                 }
-        monkeypatch.setattr("src.hermes_proxy.server._call_llm", mock_call_llm)
+        monkeypatch.setattr("src.ai_proxy.server._call_llm", mock_call_llm)
         resp = client.post("/api/analyze", json=_req())
         assert resp.status_code == 200
         data = resp.json()
@@ -94,7 +94,7 @@ class TestHermesProxy:
         """主通道+降级通道均失败 → 错误响应"""
         def mock_call_llm(prompt, api_base, model, api_key=None, timeout=300):
             raise Exception("全部不可用")
-        monkeypatch.setattr("src.hermes_proxy.server._call_llm", mock_call_llm)
+        monkeypatch.setattr("src.ai_proxy.server._call_llm", mock_call_llm)
         resp = client.post("/api/analyze", json=_req())
         assert resp.status_code == 200
         data = resp.json()
@@ -109,7 +109,7 @@ class TestHermesProxy:
                 "model": "test-model",
                 "usage": {"tokens": 10},
             }
-        monkeypatch.setattr("src.hermes_proxy.server._call_llm", mock_call_llm)
+        monkeypatch.setattr("src.ai_proxy.server._call_llm", mock_call_llm)
         resp = client.post("/api/analyze", json=_req())
         assert resp.status_code == 200
         data = resp.json()

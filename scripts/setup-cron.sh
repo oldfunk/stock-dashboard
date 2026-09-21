@@ -2,6 +2,9 @@
 # 设置 stock-dashboard 定时任务
 # 读取 docs/scheduled-tasks.md 配置，创建 Hermes cron 任务
 #
+# 运行位置：在 Hermes 所在机器上跑（作者的 Hermes 环境），不在 pi1 跑
+# （pi1 无 hermes 命令；任务通过 SSH/API 操作 pi1）。
+#
 # 用法：bash scripts/setup-cron.sh
 
 set -e

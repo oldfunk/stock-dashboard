@@ -27,16 +27,16 @@ flowchart LR
 
 ### 已归档（不再开发）
 
-- **M4a 自研虚拟盘** — 归档到 `src/paper/_legacy/`
-- **M4b QLib 离线验证** — 归档到 `scripts/_legacy/`
+- **M4a 自研虚拟盘** — 已删除（`src/paper/`、`paper.html`、纸盘测试均已删；git 历史可查，不再开发）
+- **M4b QLib 离线验证** — 不再开发（`scripts/backtest_topk.py` 保留为历史产物，不纳入流水线）
 - **M4c 券商仿真** — 不再开发
 - **M4d 实盘预备** — 不再开发
-- **AI 分析本地执行** — 归档到 `src/analyzer/_legacy/`，只保留 `src/hermes_proxy/` API 接口
+- **AI 分析本地执行** — 本地触发已停用（scheduler 不再调用；`src/analyzer/` 保留供手动脚本使用），分析改由外部 AI 执行（协议见 `src/ai_proxy/`）
 
 ### 防回归门禁（AKShare 事故不再犯）
 
 1. 数据源增删必须同步 `architecture.md` §5 注册表 + 契约单测，三者同 commit
-2. 全仓 pytest 零失败（基线 360+ passed，只升不降）
+2. 全仓 pytest 零失败（基线 317 passed，只升不降）
 3. `collector/` `screener/` 改动必须附单测
 4. Hermes 约束：只提交 GitHub 不部署 pi1；禁删 S1–S7 适配函数（除非替代 + 单测同到）
 

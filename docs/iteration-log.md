@@ -8,16 +8,16 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 **终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段利用 AI Berkshire 项目作为核心算法和分析指导，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
 
-## 当前真实状态（2026-09-16）
-- 每日筛选 5527 → 20 候选：正常，周一至周五 15:30 由 `scheduler.py` 触发。
-- AI 分析：已提频至**每日**（原仅周五），随每日流水线触发，走 `FreeModelPool`（-free 模型自动发现+轮换）。
-- 实时行情/大盘：每 5 分钟更新，正常。
-- 周六复盘系统：`ai_watchlist` / `ai_journal` / `ai_watchlist_history` 在用，链路正常。
-- 纸盘交易（M4a 完成）：`src/paper/` 撮合+信号+调度闭环，每日 15:30 选股→AI 分析→纸盘自动执行，积累模拟交易数据。37 单测全过。
-- `deep_research` 表：已建但**当前未使用**（原 Hermes 投研 cron 已废弃，勿依赖）。表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成），代码层面无引用（`grep -rn` 无匹配），迁移记录缺失（说明为历史遗留）。
-- 已知隐患 `with_roe` UnboundLocalError：已修（提前初始化为 0）。
-- pi2 开发 venv：`markdown` 依赖错装为 `markdown-it-py`，本地 `import src.web.routes` 失败——agent 改完代码后用 **ssh pi1** 做冒烟测试，不要依赖 pi2 venv。
-- 面板核心短板：**分析深度浅 + 评分不透明**。功能迭代优先补这两块，而非堆 UI。
+## 当前真实状态（2026-09-21，用户定调路线调整后）
+
+- 项目定位：价值投资**数据面板**。pi1 跑采集/筛选/展示；AI 分析由**外部 AI** 执行（不绑定具体实现，作者自用 Hermes），面板不再内联 AI 分析、不再本地触发 LLM。
+- 每日流水线：工作日 15:30 采集→筛选（5527 → 20 候选）→ K 线拉取，正常；本地 AI 自动触发已停用。
+- AI 现状：本地 Zen/Pollinations 双通道 9/07 起相继不可用；通用代理协议 `src/ai_proxy/` 已实现，外部 AI 消费方（取数/写回）待排期；周六复盘硬规则本地可跑，LLM 决议失败时整轮跳过。
+- 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
+- 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
+- `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
+- gate 基线：317 passed（2026-09-21 pi1 实测全绿）。
+- 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
 ## 目标与发展框架（2026-09-04 设立）
 
@@ -161,6 +161,15 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
+### 2026-09-21（去 AI 内联 + 去 Hermes 化 + 文档历史包袱清理，用户定调）
+- 起因：用户定调——外部 AI 只走 API（分析+笔记），股票列表下方不再直接展示 AI 分析；外部 AI 不绑定 Hermes（作者自用 Hermes）。另审计发现文档与代码多处历史包袱（基线 317/319/360+ 打架、虚构 `_legacy` 归档、账本状态停留 09-16、scheduler 仍在本地触发已死的 AI）。
+- 改了什么（分支 nightly/20260921）：
+  1. 模板：`_stock_list.html` / `_watchlist_card.html` 移除全部 AI 内联块（信号徽标/模型徽标/失败徽标/护城河摘要/AI Tab/交易网格/指引/历史时间线）+ 死 CSS；`index.html` 删 5 个死 JS 函数 + AI/历史死 CSS；顺手修观察池监控标签 🔔 emoji 违规（→ 文本"监控 →"）。
+  2. 调度/路由：scheduler 停本地 AI 自动触发（方法保留供手动）、删纸盘残留方法；routes 删 ~120 行注释尸体（并修正撒谎的 `_detect_pool_drift 已移除` 注释，B5 逻辑 live 完好）、删 500 坏死的 `/candidates` 路由 + `candidates.html` + 空 `tests/paper/`；index() 观察池 enrichment 去 AI 字段（数据 API `/api/watchlist/{code}/full` 不动，外部 AI 照常用）。
+  3. 去 Hermes 化：`src/hermes_proxy/` → `src/ai_proxy/`（+tests/config/两份代理文档改名与通用化，Hermes 注明为作者实例）；`hermes` CLI/cron/kanban 系 Hermes 平台专名，保留。
+  4. 文档：README 按现状重写过时段（AI 配置/流水线/结构树/脚本表/技术栈/基线 317）；基线统一 317（architecture/roadmap）；`_legacy` 虚构表述修正；账本"当前真实状态"重写；handoff 重写；architecture 模块边界 + AI 段通用化；AGENTS 代理文档链接 + 格式范本；setup-cron 注明运行位置；`.env.example` 重写；`docs/reports/` 新建（报告 gitignore）。
+- 验证：新不变量单测（两 partial 全量 AI 输入零泄漏 + 数据都在）；本地相关单测过；待 pi1 gate + py_compile（不重启服务）。
+- 待办：外部 AI 消费方排期（取数/写回接线）；P1 面板深化；周六复盘 LLM 决议同样依赖死通道（失败整轮跳过，现状已如实记账）。
 ### 2026-09-18（文档复检修正：handoff 冲突标记 + AGENTS.md/README/账本校订）
 - 起因：复检 AGENTS.md 时暴露 handoff.md 残留合并冲突标记（21615d2 合并解决不净，已随 main 到 pi1）+ README/AGENTS.md/账本多处过时。
 - 改了什么：① handoff.md 清冲突标记、刷新三段；② AGENTS.md 校订（基线 317、run 命令语义、部署流程、文档约定）；③ README 校正（run-once→run、基线 317、通道状态）；④ 账本约定同步部署流程。
