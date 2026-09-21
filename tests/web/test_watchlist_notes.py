@@ -2,7 +2,7 @@
 
 覆盖：
 - GET /api/watchlist/{code}/notes 获取笔记列表
-- POST /api/watchlist/{code}/notes 添加笔记
+- POST /api/watchlist/{code}/notes 添加笔记（含 model 溯源）
 - GET /api/watchlist/notes 批量获取
 - 非法参数 → 400
 """
@@ -117,6 +117,43 @@ class TestWatchlistNotesAPI:
         """不存在的股票 → 404"""
         resp = client.get("/api/watchlist/999999/full")
         assert resp.status_code == 404
+
+    def test_add_note_with_model(self, client):
+        """外部 AI 笔记带模型标识 → 写库可溯源"""
+        client.post("/api/watchlist/600519")
+        resp = client.post("/api/watchlist/600519/notes",
+                           json={"note": "AI 分析", "note_type": "analysis",
+                                 "model": "external-ai-v1"})
+        assert resp.status_code == 200
+        assert resp.json()["model"] == "external-ai-v1"
+        notes = client.get("/api/watchlist/600519/notes").json()["notes"]
+        assert notes[0]["model"] == "external-ai-v1"
+
+    def test_add_note_without_model_backward_compat(self, client):
+        """不带 model 旧调用仍可用（NULL 落库）"""
+        client.post("/api/watchlist/600519")
+        resp = client.post("/api/watchlist/600519/notes",
+                           json={"note": "用户手记", "note_type": "user"})
+        assert resp.status_code == 200
+        assert resp.json()["model"] is None
+        notes = client.get("/api/watchlist/600519/notes").json()["notes"]
+        assert notes[0]["model"] is None
+
+    def test_add_note_invalid_model(self, client):
+        """model 非字符串 → 400"""
+        client.post("/api/watchlist/600519")
+        resp = client.post("/api/watchlist/600519/notes",
+                           json={"note": "x", "note_type": "user",
+                                 "model": 123})
+        assert resp.status_code == 400
+
+    def test_notes_model_column_migrated(self, client):
+        """迁移守卫：watchlist_notes 含 model 列"""
+        from src.models.database import db_conn
+        with db_conn() as conn:
+            cols = {r[1] for r in
+                    conn.execute("PRAGMA table_info(watchlist_notes)").fetchall()}
+        assert "model" in cols
 
 
 if __name__ == '__main__':

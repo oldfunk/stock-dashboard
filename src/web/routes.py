@@ -987,8 +987,8 @@ async def api_watchlist_notes_get(code: str, limit: int = 10):
 @app.post("/api/watchlist/{code}/notes")
 async def api_watchlist_notes_add(code: str, body: dict):
     """添加投资笔记（AI 或用户提交）
-    
-    body: {"note": "...", "note_type": "weekly/analysis/user"}
+
+    body: {"note": "...", "note_type": "weekly/analysis/user", "model": "模型标识（外部 AI 必填溯源）"}
     """
     note = body.get("note")
     if not note or not isinstance(note, str):
@@ -996,10 +996,13 @@ async def api_watchlist_notes_add(code: str, body: dict):
     note_type = body.get("note_type", "weekly")
     if note_type not in ("weekly", "analysis", "user"):
         raise HTTPException(status_code=400, detail="note_type 必须为 weekly/analysis/user")
-    ok = WatchlistDAO().add_note(code, note, note_type)
+    model = body.get("model")
+    if model is not None and not isinstance(model, str):
+        raise HTTPException(status_code=400, detail="model 必须为字符串")
+    ok = WatchlistDAO().add_note(code, note, note_type, model)
     if not ok:
         raise HTTPException(status_code=500, detail="添加笔记失败")
-    return {"ok": True, "code": code, "note_type": note_type}
+    return {"ok": True, "code": code, "note_type": note_type, "model": model}
 
 
 @app.get("/api/watchlist/notes")
