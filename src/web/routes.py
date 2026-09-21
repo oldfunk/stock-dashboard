@@ -166,6 +166,13 @@ def _enrich_stocks(stocks: list[dict]) -> None:
         s['ai_failed'] = bool(s.get('ai_failed') in (1, True, '1'))
         s['ai_failure_reason'] = s.get('ai_failure_reason') or None
 
+        # 数据质量标注（供外部 AI 消费：每个数字的来源/日期/置信度，见 ai_analyzer._data_quality_facts）
+        try:
+            from src.analyzer.ai_analyzer import _data_quality_facts
+            s['data_quality'] = _data_quality_facts(s)
+        except Exception:
+            s['data_quality'] = None
+
         # 4. 财务历史汇总（用于知识面板）
         try:
             fs = fs_dao.get(code)

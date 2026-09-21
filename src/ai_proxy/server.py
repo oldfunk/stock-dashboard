@@ -111,6 +111,11 @@ def _build_prompt(req: AnalyzeRequest) -> str:
 - FCF 5年累计：{data.get('fcf_5y_sum', 'N/A')}
 - 市值：{data.get('market_cap', 'N/A')}亿
 
+数据质量（未知/缺失一律按"数据不足"处理，不得当精确值引用）：
+- 财务覆盖：{data.get('data_years', 'N/A')}；分析日期：{data.get('analysis_date', 'N/A')}
+- 上市日期：{data.get('list_date', 'N/A')}；ST状态：{data.get('is_st', 'N/A')}
+- 凡均值基于不足 5 年数据、或关键字段缺失，估值结论必须降档（至多"灰色地带"），不得写"极具吸引力"类断语。
+
 请输出以下 JSON 结构：
 {{
   "analysis": "分析文本",
@@ -119,7 +124,9 @@ def _build_prompt(req: AnalyzeRequest) -> str:
   "intrinsic_value": {{"conservative": 亿, "base_case": 亿, "optimistic": 亿, "method": "方法"}},
   "trade_strategy": {{"signal": "BUY/HOLD/AVOID", "confidence": "high/medium/low", "buy_zone": "区间", "target_price": 价, "stop_loss": 价, "take_profit": 价}},
   "veto_checklist": {{"triggered_count": 0, "cannot_explain_business": false, "negative_fcf_3y_no_improvement": false, "management_integrity_issue": false, "moat_eroding_irreversibly": false, "greater_fool_required": false, "cannot_afford_total_loss": false, "following_the_herd": false, "cannot_write_200_char_thesis": false}}
-}}"""
+}}
+
+估值方法自选（禁用固定倍数）：按商业模式选 DCF/相对估值/股息折现/明确不适用，写清假设与局限。"""
 
 
 # ── 端点 ──

@@ -177,7 +177,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 1. analysis 字段写完整的投资笔记，用口语、有观点、有犹豫。不要套模板、不要分点编号、不要写"视角一/二/三"、不要提巴菲特/段永平/芒格名字。
 2. moat_evaluation 中每项护城河必须给出明确的 score 和 trend。如果判断力不够，score 就打中等（3），不要勉强高分。
 3. management_score 基于你能看到的数字（稀释率、ROIC趋势、资产负债率）。如果你没有确切数据下判断，就如实写"数据不足以判断"并打中等分。
-4. intrinsic_value 用 Owner Earnings ≈ 最近5年平均FCF 作为基准。保守用0增长折现10倍，基准用3%增长折现12倍，乐观用5%增长折现15倍。如果FCF为负或不稳定，如实写"FCF不稳定，估值参考性有限"。
+4. intrinsic_value 估值方法自选（禁用固定倍数）：先看商业模式再选方法——稳定现金牛用 Owner Earnings 折现；周期/困境用重置成本或清算视角并明说局限；高研发科技若 FCF 失真，改用 PE/PB 相对估值或直接写"不适用精确估值"；股息稳定可用股息折现。三档（保守/基准/乐观）是"假设不同"不是"倍数不同"：每档必须写清核心假设（增长率/折现率/利润率）。method 栏写真实方法名 + 一句话局限。如果 FCF 为负或不稳定、或关键字段缺失，如实写"数据不足，估值参考性有限"，不得硬算。
 5. reverse_thinking 必须基于真实的行业/财务风险——如果是垄断国企，风险就不是"被竞争对手干掉"，而是政策风险。
 6. 所有 score 字段从 1（最差）到 5 或 10（最好）。
 7. info_richness 是本次分析的信息丰富度评级：A级=数据充分 长期财务齐全；B级=数据有限 部分指标需推算；C级=数据不足或上市不足3年。C级时：intrinsic_value 必须标注"数据不足，估值参考性有限"，trade_strategy.confidence 不得超过"低"。
@@ -945,6 +945,9 @@ class AiAnalyzer:
             roe_roic_gap_line=roe_roic_gap_line,
             fcf_yield_10y=fcf_yield_10y,
         )
+        # 数据质量与背景标注（分析师 critique #1：先告诉 AI 数字的来源/日期/置信度）
+        quality_facts = _data_quality_facts(stock)
+        prompt += "\n\n" + _data_quality_text(quality_facts)
         # 注入历史分析摘要（仅当有历史记录时追加）
         history_summary = _build_history_summary(stock.get('code', ''))
         if history_summary:
@@ -995,6 +998,8 @@ class AiAnalyzer:
                     f"[数字抽检] {stock.get('code')} 正文引用与库偏离 "
                     f"{len(mm)} 处: {mm}")
             result['model'] = used_model
+            # AI 当时看到的数据质量快照一并落库（可审计"它基于什么做的判断"）
+            result['data_quality'] = quality_facts
         return result
 
     # ── 模型调用（含故障轮换） ──
@@ -1248,9 +1253,182 @@ class AiAnalyzer:
 
 # ── 批量分析 ──
 
+# ── 数据质量标注（分析师 critique #1：AI 必须知道每个数字的来源、日期与置信度）──
+#
+# Berkshire 只当参考：不照搬"裸数字 prompt"，每个关键输入附来源与 asof 日期，
+# 缺失/兜底字段必须显式告知 AI，不得当作精确值引用。
+
+# prompt 关键字段 → 中文标签（用于缺失清单）
+QUALITY_WATCH_FIELDS = [
+    ("pe", "PE"), ("pb", "PB"), ("roe", "ROE"),
+    ("revenue_growth", "营收增长"), ("profit_growth", "净利增长"),
+    ("debt_ratio", "负债率"), ("gross_margin", "毛利率"),
+    ("ocf_per_share", "每股OCF"), ("roe_5y_avg", "ROE5年均"),
+    ("fcf_5y_sum", "FCF5年累计"), ("roic_5y_avg", "ROIC5年均"),
+    ("sector", "行业"),
+]
+
+
+def _parse_iso_date(s):
+    """解析 YYYY-MM-DD（容忍 datetime 前缀），失败返回 None。纯函数。"""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        import datetime as _dt
+        return _dt.date.fromisoformat(s.strip()[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def _data_quality_facts(stock: dict, today=None) -> dict:
+    """从 stock 字典提取数据质量事实（纯函数，缺字段一律记"未知"，永不抛异常）。
+
+    读取（全部可选）：
+      run_id/run_date/analysis_date, snapshot_date, financial_updated_at,
+      data_years（"2020-2026"）, roe_5y_count, list_date, is_st,
+      _market（[{"index_name","change_percent"}]）, 各关键字段（判缺失用）。
+    返回 facts dict，供文本渲染与落库/透传共用。
+    """
+    import datetime as _dt
+    facts = {}
+    try:
+        today_d = _parse_iso_date(today) if today else _dt.date.today()
+    except Exception:
+        today_d = _dt.date.today()
+
+    run_id = stock.get("run_id")
+    run_date = stock.get("run_date")
+    if not run_date and run_id and isinstance(run_id, str) and len(run_id) >= 8:
+        run_date = f"{run_id[:4]}-{run_id[4:6]}-{run_id[6:8]}"
+    facts["run_id"] = run_id
+    facts["analysis_date"] = (
+        stock.get("analysis_date") or run_date
+        or (today_d.isoformat() if today_d else "未知")
+    )
+    facts["snapshot_date"] = stock.get("snapshot_date")
+    facts["financial_updated"] = stock.get("financial_updated_at") \
+        or stock.get("financial_updated")
+
+    summary = stock.get("_summary") or {}
+    facts["data_years"] = stock.get("data_years") or summary.get("data_years")
+    try:
+        facts["roe_years"] = int(stock.get("roe_5y_count")
+                                 if stock.get("roe_5y_count") is not None
+                                 else summary.get("roe_5y_count"))
+    except (ValueError, TypeError):
+        facts["roe_years"] = None
+
+    facts["list_date"] = stock.get("list_date")
+    facts["listed_years"] = None
+    _ld = _parse_iso_date(facts["list_date"])
+    if _ld and today_d:
+        try:
+            facts["listed_years"] = round((_ld and (today_d - _ld).days) / 365.25, 1)
+        except Exception:
+            facts["listed_years"] = None
+
+    _st = stock.get("is_st")
+    facts["is_st"] = None if _st is None else bool(_st)
+
+    facts["missing"] = [
+        label for key, label in QUALITY_WATCH_FIELDS
+        if stock.get(key) in (None, "", "N/A")
+    ]
+
+    facts["market"] = None
+    _mkt = stock.get("_market")
+    if isinstance(_mkt, list) and _mkt:
+        rows = []
+        for m in _mkt[:6]:
+            if not isinstance(m, dict):
+                continue
+            chg = m.get("change_percent")
+            try:
+                chg_s = f"{float(chg):+.2f}%" if chg is not None else "未知"
+            except (ValueError, TypeError):
+                chg_s = "未知"
+            rows.append(f"{m.get('index_name') or m.get('index_code') or '?'} {chg_s}")
+        facts["market"] = rows or None
+    return facts
+
+
+def _data_quality_text(facts: dict) -> str:
+    """把 facts 渲染为 prompt 用的【数据质量与背景】块。纯函数。"""
+    def _v(x):
+        return x if x not in (None, "", []) else "未知"
+
+    lines = ["【数据质量与背景（先读这段再下结论）】"]
+    lines.append(
+        f"- 分析日期：{_v(facts.get('analysis_date'))}"
+        f"；筛选批次：{_v(facts.get('run_id'))}"
+        f"；行情快照日期：{_v(facts.get('snapshot_date'))}"
+        f"；财务汇总更新：{_v(facts.get('financial_updated'))}"
+    )
+    _ry = facts.get("roe_years")
+    lines.append(
+        f"- 财务覆盖区间：{_v(facts.get('data_years'))}"
+        f"；ROE 5年均基于 {_ry if _ry is not None else '未知'} 年实际数据"
+        f"（不足 5 年时均值代表性打折，不得当作长期均值引用）"
+    )
+    _ly = facts.get("listed_years")
+    _st = facts.get("is_st")
+    lines.append(
+        f"- 上市日期：{_v(facts.get('list_date'))}"
+        f"（上市约 {_ly if _ly is not None else '未知'} 年；上市不足 3 年按 C 级处理）"
+        f"；ST状态：{'ST（基本面数字可能失真，结论从紧）' if _st else ('正常' if _st is False else '未知')}"
+    )
+    _mkt = facts.get("market")
+    lines.append(
+        "- 大盘背景（分析日）：" + ("；".join(_mkt) if _mkt else "无大盘数据")
+    )
+    _miss = facts.get("missing") or []
+    lines.append(
+        "- 缺失字段：" + ("无" if not _miss else "、".join(_miss))
+        + "——缺失字段不得用于精确结论，只能写“数据不足”。"
+    )
+    lines.append(
+        "- 纪律：凡均值基于不足 5 年数据、或关键字段缺失，估值结论必须降档"
+        "（至多给到“灰色地带”），不得写“极具吸引力”类断语。"
+    )
+    return "\n".join(lines)
+
+
+def _attach_batch_context(stocks: list[dict], run_id: str) -> None:
+    """批内上下文：run_id 回填 + 快照字段（is_st/list_date/snapshot_date）富集
+    + 取一次大盘快照挂到每只 stock._market（原地修改）。
+
+    失败永不抛异常（取不到的字段如实记"未知"，见 _data_quality_facts）。
+    """
+    try:
+        from src.models.database import MarketIndexDAO, StockSnapshotDAO
+        market = MarketIndexDAO().get_latest()
+        snap_dao = StockSnapshotDAO()
+    except Exception as e:
+        logger.warning(f"[AI分析] 批上下文初始化失败（不阻断）: {e}")
+        market, snap_dao = None, None
+    for s in stocks:
+        try:
+            s.setdefault("run_id", run_id)
+            if snap_dao is not None and isinstance(s, dict):
+                try:
+                    snap = snap_dao.get_by_code(s.get("code", ""))
+                except Exception:
+                    snap = None
+                if snap:
+                    s.setdefault("is_st", snap.get("is_st"))
+                    s.setdefault("list_date", snap.get("list_date"))
+                    s.setdefault("snapshot_date", snap.get("snapshot_date"))
+                    if s.get("sector") in (None, "", "未知"):
+                        s["sector"] = snap.get("sector") or s.get("sector", "未知")
+            if "_market" not in s:
+                s["_market"] = market
+        except Exception:
+            pass
+
+
 def _build_history_summary(stock_code: str, limit: int = 3) -> str:
     """从 stock_analysis_history 提取历史关键行摘要。
-    
+
     每条压缩为一行：日期 + Signal(置信度) | 核心判断第一句
     目标 ~150 tokens，避免 prompt 膨胀。
     """
@@ -1348,6 +1526,9 @@ def analyze_batch(stocks: list[dict], run_id: str,
     logger.info(f"[AI分析] 开始分析 {total} 只股票...")
     analyzed_ok = 0
     analyzed_failed = 0
+
+    # 批内上下文：run_id/快照字段/大盘快照（供数据质量标注，失败不阻断）
+    _attach_batch_context(stocks, run_id)
 
     from src.models.database import AiAnalysisLogDAO
     log_dao = AiAnalysisLogDAO()
