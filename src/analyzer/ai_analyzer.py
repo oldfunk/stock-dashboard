@@ -181,8 +181,8 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 5. reverse_thinking 必须基于真实的行业/财务风险——如果是垄断国企，风险就不是"被竞争对手干掉"，而是政策风险。
 6. 所有 score 字段从 1（最差）到 5 或 10（最好）。
 7. info_richness 是本次分析的信息丰富度评级：A级=数据充分 长期财务齐全；B级=数据有限 部分指标需推算；C级=数据不足或上市不足3年。C级时：intrinsic_value 必须标注"数据不足，估值参考性有限"，trade_strategy.confidence 不得超过"低"。
-8. checklist 六关评分（1-5★）作为汇总视图：moat 关必须与 moat_evaluation 一致，management 关必须与 management_score 一致，margin_of_safety 关必须与 intrinsic_value 一致；能力圈（circle_of_competence）和纪律（discipline）是新判断。任一关 score≤2 时，trade_strategy.signal 不应为 BUY。
-9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句或某一句含超限转折词 → passed=false 并在 missing 中标注句号。"5 句话说不完整 = 不买"：passed=false 时 trade_strategy.signal 不得为 BUY。
+8. checklist 六关评分（1-5★）作为汇总视图：moat 关必须与 moat_evaluation 一致，management 关必须与 management_score 一致，margin_of_safety 关必须与 intrinsic_value 一致；能力圈（circle_of_competence）和纪律（discipline）是新判断。任一关 score≤2 时如仍给 BUY，必须在 verdict 理由句中解释为何低分仍值得买（否则视为无效分析）。
+9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句在 missing 中标注句号。passed=false 时如仍给 BUY，必须在 verdict 理由句中解释（否则视为无效分析）；系统不再自动改你的信号，但会标记人工复核。
 10. veto_checklist 是快速否决红线（投资纪律一票否决）：8 条逐条如实判断，任一 true 必须在该行写 true，triggered_count 填 true 的总数。8 条含义：cannot_explain_business=说不清怎么赚钱；negative_fcf_3y_no_improvement=连续3年FCF为负且无改善；management_integrity_issue=管理层诚信污点；moat_eroding_irreversibly=护城河被不可逆侵蚀；greater_fool_required=靠接盘侠赚钱（博傻）；cannot_afford_total_loss=无法承受归零；following_the_herd=因为别人都在买；cannot_write_200_char_thesis=无法用200字写清买入理由。任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高。
 11. verdict 是强制结论：不通过 → trade_strategy.signal 必须为 AVOID；灰色地带 → signal 不得为 BUY（最多 HOLD）；signal 为 BUY 时 verdict 必须为通过。灰色地带就是"不买"的纪律，不要在灰色时给买入建议。price_tiers 三档都要填（拿不准就写观望及理由，不许空着）。
 """
@@ -320,9 +320,13 @@ def _normalize_verdict(v) -> str:
     return ''
 
 
-def _check_output_consistency(result: dict) -> list[str]:
-    """确定性交叉：否决触发/镜子未过/六关≤2 却给 BUY/通过 → 返回矛盾描述。
-    空列表 = 自洽。纯函数，可单测；写库前用于质量记账。"""
+def _check_output_consistency(result: dict) -> list[tuple]:
+    """确定性交叉检测：否决触发/镜子未过/六关≤2 却给 BUY/通过 → 返回 [(code, 矛盾描述)]。
+
+    code ∈ veto（硬）/ mirror / checklist（软 tension，仅警告记账）。
+    空列表 = 自洽。纯函数，可单测；写库前用于质量记账与警告。
+    分析师整改（2026-09-21）：mirror/六关不再视为"不一致"错误，只是需要解释的 tension。
+    """
     issues = []
     if not isinstance(result, dict):
         return issues
@@ -338,18 +342,18 @@ def _check_output_consistency(result: dict) -> list[str]:
                   if k != 'triggered_count' and v is True]
     if trig > 0 or true_items:
         if _normalize_verdict(result.get('verdict')) == 'pass':
-            issues.append('否决触发却判通过')
+            issues.append(('veto', '否决触发却判通过'))
         if sig == 'BUY':
-            issues.append('否决触发却给 BUY')
+            issues.append(('veto', '否决触发却给 BUY'))
     mirror = result.get('mirror_test') or {}
     if mirror.get('passed') is False and sig == 'BUY':
-        issues.append('镜子未过却给 BUY')
+        issues.append(('mirror', '镜子未过却给 BUY（需 verdict 理由解释）'))
     checklist = result.get('checklist') or {}
     low = [k for k, v in checklist.items()
            if isinstance(v, dict) and isinstance(v.get('score'), (int, float))
            and v['score'] <= 2]
     if low and sig == 'BUY':
-        issues.append(f"六关{','.join(low)}≤2 却给 BUY")
+        issues.append(('checklist', f"六关{','.join(low)}≤2 却给 BUY（需 verdict 理由解释）"))
     return issues
 
 
@@ -450,9 +454,11 @@ def _check_numeric_citations(analysis_text, stock: dict) -> list:
 
 
 def _enforce_verdict_discipline(result: dict) -> dict:
-    """verdict↔signal 程序纪律 + 确定性交叉强制（写库前执行）。
-    否决触发 → verdict 不通过 + signal AVOID；灰色（含缺失）→ BUY 降 HOLD；
-    镜子未过/六关≤2 → BUY 熔断为 HOLD。只收紧不放松，改动记 _discipline_note。"""
+    """verdict↔signal 程序纪律 + 否决硬执行（写库前执行）。
+    否决触发 → verdict 不通过 + signal AVOID；灰色（含缺失）→ BUY 降 HOLD。
+    镜子未过/六关≤2 → 不再自动熔断（2026-09-21 分析师整改：分数型规则易诱发
+    调分博弈，且会排除反直觉深度判断），只记警告供人工复核，信号原样保留。
+    只收紧不放松（veto/verdict 部分），改动记 _discipline_note。"""
     if not isinstance(result, dict):
         return result
     trade = result.get('trade_strategy')
@@ -489,7 +495,7 @@ def _enforce_verdict_discipline(result: dict) -> dict:
         trade['signal'] = 'HOLD'
         notes.append('verdict 灰色，BUY 降为 HOLD')
         sig = 'HOLD'
-    # 3. 镜子/六关 BUY 熔断
+    # 3. 镜子/六关 tension 警告记账（不改信号，见上）
     if sig == 'BUY':
         mirror = result.get('mirror_test') or {}
         checklist = result.get('checklist') or {}
@@ -497,11 +503,9 @@ def _enforce_verdict_discipline(result: dict) -> dict:
                if isinstance(v, dict) and isinstance(v.get('score'), (int, float))
                and v['score'] <= 2]
         if mirror.get('passed') is False:
-            trade['signal'] = 'HOLD'
-            notes.append('镜子未过，BUY 熔断为 HOLD')
+            notes.append('镜子未过但给 BUY（需人工复核，未改信号）')
         elif low:
-            trade['signal'] = 'HOLD'
-            notes.append(f"六关{','.join(low)}≤2，BUY 熔断为 HOLD")
+            notes.append(f"六关{','.join(low)}≤2 但给 BUY（需人工复核，未改信号）")
     if notes:
         result['_discipline_note'] = '; '.join(notes)
     return result
@@ -976,10 +980,14 @@ class AiAnalyzer:
                 self._pool.record_quality(used_model, False)
             return None
         if isinstance(result, dict):
-            # 质量记账判的是模型原始输出（ enforce 之前）
-            if _check_output_consistency(result):
+            # 质量记账判的是模型原始输出（ enforce 之前）。
+            # 分析师整改（2026-09-21）：只有 veto 硬矛盾才记 fail；
+            # mirror/六关 tension 只警告（反直觉但自洽的判断应被允许）。
+            _cons_issues = _check_output_consistency(result)
+            if _cons_issues:
                 logger.warning(f"[AI分析] 输出自洽检查未过({used_model}): "
-                               f"{_check_output_consistency(result)}")
+                               f"{_cons_issues}")
+            if any(code == 'veto' for code, _ in _cons_issues):
                 if self._pool:
                     self._pool.record_quality(used_model, False)
             elif self._pool:

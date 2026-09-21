@@ -297,7 +297,7 @@ class TestQualityScore:
 
 
 class TestConsistencyEnforce:
-    """Q 确定性交叉：否决改判 + 镜子/六关熔断。"""
+    """Q 确定性交叉：否决改判硬执行；镜子/六关只警告记账不改信号（2026-09-21 分析师整改）。"""
 
     def _r(self, **kw):
         from src.analyzer.ai_analyzer import _enforce_verdict_discipline
@@ -317,13 +317,15 @@ class TestConsistencyEnforce:
         assert r['trade_strategy']['signal'] == 'AVOID'
         assert '_discipline_note' in r
 
-    def test_mirror_melts_buy(self):
+    def test_mirror_warns_not_melt(self):
         r = self._r(mirror_test={'passed': False})
-        assert r['trade_strategy']['signal'] == 'HOLD'
+        assert r['trade_strategy']['signal'] == 'BUY'
+        assert '镜子未过但给 BUY' in r['_discipline_note']
 
-    def test_checklist_low_melts_buy(self):
+    def test_checklist_low_warns_not_melt(self):
         r = self._r(checklist={'moat': {'score': 2, 'note': '浅'}})
-        assert r['trade_strategy']['signal'] == 'HOLD'
+        assert r['trade_strategy']['signal'] == 'BUY'
+        assert '六关moat≤2 但给 BUY' in r['_discipline_note']
 
     def test_consistency_fn(self):
         from src.analyzer.ai_analyzer import _check_output_consistency
@@ -334,6 +336,14 @@ class TestConsistencyEnforce:
                'verdict': '通过：好'}
         issues = _check_output_consistency(bad)
         assert len(issues) == 2
+        assert {c for c, _ in issues} == {'veto'}
+        soft = {'trade_strategy': {'signal': 'BUY'},
+                'veto_checklist': {'triggered_count': 0},
+                'verdict': '通过：好',
+                'mirror_test': {'passed': False},
+                'checklist': {'moat': {'score': 1}}}
+        soft_issues = _check_output_consistency(soft)
+        assert {c for c, _ in soft_issues} == {'mirror', 'checklist'}
 
 
 class TestNumericCitations:
