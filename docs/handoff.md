@@ -5,8 +5,8 @@
 
 ## 最后状态（2026-09-21 去 AI 内联 + 去 Hermes 化，分支 nightly/20260921 待合）
 - 分支：`nightly/20260921`（基于 main `8875e36`），只推分支，未动 main/pi1
-- 内容：两列表卡片去 AI 内联（+死 JS/CSS/🔔emoji 修）/ 调度停本地 AI 触发 / routes 清尸体 + 删 candidates 页 / `hermes_proxy`→`ai_proxy` / 文档历史包袱清理（基线统 317、账本状态重写、README 按现状修）
-- 验证：无 AI 内联不变量单测本地过；待 pi1 gate + 冒烟（不重启）
+- 内容：两列表卡片去 AI 内联（+死 JS/CSS/监控标签 emoji 修）/ 调度停本地 AI 触发 / routes 清尸体 + 删 candidates 页 / `hermes_proxy`→`ai_proxy` / 文档历史包袱清理（基线统 317、账本状态重写、README 按现状修）
+- 验证：pi1 worktree 全仓 **317 passed** 零回归；py_compile 全过；服务 active（未重启，展示/注释/死码变更下次 deploy 生效）
 - 外部 AI 不绑定实现（作者自用 Hermes）；`hermes` CLI/cron 系平台专名保留；消费方接线待排期
 
 ## 下一步方向

@@ -168,7 +168,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   2. 调度/路由：scheduler 停本地 AI 自动触发（方法保留供手动）、删纸盘残留方法；routes 删 ~120 行注释尸体（并修正撒谎的 `_detect_pool_drift 已移除` 注释，B5 逻辑 live 完好）、删 500 坏死的 `/candidates` 路由 + `candidates.html` + 空 `tests/paper/`；index() 观察池 enrichment 去 AI 字段（数据 API `/api/watchlist/{code}/full` 不动，外部 AI 照常用）。
   3. 去 Hermes 化：`src/hermes_proxy/` → `src/ai_proxy/`（+tests/config/两份代理文档改名与通用化，Hermes 注明为作者实例）；`hermes` CLI/cron/kanban 系 Hermes 平台专名，保留。
   4. 文档：README 按现状重写过时段（AI 配置/流水线/结构树/脚本表/技术栈/基线 317）；基线统一 317（architecture/roadmap）；`_legacy` 虚构表述修正；账本"当前真实状态"重写；handoff 重写；architecture 模块边界 + AI 段通用化；AGENTS 代理文档链接 + 格式范本；setup-cron 注明运行位置；`.env.example` 重写；`docs/reports/` 新建（报告 gitignore）。
-- 验证：新不变量单测（两 partial 全量 AI 输入零泄漏 + 数据都在）；本地相关单测过；待 pi1 gate + py_compile（不重启服务）。
+- 验证：新不变量单测（两 partial 全量 AI 输入零泄漏 + 数据都在）；pi1 worktree 全仓 **317 passed** 零回归；py_compile 全过；服务未重启（展示/注释/死码变更，下次 deploy 顺带生效）。
 - 待办：外部 AI 消费方排期（取数/写回接线）；P1 面板深化；周六复盘 LLM 决议同样依赖死通道（失败整轮跳过，现状已如实记账）。
 ### 2026-09-18（文档复检修正：handoff 冲突标记 + AGENTS.md/README/账本校订）
 - 起因：复检 AGENTS.md 时暴露 handoff.md 残留合并冲突标记（21615d2 合并解决不净，已随 main 到 pi1）+ README/AGENTS.md/账本多处过时。
