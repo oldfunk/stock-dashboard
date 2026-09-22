@@ -3,23 +3,30 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 P1② 行业均值收口 + C3 取消已合已同步）
-- 分支：`main` = `1fd7b9d`（handoff 续写提交在其上）；远端 `nightly/20260922f` 已删；生产服务器已 pull + gate，服务 active
-- 内容：行业均值参照（ROE/PE 板块均值 + 样本数，只读不改评分）补进四处评分拆解块；评分透明化 P1② 主项关闭（roadmap ✅）；C3 AI 引用数字抽检拍板取消（分析归外部 agent，本地无正文可抽检）
-- 验证：本地 verify ok=True（**348 passed**）；生产服务器 gate 348 + http 200；全仓设备名扫描 0 命中（含 AGENTS.md，2026-09-22 用户批准后补修）
-- 基线：342 → **348**
+## 最后状态（2026-09-22 开发者服务器身份清除已推待合 + 同日 P0-1 重启关闭）
+- 分支：`nightly/20260922c`（首提交 `7496732` + 收尾 docs 提交）已推 origin（经生产服务器 bundle 中继）；`main` = `33bfb6c`（本地与远端一致），生产服务器 checkout 全程停 main 未动
+- 内容：23 文件清除全部开发者服务器身份（主机名/内网 IP/家目录/硬件名/开发机盘符路径/裸 token → 占位符或泛称；账本 90+ 处与 superpowers 历史计划只改称呼不删内容）；部署目标（真实主机/ssh/部署目录）只存本地 `deploy.local.md`（gitignore），仓库内统一 `<生产服务器>`/`<部署目录>` 占位符
+- 同日早前：评审 P0-1 关闭——重启生产服务后 thesis 404→200，index/detail/api 200，日志 0 Traceback
+- 验证：本地全仓 pytest **348 passed**（uv venv 补依赖；系统 python 缺 akshare 会 16 failed）；生产服务器 worktree `gate.sh` **348 passed**；身份双扫描 0 命中、改动行 emoji 0 命中
+- 待用户批准合并；合并后同步生产 = git pull + gate（纯文档/注释改动，无需重启服务）
 
 ## 下一步方向
-1. P2 体验优化 ⑤⑥⑦⑧（详情页上下只切换 / 财务红绿高亮 / 移动端适配 / 搜索按 PE·ROE·市值排序）——本项目唯一剩余排期面，做哪个由用户点单
-2. 外部接入闭环、周六（09-26）复盘执行与决议、盯盘调度制度——使用者与外部 AI 自行发起，本项目不排期（接口 `docs/agent-api.md`、调度参考 `docs/scheduled-tasks.md` 已就绪）
+1. 等用户批准合并 `nightly/20260922c` → 合并后同步生产（git pull + gate.sh；无需重启服务）
+2. P0-2 修复（双源恒 SKIP 谎报 + `reported` 键 + prompt `findings` 透传）——待用户批准走 nightly
+3. P1② 遗留数据方向：`stock_snapshot.sector` 全 NULL（页面 guard 生效，不渲染不报错），接 AKShare 回填 vs 改 roadmap/handoff 口径——待用户拍板
+4. 残留清理第 4 项：删远端旧分支 `nightly/20260917c`、agent-api 404 口径、daily_cron 头注释休眠陷阱——待用户批准
+5. P2 体验优化 ⑤⑥⑦⑧（详情页上下只切换 / 财务红绿高亮 / 移动端适配 / 搜索按 PE·ROE·市值排序）——本项目唯一剩余排期面，做哪个由用户点单
+6. 外部接入闭环、周六（09-26）复盘执行与决议、盯盘调度制度——使用者与外部 AI 自行发起，本项目不排期（接口 `docs/agent-api.md`、调度参考 `docs/scheduled-tasks.md` 已就绪）
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；本地复盘 LLM 决议不可用（复盘决议按新分工归外部 AI 负责）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
-- 本机 Windows 拦截 loopback，TestClient HTTP 用例本地跑不动，须生产服务器验证
+- 本地全仓测试必须用 uv venv 补依赖（系统 python 缺 akshare → 16 failed，属环境非代码）；TestClient 用例本地可全跑（旧「loopback 拦截跑不动」经 348 全过实测已不成立）
 - `watchlist_thesis` 表为新表（init_database 自动建），生产服务器首次写入前未做 live 端到端验证（单测全过）
 
 ## 历史交接区（追加，不删）
+- 2026-09-22 开发者身份清除待合（nightly/20260922c：23 文件占位符化 + deploy.local.md 本地化，本地与生产 worktree gate 均 348，身份扫描 0 命中）
+- 2026-09-22 P1② 行业均值收口 + C3 取消已合已同步（远端 nightly/20260922f 已删；生产 pull + gate 348 + http 200；同日晚些 P0-1 重启令新代码全路由生效）
 - 2026-09-22 误入内容清除 + 职责定位已合已同步（`e954b29`→`2ff32b1`，gate 342 全绿；AGENTS.md:53 经用户批准于同日补修，设备名全仓归零）
 - 2026-09-22 Agent 接入指南已合已同步（`1499691`：agent-api.md + README 挂链，gate 342 全绿）
 - 2026-09-22 ABC 方案已合已同步（`bb64119`：反面检验/论文追踪/复盘三问内化 + 架构方法论固化 + 解绑上游镜像与对照工具，gate 342 全绿）

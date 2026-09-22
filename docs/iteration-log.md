@@ -4,7 +4,7 @@
 > 维护者：Hermes nightly 迭代 agent + 用户。零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 
 ## 项目定位
-A股价值投资看板。生产实例跑在生产服务器（<生产服务器>）的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情。代码真相源 = GitHub `origin/main`，生产服务器从 origin 拉取部署。
+A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情（部署目标见本地 `deploy.local.md`，不入库）。代码真相源 = GitHub `origin/main`，生产服务器从 origin 拉取部署。
 
 **终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段以价值投资门规与结构化 AI 分析为核心，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
 
@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器（<生产服务器>�
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
-- gate 基线：317 passed（2026-09-21 生产服务器实测全绿）。
+- gate 基线：348 passed（2026-09-22 本地 + 生产服务器 worktree 实测全绿）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -160,6 +160,13 @@ A股价值投资看板。生产实例跑在生产服务器（<生产服务器>�
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-22（全仓开发者服务器身份清除 + 部署信息本地化，nightly/20260922c 待合）
+- **改了什么**：23 文件清除全部开发者服务器身份引用——主机名与裸 token → `生产服务器`、硬件名 → `低内存主机`、内网 IP（新旧两个）→ `<生产服务器>`、家目录绝对路径 → `<部署目录>`、开发机盘符路径 → `<仓库路径>`；覆盖 AGENTS/README/docs（含 architecture mermaid 子图改 `PROD`）/scripts 注释/账本 90+ 处/superpowers 历史计划（只改称呼不删内容，用户拍板）。AGENTS、README、agent-api 手工润色，部署命令一律占位符并统一指向 `deploy.local.md`；`tests/test_verify_intrinsic.py` 硬编码 sys.path 改 `Path(__file__).parents[1]`；`.gitignore` 增列并新建 `deploy.local.md`（真实主机/ssh/部署目录/gate/中继命令唯一落点，不入库）。
+- **为什么**：工作树残留身份引用会随文档/账本/脚本反复复制再泄露；部署目标是机器特定配置，属本地信息不属仓库内容（与 `.hermes/environment.json` 同理）。
+- **同日早前**：评审 P0-1（合并后漏重启致新代码未生效）已关闭——重启生产服务后新进程 active，thesis 404→200、index/detail/api 200、日志 0 Traceback。
+- **验证**：本地全仓 pytest **348 passed** 零失败（需 uv venv 补依赖：系统 python 缺 akshare 时 16 failed 属环境问题）；生产服务器 worktree 跑分支 `7496732` 的 `gate.sh` **348 passed**（生产 checkout 全程停 main 未动）；身份模式双扫描（主机名/IP/家目录/硬件名/盘符路径 + 裸 token）全仓 **0 命中**（`deploy.local.md` 被 gitignore 排除）；相对 main 的改动行 emoji **0 命中**；第三方 `klinecharts.min.js` 批量误改已还原。
+- **状态**：分支已推 origin（本机直连故障，经生产服务器 bundle 中继推送），**待用户批准合并**；合并后同步生产只需 git pull + gate（纯文档/注释/单测路径改动，无需重启服务）。同批评审余项（P0-2 修复、P1 sector 数据方向、第 4 项残留清理）待用户拍板，见 handoff 下一步。
 
 ### 2026-09-22（P1② 收口：行业均值参照 + C3 取消）
 - **行业均值参照**（roadmap P1② 最后一环，用户确认后实施）：`StockSnapshotDAO.get_sector_averages()`（A 股非空板块聚合，PE 仅取正值样本防亏损股拉低，roe 全样本，只读不进评分链路）+ `get_sector_map()`；index 给候选卡/观察池卡挂板块归属并下发 `sector_avg`，`/stock/{code}`、`/watchlist/{code}` 传本股板块均值；四处评分拆解块（`_stock_list` / `_watchlist_card` / `stock_detail` / `watchlist_detail`）总分行后补「行业均值（板块）ROE…% · PE…（n只）」行，三套模板 CSS 各增 auto/1fr 覆盖行；无评分拆解（区块隐藏）时不出现。
