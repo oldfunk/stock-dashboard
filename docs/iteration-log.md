@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
+### 2026-09-22（合并 nightly/20260922：文档复检 9 处修正已同步，无需重启）
+- 合并：`nightly/20260922`（1 commit）fast-forward 入 main（`426d01a`），经 pi1 中继推送。
+- 同步：pi1 pull（纯文档变更，未重启服务）；`/`、`/api/status` 200 确认正常。
+- 遗留：远端 `nightly/20260922` 待删。
+
 ### 2026-09-21（合并部署 nightly/20260921b：分析师整改 T1–T4 上线，pi1 重启验证全绿）
 - 合并：`nightly/20260921b`（8 commits）fast-forward 入 main（`0cfa3b4` 含记账收尾），经 pi1 中继推送。
 - 部署：pi1 备份 DB（`stock_dashboard.db.bak0921b`）→ pull → restart（analyzer/routes/schema 运行时变更）→ 服务 active。
