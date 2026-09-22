@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（全仓 pytest 零失败；生产服务器基线 348 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 348 passed，只升不降）。
 
 ## 技术栈
 
@@ -25,6 +25,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 - 每次迭代只做一件小而实的事，禁止改多个无关模块
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 全仓 pytest 零失败（基线只升不降）
+- 开发与测试分离：本机只做编辑、commit、文本扫描，不跑 pytest；全仓验证一律在生产服务器 `gate.sh` 执行
 - 禁删 S1–S7 适配函数（除非替代 + 单测同 commit）
 - 提交信息中文，写清「改了什么 + 为什么」
 - 验证声明必须精确：手动分步验证 ≠ live 验证通过。任何"验证通过"必须附带实际执行的命令和输出作为证据，不能夸大验证范围。主动验证所有风险点，而非选择性验证。
