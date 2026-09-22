@@ -16,8 +16,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
-- gate 基线：348 passed（2026-09-22 本地 + 生产服务器 worktree 实测全绿）。
-- 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）。
+- gate 基线：360 passed（2026-09-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 覆盖约 3000 只（S8 新浪 49 板块，2026-09-22 接入；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
 ## 目标与发展框架（2026-09-04 设立）
@@ -72,7 +72,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 348 passed，只升不降）
+- 全仓 pytest 零失败（基线 360 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,12 +161,21 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-22（四项拍板落地：残留④ + 测试规则 + S8 sector 数据回填，nightly/20260922d 待合）
+- **残留清理④**（用户拍板「可执行」）：`docs/agent-api.md` journal 口径按实测修正——`journal/list` 空列表返回 `[]`（200）不 404，仅 `latest`/`{date}` 缺失才 404；`scripts/daily_cron.sh` 头注释补休眠陷阱（15:30 休眠则当天错过且不补跑，醒来需手动执行）。
+- **测试规则落档**（用户拍板：开发在本机、测试在生产服务器）：AGENTS.md 测试门禁改「**在生产服务器执行**——本机不跑 pytest」+ 硬规则新增「开发与测试分离：本机只编辑/commit/文本扫描，全仓验证一律生产服务器 `gate.sh`」。
+- **P1② sector 数据回填**（用户拍板「接口当然需要搞好」→ 接数据回填，不做口径修改）：注册 **S8 新浪直连行业分类**——`newSinaHy.php` 取 49 板块名单 + `Market_Center.getHQNodeData` 分页取成分（单页硬顶 100 行，空页即停），Session 复用 + 0.6s 页间节奏（背靠背连打被新浪拖慢，节奏化后全量约 87s）+ 浏览器 UA；`fetch_sector_map(timeout=420)` 线程护栏 → 上次成功磁盘缓存 `data/cache/sector_map.json`（≥1000 条才覆盖）→ `{}` 跳过回填不清旧值；`save_batch` 无 sector 字段保值（防 INSERT OR REPLACE 擦回填）+ `backfill_sectors()` 只 UPDATE map 内 code；orchestrator 快照回写后挂回填（watchlist 补录与候选判定之间）；注册表 S1–S7 → S1–S8 全仓更名（AGENTS/README/architecture/roadmap/scheduled-tasks/setup-cron/账本约束）+ roadmap 新增「数据补充」行。
+- **为什么**：`stock_snapshot.sector` 全 NULL → 板块归属与行业均值参照（P1② 展示侧已收口）空转，接源回填是该链路最后一环。数据源探测排除记录：akshare `stock_sector_spot/detail` 每调约 5.2s 超护栏、`stock_sector_detail` 须传 label、东财 push2 全断（RemoteDisconnected）、THS 无成分函数、巨潮仅分类树、curl 对 newSinaHy 15s 超时（RC28）——新浪直连为唯一活源。
+- **验证**（按新测试规则全部在生产服务器 worktree）：`gate.sh` **360 passed / Gate passed**（348 + 12 新增：S8 契约 8 + DAO 4；orchestrator 流水线测试补 `fetch_sector_map` mock，防真实打新浪卡满超时）；**live 实测** `fetch_sector_map()` 返回 **2999** 只映射（抽样 600176→玻璃行业 正确）+ 缓存 77KB 落盘（fetched=2026-09-22）；覆盖核验：新浪家数合计 3035 / 实取 2999（差 31 = `其它行业` 元数据陈旧；电子信息 247/247、机械 211/211 分页无截断，`num=1000` 被硬顶 100）；身份复扫 0 命中、新增行 emoji 0 命中、ast 全过。DB 实际回填在合并后下一次流水线运行生效。
+- **基线刷新**：348 → **360 passed**。
+- **状态**：分支 4 提交（`abbcaa2` / `d4eed12` / `9f05b82` / 本收尾）**待用户批准合并**；合并后同步生产 = git pull + 重启服务（采集/DB/scheduler 代码变更）+ gate + 观察一次 sector 回填行数。
+
 ### 2026-09-22（全仓开发者服务器身份清除 + 部署信息本地化，nightly/20260922c 待合）
 - **改了什么**：23 文件清除全部开发者服务器身份引用——主机名与裸 token → `生产服务器`、硬件名 → `低内存主机`、内网 IP（新旧两个）→ `<生产服务器>`、家目录绝对路径 → `<部署目录>`、开发机盘符路径 → `<仓库路径>`；覆盖 AGENTS/README/docs（含 architecture mermaid 子图改 `PROD`）/scripts 注释/账本 90+ 处/superpowers 历史计划（只改称呼不删内容，用户拍板）。AGENTS、README、agent-api 手工润色，部署命令一律占位符并统一指向 `deploy.local.md`；`tests/test_verify_intrinsic.py` 硬编码 sys.path 改 `Path(__file__).parents[1]`；`.gitignore` 增列并新建 `deploy.local.md`（真实主机/ssh/部署目录/gate/中继命令唯一落点，不入库）。
 - **为什么**：工作树残留身份引用会随文档/账本/脚本反复复制再泄露；部署目标是机器特定配置，属本地信息不属仓库内容（与 `.hermes/environment.json` 同理）。
 - **同日早前**：评审 P0-1（合并后漏重启致新代码未生效）已关闭——重启生产服务后新进程 active，thesis 404→200、index/detail/api 200、日志 0 Traceback。
 - **验证**：本地全仓 pytest **348 passed** 零失败（需 uv venv 补依赖：系统 python 缺 akshare 时 16 failed 属环境问题）；生产服务器 worktree 跑分支 `7496732` 的 `gate.sh` **348 passed**（生产 checkout 全程停 main 未动）；身份模式双扫描（主机名/IP/家目录/硬件名/盘符路径 + 裸 token）全仓 **0 命中**（`deploy.local.md` 被 gitignore 排除）；相对 main 的改动行 emoji **0 命中**；第三方 `klinecharts.min.js` 批量误改已还原。
-- **状态**：分支已推 origin（本机直连故障，经生产服务器 bundle 中继推送），**待用户批准合并**；合并后同步生产只需 git pull + gate（纯文档/注释/单测路径改动，无需重启服务）。同批评审余项（P0-2 修复、P1 sector 数据方向、第 4 项残留清理）待用户拍板，见 handoff 下一步。
+- **状态**：已于同日合入 main（`2f0384e`）并同步生产（gate 348 + HTTP 200）；同批评审余项落定——P1 sector 数据方向与第 4 项残留清理已实现并入 `nightly/20260922d`（见上一条），P0-2 修复仍待用户批准。
 
 ### 2026-09-22（P1② 收口：行业均值参照 + C3 取消）
 - **行业均值参照**（roadmap P1② 最后一环，用户确认后实施）：`StockSnapshotDAO.get_sector_averages()`（A 股非空板块聚合，PE 仅取正值样本防亏损股拉低，roe 全样本，只读不进评分链路）+ `get_sector_map()`；index 给候选卡/观察池卡挂板块归属并下发 `sector_avg`，`/stock/{code}`、`/watchlist/{code}` 传本股板块均值；四处评分拆解块（`_stock_list` / `_watchlist_card` / `stock_detail` / `watchlist_detail`）总分行后补「行业均值（板块）ROE…% · PE…（n只）」行，三套模板 CSS 各增 auto/1fr 覆盖行；无评分拆解（区块隐藏）时不出现。
