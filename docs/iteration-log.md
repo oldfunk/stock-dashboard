@@ -165,7 +165,8 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ### 2026-09-22（清理残留：删 hermes_proxy 空目录 + scheduler 纸盘注释尸体）
 - 清理：`rm -rf src/hermes_proxy/`（ai_proxy 改名后只剩 `__pycache__` 空壳，未被 git 跟踪但滞留磁盘）；`src/scheduler.py` 删除 `# self._trigger_paper_trading_async(config)` 注释尸体（纸盘 schema/DAO 已于 0921 T2 删除，此注释引用的方法已不存在）。
 - 背景：复查 OpenCode 0921/0922 17 提交时发现两处非阻塞残留，用户批准顺手清理。
-- 验证：本地 `python -m pytest tests/` 328 passed（18.90s）。
+- 验证：本地 `python -m pytest tests/` 328 passed（18.90s）；pi1 gate 328 passed（22.89s）+ service active。
+- 合并：`nightly/20260922b` ff 入 main（`f5205fc`），远端分支已删。
 
 ### 2026-09-22（合并 nightly/20260922：文档复检 9 处修正已同步，无需重启）
 - 合并：`nightly/20260922`（1 commit）fast-forward 入 main（`426d01a`），经 pi1 中继推送。

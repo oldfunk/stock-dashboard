@@ -3,15 +3,13 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 残留清理待合）
-- 分支：`nightly/20260922b` 待合（删 hermes_proxy 空目录 + scheduler 纸盘注释尸体，纯清理零功能变更）
-- 基线：本地 328 passed；main `3cc230e`，pi1 已同步、服务 active
-- 验证：本地 pytest 328 passed（18.90s）；清理不触逻辑，合并后 pi1 `git pull` + gate 复核
+## 最后状态（2026-09-22 残留清理已合已同步）
+- 分支：`main` = `f5205fc`；远端 `nightly/20260922b` 已删；pi1 已 pull + gate，服务 active
+- 内容：删 `src/hermes_proxy/` 空目录 + `scheduler.py` 纸盘注释尸体（纯清理零功能变更）
+- 验证：pi1 `bash scripts/gate.sh` 328 passed（22.89s）+ service active
 
 ## 下一步方向
-1. 批准合并 `nightly/20260922b` → pi1 pull + gate 复核 → 删远端该分支
-2. 外部 AI 消费方排期（取数/写回接线）
-3. P1 面板深化；收益校准追踪待排期（无成功样本）
+1. 外部 AI 消费方排期（取数/写回接线）
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
