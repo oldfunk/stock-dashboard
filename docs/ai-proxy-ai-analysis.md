@@ -22,7 +22,7 @@ OpenCode Zen 免费模型池已确认不可用（2026-09-07 起 7/7 模型全灭
 
 ## 2. 技术选型
 
-### 2.1 外部 AI 服务框架（作者侧跑在 pi2 Hermes 上）
+### 2.1 外部 AI 服务框架（作者侧由 Hermes 承担）
 
 | 候选 | 选型 | 理由 |
 |---|---|---|
@@ -34,9 +34,9 @@ OpenCode Zen 免费模型池已确认不可用（2026-09-07 起 7/7 模型全灭
 
 | 候选 | 定位 | 说明 |
 |---|---|---|
-| OpenRouter（付费） | **首选** | 多模型兜底（Claude/Gemini/DeepSeek），按量付费，pi2 可访问 |
+| OpenRouter（付费） | **首选** | 多模型兜底（Claude/Gemini/DeepSeek），按量付费 |
 | DeepSeek 直接 API | 备选 | 单价低，但单模型无轮换 |
-| 本地 Ollama | 免费 | 需 pi2 有 GPU，当前无 |
+| 本地 Ollama | 免费 | 需本机有 GPU，当前无 |
 
 Provider 在外部 AI 侧的 `.env` 或自有 config 中配置，不进 Git。
 

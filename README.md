@@ -92,7 +92,7 @@ stock-dashboard/
 │   ├── retry_ai.py             # 补跑失败 AI 分析（手动，本地通道已死，慎用）
 │   ├── run_ai_analysis.py      # 慢喂模式（每次 1 只，手动）
 │   ├── backtest_topk.py        # TopK 离线回测（历史归档产物，路线已砍）
-│   ├── setup-cron.sh           # 定时任务设置（需 hermes CLI，在 Hermes 所在机器跑，不在 pi1）
+│   ├── setup-cron.sh           # 定时任务注册脚本（可选，需 hermes CLI 的机器手动执行）
 │   ├── verify_valuation.py     # B1 估值验算闸
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
@@ -111,8 +111,7 @@ stock-dashboard/
 │   ├── handoff.md              # 班次交接速览
 │   ├── agent-api.md            # 外部 Agent 接入指南（读数据/写分析/写笔记）
 │   ├── ai-proxy-ai-analysis.md # 外部 AI 代理开发规范
-│   ├── ai-proxy-analysis-report.md # 外部 AI 代理分析报告（历史）
-│   ├── scheduled-tasks.md      # 定时任务配置
+│   ├── scheduled-tasks.md      # 定时任务参考设计（制度由使用者自定）
 │   ├── paper-trading.md        # 历史归档（量化路线已砍，不再开发）
 │   └── strategies-dry-run.md   # 多策略 dry-run 文档
 └── tools/                    # 工具目录（对照工具已移除）

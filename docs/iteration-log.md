@@ -4,7 +4,7 @@
 > 维护者：Hermes nightly 迭代 agent + 用户。零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 
 ## 项目定位
-A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情。代码真相源 = GitHub `origin/main`，pi1 从 origin 拉取部署。pi2 仅作开发/迭代副本，**不运行服务**（省 Hermes 进程资源）。
+A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情。代码真相源 = GitHub `origin/main`，pi1 从 origin 拉取部署。
 
 **终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段以价值投资门规与结构化 AI 分析为核心，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
 
@@ -134,8 +134,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - [x] Discord通知模块（8-25 nightly #3）：新增 `src/notifications/discord_notifier.py`，支持AI失败通知和每日摘要，集成到scheduler.py AI分析完成后自动发送，使用Unicode符号 → ⚠️ 📈
 |- [x] 钉选股独立分析视图（skill P2⑥，2026-08-28 收口）：`/watchlist/{code}` 路由改用 `stock_detail` 已验证取数模式，新增 `watchlist_detail.html` 模板（钉选状态徽标 + 在池卡片为核心差异点），`_watchlist_card` 链接指向独立视图；修复 8-27 半截路由（未定义符号 + 缺模板）
 ||- [x] 多策略配置结构搭建（backlog 第 45 项拆细）：在 `config/strategies.yaml` 定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利等），为后续多策略打地基（不接入流水线）
-||- [x] pi2 venv 修正 `markdown` 依赖（backlog 第 46 项）：已安装（`.venv/bin/pip install markdown`），本地 import 已验证通过
-||- [x] 清理 `deep_research` 废表（已确认可安全清理）
+|- [x] 清理 `deep_research` 废表（已确认可安全清理）
   - [x] 确认表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）
   - [x] 确认代码层面无引用（grep -rn 无匹配）
   - [x] 确认迁移记录缺失（说明为历史遗留）
@@ -161,6 +160,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-22（清除 pi2 内容 + 调度/复盘职责定位）
+- **pi2 零清除**（用户裁定：从未授权 pi2 内容入项目，重大失误）：删 `docs/ai-proxy-analysis-report.md`（整篇 pi2 架构报告）+ README 树行；`ai-proxy-ai-analysis.md` 3 处、iteration-log 项目定位段、backlog "pi2 venv" 条目、`src/ai_proxy/__init__.py` docstring 全部中性化；账本历史 16 行 23 处 `pi2` → `本地`/`AI 侧`（仅设备名脱敏，验证事实不变）。**AGENTS.md:53 同款措辞写保护审批超时未通过，暂留，待用户亲自批准后修。**
+- **调度定位**：`scheduled-tasks.md` 改"参考设计——调度制度由使用者自行设计，本项目不预设"，声明 `POST /api/trigger_update` + `agent-api` 读写支撑任意轮询组合；`setup-cron.sh` 改可选注册、不自动注册；README 树行同步。
+- **职责重定**（用户裁定落地）：外部接入闭环 = 使用者抉择、周六复盘执行与决议 = 外部 AI 职责、盯盘调度制度 = 使用者自行设计——三者不再列为本项目排期任务（handoff 下一步同步重写）；P1② 收尾方案与 C3 处置待用户确认。
+- 验证：本地 `hermes verify --skip-start` bootstrap + test 全过（ok=True，342 passed 24.64s）；`grep -ri pi2` 全仓 0 命中（AGENTS.md:53 除外，见上）。纯文档 + 1 行 docstring 变更。
 
 ### 2026-09-22（外部 Agent 接入指南）
 - 新增 `docs/agent-api.md`：通用外部 agent 接入文档——连接约定（局域网/无鉴权/6位代码/错误格式）、读端点全表、写分析双通道（`POST .../notes` 笔记 + `POST .../thesis` 论文 upsert）、钉选/监控/触发更新、典型 curl 工作流、溯源与写回红线。内容逐条对照 `src/web/routes.py` 真实路由，非凭印象。README 目录树挂链接。
@@ -269,7 +274,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ### 2026-09-14（M2 多策略筛选模式接入流水线后端核心，impl 402cd5e + verify 收尾）
 - 改了什么：`screening_result` 新增 `strategy_tags` 列（TEXT，全量命中标签 JSON array）+ `_add_column_if_not_exists` 迁移守卫；`src/screener/value_screener.py` 新增 `load_strategies`（读 `config/strategies.yaml` 成长/红利/反转三策略阈值）+ 单股策略阈值检查（缺数字字段跳过不否决，小数/百分比阈值自动归一）+ `score_candidates`/`run_screener` 支持 `multi_strategy` 开关（默认关闭，单策略行为完全不变）；multi 模式按策略分组返回三独立候选池并持久化去重；新增 `tests/screener/test_multi_strategy.py` 5 项单测。
 - 为什么：M2 策略分化（目标 9-30）要求三策略独立候选池；`strategies.yaml` 自 08-30 起只定义阈值、未接入流水线，这是接入第一步（后端核心，不含首页策略 Tab UI，后续单独做）。
-- 验证：全仓 229 passed 零失败（pi2 系统 python 缺 fastapi/httpx/pandas，uv 建 /tmp/vrf_venv 补依赖后跑通）；改动三文件 `py_compile` 通过；改动文件 emoji 零命中（存量 ★ 在 ai_analyzer.py、✓ 在单测注释，均为非改动文件且 ✓ 为允许字符）；分支 `nightly/20260914`，仅推 nightly，不碰 main/pi1。
+- 验证：全仓 229 passed 零失败（本地系统 python 缺 fastapi/httpx/pandas，uv 建 /tmp/vrf_venv 补依赖后跑通）；改动三文件 `py_compile` 通过；改动文件 emoji 零命中（存量 ★ 在 ai_analyzer.py、✓ 在单测注释，均为非改动文件且 ✓ 为允许字符）；分支 `nightly/20260914`，仅推 nightly，不碰 main/pi1。
 ### 2026-09-12（架构治理：结构图 + 总路线 + 虚拟盘方向）
 - 起因：缺结构图导致迭代破坏地基（AKShare S4/S5 在迭代中静默遗失，靠 C2/C2.5 事后抢救）。
 - 新增 `docs/architecture.md`（架构真相源）：系统结构图 + 每日流水线图 + 模块边界禁令表 + 数据表清单 + 数据源注册表 S1–S7 + 三条铁律 + 回归门禁。
@@ -312,7 +317,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 计划：prompt 输出加 verdict（通过/不通过/灰色）+ 激进/稳健/保守三档价格区间；parse_ai_response 向后兼容（新字段可选）；存量 JSON 缺字段前端降级不渲染；routes 下发 verdict 徽标；附单测。验收：prompt 样本 diff + 新旧 JSON 兼容单测 + pi1 上线后 curl。
 - 完成：prompt 加 verdict 三态 + price_tiers 三档 + 规则 11；_enforce_verdict_discipline 写库前强制（不通过→AVOID、灰色→BUY降HOLD、只收紧不放松）；候选卡 + 详情页结论徽标 + 分层建议（旧行无字段整块不渲染）；单测 9 个（纪律矩阵 7 + 解析兼容 2）；全仓 179 passed 零失败；模板离线真渲染验证新旧降级。
 ### 2026-09-05（全面接手：修 3 个 pre-existing 单测，人工主动推进）
-- 计划：①journal 按日期路由缺失改 404（前端无直接调用，安全）；②reviewer 用例 run_date 写死 7-15 已过 4 周窗口致 skip，改动态近 3 天；③analyzer 历史用例改 tmp 库隔离（现依赖真库，pi2 旧库缺 model 列即挂）。验收：三用例过 + 全仓无新增失败。
+- 计划：①journal 按日期路由缺失改 404（前端无直接调用，安全）；②reviewer 用例 run_date 写死 7-15 已过 4 周窗口致 skip，改动态近 3 天；③analyzer 历史用例改 tmp 库隔离（现依赖真库，本地旧库缺 model 列即挂）。验收：三用例过 + 全仓无新增失败。
 - 完成：三案全破，全仓 170 passed 零失败（后随 B2 到 179）；已合并部署。
 ### 2026-09-06（周六复盘 reviewer prompt 优化，人工主动推进）
 |- 计划：根据 B7 市场总结模板全覆盖要求，优化 reviewer prompt：①强化 watch 动作明确性（何时判 watch、观察项定义、期限计算）；②细化周报结构（池变动章节格式/逐股财报五句模板/小白标准检查项）；③增加覆盖率校验逻辑（缺股自动记录 actions_summary.coverage_missing）；④优化输出格式（固定章节顺序/明确分隔符）。验收：prompt 样本测试 + 单测（watch 判断/覆盖率记录/格式输出）+ pi1 下周六 live 验证。
@@ -347,11 +352,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ### 2026-08-30（nightly #4，多策略配置结构 + deep_research 清理记录）
 |- 新增 `config/strategies.yaml`：定义成长/红利/困境反转三个策略的阈值配置（ROE、PE、毛利、股息率等），为后续多策略并行打地基（不接入流水线）。
 |- 更新 `docs/iteration-log.md`：标记 backlog 第 45/46 项完成，deep_research 表清理拆为「待执行 drop 脚本」子项（用户手动决定是否 drop）。
-|- pi2 venv 验证：`markdown` 已安装，本地 import 已验证通过（`.venv/bin/python -c "import src.web.routes"`）。
+|- 本地 venv 验证：`markdown` 已安装，本地 import 已验证通过（`.venv/bin/python -c "import src.web.routes"`）。
 - 想法/为什么：
   - 多策略配置结构是 backlog 第 45 项的拆细子项，先搭配置文件，为后续接入流水线打地基（不碰生产逻辑）。
   - deep_research 表清理 backlog 第 47 项已确认可安全清理，本次只记录「待执行 drop 脚本」，不实际 drop，让用户决定是否执行。
-- 冒烟：`python3 -c "import yaml; print(yaml.safe_load(open('config/strategies.yaml')))"` 通过；`config/strategies.yaml` 语法正常；pi2 venv `python3 -c "import src.web.routes"` 通过。
+- 冒烟：`python3 -c "import yaml; print(yaml.safe_load(open('config/strategies.yaml')))"` 通过；`config/strategies.yaml` 语法正常；本地 venv `python3 -c "import src.web.routes"` 通过。
 ### 2026-08-29（nightly #3，确认 deep_research 表现状并标记可清理）
 - 确认 `deep_research` 表存在且含 5 条历史数据（茅台/五粮液/伊利/平安/招商，2026-08-22 生成）。
 - 确认代码层面无引用（`grep -rn` 无匹配）。
@@ -361,7 +366,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 冒烟：无代码改动，仅文档更新；iteration-log.md 语法正常。
 ### 2026-08-28（nightly #2，零 emoji 存量违规清理）
 - `src/notifications/discord_notifier.py`：8-25 nightly 误用 `⚠️` 与 `📈`（真实 emoji，非允许的 → ↑ ↓ ✓ 排版符号），违反项目零 emoji 硬规则。替换为纯文本前缀 `[告警]` / `[摘要]`，配色/功能不变。
-- 想法/为什么：扫描脚本 `scripts/scan_emoji.py` 未纳入离线检查，8-25 提交时漏网。本次对全仓做精确扫描（排除允许的排版符号），确认仅此 2 处命中并清除，repo 现零 emoji。冒烟：全仓精确 emoji 扫描 0 命中；py_compile 通过。仅改 pi2，未触碰 pi1。
+- 想法/为什么：扫描脚本 `scripts/scan_emoji.py` 未纳入离线检查，8-25 提交时漏网。本次对全仓做精确扫描（排除允许的排版符号），确认仅此 2 处命中并清除，repo 现零 emoji。冒烟：全仓精确 emoji 扫描 0 命中；py_compile 通过。仅改本地，未触碰 pi1。
 
 ### 2026-08-28（nightly #1，钉选股独立分析视图收口 — 修复 8-27 半截路由）
 - 8-27 提交的 `/watchlist/{code}` 路由调用了未定义辅助函数（`get_stock_by_code` / `get_analysis_history` / `get_annual_reports` / `get_market_snapshot` / `BASE_API`）且渲染了并不存在的 `watchlist_detail.html` 模板，上线即 `TemplateNotFound` 崩溃。本次按 backlog P2⑥ 把功能真正收口：
@@ -369,7 +374,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - 新增 `watchlist_detail.html` 模板：钉选状态徽标 + 在池卡片（调入日期/理由/置信度/调入调出历史）为核心差异点，复用 `score_detail` 五维拆解、投资人笔记、交易策略、历次分析时间线等已验证 markup；未在池时降级纯数据版。
   - 把 8-27 误留在 `stock_detail.html` 的孤立 `.wd-*` CSS 迁回 `watchlist_detail.html`。
   - `_watchlist_card` 卡片链接由 `/stock/` 改指向 `/watchlist/`，让独立视图可达。
-- 想法/为什么：钉选股视图是用户可见功能（观察池点进去应看到专属分析页而非通用详情），此前半截实现不可用。本次补齐到可点击/可渲染/零未定义依赖，纯展示层、零新增评分或 AI 逻辑、低风险。冒烟：routes py_compile 通过；`watchlist_detail.html` Jinja2 离线渲染（在池/不在池两态）均通过；repo 零 emoji。仅改 pi2，未触碰 pi1。
+- 想法/为什么：钉选股视图是用户可见功能（观察池点进去应看到专属分析页而非通用详情），此前半截实现不可用。本次补齐到可点击/可渲染/零未定义依赖，纯展示层、零新增评分或 AI 逻辑、低风险。冒烟：routes py_compile 通过；`watchlist_detail.html` Jinja2 离线渲染（在池/不在池两态）均通过；repo 零 emoji。仅改本地，未触碰 pi1。
 
 ### 2026-08-27（nightly，AI 深度思考框架基础架构搭建 — 账本补录）
 > 此条此前漏记（agent 未记录即提交）。本次补登以闭合进程账上下文。
@@ -381,14 +386,14 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 集成到 `scheduler.py`：AI分析完成后自动检查失败数量，如有失败则调用Discord通知，发送失败数量、失败原因列表（前5个）、批次ID等信息。
 - 标题使用纯文本前缀 `[告警]` / `[摘要]`（原误用 ⚠️ 📈 真实 emoji，已于 8-28 nightly #2 清理）。
 - 想法/为什么：此前AI失败只在前端可见，缺乏主动运维通知。本次实现自动Discord播报，让用户及时获知AI分析异常，运维价值高。安全：通知为可选功能，未配置webhook时静默跳过。
-- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中（仅含允许的 → Unicode符号）。仅改 pi2，未触碰 pi1。
+- 冒烟：本地 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中（仅含允许的 → Unicode符号）。仅改本地，未触碰 pi1。
 
 ### 2026-08-25（nightly #2，矛盾信号检测）
 - 新增 `/api/journal/{journal_date}/conflicts` API：检测指定笔记与前期的矛盾变化，包括标题变化、内容长度变化（>500字符）、模型变化、市场环境变化。
 - `AiJournalDAO` 新增 `get_previous()` 和 `get_next()` 方法：获取前后期笔记。
 - journal.html 新增矛盾检测面板：自动加载并显示检测结果，无变化时显示"无明显矛盾或显著变化"。
 - 想法/为什么：历史笔记对比的收口功能，让用户能快速识别AI分析的一致性变化。检测逻辑简单但实用，标题、内容长度、模型变化都是重要信号。
-- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改 pi2，未触碰 pi1。
+- 冒烟：本地 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改本地，未触碰 pi1。
 
 ### 2026-08-25（nightly #1，历史笔记对比）
 - 新增 `/journal/compare/{journal_date1}/{journal_date2}` 路由：支持两期笔记对比页面。
@@ -396,27 +401,27 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - `AiJournalDAO` 新增 `get_previous()` 和 `get_next()` 方法：获取前后期笔记。
 - journal.html 新增对比对话框：点击"选择两期对比"按钮弹出日期选择对话框，支持多选并跳转到对比页面。
 - 想法/为什么：AI笔记增强的核心功能，让用户直观对比不同期次的AI分析变化。双栏布局便于横向对比，对话框选择操作简单。
-- 冒烟：pi2 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改 pi2，未触碰 pi1。
+- 冒烟：本地 `.venv` py_compile 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描零命中。仅改本地，未触碰 pi1。
 
 ### 2026-08-24（nightly #2，AI 分析失败落库 — 透明化后端半）
 - `screening_result` 新增 `ai_failed`(INTEGER DEFAULT 0) + `ai_failure_reason`(TEXT)：`CREATE TABLE` 声明 + `init_database` 迁移 `_add_column_if_not_exists(conn,'screening_result','ai_failed','INTEGER')` 与 `'ai_failure_reason','TEXT'` 兜底。
 - `ScreeningResultDAO`：新增 `mark_ai_failure(run_id, code, reason)` 置 `ai_failed=1` 并写原因；`update_ai_analysis` 成功时顺带 `ai_failed=0, ai_failure_reason=NULL`（成功/失败标记互斥）。
 - `ai_analyzer.py`：`_save_failure(stock, run_id, reason=None)` 签名增 `reason` 并调用 `mark_ai_failure` 落库；`analyze_batch` 在两处失败入口传具体原因——无 API Key 传「未配置 API Key」，分析返回 None 传 `AiAnalyzer._last_error`（新增属性，值为「模型返回空/全部免费模型不可用」）；无 Key 批量跳过路径同步传因。
 - 想法/为什么：此前 AI 失败只写一条 `'{}'` 空记录，完全看不到失败原因（skill 明确列的「AI 分析失败前端/Discord 可见」项）。本次先把原因落到数据层，为后续前端徽标 + Discord 播报打地基。安全：新列默认 0/NULL，旧行 SELECT 兼容；`init_database` 迁移保证 pi1 仅一次 `systemctl restart` 即自动加列（旧行 NULL 不影响既有查询），无需手动 migration。
-- 冒烟：pi2 `python3 -m py_compile` 三文件（database/routes/ai_analyzer）通过；pytest 142 passed（2 个 pre-existing 失败与本次无关）。仅改 pi2，未触碰 pi1。
+- 冒烟：本地 `python3 -m py_compile` 三文件（database/routes/ai_analyzer）通过；pytest 142 passed（2 个 pre-existing 失败与本次无关）。仅改本地，未触碰 pi1。
 
 ### 2026-08-24（nightly #1，详情页评分拆解卡片 — 透明化收口）
 - 详情页（stock_detail.html）新增「综合评分拆解」段：复用 `score_detail` JSON，展示五维子分（ROE/估值/增长/财务/毛利）进度条 + raw 值 + 贡献分、一致性加分行、总分行；与候选卡（8-23 完成）共用同一份 `score_detail` 数据。
 - 支撑改动：routes `stock_detail` 取最新一轮 `screening_result` 行的 `score_detail` 解析为 `score_detail_parsed` 下发（旧行 NULL 时整段不渲染）；`ScreeningResultDAO` 新增 `get_latest_for_code(code)` 取该股票最新筛选行。
 - 想法/为什么：候选卡已能展开五维拆解，但点进详情页却只看到时间线 SVG 里的总分，透明化在详情页断了一截。本次把同一份 `score_detail` 在详情页独立成卡，用户可见「为什么是 88 分」的完整拆解，闭环 P1③ 详情页子项。纯展示层、零风险、不动评分引擎。
-- 冒烟：pi2 `.venv` Jinja2 离线渲染 `stock_detail` mock（含五维行 + 一致性行 + 总分 `87.8` + 无 `&#128214;` 泄漏）通过；`py_compile` 通过；pytest 142 passed。仅改 pi2，未触碰 pi1。
+- 冒烟：本地 `.venv` Jinja2 离线渲染 `stock_detail` mock（含五维行 + 一致性行 + 总分 `87.8` + 无 `&#128214;` 泄漏）通过；`py_compile` 通过；pytest 142 passed。仅改本地，未触碰 pi1。
 ### 2026-08-23（nightly #2，模型归属落库 + 候选卡徽标）
 - `stock_analysis_history` 补 `model` 列并落库（backlog 第二项闭环）：
   - `src/models/database.py`：`stock_analysis_history` 表 `CREATE TABLE` 增 `model TEXT` 列；`init_database` 迁移段加 `_add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')` 兜底；`StockAnalysisHistoryDAO.save` 签名增 `model: str = None` 并写入。
   - `src/analyzer/ai_analyzer.py`：`_save_analysis` 调用 `StockAnalysisHistoryDAO().save(...)` 末位传 `result.get('model')`（此前 `analyze_stock` 已在 `result['model']` 写入用的模型，只是没落库）；`_save_failure` 传 `None`。
   - `src/web/routes.py`：`_enrich_stocks` 取 `ai_parsed.model` 写入 `s['model']`，下传模板；`_stock_list.html` 在评分旁渲染「模型: <model>」徽标（`stock-model` 样式）。
 - 想法/为什么：模型归属此前只活在 `ai_analysis` JSON 里、复盘日志也读了，但**历史表本身没存**，跨日追溯某次分析用了哪个模型很麻烦。这是 backlog 明确列出的透明化项，且与 #1 同属「评分/分析可追溯」主线，一并闭环。向后兼容：旧行 `model` 为 NULL，`save` 有默认值，不影响既有查询。
-- 冒烟：pi2 `python3 -m py_compile` 三文件全过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 全过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中（本段仅用允许的 → 排版箭头与 `↑/↓` 折叠符）。仅改 pi2，未触碰 pi1 运行文件。
+- 冒烟：本地 `python3 -m py_compile` 三文件全过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 全过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中（本段仅用允许的 → 排版箭头与 `↑/↓` 折叠符）。仅改本地，未触碰 pi1 运行文件。
 
 ### 2026-08-23（nightly #1，评分透明化前端半 — score_detail 消费）
 - `screening_result.score_detail` 前端消费（backlog 第一项「前端半」闭环，8-22 已落库后端）：
@@ -424,7 +429,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - `src/web/templates/_stock_list.html`：在 `stock-reason` 之后新增「评分拆解」可折叠块——按钮显示总分 + 折叠箭头（↑/↓），展开为五维行（名称/raw值/子分进度条/权重/贡献） + 一致性加分行 + 总分行。键名映射 `roe→ROE, pe→估值, growth→增长, debt→财务, margin→毛利`，权重/子分/贡献直接来自 8-22 落库的 `score_detail`，零新增评分逻辑。
   - `src/web/templates/index.html` 与 `candidates.html`：各补 `toggleScoreDetail()` JS + `.stock-model`/`.score-detail`/`.sd-*` 全套 CSS（两页共用 `_stock_list` 片段，须同步）。
 - 想法/为什么：8-22/8-21 两步把评分逻辑结构化并落库，但用户在前端仍只看到总分。这一步把「为什么是 88 分」摊开成可读的五维加权拆解（不透明→透明），是面板核心短板「评分不透明」的收口。风险极低：纯展示层、读既有 `score_detail`、不动评分引擎、旧行 `score_detail` 为 NULL 时整块不渲染。渲染已用 Jinja2 离线 mock 验证（五维行 + 一致性行 + 总分 + 模型徽标均正确出现）。
-- 冒烟：Jinja2 离线渲染 mock 股通过（含 `评分拆解`/`sd-total`/`一致性加分`/`模型徽标`）；两页模板 `python3` 读取无语法错误；emoji 零命中。仅改 pi2，未触碰 pi1。
+- 冒烟：Jinja2 离线渲染 mock 股通过（含 `评分拆解`/`sd-total`/`一致性加分`/`模型徽标`）；两页模板 `python3` 读取无语法错误；emoji 零命中。仅改本地，未触碰 pi1。
 
 ### 2026-08-22（nightly #2，最小纯工程项 — 落库评分拆解）
 - 评分透明化（P1③）第二步：把上一步的 `_score_breakdown` 真正落库。
@@ -432,12 +437,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   - `src/screener/value_screener.py`：`score_candidates` 在算分后调用 `_score_breakdown(c)` 并 `json.dumps(ensure_ascii=False)` 写进 `score_detail`；`score == breakdown.total` 数值完全不变（不变量已用单测守护）。
   - `tests/screener/test_value_screener.py`：新增 `test_score_breakdown_matches_total` 守护「总分 == `_calculate_moat_score` + 子分加和 == 总分 + 五维结构完整」这三条不变量。
 - 想法/为什么：第一步只把逻辑结构化，但还没落地到数据层，详情页/Routes 仍拿不到子分。这一步**只做后端半**（落库），前端展示（routes/模板消费）拆成独立子项待下次——避免一次改多模块。数据一旦落库，下次迭代只需在 routes 读 `score_detail` 即可，无需再动评分引擎。零风险：不改变任何评分阈值，旧行 `score_detail` 为 NULL 不影响现有查询（SELECT * 兼容）。
-- 冒烟：pi2 `.venv` pytest 41 passed；改动文件 `python3 -m py_compile` 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中。仅改 pi2，未触碰 pi1 运行文件。
+- 冒烟：本地 `.venv` pytest 41 passed；改动文件 `python3 -m py_compile` 通过；scp 到 pi1 远端 `.venv/bin/python -m py_compile` 通过；emoji 扫描（literal + `&#1(29|28|27)\d{3};` entity）零命中。仅改本地，未触碰 pi1 运行文件。
 
 ### 2026-08-22（nightly #1，最小纯工程项）
 - 评分体系透明化（P1③）拆为子项，本次做最小一子项：在 `src/screener/value_screener.py` 新增纯函数 `_score_breakdown(stock)`，把原本 `_calculate_moat_score` 里内联的五维加权（ROE/PE/增长/负债/毛利）与一致性加分，拆成可逐项解释的结构（每项含 raw/sub/weight/contribution + `consistency_bonus` + `total`）。`_calculate_moat_score` 改为委托 `_score_breakdown` 返回 `total`，评分数值完全不变（已用样本股断言 `score == breakdown.total`，子分加和 == 总分，权重和 == 1.0）。
 - 想法/为什么：面板核心短板是「评分不透明」，用户看得到总分却不知怎么来的。这一步**零风险**（不改任何阈值、不影响生产筛选结果），纯粹把已有逻辑结构化，为后续「详情页展开五大维度子分+加权公式」与「`screening_result` 落库 `score_detail`」铺路。属安全前置，没动生产逻辑。
-- 冒烟：`python3 -m py_compile` 通过；pytest 式样本断言全过；无 emoji（仅含允许的 → 排版箭头）。改动只在 pi2，未触碰 pi1。
+- 冒烟：`python3 -m py_compile` 通过；pytest 式样本断言全过；无 emoji（仅含允许的 → 排版箭头）。改动只在本地，未触碰 pi1。
 
 ### 2026-08-21（人工排雷，非 nightly）
 - 修 `with_roe` UnboundLocalError（`akshare_fetcher.py` 提前初始化为 0），避免 AKShare 批量接口偶发失败时整条 pipeline 崩溃、当天 0 入选。
@@ -469,7 +474,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - **M3-2b**：`watchlist_reviewer.py` 新增 `_check_monitor_conditions()` / `_get_metric_value()` / `_compare()`，支持 pe/roe/gross_margin/net_margin/debt_ratio/dividend_yield/roe_volatility/fcf_yield/current_price 九种指标，lt/le/gt/ge/eq 五种操作符。触发写入 `ai_watchlist_history`（action=monitor_triggered）。15 单测通过。
 - **M3-2c**：`_watchlist_card.html` 新增监控条件标签（黄色背景 + JSON 文本）。
 - **M3-2d**：`routes.py` 新增 `GET/POST /api/watchlist/{code}/monitor` 端点。5 单测通过。
-- **t4**：`src/hermes_proxy/server.py` 通用 Hermes 代理服务（FastAPI + `/api/analyze` + `/api/health`），主通道+降级通道双通道。`config.yaml` 新增 `hermes_proxy` 段。5 单测通过。不修改 pi2 任何文件。
+- **t4**：`src/hermes_proxy/server.py` 通用 Hermes 代理服务（FastAPI + `/api/analyze` + `/api/health`），主通道+降级通道双通道。`config.yaml` 新增 `hermes_proxy` 段。5 单测通过。不修改 AI 侧任何文件。
 - **t5**：`scripts/backtest_topk.py` TopK 离线回测脚本，支持日/周/月再平衡，输出 JSON 报告。
 - **t6**：pi1 live 验证——中邮科技 PE=-45.2 < 20 触发监控条件，history 记录已写入。端到端链路验证通过。
 - 想法/为什么：M2 三策略分流为后续策略差异化打基础；M3 论点漂移 + 监控条件让观察池从被动展示变为主动预警；t4 通用代理服务让任何 Hermes 实例都能接入 AI 分析，不绑定特定设备。
