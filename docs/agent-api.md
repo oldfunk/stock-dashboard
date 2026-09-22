@@ -30,7 +30,8 @@
 | `GET /api/watchlist/{code}/thesis` | 单股投资论文（论点+假设+红线+卖出条件） |
 | `GET /api/watchlist/{code}/monitor` | 单股监控条件 |
 | `GET /api/history/{code}` | 单股历史分析记录 |
-| `GET /api/journal/latest`、`/api/journal/list`、`/api/journal/{date}` | 投资笔记（最新/列表/指定日，缺失 404） |
+| `GET /api/journal/latest`、`/api/journal/{date}` | 投资笔记（最新/指定日；缺失 404） |
+| `GET /api/journal/list` | 笔记列表（轻量，仅 date + title；**空时返回 `[]`（200），不 404**） |
 | `GET /api/journal/{date}/conflicts` | 笔记矛盾信号检测 |
 | `GET /api/stock/{code}/kline?period=daily&limit=250` | K 线（可选 `period`） |
 | `GET /api/index/{index_code}/kline` | 指数 K 线（实时拉取不缓存） |
