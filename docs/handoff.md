@@ -6,7 +6,7 @@
 ## 最后状态（2026-09-21 分析师整改 T1+T2 完成，分支 nightly/20260921b 待合）
 - 分支：`nightly/20260921b`（3 commits，基于 main `f44733b`），只推分支，未动 main/pi1
 - 内容：数据质量标注（prompt+落库+API）/ 估值改自选 / 上下文注入 / 纸盘 schema 删除 / 笔记 model 列 / triage 十条记账
-- 验证：pi1 worktree 全仓 **323 passed** 零回归；服务 active（未重启）
+- 验证：pi1 worktree 全仓 **328 passed** 零回归（323 + 跨期 5）；服务 active（未重启）
 - 下一轮（用户已定方向）：mirror/一致性熔断改警告、reviewer 跨期、校准 backlog；合并本分支由用户批准
 
 ## 下一步方向

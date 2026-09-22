@@ -176,7 +176,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 精简：删除纸盘 schema 建表 + 列守卫 + 5 个 Paper*DAO + `test_paper_tables.py`（新库验证无 paper 表、不 crash；存量库残留表只读保留）；`tests/paper/__init__` 早前已删。
 - T3 纪律软化：mirror/六关≤2 的 BUY 熔断改为警告记账（信号保留，反直觉判断不再被程序改写）；否决一票否决 + verdict↔signal 映射保留硬执行；质量记账仅否决矛盾记 fail；prompt 规则 8/9 同步为" tension 必须在 verdict 理由中解释"。
 - T4 复盘跨期：`_check_cross_period` 纯函数（vanished/unrecorded/signal_flip）+ review() 接入（上期 journal 对照章节进 prompt，结果进 actions_summary.cross_period，含上期新加本期即调出的 fast_drop）；未知 signal 不判翻转，空上期静默。
-- 验证：新 6+4 单测本地过；analyzer/ai_proxy/受影响 web 共 152 passed；pi1 worktree 全仓 **323 passed** 零回归（基线 317 + 新增）。
+- 验证：新 6+4 单测本地过；analyzer/ai_proxy/受影响 web 共 152 passed；pi1 worktree 全仓 **328 passed** 零回归（T1–T4 累计：基线 317 + 新增 11）。
 
 ### 2026-09-21（合并部署 nightly/20260921：ff 入 main，pi1 重启验证全绿）
 - 合并：`nightly/20260921`（3 commits）fast-forward 入 main（`ac62476`），经 pi1 中继推送（本地直连故障仍在）。
