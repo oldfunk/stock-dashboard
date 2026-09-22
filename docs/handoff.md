@@ -3,14 +3,15 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 ABC 方案已合已同步）
-- 分支：`main` = `bb64119`；远端 `nightly/20260922c` 已删；pi1 已 pull + gate，服务 active
-- 内容：A 能力补齐（反面检验 + thesis 论文落库/复盘写回 + 周复盘三问 + 双源误差标记，新表 `watchlist_thesis` + 2 个 API 端点）；B 架构固化 `architecture.md` §7 方法论与避坑；C 解绑上游（删 21 skills/10 工具/月检脚本，8 处归属声明中性化）
-- 验证：pi1 `bash scripts/gate.sh` 342 passed（24.98s）+ service active；全仓上游名扫描除 iteration-log 历史条目外归零
-- 基线：328 → 342（−5 已删 check_upstream 测试，+19 新增 test_abc_absorb）
+## 最后状态（2026-09-22 Agent 接入指南已合已同步）
+- 分支：`main` = `1499691`；远端 `nightly/20260922d` 已删；pi1 已 pull + gate，服务 active
+- 内容：新增 `docs/agent-api.md`（外部 agent 通用接入：连接约定 + 读端点全表 + notes/thesis 写回 + curl 工作流，逐条对照 `routes.py` 真实路由）+ README 目录树挂链；纯文档零代码变更
+- 验证：pi1 `bash scripts/gate.sh` 342 passed（23.02s）+ service active + http 200；本地 verify bootstrap+test ok=True
+- 基线：342 不变
 
 ## 下一步方向
-1. 外部 AI 消费方排期（取数/写回接线）；thesis API 待首个真实 AI 分析写入验证
+1. 外部 AI 消费方按 `docs/agent-api.md` 实际接入（读 full → 写 thesis/notes 跑通一轮闭环）；thesis API 待首个真实写入验证
+2. 周六（09-26）复盘 live 验证：论文注入、周度三问、thesis_updates 写回、监控条件触发（prompt 层改动，单测过、live 未验）；复盘 LLM 决议通道已死，待外部消费方接手
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
@@ -19,6 +20,7 @@
 - `watchlist_thesis` 表为新表（init_database 自动建），pi1 首次写入前未做 live 端到端验证（单测全过）
 
 ## 历史交接区（追加，不删）
+- 2026-09-22 ABC 方案已合已同步（`bb64119`：反面检验/论文追踪/复盘三问内化 + 架构方法论固化 + 解绑上游镜像与对照工具，gate 342 全绿）
 - 2026-09-22 残留清理已合已同步（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体，pi1 328 全绿）
 - 2026-09-22 残留清理待合（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体）
 - 2026-09-22 文档复检修正已合已同步（9 处写错：AGENTS 工作流/基线 317/归档表述/代理契约，纯文档未重启）
