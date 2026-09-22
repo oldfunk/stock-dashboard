@@ -3,20 +3,23 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 残留清理已合已同步）
-- 分支：`main` = `f5205fc`；远端 `nightly/20260922b` 已删；pi1 已 pull + gate，服务 active
-- 内容：删 `src/hermes_proxy/` 空目录 + `scheduler.py` 纸盘注释尸体（纯清理零功能变更）
-- 验证：pi1 `bash scripts/gate.sh` 328 passed（22.89s）+ service active
+## 最后状态（2026-09-22 ABC 方案已合已同步）
+- 分支：`main` = `bb64119`；远端 `nightly/20260922c` 已删；pi1 已 pull + gate，服务 active
+- 内容：A 能力补齐（反面检验 + thesis 论文落库/复盘写回 + 周复盘三问 + 双源误差标记，新表 `watchlist_thesis` + 2 个 API 端点）；B 架构固化 `architecture.md` §7 方法论与避坑；C 解绑上游（删 21 skills/10 工具/月检脚本，8 处归属声明中性化）
+- 验证：pi1 `bash scripts/gate.sh` 342 passed（24.98s）+ service active；全仓上游名扫描除 iteration-log 历史条目外归零
+- 基线：328 → 342（−5 已删 check_upstream 测试，+19 新增 test_abc_absorb）
 
 ## 下一步方向
-1. 外部 AI 消费方排期（取数/写回接线）
+1. 外部 AI 消费方排期（取数/写回接线）；thesis API 待首个真实 AI 分析写入验证
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
-- 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
+- 本机 Windows 拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
+- `watchlist_thesis` 表为新表（init_database 自动建），pi1 首次写入前未做 live 端到端验证（单测全过）
 
 ## 历史交接区（追加，不删）
+- 2026-09-22 残留清理已合已同步（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体，pi1 328 全绿）
 - 2026-09-22 残留清理待合（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体）
 - 2026-09-22 文档复检修正已合已同步（9 处写错：AGENTS 工作流/基线 317/归档表述/代理契约，纯文档未重启）
 - 2026-09-21 nightly/20260921b 已合已部署（分析师整改 T1–T4 + 去 kanban，生产 gate 328 全绿）
