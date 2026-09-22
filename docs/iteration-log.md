@@ -168,10 +168,10 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 验证：本地 `hermes verify --skip-start` bootstrap+test 全过 **348 passed**（342 + 新增 6：DAO 聚合/过滤 2 + 三页展示 3 + 无拆解不出现 1）；既有 `/stock` 路由 3 测无回归。
 
 ### 2026-09-22（清除误入的内部开发机内容 + 调度/复盘职责定位）
-- **内部机内容零清除**（用户裁定：该开发机相关内容从未获授权进入项目，重大失误）：删 `docs/ai-proxy-analysis-report.md`（整篇该机架构报告）+ README 树行；`ai-proxy-ai-analysis.md` 3 处、iteration-log 项目定位段、backlog 依赖修正条目、`src/ai_proxy/__init__.py` docstring 全部中性化；账本历史 16 行 23 处设备名 → `本地`/`AI 侧`（仅设备名脱敏，验证事实不变）。**AGENTS.md:53 同款措辞写保护审批超时未通过，暂留，待用户亲自批准后修。** 注：旧 git 历史仍含原记录，无法在不重写历史的前提下抹除，工作树已零残留。
+- **内部机内容零清除**（用户裁定：该开发机相关内容从未获授权进入项目，重大失误）：删 `docs/ai-proxy-analysis-report.md`（整篇该机架构报告）+ README 树行；`ai-proxy-ai-analysis.md` 3 处、iteration-log 项目定位段、backlog 依赖修正条目、`src/ai_proxy/__init__.py` docstring 全部中性化；账本历史 16 行 23 处设备名 → `本地`/`AI 侧`（仅设备名脱敏，验证事实不变）。**AGENTS.md:53 同款措辞当时因写保护暂留，2026-09-22 用户批准后已修，全仓工作树 0 命中。** 注：旧 git 历史仍含原记录，无法在不重写历史的前提下抹除，工作树已零残留。
 - **调度定位**：`scheduled-tasks.md` 改"参考设计——调度制度由使用者自行设计，本项目不预设"，声明 `POST /api/trigger_update` + `agent-api` 读写支撑任意轮询组合；`setup-cron.sh` 改可选注册、不自动注册；README 树行同步。
 - **职责重定**（用户裁定落地）：外部接入闭环 = 使用者抉择、周六复盘执行与决议 = 外部 AI 职责、盯盘调度制度 = 使用者自行设计——三者不再列为本项目排期任务（handoff 下一步同步重写）；P1② 收尾方案与 C3 处置待用户确认。
-- 验证：本地 `hermes verify --skip-start` bootstrap + test 全过（ok=True，342 passed 24.64s）；全仓设备名扫描 0 命中（AGENTS.md:53 除外，见上）。纯文档 + 1 行 docstring 变更。
+- 验证：本地 `hermes verify --skip-start` bootstrap + test 全过（ok=True，342 passed 24.64s）；全仓设备名扫描 0 命中（AGENTS.md:53 当时除外，同日经用户批准补修后归零）。纯文档 + 1 行 docstring 变更。
 
 ### 2026-09-22（外部 Agent 接入指南）
 - 新增 `docs/agent-api.md`：通用外部 agent 接入文档——连接约定（局域网/无鉴权/6位代码/错误格式）、读端点全表、写分析双通道（`POST .../notes` 笔记 + `POST .../thesis` 论文 upsert）、钉选/监控/触发更新、典型 curl 工作流、溯源与写回红线。内容逐条对照 `src/web/routes.py` 真实路由，非凭印象。README 目录树挂链接。

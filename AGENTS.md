@@ -50,7 +50,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 ## 冒烟测试
 
-改完代码后在 pi1 冒烟（本地/pi2 环境不全，验证以 pi1 为准；改动先同步到 pi1）：`ssh pi@192.168.50.210 "cd /home/pi/stock-dashboard && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误。
+改完代码后在 pi1 冒烟（本地环境不全，验证以 pi1 为准；改动先同步到 pi1）：`ssh pi@192.168.50.210 "cd /home/pi/stock-dashboard && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误。
 
 ## 文档
 
