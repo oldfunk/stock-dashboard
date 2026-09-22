@@ -2,6 +2,7 @@
 SQLite 本地存储，无外部依赖
 """
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -289,6 +290,20 @@ CREATE TABLE IF NOT EXISTS watchlist_notes (
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_notes_code ON watchlist_notes(code);
+
+-- 论文表 M-x（2026-09-22 内化）：论点+可验证假设+红线+卖出条件，复盘时更新假设状态
+CREATE TABLE IF NOT EXISTS watchlist_thesis (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT NOT NULL,
+    core_thesis     TEXT NOT NULL,        -- 论点一句话（200字内）
+    assumptions     TEXT NOT NULL DEFAULT '[]',   -- JSON [{content, verify_method, verify_freq, status: 成立/证伪/未验证}]
+    red_lines       TEXT NOT NULL DEFAULT '[]',   -- JSON [{condition, action, triggered: 0/1}]
+    sell_conditions TEXT NOT NULL DEFAULT '[]',   -- JSON 买入前写下的卖出条件
+    source          TEXT NOT NULL DEFAULT 'ai_analysis',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_thesis_code ON watchlist_thesis(code);
 
 -- 注：M4a 纸盘五表（paper_account/orders/trades/positions/nav）已随 2026-09-20
 -- 路线调整删除（git 历史可查）。存量库残留表不自动删（只读历史），新库不再建。
@@ -1022,6 +1037,93 @@ class WatchlistDAO:
                 (code,)
             ).fetchone()
         return row['max_date'] if row else None
+
+
+class WatchlistThesisDAO:
+    """论文（论点+假设+红线+卖出条件）：每股一行，复盘更新假设状态。"""
+
+    @staticmethod
+    def _row_to_dict(row) -> dict:
+        return {
+            "code": row["code"],
+            "core_thesis": row["core_thesis"],
+            "assumptions": json.loads(row["assumptions"] or "[]"),
+            "red_lines": json.loads(row["red_lines"] or "[]"),
+            "sell_conditions": json.loads(row["sell_conditions"] or "[]"),
+            "source": row["source"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @staticmethod
+    def upsert(code: str, core_thesis: str, assumptions: list, red_lines: list,
+               sell_conditions: list, source: str = "ai_analysis") -> dict:
+        now = now_cn().isoformat(timespec="seconds")
+        a_json = json.dumps(assumptions or [], ensure_ascii=False)
+        r_json = json.dumps(red_lines or [], ensure_ascii=False)
+        s_json = json.dumps(sell_conditions or [], ensure_ascii=False)
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM watchlist_thesis WHERE code=?", (code,)
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE watchlist_thesis SET core_thesis=?, assumptions=?, "
+                    "red_lines=?, sell_conditions=?, source=?, updated_at=? "
+                    "WHERE code=?",
+                    (core_thesis, a_json, r_json, s_json, source, now, code),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO watchlist_thesis (code, core_thesis, assumptions, "
+                    "red_lines, sell_conditions, source, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (code, core_thesis, a_json, r_json, s_json, source, now, now),
+                )
+        return WatchlistThesisDAO.get(code)
+
+    @staticmethod
+    def get(code: str) -> Optional[dict]:
+        with db_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM watchlist_thesis WHERE code=?", (code,)
+            ).fetchone()
+        return WatchlistThesisDAO._row_to_dict(row) if row else None
+
+    @staticmethod
+    def get_many(codes: list) -> dict:
+        """按 code 批量取论文（复盘注入用），返回 {code: thesis}。"""
+        if not codes:
+            return {}
+        marks = ",".join("?" * len(codes))
+        with db_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"SELECT * FROM watchlist_thesis WHERE code IN ({marks})", codes
+            ).fetchall()
+        return {r["code"]: WatchlistThesisDAO._row_to_dict(r) for r in rows}
+
+    @staticmethod
+    def apply_updates(code: str, assumptions: Optional[list],
+                      red_lines: Optional[list]) -> Optional[dict]:
+        """复盘写回：替换假设/红线状态（无论文时返回 None，不新建）。"""
+        current = WatchlistThesisDAO.get(code)
+        if not current:
+            return None
+        now = now_cn().isoformat(timespec="seconds")
+        with db_conn() as conn:
+            if assumptions is not None:
+                conn.execute(
+                    "UPDATE watchlist_thesis SET assumptions=?, updated_at=? WHERE code=?",
+                    (json.dumps(assumptions, ensure_ascii=False), now, code),
+                )
+            if red_lines is not None:
+                conn.execute(
+                    "UPDATE watchlist_thesis SET red_lines=?, updated_at=? WHERE code=?",
+                    (json.dumps(red_lines, ensure_ascii=False), now, code),
+                )
+        return WatchlistThesisDAO.get(code)
 
 
 # 注：Paper*DAO（M4a 纸盘）已随 2026-09-20 路线调整删除（git 历史可查）。

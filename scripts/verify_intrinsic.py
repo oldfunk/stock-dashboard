@@ -2,7 +2,7 @@
 """终值验算闸 C1：戈登模型终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检。
 
 只用 stdlib（decimal/json/argparse/sqlite3/math），零 emoji。
-设计对标上游 audit 三条硬约束（C1 币种一致/C2 分母≥5pct/C3 离散风险归属），
+内置三条硬约束（C1 币种一致/C2 分母≥5pct/C3 离散风险归属），
 全部可 deterministic 实现。
 
 核心逻辑：

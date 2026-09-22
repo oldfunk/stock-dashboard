@@ -1,6 +1,6 @@
-"""价值投资量化筛选引擎 — AI Berkshire 完整版
+"""价值投资量化筛选引擎 —— 硬性门规 + 豁免规则 + 镜子测试预备。
 
-基于 AI Berkshire 的 7条硬性门规 + 3条豁免规则 + 镜子测试预备。
+7 条硬性门规 + 3 条豁免规则 + 镜子测试预备。
 
 对外暴露：
 - ValueScreener 类：核心过滤 + 评分逻辑（无副作用，不写库）
@@ -117,7 +117,7 @@ def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
     return reasons
 
 
-# ── AI Berkshire 规则定义 ──
+# ── 门规与豁免定义 ──
 
 def _data_years_span(data_years) -> int | None:
     """'2020-2026' → 6；解析失败返回 None（调用方判不豁免）。"""
@@ -129,7 +129,7 @@ def _data_years_span(data_years) -> int | None:
 
 
 def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
-    """AI Berkshire 7条门规 + 3条豁免 + 季节性OCF容差。
+    """7条硬性门规 + 3条豁免 + 季节性OCF容差。
 
     返回符合的理由列表（空列表 = 不符合，一票否决）。
     """
@@ -158,7 +158,7 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     if roe is not None and roe > 0:
         reasons.append(f"ROE={roe}%（≥{min_roe}%）")
 
-    # 10年平均ROE（AI Berkshire: 10年平均<8%排除，我们优先用10年）
+    # 10年平均ROE（10年平均<8%排除，优先用10年数据）
     roe_10y = stock.get('roe_10y_avg')
     roe_5y = stock.get('roe_5y_avg')
     
@@ -166,7 +166,7 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     roe_to_check = roe_10y if roe_10y is not None else roe_5y
     
     if roe_to_check is not None and roe_to_check < 8:
-        # 豁免A：战略投入期（对标 Berkshire 豁免A）——高增长 + OCF 已转正 + 数据覆盖短
+        # 豁免A：战略投入期 ——高增长 + OCF 已转正 + 数据覆盖短
         rev_g = stock.get('revenue_growth') or 0
         ocf_l = stock.get('ocf_latest')
         ocf_tr = stock.get('ocf_5y_trend', 0) or 0
@@ -187,7 +187,7 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     elif roe_to_check is not None:
         reasons.append(f"{'10年' if roe_10y else '5年'}均ROE={roe_to_check}%")
 
-    # ── 规则 2：OCF/NI 精确计算（AI Berkshire: 5年累计FCF为负排除 + OCF/NI < 0.7排除）──
+    # ── 规则 2：OCF/NI 精确计算（5年累计FCF为负排除 + OCF/NI < 0.7排除）──
     # 代理：OCF/股正数 + 多数年份OCF为正（保持向后兼容）
     ocf = stock.get('ocf_per_share')
     ocf_pos_years = stock.get('ocf_positive_years')
@@ -252,7 +252,7 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     nm_to_check = nm_10y if nm_10y is not None else nm_5y
     
     if nm_to_check is not None and nm_to_check < min_nm:
-        # 豁免C：主动低利润率模式（对标 Berkshire 豁免B）——毛利率>30%（有能力赚）+
+        # 豁免C：主动低利润率模式 ——毛利率>30%（有能力赚）+
         # 营收净利双正（改善趋势，非长期失血）
         gm_current = stock.get('gross_margin')
         rev_g = stock.get('revenue_growth') or 0
@@ -273,7 +273,7 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     gm_to_check = gm_5y if gm_5y is not None else gm_current
     
     if gm_to_check is not None and gm_to_check < min_gm:
-        # 豁免D：高周转薄利模式（对标 Berkshire 豁免C：Costco 类）——ROE>20% +
+        # 豁免D：高周转薄利模式（Costco 类）——ROE>20% +
         # OCF 为正且过半年份为正（现金真实）+ 5年均净利率>0（不失血）
         roe = stock.get('roe') or 0
         ocf = stock.get('ocf_per_share')
@@ -494,7 +494,7 @@ def _score_breakdown(stock: dict) -> dict:
 
 
 def _calculate_moat_score(stock: dict) -> float:
-    """AI Berkshire 五维评分 (0-100)。
+    """五维评分 (0-100)。
 
     权重反映：护城河 > 估值 > 增长 > 财务健康 > 市场验证。
     实现委托给 `_score_breakdown`，避免评分逻辑与拆解逻辑重复漂移。
@@ -505,7 +505,7 @@ def _calculate_moat_score(stock: dict) -> float:
 # ── 主类 ──
 
 class ValueScreener:
-    """AI Berkshire 价值投资筛选器（纯逻辑，无 IO 副作用）。
+    """价值投资筛选器（纯逻辑，无 IO 副作用）。
 
     check_criteria 使用 stock 内嵌入的 5年历史字段（由 score_candidates 预加载）。
     """

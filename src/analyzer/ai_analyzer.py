@@ -163,6 +163,17 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
         "triggered_count": 0
     }},
 
+    "thesis": {{
+        "core_thesis": "论点一句话（200字内）：我以___元买入___，因为…",
+        "assumptions": [
+            {{"content": "可验证假设", "verify_method": "验证方式", "verify_freq": "季度/半年/事件", "status": "未验证"}}
+        ],
+        "red_lines": [
+            {{"condition": "触发条件", "action": "触发后动作（重新评估/清仓）"}}
+        ],
+        "sell_conditions": ["买入前写下的卖出条件1"]
+    }},
+
     "checklist": {{
         "circle_of_competence": {{"score": 1-5, "note": "一句话能否说清这门生意 + 是否真的理解"}},
         "good_business": {{"score": 1-5, "note": "经济特征综合：ROE/毛利/FCF/杠杆"}},
@@ -185,6 +196,8 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 9. mirror_test 是真镜子测试：用具体价格/护城河/管理层判断/估值折让/下行风险填充 5 句模板，每句都必须是具体结论而非空话。5 句缺任意一句在 missing 中标注句号。passed=false 时如仍给 BUY，必须在 verdict 理由句中解释（否则视为无效分析）；系统不再自动改你的信号，但会标记人工复核。
 10. veto_checklist 是快速否决红线（投资纪律一票否决）：8 条逐条如实判断，任一 true 必须在该行写 true，triggered_count 填 true 的总数。8 条含义：cannot_explain_business=说不清怎么赚钱；negative_fcf_3y_no_improvement=连续3年FCF为负且无改善；management_integrity_issue=管理层诚信污点；moat_eroding_irreversibly=护城河被不可逆侵蚀；greater_fool_required=靠接盘侠赚钱（博傻）；cannot_afford_total_loss=无法承受归零；following_the_herd=因为别人都在买；cannot_write_200_char_thesis=无法用200字写清买入理由。任一 true → trade_strategy.signal 必须为 AVOID 且 confidence 不得为高。
 11. verdict 是强制结论：不通过 → trade_strategy.signal 必须为 AVOID；灰色地带 → signal 不得为 BUY（最多 HOLD）；signal 为 BUY 时 verdict 必须为通过。灰色地带就是"不买"的纪律，不要在灰色时给买入建议。price_tiers 三档都要填（拿不准就写观望及理由，不许空着）。
+12. 做A级（信息充裕）分析时必须反面检验：共识过强的股票，你的输出会趋同于市场定价。自问三件事——我的确定性来自生意本质还是资料数量？资料量减半结论会变吗？与市场共识雷同处，我的信息优势在哪？findings 里必须写一段"聪明人为什么不买"的反方论据（找不到才允许写"未找到有力反方论据"）。
+13. thesis 是投资论点本体，必须含：论点一句话（200字内）、3-7条可验证假设（每条写明假设内容+验证方式+验证频率）、红线清单（触发后立即重新评估的条件）、买入前写下的卖出条件。论点失效=假设被证伪，假设未被证伪但价格透支=仍可持有。
 """
 
 
@@ -1263,7 +1276,7 @@ class AiAnalyzer:
 
 # ── 数据质量标注（分析师 critique #1：AI 必须知道每个数字的来源、日期与置信度）──
 #
-# Berkshire 只当参考：不照搬"裸数字 prompt"，每个关键输入附来源与 asof 日期，
+# 内部只当参考：不照搬"裸数字 prompt"，每个关键输入附来源与 asof 日期，
 # 缺失/兜底字段必须显式告知 AI，不得当作精确值引用。
 
 # prompt 关键字段 → 中文标签（用于缺失清单）
@@ -1343,6 +1356,9 @@ def _data_quality_facts(stock: dict, today=None) -> dict:
         if stock.get(key) in (None, "", "N/A")
     ]
 
+    # 双源交叉验算结论（_attach_batch_context 写入；缺数据记 None）
+    facts["valuation_check"] = stock.get("_valuation_check")
+
     facts["market"] = None
     _mkt = stock.get("_market")
     if isinstance(_mkt, list) and _mkt:
@@ -1398,12 +1414,32 @@ def _data_quality_text(facts: dict) -> str:
         "- 纪律：凡均值基于不足 5 年数据、或关键字段缺失，估值结论必须降档"
         "（至多给到“灰色地带”），不得写“极具吸引力”类断语。"
     )
+    _vc = facts.get("valuation_check")
+    if _vc and any(
+        _vc.get(k, {}).get("verdict") in ("WARN", "FAIL")
+        for k in ("market_cap", "pe")
+    ):
+        _mc, _pe = _vc.get("market_cap", {}), _vc.get("pe", {})
+        _parts = []
+        if _mc.get("verdict") in ("WARN", "FAIL"):
+            _parts.append(f"市值验算{_mc['verdict']}（现价×股本={_mc.get('calculated_yi')}亿 "
+                          f"vs 快照{_mc.get('reported')}亿，偏差{_mc.get('deviation_pct')}%）")
+        if _pe.get("verdict") in ("WARN", "FAIL"):
+            _parts.append(f"PE验算{_pe['verdict']}（复算{_pe.get('calculated')} "
+                          f"vs 快照{_pe.get('reported')}，偏差{_pe.get('deviation_pct')}%）")
+        lines.append(
+            "- 双源误差标记：" + "；".join(_parts)
+            + "——超1%容差，该字段置信度降级，不得作为精确值引用，估值结论从紧。"
+        )
+    elif _vc:
+        lines.append("- 双源误差标记：市值/PE 双源验算通过（偏差≤1%容差）。")
     return "\n".join(lines)
 
 
 def _attach_batch_context(stocks: list[dict], run_id: str) -> None:
     """批内上下文：run_id 回填 + 快照字段（is_st/list_date/snapshot_date）富集
-    + 取一次大盘快照挂到每只 stock._market（原地修改）。
+    + 取一次大盘快照挂到每只 stock._market（原地修改）
+    + 双源误差标记（市值：现价×总股本 vs 快照；PE：年报复算 vs 快照，1%容差）。
 
     失败永不抛异常（取不到的字段如实记"未知"，见 _data_quality_facts）。
     """
@@ -1428,6 +1464,22 @@ def _attach_batch_context(stocks: list[dict], run_id: str) -> None:
                     s.setdefault("snapshot_date", snap.get("snapshot_date"))
                     if s.get("sector") in (None, "", "未知"):
                         s["sector"] = snap.get("sector") or s.get("sector", "未知")
+                    # 双源误差标记（复用 B1 验算逻辑，1%/5% 容差；永不抛异常）
+                    try:
+                        from scripts.verify_valuation import (
+                            verify_market_cap, verify_ratios)
+                        s["_valuation_check"] = {
+                            "market_cap": verify_market_cap(
+                                snap.get("current_price"),
+                                s.get("total_shares"),
+                                snap.get("market_cap")),
+                            "pe": verify_ratios(
+                                snap.get("current_price"),
+                                s.get("eps"), None,
+                                snap.get("pe"), None)["pe"],
+                        }
+                    except Exception:
+                        s["_valuation_check"] = None
             if "_market" not in s:
                 s["_market"] = market
         except Exception:
@@ -1495,6 +1547,21 @@ def _save_analysis(stock: dict, result: dict, run_id: str):
     StockAnalysisHistoryDAO().save(
         stock['code'], run_id, stock.get('score'),
         analysis_json, trade_json, result.get('model'))
+
+    # 论文落库（论点+假设+红线+卖出条件，复盘时更新假设状态）
+    thesis = result.get('thesis')
+    if isinstance(thesis, dict) and thesis.get('core_thesis'):
+        try:
+            from src.models.database import WatchlistThesisDAO
+            WatchlistThesisDAO.upsert(
+                stock['code'], str(thesis['core_thesis'])[:500],
+                thesis.get('assumptions') or [],
+                thesis.get('red_lines') or [],
+                thesis.get('sell_conditions') or [],
+                source='ai_analysis',
+            )
+        except Exception as e:
+            logger.warning(f"[AI分析] 论文落库失败（不阻断）: {e}")
 
 
 def _save_failure(stock: dict, run_id: str, reason: str = None):

@@ -164,9 +164,9 @@ flowchart LR
 
 ---
 
-## 2026-08-11 AI Berkshire 深度对齐（进行中）
+## 2026-08-11 分析理论补全（进行中）
 
-> 依据 docs/superpowers/plans/2026-08-11-berkshire-deepening.md，逐阶段补全分析理论缺口，全部改动在 prompt + 模板层，不改流水线。
+> 分阶段补全分析理论缺口（信息丰富度评级、六关 Checklist、镜子测试、快速否决红线），全部改动在 prompt + 模板层，不改流水线。
 
 ### 阶段 A：信息丰富度评级 A/B/C（已完成 ✅）
 - **prompt**（ai_analyzer.py）：ANALYSIS_PROMPT 新增 info_richness 字段（grade A/B/C + basis），指导 C 级时估值标注受限 + confidence 不得超低

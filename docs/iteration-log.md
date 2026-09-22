@@ -6,7 +6,7 @@
 ## 项目定位
 A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情。代码真相源 = GitHub `origin/main`，pi1 从 origin 拉取部署。pi2 仅作开发/迭代副本，**不运行服务**（省 Hermes 进程资源）。
 
-**终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段利用 AI Berkshire 项目作为核心算法和分析指导，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
+**终极目标**：做一个自己用的 AI 自动盯盘投资工具，最终让 AI 接管投资决策。当前阶段以价值投资门规与结构化 AI 分析为核心，围绕它搭一个好用的网页面板。网页面板 UI 已基本定型，但要做到足够细致和直观还有距离。当前系统能做详尽的分析（筛选 + 结构化 AI 评估 + 估值 + 策略），但还做不到 AI 接管操作——这是终极目标，不是现在。
 
 ## 当前真实状态（2026-09-21，用户定调路线调整后）
 
@@ -152,15 +152,21 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] B6 监控池状态机与进出纪律 P1（M3）：schema + 软删除 + watch 落库（B6a+B7）；watch 指派进 reviewer prompt，待周六 live 驗。
 - [x] B7 市场总结模板与全覆盖校验 P1（M3）：reviewer prompt 周报结构（池变动/逐股五句/小白）+ coverage 记 actions_summary；prompt 生效等周六 live。
 
-## Berkshire 算法核心融入（2026-09-07 设立，C 系列，接 B 系列之后执行）
+## Berkshire 算法核心融入（2026-09-07 设立，C 系列，接 B 系列之后执行）〔2026-09-22 注：本节历史任务名保留；上游已解绑，算法均已内化为本项目自有实现〕
 - [x] C1 终值验算闸 P0（详见 `docs/berkshire-core-integration.md`）：`scripts/verify_intrinsic.py`（戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检，stdlib only）+ `analyze_stock` 写库前改判标注（分母失效档标"仅情景参考"，不阻断）+ run_pipeline 4.6 接入（try/except 永不阻断）+ 单测 ≥6。验收：单测 + pi1 实测 20 只 + 全仓无回归。
 - [x] C2 东财 datacenter 第二财务源 P0（2026-09-11 完成）：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API（stdlib only）；`enrich_financial_data()` 第一步 stock_yjbb_em 失败时自动触发 C2 兜底；填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变）；全仓 218 passed 零失败。
 - [x] C2.5 东财 datacenter 补 roic/fcf P0（2026-09-12 完成）：`_fetch_eastmoney_roic_fcf()` 直连 datacenter 取年报 ROIC + FCFF_BACK（stdlib only）；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发兜底；批量重建后 822/904 股有 roic/fcf（91%）；单测 3 个；全仓 221 passed 零失败。
 - [ ] C3 AI 引用数字抽检 P2（可选，C1 落地后再议）：仿 report_audit，抽样正文数字断言 vs 库交叉，记 `actions_summary.numeric_mismatch`，warn-only 永不阻断。
 - 明确不做：动量/技术面（上游自证无预测力）、Morningstar（无 A 股价值）、雪球爬虫（红线）、多 Agent（性能配额）、上游研报跟进（只看 skills/ + tools/）。
-- [ ] 上游跟踪常设项：每月初 nightly 检查上游 skills/ + tools/ 新增 commit，有新增才研判，无新增 ledger 记 no-op。
+- [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-22（ABC 方案：能力内化 + 解绑上游）
+- **A 能力补齐**：`ANALYSIS_PROMPT` 新增反面检验/偏见自问（规则12）+ thesis 结构（论点/假设/红线/卖出条件，规则13）；新增 `watchlist_thesis` 表 + `WatchlistThesisDAO`（upsert/get/get_many/apply_updates）+ `GET/POST /api/watchlist/{code}/thesis` + `/full` 返回 `thesis`；`_save_analysis` 落库论文，复盘 prompt 注入论文与假设状态、输出 `thesis_updates` 写回；复盘 prompt 加周度三问（空仓买入/停牌5年/论文完整复述）；双源误差标记（`_attach_batch_context` 市值/PE 两源验算 → `_data_quality_facts/text` 标注给 AI）。
+- **B 架构固化**：`docs/architecture.md` 新增 §7 方法论与内化避坑（漏斗/闸门口径分离 + 8 条避坑硬约束 + 内化能力清单）。
+- **C 解绑上游**：删 `docs/berkshire/`（21 skills）、`docs/berkshire-对照规格书.md`、`docs/berkshire-core-integration.md`、`docs/superpowers/plans/2026-08-11-berkshire-deepening.md`、`.hermes/` 2 份计划、`tools/berkshire/`（10 工具）、`scripts/check_upstream.py` + 其测试（-5）；改写 `value_screener.py`/`config.yaml`/`verify_valuation.py`/`verify_intrinsic.py`/`README.md`/`roadmap.md`/`ai_analyzer.py`/iteration-log 顶部定位 等 8 处归属声明为中性表述；历史账本条目按"只追加不删"保留。
+- 验证：本地 `python -m pytest` 342 passed（328 基线 − 5 已删测试 + 19 新增）；`grep -ri berkshire` 除 iteration-log 历史条目外归零。待合并后 pi1 gate 复验。
 
 ### 2026-09-22（清理残留：删 hermes_proxy 空目录 + scheduler 纸盘注释尸体）
 - 清理：`rm -rf src/hermes_proxy/`（ai_proxy 改名后只剩 `__pycache__` 空壳，未被 git 跟踪但滞留磁盘）；`src/scheduler.py` 删除 `# self._trigger_paper_trading_async(config)` 注释尸体（纸盘 schema/DAO 已于 0921 T2 删除，此注释引用的方法已不存在）。

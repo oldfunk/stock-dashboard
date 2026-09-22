@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""估值验算闸 B1：移植自 AI Berkshire tools/financial_rigor.py 的轻量版。
+"""估值验算闸 B1：市值/PE 独立验算（Decimal 精确、stdlib only）。
 
 只用 stdlib（decimal/json/argparse/sqlite3），零 emoji。
 三道检查（全部 Decimal 精确计算，禁止 float 心算）：

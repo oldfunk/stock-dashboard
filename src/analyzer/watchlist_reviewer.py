@@ -453,6 +453,41 @@ class WatchlistReviewer:
                       for m in market) if market else "无数据")
         )
 
+        # 论文与假设（复盘核验用；无论文则不注入本段）
+        thesis_section = ""
+        if not is_initial:
+            try:
+                from src.models.database import WatchlistThesisDAO
+                theses = WatchlistThesisDAO.get_many(
+                    [s["code"] for s in current])
+            except Exception:
+                theses = {}
+            if theses:
+                t_lines = []
+                for s in current:
+                    t = theses.get(s["code"])
+                    if not t:
+                        continue
+                    a_txt = "；".join(
+                        f"{i+1}) {a.get('content','')}（验证:{a.get('verify_method','')} "
+                        f"/{a.get('verify_freq','')}，状态:{a.get('status','未验证')}）"
+                        for i, a in enumerate(t.get("assumptions") or [])) or "无"
+                    r_txt = "；".join(
+                        f"{r.get('condition','')}→{r.get('action','')}"
+                        for r in (t.get("red_lines") or [])) or "无"
+                    t_lines.append(
+                        f"  - {s['code']} {s.get('name','')}: 论点「{t['core_thesis']}」\n"
+                        f"    假设: {a_txt}\n"
+                        f"    红线: {r_txt}\n"
+                        f"    卖出条件: {'；'.join(t.get('sell_conditions') or []) or '无'}")
+                thesis_section = (
+                    "【当前论文与假设（上次分析写入，本周必须逐条核验状态）】\n"
+                    + "\n".join(t_lines)
+                    + "\nassumption.status 只能是 成立/证伪/未验证；证伪或红线触发"
+                      "必须在 thesis_updates 说明，并影响该股 action 与 journal 三问。")
+            else:
+                thesis_section = "【当前论文与假设】\n  （池内暂无论文记录）"
+
         return f"""{role_line}
 
 【规则】
@@ -468,6 +503,8 @@ class WatchlistReviewer:
 
 {mkt_section}
 
+{thesis_section}
+
 【输出 JSON schema】{{
     "watchlist_actions": [
         {{"code": "000792", "action": "keep", "reason": "..."}},
@@ -476,18 +513,30 @@ class WatchlistReviewer:
         {{"code": "600276", "action": "watch", "reason": "毛利率拐点待确认", "watch_until": "2026-10-15"}}
     ],
     "new_watchlist": ["000792", "600519", "300750", "600276", "002415"],
+    "thesis_updates": [
+        {{"code": "000792", "assumptions": [
+            {{"content": "钾肥价格维持高位", "verify_method": "季报毛利率≥55%", "verify_freq": "季度", "status": "成立"}}
+        ], "red_lines": [{{"condition": "毛利率连续两季<50%", "action": "重新评估"}}]}}
+    ],
     "journal": {{
         "title": "本周复盘 - 市场震荡，观察池稳定",
         "content_md": "# 本周复盘\\n## 市场观察\\n..."
     }}
 }}
 
+thesis_updates 只写池内有论文记录的股票：逐条给假设 status（成立/证伪/未验证，
+证伪必须写清依据）；red_lines 原样带回并在触发时注明。无论文记录的股票不要写。
+没有需要更新的就输出空数组 []。
+
 journal.content_md 用 Markdown，按周报深度版结构写（小白可读：每节第一句必须是结论；
 术语必须括号白话注释；禁用未解释缩写），包含：
 1. 池变动（调入写触发条件，调出写原因；无变动写一句"无变动及原因"；watch 名单写观察项与期限）
 2. 市场观察（大盘走势、情绪，一句话结论先行）
 3. 池内逐股财报五句（在池每只都要写：生意一句/财务一句/估值一句/风险一句/操作一句）
-4. 风险提示
+4. 用新价格重审旧决策——对池内每只（至少对本周有异动的）回答三问：
+   ① 今天空仓，你还会在当前价格买入吗？② 明天停牌 5 年你舒服吗？
+   ③ 当初的买入论点还完整吗（哪条假设被证伪/仍未验证）？三问答案矛盾于当初信号的，写清为什么
+5. 风险提示
 
 注意：每节第一句必须是结论；术语必须括号白话注释；禁用未解释缩写
 """
@@ -856,6 +905,23 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                     'cross_period': cross_in + fast_drop,
                 })
             )
+
+        # 论文假设状态更新（复盘核验写回；无论文则跳过该 code）
+        thesis_updates = (result.get("thesis_updates")
+                          if isinstance(result, dict) else None)
+        if isinstance(thesis_updates, list):
+            from src.models.database import WatchlistThesisDAO
+            for tu in thesis_updates:
+                if not isinstance(tu, dict) or not tu.get("code"):
+                    continue
+                try:
+                    updated = WatchlistThesisDAO.apply_updates(
+                        tu["code"], tu.get("assumptions"), tu.get("red_lines"))
+                    if updated:
+                        logger.info(f"[复盘] 论文假设状态已更新: {tu['code']}")
+                except Exception as e:
+                    logger.warning(
+                        f"[复盘] 论文状态更新失败（不阻断）{tu['code']}: {e}")
 
         return {
             "new_watchlist": [w['code'] for w in watchlist_dao.get_all()],

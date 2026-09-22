@@ -435,7 +435,7 @@ class TestValueScreenerIntegration:
 
 
 class TestExemptionsRefined:
-    """B4 豁免细化（对标 Berkshire A/B/C）：只收紧不放松的反例矩阵。"""
+    """B4 豁免细化：只收紧不放松的反例矩阵。"""
 
     def test_span_helper(self):
         from src.screener.value_screener import _data_years_span

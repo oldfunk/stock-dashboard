@@ -95,7 +95,6 @@ stock-dashboard/
 │   ├── setup-cron.sh           # 定时任务设置（需 hermes CLI，在 Hermes 所在机器跑，不在 pi1）
 │   ├── verify_valuation.py     # B1 估值验算闸
 │   ├── verify_intrinsic.py     # C1 终值验算闸
-│   ├── check_upstream.py       # 上游数据月度巡检
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
 ├── tests/                      # pytest（基线 317 passed，2026-09-21 pi1 gate 全绿）
@@ -115,7 +114,7 @@ stock-dashboard/
 │   ├── scheduled-tasks.md      # 定时任务配置
 │   ├── paper-trading.md        # 历史归档（量化路线已砍，不再开发）
 │   └── strategies-dry-run.md   # 多策略 dry-run 文档
-└── tools/berkshire/            # 上游 AI Berkshire 对照工具
+└── tools/                    # 工具目录（对照工具已移除）
 ```
 
 ---
@@ -124,7 +123,7 @@ stock-dashboard/
 
 ### 核心理念
 
-**不靠排名，只靠及格线。** 基于 AI Berkshire 7 条门规的硬性指标过滤 + 本地五维评分，每只股票必须通过全部门规才能进入候选池。
+**不靠排名，只靠及格线。** 7 条硬性门规的指标过滤 + 本地五维评分，每只股票必须通过全部门规才能进入候选池。
 
 列表卡片（候选/观察池）只展示数据：指标、筛选原因、评分拆解、财务历史、监控条件。
 AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不再内联展示**，由外部 AI
@@ -141,7 +140,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 6. 每周六：复盘（硬规则 + 监控条件本地执行；LLM 决议依赖已死通道，失败时整轮跳过，待外部 AI 消费方排期）→ ai_watchlist + ai_journal
 ```
 
-### AI Berkshire 7 条门规
+### 7 条硬性门规
 
 | # | 规则 | 指标 | 豁免 |
 |:-:|:-----|:-----|:-----|
@@ -200,7 +199,6 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 | `python3 scripts/run_ai_analysis.py` | 慢喂模式（每次 1 只，适合 cron） |
 | `python3 scripts/verify_valuation.py` | B1 估值验算闸 |
 | `python3 scripts/verify_intrinsic.py` | C1 终值验算闸 |
-| `python3 scripts/check_upstream.py` | 上游数据月度巡检 |
 | `python3 scripts/c25_bulk_fill.py` | C2.5 批量补 ROIC/FCF |
 
 ---
@@ -235,19 +233,16 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 
 ---
 
-## 与 AI Berkshire 的关系
+## 方法论来源与设计取舍
 
-AI Berkshire 仅当参考，不照搬缝合（2026-09-21 定调：它自身的模板强约束/硬编码倍数/无校准问题，本项目不继承）。
+价值投资门规与分析框架为本项目自有实现，方法论原则（能力圈、护城河、安全边际、一票否决纪律）源自公开价值投资常识，不绑定、不镜像任何外部项目。设计取舍：
 
-量化筛选对齐 `quality-screen.md`，A 股适配：
-
-1. **自动化** — Berkshire 需手动跑，本项目全自动
+1. **自动化** — 全自动采集、筛选、复盘、报告，无需手动跑
 2. **本地数据仓库** — 逐日累积历史财务数据
-3. **A 股适配** — 数据源换 AKShare/腾讯，规则兼容 A 股特性
+3. **A 股适配** — 数据源 AKShare/腾讯，规则兼容 A 股特性
 4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用 AKShare 可获取字段
 5. **结构化分析契约** — 外部 AI 应输出护城河/管理层/估值/策略 JSON（格式见上节；面板只展示数据与笔记，不内联分析）
-
-`tools/berkshire/` 保留上游工具对照（`quality-screen`/`financial_rigor` 等），A 股侧以 `src/` 实现为准。
+6. **落库追踪** — 论点/假设/红线/笔记全部落库跨期对照，不做事后一次性报告
 
 ---
 

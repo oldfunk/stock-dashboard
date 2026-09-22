@@ -1016,6 +1016,38 @@ async def api_watchlist_all_notes(limit: int = 50):
     return {"notes": [dict(r) for r in rows]}
 
 
+@app.get("/api/watchlist/{code}/thesis")
+async def api_watchlist_thesis_get(code: str):
+    """获取某只股票的投资论文（论点+假设+红线+卖出条件）"""
+    from src.models.database import WatchlistThesisDAO
+    return {"code": code, "thesis": WatchlistThesisDAO.get(code)}
+
+
+@app.post("/api/watchlist/{code}/thesis")
+async def api_watchlist_thesis_upsert(code: str, body: dict):
+    """创建/更新投资论文（外部 AI 或本地分析提交）
+
+    body: {"core_thesis": "...", "assumptions": [{content, verify_method,
+    verify_freq, status}], "red_lines": [{condition, action}],
+    "sell_conditions": ["..."], "source": "ai_analysis/manual"}
+    """
+    from src.models.database import WatchlistThesisDAO
+    core = body.get("core_thesis")
+    if not core or not isinstance(core, str):
+        raise HTTPException(status_code=400, detail="core_thesis 必须为非空字符串")
+    for key in ("assumptions", "red_lines", "sell_conditions"):
+        if key in body and not isinstance(body[key], list):
+            raise HTTPException(status_code=400, detail=f"{key} 必须为数组")
+    source = body.get("source", "manual")
+    if source not in ("ai_analysis", "manual"):
+        raise HTTPException(status_code=400, detail="source 必须为 ai_analysis/manual")
+    thesis = WatchlistThesisDAO.upsert(
+        code, core[:500], body.get("assumptions") or [],
+        body.get("red_lines") or [], body.get("sell_conditions") or [],
+        source=source)
+    return {"ok": True, "code": code, "thesis": thesis}
+
+
 @app.get("/api/watchlist/{code}/full")
 async def api_watchlist_full(code: str):
     """获取钉选股的完整数据（一次性获取所有信息供 AI 分析）
@@ -1129,6 +1161,10 @@ async def api_watchlist_full(code: str):
     # 6. 投资笔记
     notes = WatchlistDAO().list_notes(code, limit=10)
     item['notes'] = notes
+
+    # 7. 投资论文（论点+假设+红线+卖出条件）
+    from src.models.database import WatchlistThesisDAO
+    item['thesis'] = WatchlistThesisDAO.get(code)
 
     return item
 
