@@ -48,3 +48,6 @@ data/stock_dashboard.db
 /data/db/*.bak
 /data/stock.db
 /data/stock_dashboard.db
+
+# Hermes 本机 verify 配方（含机器特定 basetemp 路径，不跨机）
+/.hermes/environment.json
