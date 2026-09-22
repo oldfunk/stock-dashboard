@@ -135,6 +135,13 @@
                     <span class="sd-w"></span>
                     <span class="sd-contrib">{{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}</span>
                 </div>
+                {% set _sa = sector_avg.get(stock.sector) if (sector_avg is defined and sector_avg and stock.sector is defined and stock.sector) else none %}
+                {% if _sa %}
+                <div class="sd-row sd-sector">
+                    <span class="sd-name">行业均值（{{ stock.sector }}）</span>
+                    <span class="sd-detail">ROE {{ "%.2f"|format(_sa.avg_roe) if _sa.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(_sa.avg_pe) if _sa.avg_pe is not none else '--' }}（{{ _sa.n }}只）</span>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endif %}

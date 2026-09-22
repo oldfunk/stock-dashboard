@@ -487,6 +487,41 @@ class StockSnapshotDAO:
             ).fetchone()
         return dict(row) if row else None
 
+    @classmethod
+    def get_sector_averages(cls) -> dict:
+        """行业均值参照（P1② 评分透明化）：{sector: {'avg_pe', 'avg_roe', 'n'}}。
+
+        pe 仅取正值样本（亏损股不拉低均值），roe 全样本；仅 A 股且板块非空。
+        只读展示，不参与评分。
+        """
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT sector, "
+                "AVG(CASE WHEN pe IS NOT NULL AND pe > 0 THEN pe END) AS avg_pe, "
+                "AVG(roe) AS avg_roe, COUNT(*) AS n "
+                "FROM stock_snapshot "
+                "WHERE market = 'A' AND sector IS NOT NULL AND TRIM(sector) <> '' "
+                "GROUP BY sector"
+            ).fetchall()
+        out = {}
+        for r in rows:
+            out[r["sector"]] = {
+                "avg_pe": round(r["avg_pe"], 1) if r["avg_pe"] is not None else None,
+                "avg_roe": round(r["avg_roe"], 2) if r["avg_roe"] is not None else None,
+                "n": r["n"],
+            }
+        return out
+
+    @classmethod
+    def get_sector_map(cls) -> dict:
+        """{code: sector}（A 股且板块非空），供列表页给卡片挂板块归属。"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT code, sector FROM stock_snapshot "
+                "WHERE market = 'A' AND sector IS NOT NULL AND TRIM(sector) <> ''"
+            ).fetchall()
+        return {r["code"]: r["sector"] for r in rows}
+
 
 class ScreeningResultDAO:
     def save_batch(self, records: list[dict]):

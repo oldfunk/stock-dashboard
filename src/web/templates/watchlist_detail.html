@@ -126,6 +126,9 @@
         .wd-sd-total { font-size: 32px; font-weight: 700; color: var(--color-up); letter-spacing: 1px; }
         .wd-sd-sub { font-size: 13px; color: var(--text-tertiary); }
         .wd-sd-grid { display: flex; flex-direction: column; gap: 0; }
+        .wd-sd-row.wd-sector { grid-template-columns: auto 1fr; }
+        .wd-sector .wd-sd-name { font-weight: 400; opacity: .75; }
+        .wd-sector .wd-sd-detail { text-align: right; opacity: .75; font-variant-numeric: tabular-nums; }
         .wd-sd-row {
             display: grid;
             grid-template-columns: 64px 1fr 56px 48px;
@@ -284,6 +287,12 @@
                 <span class="wd-sd-sub"></span>
                 <span class="wd-sd-contrib">{{ "%.1f"|format(score_detail_parsed.total) if score_detail_parsed.total is not none else '' }}</span>
             </div>
+            {% if sector_avg %}
+            <div class="wd-sd-row wd-sector">
+                <span class="wd-sd-name">行业均值（{{ sector_avg.sector }}）</span>
+                <span class="wd-sd-detail">ROE {{ "%.2f"|format(sector_avg.avg_roe) if sector_avg.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(sector_avg.avg_pe) if sector_avg.avg_pe is not none else '--' }}（{{ sector_avg.n }}只）</span>
+            </div>
+            {% endif %}
         </div>
     </section>
     {% endif %}

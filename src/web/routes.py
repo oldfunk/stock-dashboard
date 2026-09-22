@@ -326,6 +326,12 @@ async def index(request: Request):
     # 解析 AI 分析 JSON + 历史 + 财务汇总
     _enrich_stocks(stocks)
 
+    # 行业均值参照（P1② 评分透明化收尾）：板块归属 + 各板块均值，只读展示
+    sector_map = StockSnapshotDAO.get_sector_map()
+    sector_avg = StockSnapshotDAO.get_sector_averages()
+    for s in stocks:
+        s['sector'] = sector_map.get(s['code'])
+
     # 排序：score 降序（高分在前），score 相同按 code 升序
     stocks.sort(key=lambda s: (-(s.get('score') or 0), s['code']))
 
@@ -337,6 +343,7 @@ async def index(request: Request):
     fs_dao = FinancialSummaryDAO()
     for item in ai_watchlist:
         code = item['code']
+        item['sector'] = sector_map.get(code)
         # 实时行情：优先实时缓存，降级到 stock_snapshot
         item['current_price'] = None
         item['change_percent'] = None
@@ -433,6 +440,7 @@ async def index(request: Request):
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
         "ai_journal_latest": ai_journal_latest,
+        "sector_avg": sector_avg,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
@@ -516,6 +524,14 @@ async def stock_detail(request: Request, code: str):
         except (json.JSONDecodeError, TypeError):
             score_detail_parsed = None
 
+    # 行业均值参照（P1② 评分透明化收尾）：本股板块均值，只读展示
+    sector_avg = None
+    _sector = snapshot.get("sector")
+    if _sector:
+        _row = StockSnapshotDAO.get_sector_averages().get(_sector)
+        if _row:
+            sector_avg = {"sector": _sector, **_row}
+
     config = load_config()
     page_title = config.get("web", {}).get("page_title", "价值投资选股看板")
 
@@ -534,6 +550,7 @@ async def stock_detail(request: Request, code: str):
         "in_watchlist": in_watchlist,
         "watchlist_history": watchlist_history,
         "score_detail_parsed": score_detail_parsed,
+        "sector_avg": sector_avg,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
@@ -1251,6 +1268,14 @@ async def watchlist_detail(request: Request, code: str):
     if in_watchlist:
         watchlist_history = AiWatchlistHistoryDAO().list_by_code(code, limit=20)
 
+    # 行业均值参照（P1② 评分透明化收尾）：本股板块均值，只读展示
+    sector_avg = None
+    _sector = snapshot.get("sector")
+    if _sector:
+        _row = StockSnapshotDAO.get_sector_averages().get(_sector)
+        if _row:
+            sector_avg = {"sector": _sector, **_row}
+
     page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
 
     return templates.TemplateResponse(request, "watchlist_detail.html", {
@@ -1262,6 +1287,7 @@ async def watchlist_detail(request: Request, code: str):
         "watchlist_history": watchlist_history,
         "analysis_history": analysis_history,
         "score_detail_parsed": score_detail_parsed,
+        "sector_avg": sector_avg,
         "ai_parsed": ai_parsed,
         "trade_parsed": trade_parsed,
         "financial_summary": financial_summary,

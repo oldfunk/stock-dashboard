@@ -117,7 +117,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 6. **分支合并前先检查共改文件**：`nightly/20260914` 和 `nightly/20260913` 同时改了 `_stock_list.html`，合并时 handoff.md 产生冲突。规则：启动新 nightly 前先 `git fetch origin && git log --oneline origin/main..origin/nightly/*` 检查是否有其他活跃分支在改同一批文件，有冲突风险时先协调合并顺序。
 
 ## 待办 backlog（细粒度，按优先级）
-- [ ] 评分体系透明化（skill P1③，已拆子项，本次做最小一子项）
+- [x] 评分体系透明化（2026-09-22 收口：行业均值参照四处补齐，roadmap P1② 一并关闭）
   - [x] 抽 `_score_breakdown()` 纯函数：把五维加权 + 一致性加分拆成可逐项解释的结构（透明化前置，不改阈值）
   - [x] `screening_result` 落库 `score_detail`（JSON）—— 后端半：schema + 迁移 + `score_candidates` 序列化写入（2026-08-22 完成）
   - [x] `screening_result.score_detail` 在 routes/模板消费展示（前端半，2026-08-23 完成）：routes 解析 `score_detail` 为 `score_detail_parsed`，`_stock_list.html` 新增「评分拆解」可折叠块（五维 raw/子分/权重/贡献 + 一致性加分 + 总分），index/candidates 双页 JS 切换 + CSS
@@ -155,11 +155,17 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - [x] C1 终值验算闸 P0（详见 `docs/berkshire-core-integration.md`）：`scripts/verify_intrinsic.py`（戈登终值 PE 三档 + LLM 隐含倍数反解对比 + C1 币种/C2 分母体检，stdlib only）+ `analyze_stock` 写库前改判标注（分母失效档标"仅情景参考"，不阻断）+ run_pipeline 4.6 接入（try/except 永不阻断）+ 单测 ≥6。验收：单测 + pi1 实测 20 只 + 全仓无回归。
 - [x] C2 东财 datacenter 第二财务源 P0（2026-09-11 完成）：`_fetch_eastmoney_direct()` 直连 datacenter.eastmoney.com 公开 JSON API（stdlib only）；`enrich_financial_data()` 第一步 stock_yjbb_em 失败时自动触发 C2 兜底；填充字段：ROE/毛利率/EPS/每股净资产/营收增长/净利增长/净利润；单测 5 个（直接API/无效代码/代码格式/兜底触发/正常路径不变）；全仓 218 passed 零失败。
 - [x] C2.5 东财 datacenter 补 roic/fcf P0（2026-09-12 完成）：`_fetch_eastmoney_roic_fcf()` 直连 datacenter 取年报 ROIC + FCFF_BACK（stdlib only）；`collect_historical_financial_data()` AKShare 利润表/现金流 API 挂掉时自动触发兜底；批量重建后 822/904 股有 roic/fcf（91%）；单测 3 个；全仓 221 passed 零失败。
-- [ ] C3 AI 引用数字抽检 P2（可选，C1 落地后再议）：仿 report_audit，抽样正文数字断言 vs 库交叉，记 `actions_summary.numeric_mismatch`，warn-only 永不阻断。
+- [x] ~~C3 AI 引用数字抽检 P2~~（2026-09-22 用户拍板取消：新分工下分析归外部 agent，本地无分析正文可抽检，产出质量由外部负责）
 - 明确不做：动量/技术面（上游自证无预测力）、Morningstar（无 A 股价值）、雪球爬虫（红线）、多 Agent（性能配额）、上游研报跟进（只看 skills/ + tools/）。
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-22（P1② 收口：行业均值参照 + C3 取消）
+- **行业均值参照**（roadmap P1② 最后一环，用户确认后实施）：`StockSnapshotDAO.get_sector_averages()`（A 股非空板块聚合，PE 仅取正值样本防亏损股拉低，roe 全样本，只读不进评分链路）+ `get_sector_map()`；index 给候选卡/观察池卡挂板块归属并下发 `sector_avg`，`/stock/{code}`、`/watchlist/{code}` 传本股板块均值；四处评分拆解块（`_stock_list` / `_watchlist_card` / `stock_detail` / `watchlist_detail`）总分行后补「行业均值（板块）ROE…% · PE…（n只）」行，三套模板 CSS 各增 auto/1fr 覆盖行；无评分拆解（区块隐藏）时不出现。
+- **C3 取消**：backlog 注销——新分工下分析归外部 agent，本地无分析正文可抽检，产出质量由外部负责（用户拍板）。
+- **评分透明化 P1② 主项关闭**：roadmap 标 ✅ 收口，backlog 主项 [x]。
+- 验证：本地 `hermes verify --skip-start` bootstrap+test 全过 **348 passed**（342 + 新增 6：DAO 聚合/过滤 2 + 三页展示 3 + 无拆解不出现 1）；既有 `/stock` 路由 3 测无回归。
 
 ### 2026-09-22（清除误入的内部开发机内容 + 调度/复盘职责定位）
 - **内部机内容零清除**（用户裁定：该开发机相关内容从未获授权进入项目，重大失误）：删 `docs/ai-proxy-analysis-report.md`（整篇该机架构报告）+ README 树行；`ai-proxy-ai-analysis.md` 3 处、iteration-log 项目定位段、backlog 依赖修正条目、`src/ai_proxy/__init__.py` docstring 全部中性化；账本历史 16 行 23 处设备名 → `本地`/`AI 侧`（仅设备名脱敏，验证事实不变）。**AGENTS.md:53 同款措辞写保护审批超时未通过，暂留，待用户亲自批准后修。** 注：旧 git 历史仍含原记录，无法在不重写历史的前提下抹除，工作树已零残留。
