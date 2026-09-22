@@ -234,9 +234,6 @@ class MarketScheduler:
             # AI 分析改由外部 AI 执行（读 API/库 → 写笔记），面板不再本地触发
             # （2026-09-21 方向；本地 Zen/备用通道已确认不可用，触发只会空转失败）
             # self._trigger_ai_analysis_async(config)
-
-            # 纸盘交易已归档，不再自动触发
-            # self._trigger_paper_trading_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
