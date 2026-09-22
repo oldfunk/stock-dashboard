@@ -37,6 +37,8 @@ config/local.yaml
 
 # Cache
 data/cache/
+data/logs/
+data/backup/
 stock-dashboard/
 # empty ghost db
 data/stock_dashboard.db

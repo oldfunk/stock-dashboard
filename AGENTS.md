@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（全仓 pytest 零失败；pi1 基线 317 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（全仓 pytest 零失败；pi1 基线 348 passed，只升不降）。
 
 ## 技术栈
 

@@ -198,5 +198,5 @@ pi1 前端: 展示数据与外部 AI 笔记（列表卡片只展示数据，不�
 1. 外部 AI 服务能接收 `POST /api/analyze` 并返回分析 JSON（`src/ai_proxy/server.py` 为参考实现）
 2. 外部 AI 调接口成功后，`stock_analysis_history` 表有新记录
 3. 外部 AI 笔记写入后，面板投资笔记/钉选股笔记正常展示（列表卡片不内联 AI 分析）
-4. 全仓 pytest 零失败（基线 317 passed，只升不降）
+4. 全仓 pytest 零失败（基线 348 passed，只升不降）
 5. 外部 AI 消费方上线后：连续 5 个交易日流水线 AI 分析成功率 ≥ 80%

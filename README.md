@@ -97,7 +97,7 @@ stock-dashboard/
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 317 passed，2026-09-21 pi1 gate 全绿）
+├── tests/                      # pytest（基线 348 passed，2026-09-22 pi1 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── ai_proxy/               # 外部 AI 代理协议单测
@@ -125,7 +125,7 @@ stock-dashboard/
 
 **不靠排名，只靠及格线。** 7 条硬性门规的指标过滤 + 本地五维评分，每只股票必须通过全部门规才能进入候选池。
 
-列表卡片（候选/观察池）只展示数据：指标、筛选原因、评分拆解、财务历史、监控条件。
+列表卡片（候选/观察池）只展示数据：指标、筛选原因、评分拆解（含行业均值参照）、财务历史、监控条件。
 AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不再内联展示**，由外部 AI
 通过数据 API 消费后输出、写回笔记（2026-09-21 方向）。
 
@@ -229,7 +229,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 - **AI 分析** — 外部 AI 通过数据 API 读取、分析后写回笔记（通用协议 `src/ai_proxy/`；作者自用 Hermes 接入）。本地 Zen/Pollinations 通道 9/07 起相继不可用，本地触发已停用。
 - **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-21 pi1 基线 317 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-22 pi1 基线 348 passed）
 
 ---
 
@@ -251,7 +251,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 317 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 348 passed 只升不降，确切数见账本最新 Changelog）
 3. 推送 nightly → 用户批准后合并到 main → 同步 pi1
 4. 生产环境：`pi1 192.168.50.210` `stock-dashboard.service` :9527
 
