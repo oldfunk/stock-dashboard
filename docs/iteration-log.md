@@ -161,7 +161,12 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
-### 2026-09-21（分析师审查整改 T1+T2：数据质量标注/估值去硬编码/纸盘 schema 清理/笔记来源列，分支 nightly/20260921b）
+### 2026-09-21（合并部署 nightly/20260921b：分析师整改 T1–T4 上线，pi1 重启验证全绿）
+- 合并：`nightly/20260921b`（8 commits）fast-forward 入 main（`303462b`），经 pi1 中继推送。
+- 部署：pi1 备份 DB（`stock_dashboard.db.bak0921b`）→ pull → restart（analyzer/routes/schema 运行时变更）→ 服务 active。
+- 验证：生产 gate **328 passed**；`/`、`/api/status`、`/journal` 全 200；当日流水线 completed 未受影响。
+- 用词修正：backlog 中的"校准看板"改称"收益校准追踪"（BUY/HOLD/AVOID 后续表现追踪，与 Hermes kanban 无关；kanban 已按用户要求清零）。
+- 遗留：远端 `nightly/20260921b` 待删；外部 AI 消费方、P1、收益校准追踪待排期。
 - 起因：外部分析师审阅代码后提出 10 条 critique（按判断力影响排序），用户定调——Berkshire 只当参考、不照搬缝合；逐条验真后修复 + 精简。T3（mirror/六关熔断改警告）与 T4（复盘跨期）已在本轮一并交付；校准看板留待 backlog（无成功样本）。
 - 逐条验真结论：
   1. 数据无质量标注 → 属实，已修：新增 `_data_quality_facts/_text`（来源/日期/覆盖区间/上市年限/ST/缺失清单/大盘），注入 prompt、随结果落库（`result['data_quality']）、经 `_enrich_stocks` 透传 API（外部 AI 可用）；批上下文 `_attach_batch_context`（run_id/快照字段/大盘，失败不阻断）。
@@ -171,7 +176,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
   6. 信息丰富度无年限锚 → 属实，已修：`data_years/ro_5y_count/list_date` 已注入，规则 7"上市不足 3 年"首次可判定。
   7. 模型不可控 + 无版本记录 → 半错：`model` 列 08-23 已有，本地触发已停；本轮补笔记 `model` 列（外部 AI 必填溯源）+ 迁移守卫。
   8. 无跨期校验 → 半错：B5 漂移 + conflicts 接口 live 完好（分析师看的是旧代码，正说明表述不清）；reviewer 单期复盘缺口留待下一轮。
-  9. 从未校准 → 属实，无数据可校（成功 BUY 样本≈0），仅记 backlog，不写代码。
+  9. 从未校准 → 属实，无数据可校（成功 BUY 样本≈0），仅记 backlog（收益校准追踪），不写代码。
   10. 无日期 → 属实，已修：分析日期/快照日期/大盘背景/ST 全部注入。
 - 精简：删除纸盘 schema 建表 + 列守卫 + 5 个 Paper*DAO + `test_paper_tables.py`（新库验证无 paper 表、不 crash；存量库残留表只读保留）；`tests/paper/__init__` 早前已删。
 - T3 纪律软化：mirror/六关≤2 的 BUY 熔断改为警告记账（信号保留，反直觉判断不再被程序改写）；否决一票否决 + verdict↔signal 映射保留硬执行；质量记账仅否决矛盾记 fail；prompt 规则 8/9 同步为" tension 必须在 verdict 理由中解释"。

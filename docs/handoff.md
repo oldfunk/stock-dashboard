@@ -3,16 +3,16 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-21 分析师整改 T1+T2 完成，分支 nightly/20260921b 待合）
-- 分支：`nightly/20260921b`（3 commits，基于 main `f44733b`），只推分支，未动 main/pi1
-- 内容：数据质量标注（prompt+落库+API）/ 估值改自选 / 上下文注入 / 纸盘 schema 删除 / 笔记 model 列 / triage 十条记账
-- 验证：pi1 worktree 全仓 **328 passed** 零回归（323 + 跨期 5）；服务 active（未重启）
-- 下一轮（用户已定方向）：mirror/一致性熔断改警告、reviewer 跨期、校准 backlog；合并本分支由用户批准
+## 最后状态（2026-09-21 nightly/20260921b 已合已部署）
+- 分支：`main` = `303462b`（ff 合并 8 commits）；远端 `nightly/20260921b` 待删；pi1 已 pull + restart + 验证
+- 上线：数据质量标注 / 估值自选 / 纪律软化 / 复盘跨期 / 纸盘 schema 删除 / 笔记 model 列 / 去 kanban
+- 验证：生产 gate **328 passed**；三端点 200；DB 备份 `stock_dashboard.db.bak0921b`
+- 用词：backlog"收益校准追踪"（与 Hermes kanban 无关，kanban 已清零）；外部 AI 不绑定实现
 
 ## 下一步方向
-1. 用户批准后合 `nightly/20260921b` → pi1 pull + restart + gate（本轮含 analyzer/routes/schema 运行时变更，需重启生效）
-2. 下一轮整改：mirror/一致性软化、reviewer 跨期对比、校准看板设计
-3. P1 面板深化；外部 AI 消费方排期
+1. 删远端 `nightly/20260921b`（已合，无残留）
+2. 外部 AI 消费方排期（取数/写回接线）
+3. P1 面板深化；收益校准追踪待排期（无成功样本）
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
@@ -20,6 +20,7 @@
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
 
 ## 历史交接区（追加，不删）
+- 2026-09-21 nightly/20260921b 已合已部署（分析师整改 T1–T4 + 去 kanban，生产 gate 328 全绿）
 - 2026-09-21 分析师整改 T1+T2 待合（nightly/20260921b：数据质量标注/估值自选/纸盘 schema 删除/笔记 model 列，pi1 323 全绿）
 - 2026-09-21 nightly/20260921 已合已部署（去 AI 内联 + ai_proxy 改名 + 文档清包袱，pi1 gate 317 全绿）
 - 2026-09-21 去 AI 内联 + 去 Hermes 化待合（nightly/20260921：卡片去 AI/停本地触发/ai_proxy 改名/文档清包袱）
