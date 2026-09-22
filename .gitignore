@@ -47,7 +47,7 @@ data/stock_dashboard.db
 .superpowers/
 
 # DB 备份
-/data/db/*.bak
+/data/db/*.bak*
 /data/stock.db
 /data/stock_dashboard.db
 
