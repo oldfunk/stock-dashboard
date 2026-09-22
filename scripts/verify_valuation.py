@@ -13,7 +13,8 @@
 年报滞后），只做极端值捕捉：偏差 >100% 告警，>300% 或符号矛盾
 （如一边为负）失败，其余通过。缺数据判跳过（不判失败）。
 批量：verify_run(run_id) 跑整轮 20 候选，JSON 报告落 data/，
-有失败 exit 1。供 scripts/run_pipeline.py 采集后调用。
+有失败 exit 1；全部因缺数据跳过（验算未执行）exit 2，绝不以 0
+谎报成功（P0-2）。供 scripts/run_pipeline.py 采集后调用。
 """
 
 import argparse
@@ -61,13 +62,16 @@ def verdict_for(dev, tol_warn=TOL_WARN, tol_fail=TOL_FAIL) -> str:
 
 def verify_market_cap(price, shares, reported_cap_yi) -> dict:
     """V1：市值独立验算。price 现价（元），shares 总股本（股），
-    reported_cap_yi 快照市值（亿）。返回计算市值（亿）+ 偏差 + 判定。"""
+    reported_cap_yi 快照市值（亿）。返回计算市值 + 快照市值（reported，
+    P0-2 补键，供 prompt 渲染）+ 偏差 + 判定。"""
     if price is None or shares is None or reported_cap_yi is None:
-        return {'calculated_yi': None, 'deviation_pct': None,
-                'verdict': 'SKIP', 'note': '缺现价/总股本/快照市值'}
+        return {'calculated_yi': None, 'reported': reported_cap_yi,
+                'deviation_pct': None, 'verdict': 'SKIP',
+                'note': '缺现价/总股本/快照市值'}
     if float(price) <= 0 or float(shares) <= 0:
-        return {'calculated_yi': None, 'deviation_pct': None,
-                'verdict': 'SKIP', 'note': '现价或总股本非正'}
+        return {'calculated_yi': None, 'reported': reported_cap_yi,
+                'deviation_pct': None, 'verdict': 'SKIP',
+                'note': '现价或总股本非正'}
     calc_yi = exact(price) * exact(shares) / Decimal(1e8)
     dev = deviation_pct(calc_yi, exact(reported_cap_yi))
     v = verdict_for(dev)
@@ -75,6 +79,7 @@ def verify_market_cap(price, shares, reported_cap_yi) -> dict:
         '股本非最新（回购/增发）？单位口径？股价非最新？' if v == 'FAIL'
         else '股价波动或股本微调所致')
     return {'calculated_yi': round(float(calc_yi), 2),
+            'reported': reported_cap_yi,
             'deviation_pct': round(dev, 2) if dev is not None else None,
             'verdict': v, 'note': note}
 
@@ -128,7 +133,10 @@ def _worst(*verdicts) -> str:
 
 def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
     """批量验算一轮筛选结果。run_id 缺省取最新轮。
-    返回 {run_id, total, pass, warn, fail, skip, alerts, report}。"""
+    返回 {run_id, total, pass, warn, fail, skip, verified, alerts, report}。
+    verified = pass+warn+fail（真实完成交叉验算的样本数）；total>0 且
+    verified=0 表示双源缺数、验算未执行——不许被当成“零失败即通过”（P0-2）。
+    """
     from src.models.database import get_db_path  # 延迟导入，保持纯函数可独立测试
     db_path = db_path or get_db_path()
     con = sqlite3.connect(db_path)
@@ -140,7 +148,8 @@ def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
             ).fetchone()
             if row is None:
                 return {'run_id': None, 'total': 0, 'pass': 0, 'warn': 0,
-                        'fail': 0, 'skip': 0, 'alerts': [], 'report': None,
+                        'fail': 0, 'skip': 0, 'verified': 0,
+                        'alerts': [], 'report': None,
                         'note': 'screening_result 为空'}
             run_id = row['run_id']
         stocks = [dict(r) for r in con.execute(
@@ -205,9 +214,11 @@ def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
                'market_cap': r['market_cap'], 'ratios': r['ratios'],
                'circulating': r['circulating']}
               for r in results if r['verdict'] in ('WARN', 'FAIL')]
+    verified = counts['PASS'] + counts['WARN'] + counts['FAIL']
     summary = {'run_id': run_id, 'total': len(results),
                'pass': counts['PASS'], 'warn': counts['WARN'],
                'fail': counts['FAIL'], 'skip': counts['SKIP'],
+               'verified': verified,
                'alerts': alerts, 'checked_at': datetime.now().isoformat(timespec='seconds')}
     report_path = None
     if report_dir is None:
@@ -221,6 +232,9 @@ def verify_run(run_id=None, db_path=None, report_dir=None) -> dict:
     summary['report'] = report_path
     logger.info(f"[验算闸] {run_id}: 通过={counts['PASS']} 告警={counts['WARN']} "
                 f"失败={counts['FAIL']} 跳过={counts['SKIP']}")
+    if len(results) and verified == 0:
+        logger.warning(f"[验算闸] {run_id}: 全部 {summary['skip']} 只均因缺数据"
+                       "跳过——验算未执行（非通过）")
     for a in alerts:
         logger.warning(f"[验算闸] {a['verdict']} {a['code']} {a['name']} "
                        f"市值偏差={a['market_cap'].get('deviation_pct')}% "
@@ -244,6 +258,9 @@ def main(argv=None) -> int:
     for a in s['alerts']:
         print(f"  {tag[a['verdict']]} {a['code']} {a['name']}")
     print(f"报告: {s['report']}")
+    if s['total'] > 0 and s.get('verified', 0) == 0:
+        print("验算未执行：全部候选因缺数据跳过（非通过），退出码 2")
+        return 2
     return 1 if s['fail'] > 0 else 0
 
 

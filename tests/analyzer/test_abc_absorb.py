@@ -226,3 +226,25 @@ class TestValuationCheck:
         from src.analyzer.ai_analyzer import _data_quality_text
         text = _data_quality_text({})
         assert "双源误差标记" not in text
+
+    def test_text_all_skip_says_not_verified(self):
+        """P0-2：双源全 SKIP 必须如实报“未执行”，不许谎报通过；原因透传。"""
+        from src.analyzer.ai_analyzer import _data_quality_text
+        facts = {"valuation_check": {
+            "market_cap": {"verdict": "SKIP", "note": "缺现价/总股本/快照市值"},
+            "pe": {"verdict": "SKIP", "note": "缺现价/eps 或 eps 非正"}}}
+        text = _data_quality_text(facts)
+        assert "双源验算未执行" in text
+        assert "缺现价/总股本/快照市值" in text
+        assert "这不是通过" in text
+        assert "验算通过" not in text
+
+    def test_text_partial_skip_pass_shows_skip_reason(self):
+        """一项通过 + 一项跳过：如实报通过同时透传跳过原因。"""
+        from src.analyzer.ai_analyzer import _data_quality_text
+        facts = {"valuation_check": {
+            "market_cap": {"verdict": "PASS"},
+            "pe": {"verdict": "SKIP", "note": "缺现价/eps 或 eps 非正"}}}
+        text = _data_quality_text(facts)
+        assert "验算通过" in text
+        assert "缺现价/eps" in text

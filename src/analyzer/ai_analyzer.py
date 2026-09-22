@@ -1415,10 +1415,7 @@ def _data_quality_text(facts: dict) -> str:
         "（至多给到“灰色地带”），不得写“极具吸引力”类断语。"
     )
     _vc = facts.get("valuation_check")
-    if _vc and any(
-        _vc.get(k, {}).get("verdict") in ("WARN", "FAIL")
-        for k in ("market_cap", "pe")
-    ):
+    if _vc:
         _mc, _pe = _vc.get("market_cap", {}), _vc.get("pe", {})
         _parts = []
         if _mc.get("verdict") in ("WARN", "FAIL"):
@@ -1427,12 +1424,30 @@ def _data_quality_text(facts: dict) -> str:
         if _pe.get("verdict") in ("WARN", "FAIL"):
             _parts.append(f"PE验算{_pe['verdict']}（复算{_pe.get('calculated')} "
                           f"vs 快照{_pe.get('reported')}，偏差{_pe.get('deviation_pct')}%）")
-        lines.append(
-            "- 双源误差标记：" + "；".join(_parts)
-            + "——超1%容差，该字段置信度降级，不得作为精确值引用，估值结论从紧。"
-        )
-    elif _vc:
-        lines.append("- 双源误差标记：市值/PE 双源验算通过（偏差≤1%容差）。")
+        if _parts:
+            lines.append(
+                "- 双源误差标记：" + "；".join(_parts)
+                + "——超1%容差，该字段置信度降级，不得作为精确值引用，估值结论从紧。"
+            )
+        elif _mc.get("verdict") == "SKIP" and _pe.get("verdict") == "SKIP":
+            # P0-2：双源都缺数据时如实报“未执行”，不许静默 SKIP 谎报通过；
+            # 跳过原因（findings）透传进 prompt。
+            _notes = list(dict.fromkeys(
+                n for n in (_mc.get("note"), _pe.get("note")) if n))
+            lines.append(
+                "- 双源验算未执行：市值/PE 均因缺数据跳过（"
+                + "；".join(_notes)
+                + "）——这不是通过；估值关键数字未交叉验证，关键结论必须按缺数据降档。"
+            )
+        else:
+            _skip = [f"{'市值' if k == 'market_cap' else 'PE'}"
+                     f"跳过：{_vc[k].get('note')}"
+                     for k in ("market_cap", "pe")
+                     if (_vc.get(k) or {}).get("verdict") == "SKIP"]
+            lines.append(
+                "- 双源误差标记：市值/PE 双源验算通过（偏差≤1%容差）"
+                + ("；" + "；".join(_skip) if _skip else "") + "。"
+            )
     return "\n".join(lines)
 
 

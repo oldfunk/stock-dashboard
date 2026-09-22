@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(PROJ, 'scripts'))
 
 from verify_valuation import (  # noqa: E402
     deviation_pct, exact, verdict_for, verify_market_cap, verify_ratios,
-    cross_check,
+    cross_check, verify_run, main,
 )
 
 
@@ -82,3 +82,55 @@ class TestCirculating:
         # 误拿总市值 914.49 当流通口径 → 28% 偏差 → 失败（正是 V1b 要抓的）
         r = verify_market_cap(29.25, 2.239e9, 914.49)
         assert r['verdict'] == 'FAIL'
+
+
+class TestReportedKey:
+    """P0-2：verify_market_cap 必须带 reported 键（prompt 渲染快照值）。"""
+
+    def test_normal_result_has_reported(self):
+        r = verify_market_cap(1500.0, 1.256e9, 18840.0)
+        assert r['reported'] == 18840.0
+
+    def test_skip_result_has_reported(self):
+        r = verify_market_cap(10.0, None, 100.0)
+        assert r['reported'] == 100.0
+
+    def test_missing_cap_reports_none(self):
+        r = verify_market_cap(10.0, 1e9, None)
+        assert r['verdict'] == 'SKIP'
+        assert r['reported'] is None
+
+
+class TestZeroSampleHonesty:
+    """P0-2：双源全缺数 → verified=0、exit 2，不许以“零失败”谎报成功。"""
+
+    @staticmethod
+    def _make_db(tmp_path):
+        import sqlite3
+        db = str(tmp_path / 'gate.db')
+        con = sqlite3.connect(db)
+        con.execute('CREATE TABLE screening_result '
+                    '(run_id TEXT, run_date TEXT, code TEXT, name TEXT, '
+                    'pe REAL, pb REAL, market_cap REAL)')
+        con.execute("INSERT INTO screening_result VALUES "
+                    "('r1','2026-09-22','600519','茅台',NULL,NULL,NULL)")
+        con.execute('CREATE TABLE stock_snapshot '
+                    '(code TEXT, current_price REAL, pe REAL, pb REAL, '
+                    'market_cap REAL, circulating_cap REAL)')
+        con.execute('CREATE TABLE financial_history '
+                    '(stock_code TEXT, report_date TEXT, report_type TEXT, '
+                    'eps REAL, total_shares REAL)')
+        con.commit()
+        con.close()
+        return db
+
+    def test_verify_run_verified_zero(self, tmp_path):
+        s = verify_run(db_path=self._make_db(tmp_path),
+                       report_dir=str(tmp_path))
+        assert s['total'] == 1 and s['skip'] == 1
+        assert s['verified'] == 0
+
+    def test_main_exit_2_all_skip(self, tmp_path):
+        db = self._make_db(tmp_path)
+        code = main(['--db', db, '--report-dir', str(tmp_path), '--quiet'])
+        assert code == 2
