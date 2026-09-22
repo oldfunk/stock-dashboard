@@ -17,7 +17,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 ## 架构
 
-`src/` 分层：`collector/`（数据采集）→ `screener/`（7 门规筛选 + 五维打分）→ `analyzer/`（本地分析代码，pipeline 已停用触发，仅手动脚本可用）→ `web/`（FastAPI 展示）。模块边界禁令见 `docs/architecture.md` §3。数据源注册表 S1–S7 及三条铁律见 `docs/architecture.md` §5。
+`src/` 分层：`collector/`（数据采集）→ `screener/`（7 门规筛选 + 五维打分）→ `analyzer/`（本地分析代码，pipeline 已停用触发，仅手动脚本可用）→ `web/`（FastAPI 展示）。模块边界禁令见 `docs/architecture.md` §3。数据源注册表 S1–S8 及三条铁律见 `docs/architecture.md` §5。
 
 ## 硬规则
 
@@ -26,7 +26,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 全仓 pytest 零失败（基线只升不降）
 - 开发与测试分离：本机只做编辑、commit、文本扫描，不跑 pytest；全仓验证一律在生产服务器 `gate.sh` 执行
-- 禁删 S1–S7 适配函数（除非替代 + 单测同 commit）
+- 禁删 S1–S8 适配函数（除非替代 + 单测同 commit）
 - 提交信息中文，写清「改了什么 + 为什么」
 - 验证声明必须精确：手动分步验证 ≠ live 验证通过。任何"验证通过"必须附带实际执行的命令和输出作为证据，不能夸大验证范围。主动验证所有风险点，而非选择性验证。
 - 任务颗粒度必须细化到"单一可验证步骤"：复合任务必须拆分为独立子任务，每个子任务有明确的完成标准和验证命令。

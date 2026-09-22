@@ -46,7 +46,7 @@ hermes cron create \
     --name "stock-dashboard-monthly-analysis" \
     --deliver local \
     "0 10 1 * *" \
-    "执行 stock-dashboard 每月分析。读取 docs/scheduled-tasks.md 中'每月分析'配置，分析：1) 候选股表现（本月筛选结果 vs 历史）2) 策略有效性（多策略命中分布）3) 数据源健康度（S1-S7 可用性）4) 系统资源使用（DB 大小、日志量）。生成报告写入 docs/reports/monthly-YYYYMM.md，末尾记录执行状态。" \
+    "执行 stock-dashboard 每月分析。读取 docs/scheduled-tasks.md 中'每月分析'配置，分析：1) 候选股表现（本月筛选结果 vs 历史）2) 策略有效性（多策略命中分布）3) 数据源健康度（S1-S8 可用性）4) 系统资源使用（DB 大小、日志量）。生成报告写入 docs/reports/monthly-YYYYMM.md，末尾记录执行状态。" \
     2>&1 | tail -3
 
 echo ""

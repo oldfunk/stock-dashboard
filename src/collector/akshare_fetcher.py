@@ -13,6 +13,7 @@ import time
 import logging
 import os
 import re
+import threading
 from collections import defaultdict
 
 import akshare as ak
@@ -26,6 +27,9 @@ from src.utils import (
 logger = logging.getLogger(__name__)
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), '../../data/cache/stock_codes.json')
+SECTOR_CACHE_FILE = os.path.join(
+    os.path.dirname(__file__), '../../data/cache/sector_map.json')
+SECTOR_MAP_MIN = 1000  # S8：低于此规模视为上游异常，照常返回但不覆盖缓存
 
 
 # ── 股票代码缓存 ──
@@ -1167,3 +1171,138 @@ def _fetch_kline_tx(code: str, start_str: str, end_str: str) -> list[dict]:
             "turnover": None,  # 腾讯数据源无换手率
         })
     return records
+
+
+# ── S8 行业分类（新浪 49 板块，stock_snapshot.sector 回填数据源）──
+
+SINA_HY_URL = 'http://money.finance.sina.com.cn/q/view/newSinaHy.php'
+SINA_NODE_URL = ('http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/'
+                 'Market_Center.getHQNodeData')
+_SINA_HEADERS = {
+    'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36'),
+    'Referer': 'http://finance.sina.com.cn/',
+}
+SINA_PAGE_SLEEP = 0.6  # 页间节奏：实测背靠背连打会被新浪拖慢；0.6s 全量约 80s
+
+_SINA_SESSION = None
+
+
+def _sina_session():
+    """惰性新浪 Session（TCP 连接复用 + 浏览器头）。"""
+    global _SINA_SESSION
+    if _SINA_SESSION is None:
+        import requests
+        _SINA_SESSION = requests.Session()
+        _SINA_SESSION.headers.update(_SINA_HEADERS)
+    return _SINA_SESSION
+
+
+def _sina_get(url: str, timeout: int = 20):
+    """新浪 GET：失败/非 200 返回 None。
+
+    不用 curl_get：newSinaHy 实测裸 curl 15s 超时（RC28），requests 约 11s 可回；
+    requests 栈与 S2/S3 同源，生产每日验证可达。
+    """
+    try:
+        r = _sina_session().get(url, timeout=timeout)
+        return r.text if r.status_code == 200 else None
+    except Exception as e:
+        logger.debug(f"[S8] GET 失败 {url}: {e}")
+        return None
+
+
+def _fetch_sector_map_impl() -> dict:
+    """新浪直连：newSinaHy 取板块名单 -> getHQNodeData 按页取成分，
+    返回 {6位代码: 中文板块名}。单板块响应坏仅跳过该板块（其余保留）。
+
+    不走 akshare 封装：stock_sector_detail 实测每次固定约 5s（分页进度条），
+    49 板块累计超出超时护栏。全量实测（Session + 0.6s 节奏）49 板块约 80s。
+    """
+    body = _sina_get(SINA_HY_URL, timeout=25)  # 名单接口慢，实测约 11s
+    if not body or '=' not in body:
+        raise RuntimeError('新浪行业名单响应异常')
+    payload = json.loads(body.split('=', 1)[1].strip().rstrip(';').strip())
+    out: dict = {}
+    for label, val in payload.items():
+        label = str(label).strip()
+        parts = str(val).split(',')
+        board = parts[1].strip() if len(parts) >= 2 else ''
+        if not label or not board:
+            continue
+        for page in range(1, 61):  # 空页即停；60 页仅作兜底上限
+            url = (f'{SINA_NODE_URL}?page={page}&num=100&sort=symbol'
+                   f'&asc=1&node={label}')
+            try:
+                nb = _sina_get(url)
+                rows = json.loads(nb) if nb else []
+            except Exception as e:
+                logger.warning(
+                    f"[S8] 板块「{board}」第 {page} 页解析失败（跳过板块）: {e}")
+                rows = []
+            time.sleep(SINA_PAGE_SLEEP)
+            if not isinstance(rows, list) or not rows:
+                break
+            for row in rows:
+                code = str(row.get('code') or '').strip()
+                if re.fullmatch(r'\d{6}', code):
+                    out[code] = board
+    return out
+
+
+def _load_sector_cache() -> dict:
+    """读取上次成功的行业映射（任何异常 -> {}）。"""
+    try:
+        with open(SECTOR_CACHE_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        m = data.get('map')
+        return {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_sector_cache(sector_map: dict):
+    try:
+        os.makedirs(os.path.dirname(SECTOR_CACHE_FILE), exist_ok=True)
+        with open(SECTOR_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'fetched': now_cn().strftime('%Y-%m-%d'), 'map': sector_map},
+                      f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"[S8] 行业映射缓存写入失败: {e}")
+
+
+def fetch_sector_map(timeout: int = 420) -> dict:
+    """S8 行业分类（新浪 49 板块）：{6位代码: 行业名}，供 stock_snapshot.sector 回填。
+
+    兜底链：新浪实时（daemon 线程超时护栏，防上游无超时接口挂死）
+            -> 上次成功磁盘缓存 -> {}（调用方跳过回填，不清旧值）。
+    """
+    result: dict = {}
+    errors: list = []
+
+    def _run():
+        nonlocal result
+        try:
+            result = _fetch_sector_map_impl()
+        except Exception as e:
+            errors.append(e)
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        errors.append(TimeoutError(f"新浪行业映射拉取超时 {timeout}s"))
+    if not errors and result:
+        if len(result) >= SECTOR_MAP_MIN:
+            _save_sector_cache(result)
+        else:
+            logger.warning(
+                f"[S8] 行业映射仅 {len(result)} 只（<{SECTOR_MAP_MIN}），不覆盖缓存")
+        return result
+    if not errors:
+        errors.append(ValueError("上游返回空行业映射"))
+    logger.warning(f"[S8] 新浪行业实时拉取失败（{errors[0]}），尝试磁盘缓存兜底")
+    cached = _load_sector_cache()
+    if cached:
+        logger.warning(f"[S8] 使用磁盘行业缓存 {len(cached)} 只兜底")
+    return cached

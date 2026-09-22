@@ -74,7 +74,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 每次只做一件小而实的事，禁止改多个无关模块
 - 全仓 pytest 零失败（基线 348 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
-- 禁删 S1–S7 适配函数（除非替代 + 单测同到）
+- 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
 - 提交到 nightly 分支，不直接 push main
 - 生产服务器部署：合并获批后由 agent 同步（pull + restart + 冒烟验证）

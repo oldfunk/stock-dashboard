@@ -34,6 +34,8 @@ def _run_with_config(config):
         patch('src.collector.akshare_fetcher.enrich_financial_data'), \
         patch('src.collector.akshare_fetcher.fetch_tencent_batch',
               return_value=[]), \
+        patch('src.collector.akshare_fetcher.fetch_sector_map',
+              return_value={}), \
         patch('src.models.database.WatchlistDAO'), \
         patch('src.screener.value_screener.run_screener') as mock_screen:
         mock_snap.return_value.count.return_value = 2
@@ -68,6 +70,8 @@ def test_multi_strategy_true_two_pools():
         patch('src.collector.akshare_fetcher.enrich_financial_data'), \
         patch('src.collector.akshare_fetcher.fetch_tencent_batch',
               return_value=[]), \
+        patch('src.collector.akshare_fetcher.fetch_sector_map',
+              return_value={}), \
         patch('src.models.database.WatchlistDAO'), \
         patch('src.screener.value_screener.run_screener',
               return_value=rows) as mock_screen:

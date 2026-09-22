@@ -59,7 +59,7 @@ stock-dashboard/
 │   └── strategies.yaml       # 多策略定义（成长/红利/困境反转阈值）
 ├── src/
 │   ├── collector/            # 数据采集层
-│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S7 注册表）
+│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S8 注册表）
 │   │   └── onboard.py          # 新股上市检测
 │   ├── screener/
 │   │   └── value_screener.py   # 7 条门规筛选 + 多策略评分
@@ -175,7 +175,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 
 ## 数据源架构
 
-7 个数据源 S1–S7 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
+8 个数据源 S1–S8 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
 
 - **行情**：腾讯为主 S1，兜底新浪 → AKShare 自算
 - **财务**：AKShare `stock_yjbb_em` 为主 S2，兜底 C2 东财直连
@@ -267,7 +267,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 
 | 文档 | 定位 |
 |---|---|
-| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S7 |
+| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S8 |
 | `docs/roadmap.md` | 总路线（P1 面板深化 → P2 体验优化） |
 | `docs/iteration-log.md` | 迭代进程账（Hermes agent 上下文源，含 backlog） |
 | `docs/handoff.md` | 班次交接速览（历史追加不删） |

@@ -418,5 +418,149 @@ class TestC2_5EastmoneyRoicFcf:
             assert result['2025-12-31']['fcf'] is None
 
 
+class TestS8SectorMap:
+    """S8 行业分类（新浪直连 newSinaHy + getHQNodeData）契约单测：
+    不断网可跑，全部 mock。"""
+
+    def _patch_env(self, tmp_path, monkeypatch, fetcher):
+        monkeypatch.setattr(fetcher, 'SECTOR_CACHE_FILE',
+                            str(tmp_path / 'sector_map.json'))
+        monkeypatch.setattr(fetcher, 'SINA_PAGE_SLEEP', 0)  # 单测不吃线上节奏
+
+    @staticmethod
+    def _hy_body(boards):
+        """boards: [(label, 中文名)]，拼 newSinaHy 响应体。"""
+        payload = {label: f'{label},{name},99,0,0' for label, name in boards}
+        return ('var S_Finance_bankuai_sinaindustry = '
+                + json.dumps(payload, ensure_ascii=False) + ';')
+
+    @staticmethod
+    def _node_body(codes):
+        """拼 getHQNodeData JSON 响应体（code 可为 str 或 int）。"""
+        return json.dumps([{'symbol': f'sh{c}', 'code': c, 'name': 'x'}
+                           for c in codes])
+
+    def test_impl_parses_hy_and_node(self, tmp_path, monkeypatch):
+        """名单解析 + node 分页：label 调接口、中文名入库、非法代码丢弃、空页停止。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+        hy = self._hy_body([('new_blhy', '玻璃行业')])
+        node = self._node_body(['600176', 600519, '12ab34'])
+        with patch.object(fetcher, '_sina_get',
+                          side_effect=[hy, node, '[]']) as get:
+            result = fetcher.fetch_sector_map()
+
+        assert result == {'600176': '玻璃行业', '600519': '玻璃行业'}
+        assert get.call_count == 3
+        first_node_url = get.call_args_list[1][0][0]
+        assert 'node=new_blhy' in first_node_url
+        assert 'page=1' in first_node_url
+
+    def test_board_failure_keeps_rest(self, tmp_path, monkeypatch):
+        """单板块响应坏（JSON 非法）只跳过该板块，其余保留。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+        hy = self._hy_body([('new_baijiu', '白酒'), ('new_bank', '银行')])
+        node = self._node_body(['600519'])
+        with patch.object(fetcher, '_sina_get',
+                          side_effect=[hy, node, '{bad json']):
+            result = fetcher.fetch_sector_map()
+
+        assert result == {'600519': '白酒'}
+
+    def test_pagination_until_empty_page(self, tmp_path, monkeypatch):
+        """按页拉取直到空页（不依赖单页行数，防上游限页截断）。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+        hy = self._hy_body([('new_x', '电子')])
+        p1 = self._node_body([f'{i:06d}' for i in range(100)])
+        p2 = self._node_body([f'{100000 + i}' for i in range(50)])
+        with patch.object(fetcher, '_sina_get',
+                          side_effect=[hy, p1, p2, '[]']) as get:
+            result = fetcher.fetch_sector_map()
+
+        assert len(result) == 150
+        assert result['000042'] == '电子'
+        assert get.call_count == 4
+        assert 'page=3' in get.call_args_list[3][0][0]
+
+    def test_live_map_cached_when_ge_min(self, tmp_path, monkeypatch):
+        """达到规模阈值的实时映射写盘缓存（供下次失败兜底）。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+        monkeypatch.setattr(fetcher, 'SECTOR_MAP_MIN', 2)
+        hy = self._hy_body([('new_baijiu', '白酒')])
+        node = self._node_body(['600519', '000858'])
+        with patch.object(fetcher, '_sina_get', side_effect=[hy, node, '[]']):
+            result = fetcher.fetch_sector_map()
+
+        assert len(result) == 2
+        with open(fetcher.SECTOR_CACHE_FILE, encoding='utf-8') as f:
+            cached = json.load(f)
+        assert cached['map'] == result
+        assert cached['fetched']
+
+    def test_undersized_live_map_not_cached(self, tmp_path, monkeypatch):
+        """低于阈值：照常返回但不覆盖已有缓存（防上游异常写坏缓存）。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+        old = {'fetched': '2026-09-01', 'map': {'600519': '白酒'}}
+        with open(fetcher.SECTOR_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(old, f)
+        hy = self._hy_body([('new_blhy', '玻璃行业')])
+        node = self._node_body(['600176'])
+        with patch.object(fetcher, '_sina_get', side_effect=[hy, node, '[]']):
+            result = fetcher.fetch_sector_map()
+
+        assert result == {'600176': '玻璃行业'}
+        with open(fetcher.SECTOR_CACHE_FILE, encoding='utf-8') as f:
+            assert json.load(f) == old
+
+    def test_live_failure_falls_back_to_cache(self, tmp_path, monkeypatch):
+        """实时失败 -> 磁盘缓存兜底。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        cache = {'fetched': '2026-09-20', 'map': {'600519': '白酒'}}
+        with open(str(tmp_path / 'sector_map.json'), 'w', encoding='utf-8') as f:
+            json.dump(cache, f)
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+
+        def _boom():
+            raise RuntimeError('simulated sina failure')
+
+        with patch.object(fetcher, '_fetch_sector_map_impl', _boom):
+            assert fetcher.fetch_sector_map() == {'600519': '白酒'}
+
+    def test_live_failure_no_cache_returns_empty(self, tmp_path, monkeypatch):
+        """实时失败且无缓存 -> {}，调用方跳过回填（不清旧值）。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+
+        def _boom():
+            raise RuntimeError('simulated sina failure')
+
+        with patch.object(fetcher, '_fetch_sector_map_impl', _boom):
+            assert fetcher.fetch_sector_map() == {}
+
+    def test_timeout_falls_back_to_cache(self, tmp_path, monkeypatch):
+        """上游无超时挂死 -> daemon 线程超时护栏触发 -> 缓存兜底。"""
+        import time
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import patch
+        cache = {'fetched': '2026-09-20', 'map': {'600519': '白酒'}}
+        with open(str(tmp_path / 'sector_map.json'), 'w', encoding='utf-8') as f:
+            json.dump(cache, f)
+        self._patch_env(tmp_path, monkeypatch, fetcher)
+
+        with patch.object(fetcher, '_fetch_sector_map_impl',
+                          lambda: time.sleep(0.5)):
+            assert fetcher.fetch_sector_map(timeout=0.05) == {'600519': '白酒'}
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

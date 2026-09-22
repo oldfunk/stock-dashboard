@@ -451,6 +451,14 @@ class StockSnapshotDAO:
     def save_batch(self, records: list[dict]):
         with db_conn() as conn:
             for r in records:
+                # sector 保值：上游 dict 无板块时不清已有值
+                # （INSERT OR REPLACE 整行覆盖，否则每日快照都会把回填的板块擦成 NULL）
+                sector = r.get('sector')
+                if not sector:
+                    prev = conn.execute(
+                        "SELECT sector FROM stock_snapshot WHERE code = ?",
+                        (r['code'],)).fetchone()
+                    sector = prev["sector"] if prev else None
                 conn.execute("""
                     INSERT OR REPLACE INTO stock_snapshot
                     (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
@@ -458,7 +466,7 @@ class StockSnapshotDAO:
                      dividend_yield, current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (r['code'], r['name'], r.get('market', 'A'),
-                      r.get('sector'), r.get('pe'), r.get('pb'), r.get('ps'),
+                      sector, r.get('pe'), r.get('pb'), r.get('ps'),
                       r.get('market_cap'), r.get('circulating_cap'),
                       r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
                       r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
@@ -466,6 +474,22 @@ class StockSnapshotDAO:
                       r.get('high_52w'), r.get('low_52w'),
                       1 if r.get('is_st') else 0, r.get('list_date'),
                       r['snapshot_date']))
+
+    def backfill_sectors(self, sector_map: dict) -> int:
+        """S8 行业回填：按 {code: sector} 刷新表内已有行（含行业再分类修正）。
+
+        只碰 map 内的 code，map 为 {} 时不动任何行（上游失败不清旧值）。返回更新行数。
+        """
+        if not sector_map:
+            return 0
+        items = [(sector, code) for code, sector in sector_map.items()
+                 if code and sector]
+        if not items:
+            return 0
+        with db_conn() as conn:
+            conn.executemany(
+                "UPDATE stock_snapshot SET sector = ? WHERE code = ?", items)
+            return conn.total_changes
 
     def get_latest_snapshot_date(self) -> Optional[str]:
         with db_conn() as conn:

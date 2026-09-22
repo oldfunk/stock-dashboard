@@ -110,6 +110,18 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
         except Exception as e:
             logger.warning(f"[Snapshot] watchlist enrich 失败（不影响主流程）: {e}")
 
+    # ── S8 行业回填：新浪 49 板块成分 -> stock_snapshot.sector（失败不影响主流程）──
+    try:
+        from src.collector.akshare_fetcher import fetch_sector_map
+        sector_map = fetch_sector_map()
+        if sector_map:
+            updated = StockSnapshotDAO().backfill_sectors(sector_map)
+            logger.info(f"[Sector] 行业回填 {updated} 行（映射 {len(sector_map)} 只）")
+        else:
+            logger.warning("[Sector] 行业映射不可用，跳过回填（不清旧值）")
+    except Exception as e:
+        logger.warning(f"[Sector] 行业回填失败（不影响主流程）: {e}")
+
     if not candidates:
         logger.warning("No candidates from pipeline")
         RunLogDAO().complete_run(run_id, total_stocks, 0, 0, "no candidates")
