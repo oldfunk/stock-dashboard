@@ -3,23 +3,24 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 Agent 接入指南已合已同步）
-- 分支：`main` = `1499691`；远端 `nightly/20260922d` 已删；pi1 已 pull + gate，服务 active
-- 内容：新增 `docs/agent-api.md`（外部 agent 通用接入：连接约定 + 读端点全表 + notes/thesis 写回 + curl 工作流，逐条对照 `routes.py` 真实路由）+ README 目录树挂链；纯文档零代码变更
-- 验证：pi1 `bash scripts/gate.sh` 342 passed（23.02s）+ service active + http 200；本地 verify bootstrap+test ok=True
+## 最后状态（2026-09-22 pi2 清除 + 职责定位已合已同步）
+- 分支：`main` = `e954b29`；远端 `nightly/20260922e` 已删；pi1 已 pull + gate，服务 active
+- 内容：全仓清除 pi2（删整篇 pi2 报告 + 24 处中性化，账本历史仅设备名脱敏）；`scheduled-tasks.md` 改参考设计（制度由使用者自定）；职责重定：外部接入=使用者抉择、复盘决议=外部 AI、盯盘调度=使用者自设，均不列本项目排期
+- 验证：本地 `hermes verify --skip-start` ok=True（342 passed）；pi1 gate 342 + http 200；`grep -ri pi2` 全仓 0 命中（**AGENTS.md:53 写保护审批超时未改，待用户亲自批准**）
 - 基线：342 不变
 
 ## 下一步方向
-1. 外部 AI 消费方按 `docs/agent-api.md` 实际接入（读 full → 写 thesis/notes 跑通一轮闭环）；thesis API 待首个真实写入验证
-2. 周六（09-26）复盘 live 验证：论文注入、周度三问、thesis_updates 写回、监控条件触发（prompt 层改动，单测过、live 未验）；复盘 LLM 决议通道已死，待外部消费方接手
+1. P1② 评分透明化收尾方案待用户确认（roadmap 原文"与行业平均对比"是否做、怎么做）；C3 数字抽检处置待用户拍板（原设计针对本地分析流水线，新分工下需重定义或取消）
+2. 外部接入闭环、周六（09-26）复盘执行与决议、盯盘调度制度——使用者与外部 AI 自行发起，本项目不排期（接口 `docs/agent-api.md`、调度参考 `docs/scheduled-tasks.md` 已就绪）
 
 ## 已知隐患
-- 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
+- 本地 Zen/Pollinations 双通道已死；本地复盘 LLM 决议不可用（复盘决议按新分工归外部 AI 负责）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
 - 本机 Windows 拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
 - `watchlist_thesis` 表为新表（init_database 自动建），pi1 首次写入前未做 live 端到端验证（单测全过）
 
 ## 历史交接区（追加，不删）
+- 2026-09-22 Agent 接入指南已合已同步（`1499691`：agent-api.md + README 挂链，gate 342 全绿）
 - 2026-09-22 ABC 方案已合已同步（`bb64119`：反面检验/论文追踪/复盘三问内化 + 架构方法论固化 + 解绑上游镜像与对照工具，gate 342 全绿）
 - 2026-09-22 残留清理已合已同步（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体，pi1 328 全绿）
 - 2026-09-22 残留清理待合（nightly/20260922b：hermes_proxy 空目录 + scheduler 纸盘注释尸体）
