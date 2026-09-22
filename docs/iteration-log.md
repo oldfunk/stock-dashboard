@@ -16,8 +16,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
-- gate 基线：360 passed（2026-09-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
-- 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 覆盖约 3000 只（S8 新浪 49 板块，2026-09-22 接入；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
+- gate 基线：367 passed（2026-09-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
 ## 目标与发展框架（2026-09-04 设立）
@@ -72,7 +72,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 360 passed，只升不降）
+- 全仓 pytest 零失败（基线 367 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -160,6 +160,19 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-22（P0-2 修复：验算闸双源缺数不谎报，nightly/20260922e 待合）
+- **背景**（同日评审 P0-2，用户批准「p0-2修复」后实施）：双源都缺数据时验算恒 SKIP，prompt 却因 `elif` 分支渲染「双源验算通过」谎报成功；`verify_market_cap` 缺 `reported` 键致 prompt 渲染「快照None亿」；跳过原因（findings）不进 prompt，AI 把缺失字段当精确值引用。
+- **改了什么**：① `verify_market_cap` 三个返回分支补 `reported`（快照市值，供 prompt 渲染真实对照值）；② `verify_run` summary 加 `verified`（= pass+warn+fail，真实完成交叉验算的样本数）+ 全 SKIP 警告日志，CLI `main()` 全缺数 **exit 2**（fail>0 仍 exit 1、正常 exit 0——绝不以零失败冒充成功）；③ `_data_quality_text` 双源块三态重写：任一 WARN/FAIL → 明细行（带真实快照值）；**双全 SKIP → 「双源验算未执行（原因）——这不是通过，关键结论按缺数据降档」**；有验算项通过 → 「通过」+ 附跳过项原因（findings 透传）。
+- **为什么**：验算闸的价值在诚实——没验不许装作验过；exit 0/2 区分「验过没问题」与「根本没验」，下游与人工看日志不再被骗。
+- **验证**（生产服务器 worktree，按测试规则）：`gate.sh` **367 passed / Gate passed / 40.16s**（360 + 7 新增：reported 3 + 零样本诚实 2 + prompt 三态 2）；首跑 gate 抓到测试内 SQL 误用 Python `None` 的真 bug（改 `NULL`）后复跑全绿；ast / 新增行 emoji 0 / 身份 0 三扫描全绿；既有 A3b 3 测与 B1 12 测零回归。
+- **状态**：`nightly/20260922e`（`453dfdf` + 本收尾 docs）**待用户批准合并**；合并后生产 git pull + 重启 `stock-dashboard.service`（验算闸/分析 prompt 改动需重启生效）+ gate 复验。基线刷新 360 → **367 passed**。
+
+### 2026-09-22（合并部署 nightly/20260922d：残留④ + 测试规则 + S8 sector 回填上线，生产回填 live 实证）
+- **合并**：`nightly/20260922d`（4 提交）ff 入 main（`1f0427c`），本机直连推送成功；远端/本地分支已删，远端仅剩 main + archive。
+- **部署**：生产服务器 git pull → 部署目录 `gate.sh` **360 passed** → 重启 `stock-dashboard.service`（采集/DB/scheduler 代码变更必重启）→ active，ROOT/API/JOURNAL 全 200，日志 0 Traceback。
+- **sector 回填 live 实证**（手动触发完整链路，与 orchestrator 挂载点等效）：`fetch_sector_map()` 真实新浪 92.3s → **2999 只**映射 → `backfill_sectors()` 回填 **2594 行**（DB total 5527；映射−回填差值 = 新浪收录但不在快照全集的代码）→ 最新快照日 Top 板块 金融40/机械33/生物制药30/交运29/建筑28 → 首页 `行业均值` 渲染 **16 行**（此前 0）——板块归属→行业均值→卡片展示闭环打通。
+- **状态**：已合已同步；此后 sector 随每日 15:30 流水线自动回填（420s 护栏 + 磁盘缓存兜底）。
 
 ### 2026-09-22（四项拍板落地：残留④ + 测试规则 + S8 sector 数据回填，nightly/20260922d 待合）
 - **残留清理④**（用户拍板「可执行」）：`docs/agent-api.md` journal 口径按实测修正——`journal/list` 空列表返回 `[]`（200）不 404，仅 `latest`/`{date}` 缺失才 404；`scripts/daily_cron.sh` 头注释补休眠陷阱（15:30 休眠则当天错过且不补跑，醒来需手动执行）。
