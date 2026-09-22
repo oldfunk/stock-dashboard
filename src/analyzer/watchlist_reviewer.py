@@ -154,6 +154,61 @@ def check_journal_coverage(pool_codes, content_md: str) -> list:
     return sorted(c for c in pool_codes if c not in content_md)
 
 
+def _check_cross_period(prev_details: dict, cur_codes: list,
+                        sig_pairs: dict) -> list[dict]:
+    """跨期对照（分析师 critique #8）：上期 vs 本期矛盾显式标注，warn-only。
+
+    Args:
+        prev_details: 上期 journal actions_summary.details
+            {add:[{code}], keep:[...], watch:[...], remove:[...]}，缺失/异形 → 空池对待
+        cur_codes: 本期复盘前池内代码
+        sig_pairs: {code: (上期signal, 本期signal)}，None=未知（未知不判翻转）
+
+    Returns:
+        findings [{type, message, severity}]，类型：
+        vanished（上期在池本期已不在，非复盘调出）/
+        unrecorded（本期池内股无上期记录）/
+        signal_flip（两期信号都已知且不同；基本面无实质变化则视为模型波动）
+    纯函数，可单测。
+    """
+    findings = []
+    if not isinstance(prev_details, dict):
+        prev_details = {}
+    prev_pool = set()
+    for k in ("add", "keep", "watch"):
+        for i in (prev_details.get(k) or []):
+            if isinstance(i, dict) and i.get("code"):
+                prev_pool.add(i["code"])
+    cur_set = set(cur_codes or [])
+    if prev_details and prev_pool:
+        for code in sorted(prev_pool - cur_set):
+            findings.append({
+                "type": "vanished",
+                "message": f"{code} 上期在池、本期复盘前已不在（非复盘调出），检查是否手动干预",
+                "severity": "warning",
+            })
+        for code in sorted(cur_set - prev_pool):
+            findings.append({
+                "type": "unrecorded",
+                "message": f"{code} 本期在池但无上期记录（新纳入未走复盘或首期），结论从紧",
+                "severity": "info",
+            })
+    for code in sorted(cur_set):
+        pair = (sig_pairs or {}).get(code) or (None, None)
+        try:
+            ps, cs = (list(pair) + [None, None])[:2]
+        except Exception:
+            continue
+        if ps and cs and ps != cs:
+            findings.append({
+                "type": "signal_flip",
+                "message": f"{code} Signal 翻转：上期 {ps} → 本期 {cs}"
+                           "（若基本面无实质变化，视为模型波动，结论从紧）",
+                "severity": "warning",
+            })
+    return findings
+
+
 # ── 复盘引擎 ──
 
 class WatchlistReviewer:
@@ -258,19 +313,66 @@ class WatchlistReviewer:
                 logger.info(f"[复盘] 监控条件触发 {len(monitor_triggered)} 只: "
                             f"{[t['code'] for t in monitor_triggered]}")
 
+            # 2c. 跨期对照（分析师 critique #8）：上期 journal + 两期 signal 对比
+            from src.models.ai_watchlist import AiJournalDAO as _JDao
+            from src.models.database import StockAnalysisHistoryDAO as _HDao
+            _today = now_cn().strftime("%Y-%m-%d")
+            try:
+                _prev_journal = _JDao().get_previous(_today)
+            except Exception:
+                _prev_journal = None
+            prev_details, prev_add = {}, []
+            if _prev_journal and _prev_journal.get('actions_summary'):
+                try:
+                    _pd = json.loads(_prev_journal['actions_summary'])
+                    prev_details = _pd.get('details') or {}
+                    prev_add = [i.get('code') for i in prev_details.get('add', [])
+                                if isinstance(i, dict) and i.get('code')]
+                except Exception:
+                    prev_details, prev_add = {}, []
+            _hist_dao = _HDao()
+            sig_pairs = {}
+            for s in current:
+                _c = s['code']
+                try:
+                    _rows = _hist_dao.get_history(_c, limit=2)
+                except Exception:
+                    _rows = []
+                _sigs = []
+                for _r in _rows or []:
+                    _t = (_r or {}).get('ai_trade_strategy')
+                    try:
+                        _t = json.loads(_t) if isinstance(_t, str) else (_t or {})
+                    except Exception:
+                        _t = {}
+                    _sigs.append((_t.get('signal') or '').upper() or None)
+                # history 倒序：[本期, 上期]
+                sig_pairs[_c] = ((_sigs[1] if len(_sigs) > 1 else None),
+                                 (_sigs[0] if len(_sigs) > 0 else None))
+            cross_findings = _check_cross_period(
+                prev_details, [s['code'] for s in current], sig_pairs)
+            if cross_findings:
+                logger.info(f"[复盘] 跨期对照 {len(cross_findings)} 条")
+
             # 3. 调用 LLM
             prompt = self._build_prompt(
                 current, candidates, analyses, market, forced_out
             )
+            if cross_findings:
+                prompt += ("\n\n【上期对照（程序计算，非 LLM 输出）】\n" + "\n".join(
+                    f"  - [{f['type']}] {f['message']}" for f in cross_findings
+                ) + "\n本次结论如与上期矛盾，必须在 journal 正文解释原因。")
             result = self._call_llm(prompt)
             if result is None:
                 logger.warning("[复盘] LLM 调用失败，跳过本次")
                 return {"skipped": True, "reason": "llm_failed"}
 
             # 4. 校验 + 落库
+            if isinstance(result, dict):
+                result['cross_period'] = cross_findings
             validated = self._validate_and_persist(
                 result, run_id, forced_out, current, candidates,
-                analyses=analyses,
+                analyses=analyses, prev_add=prev_add,
             )
             return validated
 
@@ -593,7 +695,8 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
     def _validate_and_persist(self, result: dict, run_id: str,
                               forced_out: list[dict], current: list[dict],
                               candidates: list[dict],
-                              analyses: Optional[dict] = None) -> dict:
+                              analyses: Optional[dict] = None,
+                              prev_add: Optional[list] = None) -> dict:
         """校验 LLM 输出 + 落库。
 
         校验规则：
@@ -719,6 +822,16 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                 logger.warning(f"[复盘] 数字抽检偏离 {len(mm_codes)} 只: {mm_codes}")
 
             journal_dao = AiJournalDAO()
+            # 跨期对照落库（分析师 critique #8）：本期 vs 上期矛盾显式记账
+            cross_in = list(result.get('cross_period') or []) \
+                if isinstance(result, dict) else []
+            fast_drop = [
+                {'type': 'fast_drop',
+                 'message': f"{c} 上期新加本期即调出：当初调入理由是否站得住",
+                 'severity': 'warning'}
+                for c in (prev_add or [])
+                if final_actions.get(c, (None,))[0] == 'remove'
+            ]
             journal_dao.save(
                 journal_date=action_date,
                 run_id=run_id,
@@ -740,6 +853,7 @@ journal.content_md 用 Markdown，按周报深度版结构写（小白可读：�
                     'coverage_missing': coverage_missing,
                     'numeric_mismatch': {
                         'total': len(mm_codes), 'codes': sorted(mm_codes)},
+                    'cross_period': cross_in + fast_drop,
                 })
             )
 
