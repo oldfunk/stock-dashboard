@@ -89,7 +89,7 @@ def test_get_by_code_found(tmp_db):
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/models/test_stock_snapshot.py -v`
+Run: `cd <仓库路径> && python -m pytest tests/models/test_stock_snapshot.py -v`
 
 Expected: FAIL — `AttributeError: 'StockSnapshotDAO' object has no attribute 'get_by_code'`
 
@@ -109,14 +109,14 @@ Expected: FAIL — `AttributeError: 'StockSnapshotDAO' object has no attribute '
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/models/test_stock_snapshot.py -v`
+Run: `cd <仓库路径> && python -m pytest tests/models/test_stock_snapshot.py -v`
 
 Expected: PASS (2 tests)
 
 - [ ] **Step 5: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/models/database.py tests/models/test_stock_snapshot.py
 git commit -m "feat: StockSnapshotDAO.get_by_code 按 code 查最新快照
 
@@ -204,7 +204,7 @@ def test_stock_detail_ok_with_snapshot_only(client):
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/web/test_routes_stock_detail.py -v`
+Run: `cd <仓库路径> && python -m pytest tests/web/test_routes_stock_detail.py -v`
 
 Expected: FAIL — `/stock/000792` 路由不存在 / 404 路由 fallback
 
@@ -353,7 +353,7 @@ async def stock_detail(request: Request, code: str):
 
 - [ ] **Step 5: 检查 base.html 是否存在并调整模板**
 
-Run: `cd g:\trae\stock-dashboard-github && dir src\web\templates\base.html`
+Run: `cd <仓库路径> && dir src\web\templates\base.html`
 
 如果不存在（expected: File not found），则将 `stock_detail.html` 改成完整 HTML 结构：
 
@@ -361,14 +361,14 @@ Run: `cd g:\trae\stock-dashboard-github && dir src\web\templates\base.html`
 
 - [ ] **Step 6: 运行测试确认通过**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/web/test_routes_stock_detail.py -v`
+Run: `cd <仓库路径> && python -m pytest tests/web/test_routes_stock_detail.py -v`
 
 Expected: PASS (3 tests)
 
 - [ ] **Step 7: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/routes.py src/web/templates/stock_detail.html tests/web/test_routes_stock_detail.py
 git commit -m "feat: 新增 /stock/{code} 单股详情页路由（最小版）
 
@@ -549,7 +549,7 @@ git commit -m "feat: 新增 /stock/{code} 单股详情页路由（最小版）
 启动 web 服务（开发模式）：
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 python -m src.main serve
 ```
 
@@ -557,12 +557,12 @@ python -m src.main serve
 - 无 AI 分析的股票（如选 stock_snapshot 有但 stock_analysis_history 没有的）：只显示 Header + 快照条，不报错
 - 有 AI 分析的股票：显示 3-8 章节中字段存在的部分
 
-如果 pi 上已有 000792 的 AI 分析数据，先在 pi 上验证。
+如果生产服务器上已有 000792 的 AI 分析数据，先在生产服务器上验证。
 
 - [ ] **Step 3: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/templates/stock_detail.html
 git commit -m "feat: 单股详情页补全 AI 分析章节（3-8）
 
@@ -719,7 +719,7 @@ git commit -m "feat: 单股详情页补全 AI 分析章节（3-8）
 - [ ] **Step 2: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/templates/stock_detail.html
 git commit -m "feat: 单股详情页补全动态财务历史章节
 
@@ -917,28 +917,28 @@ templates.env.filters['from_json'] = _from_json
 
 - [ ] **Step 4: 检查 AiWatchlistDAO.get_by_code 和 AiWatchlistHistoryDAO.list_by_code 是否存在**
 
-Run: `cd g:\trae\stock-dashboard-github && python -c "from src.models.ai_watchlist import AiWatchlistDAO, AiWatchlistHistoryDAO; print(hasattr(AiWatchlistDAO, 'get_by_code')); print(hasattr(AiWatchlistHistoryDAO, 'list_by_code'))"`
+Run: `cd <仓库路径> && python -c "from src.models.ai_watchlist import AiWatchlistDAO, AiWatchlistHistoryDAO; print(hasattr(AiWatchlistDAO, 'get_by_code')); print(hasattr(AiWatchlistHistoryDAO, 'list_by_code'))"`
 
 Expected: `True True`
 
 如果 False，则需要在 `src/models/ai_watchlist.py` 补充对应方法。先用 Grep 看现有方法名：
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 ```
 
 用 Grep tool 搜 `class AiWatchlistDAO` 和 `class AiWatchlistHistoryDAO` 的方法定义，确认是否有 `get_by_code` / `list_by_code` 或等价方法。如缺失则在 Task 1 之前补一个 Task 补 DAO 方法（不要在 Task 5 里临时改）。
 
 - [ ] **Step 5: 运行所有测试**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/web/test_routes_stock_detail.py -v`
+Run: `cd <仓库路径> && python -m pytest tests/web/test_routes_stock_detail.py -v`
 
 Expected: PASS (3 tests)
 
 - [ ] **Step 6: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/templates/stock_detail.html src/web/routes.py
 git commit -m "feat: 单股详情页补全剩余章节（10-12）
 
@@ -1107,7 +1107,7 @@ git commit -m "feat: 单股详情页补全剩余章节（10-12）
 - [ ] **Step 2: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/templates/stock_detail.html
 git commit -m "style: 单股详情页补全完整 CSS
 
@@ -1198,7 +1198,7 @@ git commit -m "style: 单股详情页补全完整 CSS
 - [ ] **Step 6: 提交**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git add src/web/templates/_watchlist_card.html src/web/templates/_stock_list.html src/web/templates/index.html src/web/templates/candidates.html
 git commit -m "feat: 观察池/候选股卡片可点击进入单股详情页
 
@@ -1209,20 +1209,20 @@ git commit -m "feat: 观察池/候选股卡片可点击进入单股详情页
 
 ---
 
-## Task 8: 端到端验证 + 部署到 pi
+## Task 8: 端到端验证 + 部署到生产服务器
 
 **Files:** 无代码改动，验证 + 部署
 
 - [ ] **Step 1: 本地运行所有测试**
 
-Run: `cd g:\trae\stock-dashboard-github && python -m pytest tests/ -v`
+Run: `cd <仓库路径> && python -m pytest tests/ -v`
 
 Expected: 全部 PASS
 
 - [ ] **Step 2: 本地手动验证**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 python -m src.main serve
 ```
 
@@ -1236,34 +1236,34 @@ python -m src.main serve
 7. 浏览器后退按钮能返回原页面
 8. 点"钉选"按钮不触发跳转
 
-- [ ] **Step 3: 同步到 pi**
+- [ ] **Step 3: 同步到生产服务器**
 
 ```bash
-cd g:\trae\stock-dashboard-github
+cd <仓库路径>
 git push origin main
 
-# 同步到 pi（参考之前 rsync over SSH 的部署方式）
-rsync -avz --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data/db' g:\trae\stock-dashboard-github\ pi@192.168.50.142:/home/pi/stock-dashboard/
+# 同步到生产服务器（参考之前 rsync over SSH 的部署方式）
+rsync -avz --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data/db' <仓库路径>\ <生产服务器>:<部署目录>/
 ```
 
 如果 rsync 命令在 PowerShell 下报错，改用：
 
 ```powershell
-cd g:\trae\stock-dashboard-github
-ssh pi@192.168.50.142 "sudo systemctl stop stock-dashboard"
+cd <仓库路径>
+ssh <生产服务器> "sudo systemctl stop stock-dashboard"
 # 然后用 scp 或 rsync 同步代码
-ssh pi@192.168.50.142 "sudo systemctl start stock-dashboard"
+ssh <生产服务器> "sudo systemctl start stock-dashboard"
 ```
 
-- [ ] **Step 4: pi 上验证**
+- [ ] **Step 4: 生产服务器上验证**
 
 ```bash
-ssh pi@192.168.50.142
+ssh <生产服务器>
 sudo systemctl status stock-dashboard
 # 应为 active (running)
 ```
 
-浏览器打开 `http://192.168.50.142:8000/stock/000792`，验证：
+浏览器打开 `http://<生产服务器>:8000/stock/000792`，验证：
 - 12 章节都正确渲染
 - 评分趋势 SVG 折线图显示
 - 财务历史表格显示

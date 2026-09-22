@@ -3,7 +3,7 @@
 # 配合凌晨 cron 使用：先跑筛选，再跑 AI 分析
 #
 # 用法：
-#   0 2 * * * /home/debian/stock-dashboard/scripts/stock-ai-slow-feed.sh
+#   0 2 * * * <部署目录>/scripts/stock-ai-slow-feed.sh
 set -e
 cd "$(dirname "$0")/.."
 

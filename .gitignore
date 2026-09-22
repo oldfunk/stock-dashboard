@@ -53,3 +53,6 @@ data/stock_dashboard.db
 
 # Hermes 本机 verify 配方（含机器特定 basetemp 路径，不跨机）
 /.hermes/environment.json
+
+# 部署目标本地文件（含服务器身份，不入库）
+/deploy.local.md

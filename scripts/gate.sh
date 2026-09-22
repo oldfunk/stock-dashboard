@@ -11,7 +11,7 @@ rm -rf "$BASETEMP" 2>/dev/null || true
 mkdir -p "$BASETEMP"
 
 echo "=== Running full test suite ==="
-# 优先用项目 venv（pi1），否则回退系统 python
+# 优先用项目 venv（生产服务器），否则回退系统 python
 PYBIN="${PYTHON:-}"
 if [ -z "$PYBIN" ]; then
     if [ -x ".venv/bin/python" ]; then PYBIN=".venv/bin/python";

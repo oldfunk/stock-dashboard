@@ -14,7 +14,7 @@ flowchart TB
         HP[外部 AI 代理协议<br/>src/ai_proxy/]
     end
 
-    subgraph PI[pi1 · stock-dashboard.service :9527]
+    subgraph PROD[生产服务器 · stock-dashboard.service :9527]
         SCH[MarketScheduler<br/>src/scheduler.py]
         ORCH[run_daily_pipeline<br/>src/orchestrator.py]
         COL[采集层<br/>src/collector/]
@@ -112,10 +112,10 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 348 passed，2026-09-22 pi1 gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 348 passed，2026-09-22 生产服务器 gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
-- pi1 只接受 `main` 分支部署；Hermes 只提交 GitHub 不部署（见 iteration-log 约束）。
+- 生产服务器只接受 `main` 分支部署；Hermes 只提交 GitHub 不部署（见 iteration-log 约束）。
 
 ## 6. 架构演进方向
 

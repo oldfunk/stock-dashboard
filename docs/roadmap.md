@@ -38,7 +38,7 @@ flowchart LR
 1. 数据源增删必须同步 `architecture.md` §5 注册表 + 契约单测，三者同 commit
 2. 全仓 pytest 零失败（基线 348 passed，只升不降）
 3. `collector/` `screener/` 改动必须附单测
-4. Hermes 约束：只提交 GitHub 不部署 pi1；禁删 S1–S7 适配函数（除非替代 + 单测同到）
+4. Hermes 约束：只提交 GitHub 不部署生产服务器；禁删 S1–S7 适配函数（除非替代 + 单测同到）
 
 ---
 
@@ -72,7 +72,7 @@ flowchart LR
 - **多卡片 grid**：卡片 `min-width: 0; overflow: hidden` 防止撑开列宽
 - **LLM JSON 字段**：写模板前必须查 DB 确认实际字段名
 - **零依赖优先**：评分趋势用纯 SVG 生成，不引入前端库（除非确有必要，klinecharts 除外）
-- **pi 性能**：数据定时缓存，非实时拉取；复杂渲染评估 CPU/内存负载
+- **生产服务器性能**：数据定时缓存，非实时拉取；复杂渲染评估 CPU/内存负载
 - **klinecharts 渲染**：`init()` 后容器必须可见且尺寸非零，否则 canvas 尺寸为 0 无法绘制（loadKline 只切换 loading/empty 状态，不隐藏 chart 容器）
 - **klinecharts 指标 API**：`createIndicator(name, isStack, {id})` 副图返回 paneId，必须保存；`removeIndicator(paneId, name)` 才能正确删除，不能把 name 当 paneId 传
 - **klinecharts 蜡烛图类型**：`candle_solid`（全实心）/ `candle_stroke`（全空心）/ `candle_up_stroke`（阳线空心阴线实心）/ `candle_down_stroke`（阳线实心阴线空心）。中国习惯用 `candle_up_stroke`

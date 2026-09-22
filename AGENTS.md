@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AI 驱动的 A 股价值投资选股看板。工作日 15:30 后自动跑完全市场约 5500 只股票，经 7 条门规筛选输出候选池 ≤20 只（AI 分析由外部 AI 执行，面板不触发）。生产实例跑在 pi1（192.168.50.210:9527）。
+AI 驱动的 A 股价值投资选股看板。工作日 15:30 后自动跑完全市场约 5500 只股票，经 7 条门规筛选输出候选池 ≤20 只（AI 分析由外部 AI 执行，面板不触发）。生产实例部署于生产服务器（端口 9527，部署目标见本地 `deploy.local.md`，该文件不入库）。
 
 ## 运行
 
@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（全仓 pytest 零失败；pi1 基线 348 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（全仓 pytest 零失败；生产服务器基线 348 passed，只升不降）。
 
 ## 技术栈
 
@@ -29,8 +29,8 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 - 提交信息中文，写清「改了什么 + 为什么」
 - 验证声明必须精确：手动分步验证 ≠ live 验证通过。任何"验证通过"必须附带实际执行的命令和输出作为证据，不能夸大验证范围。主动验证所有风险点，而非选择性验证。
 - 任务颗粒度必须细化到"单一可验证步骤"：复合任务必须拆分为独立子任务，每个子任务有明确的完成标准和验证命令。
-- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支（合并须用户批准，绝不自动合并）；2) 同步 pi1（ssh git pull + gate.sh 验证）；3) 更新 handoff.md；4) 更新迭代日志。这个流程是强制性的，不是可选的。
-- 环境差异必须验证：PC 上测试通过 ≠ pi1 上能跑。涉及 pi1 的改动必须在 pi1 上实际执行验证，不能只在 PC 上跑测试就声称完成。
+- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支（合并须用户批准，绝不自动合并）；2) 同步生产服务器（ssh git pull + gate.sh 验证）；3) 更新 handoff.md；4) 更新迭代日志。这个流程是强制性的，不是可选的。
+- 环境差异必须验证：PC 上测试通过 ≠ 生产服务器上能跑。涉及生产服务器的改动必须在生产服务器上实际执行验证，不能只在 PC 上跑测试就声称完成。
 - 文档更新是交付物的一部分：交接文档和迭代日志必须与代码同步更新，不能作为可选步骤。
 
 ## 开工与交接
@@ -46,11 +46,11 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 3. `git push origin HEAD`（只推 nightly 分支）
 4. 多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
 
-**绝不**：在本地 main 上 commit、`git push origin main`、自动合并到 main。默认推送到 `nightly/*` 分支；合并须用户批准，合并后同步 pi1 并验证运行（`git pull` + 重启 `stock-dashboard.service` + 确认运行正常）。
+**绝不**：在本地 main 上 commit、`git push origin main`、自动合并到 main。默认推送到 `nightly/*` 分支；合并须用户批准，合并后同步生产服务器并验证运行（`git pull` + 重启 `stock-dashboard.service` + 确认运行正常）。
 
 ## 冒烟测试
 
-改完代码后在 pi1 冒烟（本地环境不全，验证以 pi1 为准；改动先同步到 pi1）：`ssh pi@192.168.50.210 "cd /home/pi/stock-dashboard && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误。
+改完代码后在生产服务器冒烟（本地环境不全，验证以生产服务器为准；改动先同步到生产服务器；目标值见 `deploy.local.md`）：`ssh <生产服务器> "cd <部署目录> && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误。
 
 ## 文档
 

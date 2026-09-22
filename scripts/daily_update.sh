@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 每日收盘后选股更新脚本
 # 用法: ./scripts/daily_update.sh
-# 建议通过 cron 定时执行: 30 15 * * 1-5 /home/debian/stock-dashboard/scripts/daily_update.sh
+# 建议通过 cron 定时执行: 30 15 * * 1-5 <部署目录>/scripts/daily_update.sh
 
 set -e
 cd "$(dirname "$0")/.."

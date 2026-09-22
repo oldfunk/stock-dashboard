@@ -2139,7 +2139,7 @@ dependencies = [
 ]
 ```
 
-- [ ] 在 pi 上安装：`pip install markdown`
+- [ ] 在生产服务器上安装：`pip install markdown`
 
 ### Step 7.4: 改造 index.html
 

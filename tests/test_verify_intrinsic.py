@@ -4,8 +4,9 @@
 import json
 import sys
 from decimal import Decimal
+from pathlib import Path
 
-sys.path.insert(0, '/home/pi/stock-dashboard')
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.verify_intrinsic import (
     exact,

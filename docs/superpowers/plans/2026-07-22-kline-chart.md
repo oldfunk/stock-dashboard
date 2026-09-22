@@ -770,7 +770,7 @@ git commit -m "feat: 单股详情页第10章节填入 klinecharts K线图"
 
 ---
 
-### Task 6: 端到端验证 + 部署 pi
+### Task 6: 端到端验证 + 部署生产服务器
 
 **Files:** 无代码修改，纯验证
 
@@ -779,21 +779,21 @@ git commit -m "feat: 单股详情页第10章节填入 klinecharts K线图"
 Run: `python -m pytest tests/models/test_kline_dao.py tests/collector/test_kline_fetcher.py tests/web/test_routes_kline.py tests/web/test_routes_stock_detail.py -v`
 Expected: All passed
 
-- [ ] **Step 2: 部署到 pi**
+- [ ] **Step 2: 部署到生产服务器**
 
 ```bash
-scp src/models/database.py pi:/home/pi/stock-dashboard/src/models/database.py
-scp src/collector/akshare_fetcher.py pi:/home/pi/stock-dashboard/src/collector/akshare_fetcher.py
-scp src/scheduler.py pi:/home/pi/stock-dashboard/src/scheduler.py
-scp src/web/routes.py pi:/home/pi/stock-dashboard/src/web/routes.py
-scp src/web/templates/stock_detail.html pi:/home/pi/stock-dashboard/src/web/templates/stock_detail.html
-ssh pi "sudo systemctl restart stock-dashboard"
+scp src/models/database.py <生产服务器>:<部署目录>/src/models/database.py
+scp src/collector/akshare_fetcher.py <生产服务器>:<部署目录>/src/collector/akshare_fetcher.py
+scp src/scheduler.py <生产服务器>:<部署目录>/src/scheduler.py
+scp src/web/routes.py <生产服务器>:<部署目录>/src/web/routes.py
+scp src/web/templates/stock_detail.html <生产服务器>:<部署目录>/src/web/templates/stock_detail.html
+ssh <生产服务器> "sudo systemctl restart stock-dashboard"
 ```
 
-- [ ] **Step 3: pi 上手动触发首次 K 线拉取**
+- [ ] **Step 3: 生产服务器上手动触发首次 K 线拉取**
 
 ```bash
-ssh pi "cd /home/pi/stock-dashboard && python -c \"
+ssh <生产服务器> "cd <部署目录> && python -c \"
 from src.models.database import init_database, KlineDAO
 from src.collector.akshare_fetcher import fetch_kline_data
 init_database()
@@ -809,15 +809,15 @@ for code in codes:
 - [ ] **Step 4: 验证 API + 页面**
 
 ```bash
-ssh pi "curl -s http://localhost:9527/api/stock/000792/kline?period=daily | python3 -c 'import sys,json; d=json.load(sys.stdin); print(f\"klines: {len(d[\"klines\"])} 条, 首条: {d[\"klines\"][0] if d[\"klines\"] else None}\")'"
-ssh pi "curl -s -o /dev/null -w '%{http_code}' http://localhost:9527/stock/000792"
+ssh <生产服务器> "curl -s http://localhost:9527/api/stock/000792/kline?period=daily | python3 -c 'import sys,json; d=json.load(sys.stdin); print(f\"klines: {len(d[\"klines\"])} 条, 首条: {d[\"klines\"][0] if d[\"klines\"] else None}\")'"
+ssh <生产服务器> "curl -s -o /dev/null -w '%{http_code}' http://localhost:9527/stock/000792"
 ```
 
 Expected: klines 有数据，页面 200
 
 - [ ] **Step 5: 浏览器验证 K 线渲染**
 
-- 访问 `http://pi:9527/stock/000792`
+- 访问 `http://<生产服务器>:9527/stock/000792`
 - 确认 K 线图区域显示蜡烛图 + 成交量
 - 点击"周K"/"月K"切换
 - 滚轮缩放、十字线拖拽

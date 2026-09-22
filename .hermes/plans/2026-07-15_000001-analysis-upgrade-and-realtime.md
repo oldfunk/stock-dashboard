@@ -94,7 +94,7 @@ if history_summary:
 #!/usr/bin/env bash
 # 周度 AI 分析 cron 脚本（价值投资：周级节奏）
 # 安装：crontab -e
-# 0 16 * * 1 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
+# 0 16 * * 1 <部署目录>/scripts/ai_analysis_cron.sh >> /var/log/stock-dashboard-ai.log 2>&1
 ```
 
 改变：`*/30 16-23 * * 1-5` → `0 16 * * 1`（每周一 16:00）
@@ -106,10 +106,10 @@ if history_summary:
 现有 crontab 条目：
 ```
 # 旧（日级）：
-*/30 16-23 * * 1-5 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh
+*/30 16-23 * * 1-5 <部署目录>/scripts/ai_analysis_cron.sh
 
 # 新（周级）：
-0 16 * * 1 /home/debian/stock-dashboard/scripts/ai_analysis_cron.sh
+0 16 * * 1 <部署目录>/scripts/ai_analysis_cron.sh
 ```
 
 ---
