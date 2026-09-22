@@ -70,10 +70,19 @@ Content-Type: application/json
     "roe_5y_avg": 25.3,
     "gross_margin": 92.0,
     "fcf_5y_sum": 1234.5,
-    "...": "其他 financial_summary 字段"
+    "...": "其他 financial_summary 字段",
+    "data_years": "2016-2026",
+    "roe_5y_count": 5,
+    "list_date": "2001-08-27",
+    "is_st": false,
+    "snapshot_date": "2026-09-19",
+    "analysis_date": "2026-09-21"
   }
 }
-```
+
+> 数据质量键（`data_years`/`roe_5y_count`/`list_date`/`is_st`/`snapshot_date`/`analysis_date`）
+> 建议必传；缺失时服务端按"未知"处理、结论自动降档。面板 `/api/stocks`、
+> `/api/watchlist/{code}/full` 已透传 `data_quality` 块，可直接转发。
 
 **响应**
 
@@ -111,7 +120,8 @@ Content-Type: application/json
 
 | 表 | 写入字段 |
 |---|---|
-| `stock_analysis_history` | run_id, code, name, ai_analysis (JSON), model, created_at |
+| `stock_analysis_history` | stock_code, run_id, score, ai_analysis (JSON), ai_trade_strategy (JSON), model（必填溯源） |
+| `watchlist_notes` | code, note, note_type, model（必填溯源）, created_at |
 | `screening_result` | ai_analysis 回写列 + ai_failed 标记 |
 | `ai_analysis_log` | run_id, code, model, tokens, cost |
 
@@ -168,8 +178,8 @@ pi1 前端: 展示数据与外部 AI 笔记（列表卡片只展示数据，不�
 
 | 文件/目录 | 操作 |
 |---|---|
-| `src/analyzer/ai_analyzer.py` | 移到 `src/analyzer/_legacy/` |
-| `src/analyzer/` 下 FreeModelPool 相关 | 移到 `src/analyzer/_legacy/` |
+| `src/analyzer/ai_analyzer.py` | 保留：pipeline 已停用本地触发，仅手动脚本（retry_ai.py 等）可用；不迁 `_legacy/` |
+| `src/analyzer/` 下 FreeModelPool 相关 | 保留（随上，不再主动轮换） |
 | `scripts/retry_ai.py` | 保留（手动补跑本地分析；外部 AI 上线后改为重试消费方接口） |
 | `scripts/verify_valuation.py` | 保留（不依赖 LLM） |
 | `scripts/verify_intrinsic.py` | 保留（不依赖 LLM） |
@@ -188,5 +198,5 @@ pi1 前端: 展示数据与外部 AI 笔记（列表卡片只展示数据，不�
 1. 外部 AI 服务能接收 `POST /api/analyze` 并返回分析 JSON（`src/ai_proxy/server.py` 为参考实现）
 2. 外部 AI 调接口成功后，`stock_analysis_history` 表有新记录
 3. 外部 AI 笔记写入后，面板投资笔记/钉选股笔记正常展示（列表卡片不内联 AI 分析）
-4. 全仓 pytest 零失败（基线 313+ passed）
-5. 连续 5 个交易日流水线 AI 分析成功率 ≥ 80%
+4. 全仓 pytest 零失败（基线 317 passed，只升不降）
+5. 外部 AI 消费方上线后：连续 5 个交易日流水线 AI 分析成功率 ≥ 80%

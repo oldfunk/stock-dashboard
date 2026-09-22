@@ -76,8 +76,8 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 | `financial_history` | 采集 | 汇总重建/详情页 | 年报明细（摘要+利润+现金流合并） |
 | `financial_summary` | 重建 | 筛选/详情页 | 5y/10y 均值（ROE/毛利/FCF/ROIC…） |
 | `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写列 |
-| `stock_analysis_history` | 外部 AI | 时间线/复盘 | 每次 AI 分析快照 |
-| `ai_analysis_log` | 外部 AI | 成本统计 | token 用量 |
+| `stock_analysis_history` | 外部 AI（消费方待排期，现无写入） | 时间线/复盘 | 每次 AI 分析快照 |
+| `ai_analysis_log` | 外部 AI（消费方待排期，现无写入） | 成本统计 | token 用量 |
 | `ai_watchlist` | 周复盘 | 首页 | 当前 5 只池股 |
 | `ai_watchlist_history` | 周复盘 | 变更追踪 | 每次调仓记录 |
 | `ai_journal` | 周复盘 | 笔记页 | 复盘纪要 |

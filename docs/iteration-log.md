@@ -17,6 +17,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
 - gate 基线：317 passed（2026-09-21 pi1 实测全绿）。
+- 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
 ## 目标与发展框架（2026-09-04 设立）
@@ -162,7 +163,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 ## 变更记录（Changelog）
 
 ### 2026-09-21（合并部署 nightly/20260921b：分析师整改 T1–T4 上线，pi1 重启验证全绿）
-- 合并：`nightly/20260921b`（8 commits）fast-forward 入 main（`303462b`），经 pi1 中继推送。
+- 合并：`nightly/20260921b`（8 commits）fast-forward 入 main（`0cfa3b4` 含记账收尾），经 pi1 中继推送。
 - 部署：pi1 备份 DB（`stock_dashboard.db.bak0921b`）→ pull → restart（analyzer/routes/schema 运行时变更）→ 服务 active。
 - 验证：生产 gate **328 passed**；`/`、`/api/status`、`/journal` 全 200；当日流水线 completed 未受影响。
 - 用词修正：backlog 中的"校准看板"改称"收益校准追踪"（BUY/HOLD/AVOID 后续表现追踪，与 Hermes kanban 无关；kanban 已按用户要求清零）。
@@ -193,7 +194,7 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 - 改了什么（分支 nightly/20260921）：
   1. 模板：`_stock_list.html` / `_watchlist_card.html` 移除全部 AI 内联块（信号徽标/模型徽标/失败徽标/护城河摘要/AI Tab/交易网格/指引/历史时间线）+ 死 CSS；`index.html` 删 5 个死 JS 函数 + AI/历史死 CSS；顺手修观察池监控标签 🔔 emoji 违规（→ 文本"监控 →"）。
   2. 调度/路由：scheduler 停本地 AI 自动触发（方法保留供手动）、删纸盘残留方法；routes 删 ~120 行注释尸体（并修正撒谎的 `_detect_pool_drift 已移除` 注释，B5 逻辑 live 完好）、删 500 坏死的 `/candidates` 路由 + `candidates.html` + 空 `tests/paper/`；index() 观察池 enrichment 去 AI 字段（数据 API `/api/watchlist/{code}/full` 不动，外部 AI 照常用）。
-  3. 去 Hermes 化：`src/hermes_proxy/` → `src/ai_proxy/`（+tests/config/两份代理文档改名与通用化，Hermes 注明为作者实例）；`hermes` CLI/cron/kanban 系 Hermes 平台专名，保留。
+  3. 去 Hermes 化：`src/hermes_proxy/` → `src/ai_proxy/`（+tests/config/两份代理文档改名与通用化，Hermes 注明为作者实例）；`hermes` CLI/cron 系 Hermes 平台专名，保留；kanban 表述已于同日后续提交清零。
   4. 文档：README 按现状重写过时段（AI 配置/流水线/结构树/脚本表/技术栈/基线 317）；基线统一 317（architecture/roadmap）；`_legacy` 虚构表述修正；账本"当前真实状态"重写；handoff 重写；architecture 模块边界 + AI 段通用化；AGENTS 代理文档链接 + 格式范本；setup-cron 注明运行位置；`.env.example` 重写；`docs/reports/` 新建（报告 gitignore）。
 - 验证：新不变量单测（两 partial 全量 AI 输入零泄漏 + 数据都在）；pi1 worktree 全仓 **317 passed** 零回归；py_compile 全过；服务未重启（展示/注释/死码变更，下次 deploy 顺带生效）。
 - 待办：外部 AI 消费方排期（取数/写回接线）；P1 面板深化；周六复盘 LLM 决议同样依赖死通道（失败整轮跳过，现状已如实记账）。

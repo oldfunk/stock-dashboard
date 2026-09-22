@@ -3,20 +3,19 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-21 nightly/20260921b 已合已部署）
-- 分支：`main` = `303462b`（ff 合并 8 commits）；远端 `nightly/20260921b` 待删；pi1 已 pull + restart + 验证
+## 最后状态（2026-09-21 nightly/20260921b 已合已部署，记账收尾完成）
+- 分支：`main` = `0cfa3b4`；远端 `nightly/20260921b` 已删；pi1 已 pull + restart + 验证
 - 上线：数据质量标注 / 估值自选 / 纪律软化 / 复盘跨期 / 纸盘 schema 删除 / 笔记 model 列 / 去 kanban
 - 验证：生产 gate **328 passed**；三端点 200；DB 备份 `stock_dashboard.db.bak0921b`
 - 用词：backlog"收益校准追踪"（与 Hermes kanban 无关，kanban 已清零）；外部 AI 不绑定实现
 
 ## 下一步方向
-1. 删远端 `nightly/20260921b`（已合，无残留）
-2. 外部 AI 消费方排期（取数/写回接线）
-3. P1 面板深化；收益校准追踪待排期（无成功样本）
+1. 外部 AI 消费方排期（取数/写回接线）
+2. P1 面板深化；收益校准追踪待排期（无成功样本）
 
 ## 已知隐患
 - 本地 Zen/Pollinations 双通道已死；周六复盘 LLM 决议同命（失败整轮跳过）
-- AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）
+- AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
 - 本机 Windows 沙箱拦截 loopback，TestClient HTTP 用例本地跑不动，须 pi1 验证
 
 ## 历史交接区（追加，不删）
