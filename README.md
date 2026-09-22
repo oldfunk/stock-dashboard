@@ -109,6 +109,7 @@ stock-dashboard/
 │   ├── roadmap.md              # 总路线（P1 面板深化 → P2 体验优化）
 │   ├── iteration-log.md        # 迭代进程账
 │   ├── handoff.md              # 班次交接速览
+│   ├── agent-api.md            # 外部 Agent 接入指南（读数据/写分析/写笔记）
 │   ├── ai-proxy-ai-analysis.md # 外部 AI 代理开发规范
 │   ├── ai-proxy-analysis-report.md # 外部 AI 代理分析报告（历史）
 │   ├── scheduled-tasks.md      # 定时任务配置

@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在 pi1（192.168.50.210）的 systemd `
 
 ## 变更记录（Changelog）
 
+### 2026-09-22（外部 Agent 接入指南）
+- 新增 `docs/agent-api.md`：通用外部 agent 接入文档——连接约定（局域网/无鉴权/6位代码/错误格式）、读端点全表、写分析双通道（`POST .../notes` 笔记 + `POST .../thesis` 论文 upsert）、钉选/监控/触发更新、典型 curl 工作流、溯源与写回红线。内容逐条对照 `src/web/routes.py` 真实路由，非凭印象。README 目录树挂链接。
+- 验证：本地 `hermes verify --skip-start` bootstrap + test 全过；纯文档变更，无代码改动。
+- 关联：handoff「下一步方向 #1 外部 AI 消费方排期」的接入侧交付，消费方（Hermes/OpenCode）按此文档即可连入读写。
+
 ### 2026-09-22（ABC 方案：能力内化 + 解绑上游）
 - **A 能力补齐**：`ANALYSIS_PROMPT` 新增反面检验/偏见自问（规则12）+ thesis 结构（论点/假设/红线/卖出条件，规则13）；新增 `watchlist_thesis` 表 + `WatchlistThesisDAO`（upsert/get/get_many/apply_updates）+ `GET/POST /api/watchlist/{code}/thesis` + `/full` 返回 `thesis`；`_save_analysis` 落库论文，复盘 prompt 注入论文与假设状态、输出 `thesis_updates` 写回；复盘 prompt 加周度三问（空仓买入/停牌5年/论文完整复述）；双源误差标记（`_attach_batch_context` 市值/PE 两源验算 → `_data_quality_facts/text` 标注给 AI）。
 - **B 架构固化**：`docs/architecture.md` 新增 §7 方法论与内化避坑（漏斗/闸门口径分离 + 8 条避坑硬约束 + 内化能力清单）。
