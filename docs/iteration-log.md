@@ -15,7 +15,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - AI 现状：本地 Zen/Pollinations 双通道 9/07 起相继不可用；通用代理协议 `src/ai_proxy/` 已实现，外部 AI 消费方（取数/写回）待排期；周六复盘硬规则本地可跑，LLM 决议失败时整轮跳过。
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
-- `deep_research` 表：已建但**当前未使用**（历史遗留，勿依赖）。
+- `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
 - gate 基线：367 passed（2026-09-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
@@ -162,13 +162,18 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-23（deep_research 废表删除，用户批准，nightly/20260923b 已合）
+- **执行**（用户原话"脏数据别留了"）：生产 DB 删表前全仓 grep 确认零代码引用 → 5 行 JSON 备份（`data/backup/deep_research_backup_20260923.json`）→ 断言 5 行 → `DROP TABLE deep_research` → 验证 `sqlite_master` 已无此表。实际 5 行为格力/五粮液/茅台/伊利/海天（08-29 条目记的"平安/招商"有误，以本次实测为准）。
+- **文档**：账本现行状态行 + 收尾条目 + backlog 相关行更新为已删；`architecture.md` 注册表该行改为已删除勿重建；handoff 下一步③勾除 + 历史区追加。
+- **验证**：删表前后服务未重启（纯数据操作，无代码变更）；生产 `gate.sh` 367 passed；HTTP 200。备份文件留存生产 `data/backup/`，可恢复。
+
 ### 2026-09-23（维护模式收尾：停止投入，保采集+选股，AI 接口保留，nightly/20260923a 已合）
 - **用户指令**：项目停止投入、不再深入开发；pi 保留每日采集 + 算法选股；AI 不再投入但保留数据接口供日后自助分析；收尾。
 - **AI 零触发审计**（结论：无任何自动 AI 调用，可无人值守）：scheduler AI 调用已注释（`src/scheduler.py:236`，函数体留 dead code 未删）；日流水线走 `orchestrator.run_daily_pipeline`（无 AI 步骤）；`run_pipeline` 步骤 6 只手动触发；pi 无 crontab、无 systemd 定时任务；`.env` 无 Key；Zen/Pollinations 双通道已死——零花钱、零限流风险。
 - **今日生产实证**：`20260923_153008` completed（15:30:08→16:16:15，5527→20，analyzed=0）；screening 当日 20 行；快照今日回写 719 行（候选池+钉选补录；其余行保留历史日期 = 既有滚动记录设计）；sector 487/719；首页行业均值 17 行（S8 调度内自动回填生效）。
 - **备份清理**（生产 `data/`，gitignored，不影响代码）：`data/db` 删 4 个陈年 .bak（留最新 2 个），280M→122M；`data/backup` 删 Sep 4-5 实验快照 8 个（323M，前 sector-schema 时代）；合计释放约 480M；磁盘 26%→25%（42G 空闲）。`data/logs` 轮转 bounded 不动；DB 42M 日增数千行，空间以年计充足。
 - **文档冻结**：handoff 三段重写（维护模式）+ 历史区追加；本账 P2 余项标不再开发；roadmap 挂维护横幅 + P2 归档。基线 367 冻结（后续无代码，gate 仅动代码时重跑）。
-- **用户保留决策**：`deep_research` 废表（5 行，无代码引用）是否 drop——留着无害，未动。
+- **用户保留决策已执行**：`deep_research` 废表已删（2026-09-23 用户批准"脏数据别留"；5 行：格力/五粮液/茅台/伊利/海天，备份生产 `data/backup/deep_research_backup_20260923.json`；删前全仓 grep 零代码引用）。注：08-31 条目曾记"验证表不存在"系误记，表一直在，今日才真删。
 - **验证**：收尾分支 tip 生产 worktree/部署目录 `gate.sh` 367 passed；三扫描全绿；合并后 pull + HTTP 200（纯文档变更不重启）。
 
 ### 2026-09-23（合并部署 nightly/20260922e：P0-2 修复上线，生产同步完成）
