@@ -61,9 +61,10 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 5. [x] **分析摘要前置**（2026-09-15 完成，`6256d58`，在 nightly/20260914 待合）：`_enrich_stocks()` 解析 `ai_analysis` JSON 提取 `moat_evaluation[0].type` / `management_score` / `intrinsic_value`，写入 `s['moat_type']` / `s['mgmt_score']` / `s['iv_range']`（NULL/异形行守卫为 None，有值才渲染）；候选卡新增摘要块；回归测试 4 例。注：2026-09-13 nightly 与 08-30 条目曾记一次前置，本次为合并冲突后存量丢失的重做，以本次为准。
 6. [x] **操作指引强化**（2026-09-15 完成，`4495b9c`，在 nightly/20260914 待合）：交易 Tab 在 trade-grid 下方新增 trade-guide 动态行，按 `trade_parsed.signal`（大小写归一）生成一句话指引（BUY 含置信度/目标价/止损、HOLD、AVOID），无 trade_parsed 不显示；Jinja 五用例渲染验证 5/5。
 
-**P2 — 可选（C3 或上游跟踪）**
-7. C3 AI 引用数字抽检（P2，可选）：仿 report_audit，抽样正文数字 vs 库交叉验证，记 `actions_summary.numeric_mismatch`，warn-only。
-8. 上游跟踪：每月初检查上游 skills/tools/ 有无新增 commit。
+**P2 — 可选（C3 或上游跟踪）**〔2026-09-23 维护模式：不再开发〕
+7. ~~C3 AI 引用数字抽检~~（已取消，见 C3 注记）。
+8. ~~上游跟踪~~（已取消：上游已解绑）。
+9. ~~P2 体验优化 ⑤⑥⑦⑧~~（2026-09-23 停止投入，不再开发，roadmap 已归档）。
 
 ### 周六 live 验证（B6/B7）
 - B6（监控池状态机）和 B7（周报模板）prompt 已就位，本周六复盘自动触发。
@@ -160,6 +161,15 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-23（维护模式收尾：停止投入，保采集+选股，AI 接口保留，nightly/20260923a 已合）
+- **用户指令**：项目停止投入、不再深入开发；pi 保留每日采集 + 算法选股；AI 不再投入但保留数据接口供日后自助分析；收尾。
+- **AI 零触发审计**（结论：无任何自动 AI 调用，可无人值守）：scheduler AI 调用已注释（`src/scheduler.py:236`，函数体留 dead code 未删）；日流水线走 `orchestrator.run_daily_pipeline`（无 AI 步骤）；`run_pipeline` 步骤 6 只手动触发；pi 无 crontab、无 systemd 定时任务；`.env` 无 Key；Zen/Pollinations 双通道已死——零花钱、零限流风险。
+- **今日生产实证**：`20260923_153008` completed（15:30:08→16:16:15，5527→20，analyzed=0）；screening 当日 20 行；快照今日回写 719 行（候选池+钉选补录；其余行保留历史日期 = 既有滚动记录设计）；sector 487/719；首页行业均值 17 行（S8 调度内自动回填生效）。
+- **备份清理**（生产 `data/`，gitignored，不影响代码）：`data/db` 删 4 个陈年 .bak（留最新 2 个），280M→122M；`data/backup` 删 Sep 4-5 实验快照 8 个（323M，前 sector-schema 时代）；合计释放约 480M；磁盘 26%→25%（42G 空闲）。`data/logs` 轮转 bounded 不动；DB 42M 日增数千行，空间以年计充足。
+- **文档冻结**：handoff 三段重写（维护模式）+ 历史区追加；本账 P2 余项标不再开发；roadmap 挂维护横幅 + P2 归档。基线 367 冻结（后续无代码，gate 仅动代码时重跑）。
+- **用户保留决策**：`deep_research` 废表（5 行，无代码引用）是否 drop——留着无害，未动。
+- **验证**：收尾分支 tip 生产 worktree/部署目录 `gate.sh` 367 passed；三扫描全绿；合并后 pull + HTTP 200（纯文档变更不重启）。
 
 ### 2026-09-23（合并部署 nightly/20260922e：P0-2 修复上线，生产同步完成）
 - **合并**（用户批准「靠你把关」后执行）：`nightly/20260922e`（2 提交：P0-2 修复 `453dfdf` + 收尾 docs `c6175d1`）ff 入 main（= `c6175d1`）；合并前审计 `origin/main..HEAD` 恰 2 提交；远端/本地分支已删，远端仅 main + archive。

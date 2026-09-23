@@ -3,26 +3,31 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-23 P0-2 修复已合已同步；main=c6175d1；暂无待合代码）
-- **0922e 已合并部署**：`nightly/20260922e`（P0-2 修复 + 收尾 docs，2 提交）ff 入 main = `c6175d1`（审计 `origin/main..HEAD` 恰 2 提交），远端/本地分支已删，远端仅 main + archive；生产同步 = git pull → 部署目录 gate **367 passed / 29.71s** → 重启 `stock-dashboard.service`（active，ROOT/API/JOURNAL 全 200，自重启点起日志 0 Traceback）
-- **P0-2 已生效**：验算闸双源缺数 exit 2 不谎报 + `reported` 键 + prompt 双源三态（含 findings 透传）；sector 此后随每日 15:30 流水线自动回填（420s 护栏 + 磁盘缓存兜底）
-- **基线 367 与 main 一致**（worktree gate 367 + 部署目录 gate 367 双实证）；本次为纯合并无新代码，三扫描沿用上个分支结果（ast / 新增行 emoji 0 / 身份 0）
-- 本次收尾 docs 在 `nightly/20260923a`（纯文档，无代码）待合
+## 最后状态（2026-09-23 维护模式收尾已合：停止投入，保采集+选股，AI 接口保留）
+- **项目冻结**：2026-09-23 用户指令停止投入、不再深入开发；日常只保留 pi 每日采集 + 算法选股；AI 分析不再投入，数据接口保留供日后外部 AI 自助分析
+- **收尾分支 `nightly/20260923a` 已合入 main**：AI 零触发审计 + 备份清理 + 文档冻结（handoff/账本/roadmap 维护模式），纯文档零代码；远端仅 main + archive
+- **在跑什么**：`stock-dashboard.service`（enabled，掉电自启）→ 内置调度器：交易日 15:30 `orchestrator.run_daily_pipeline`（采集+筛选+验算闸+S8 回填，不含 AI）+ 每 30min 大盘 + 交易时段每 5min 行情 + 周六本地复盘（规则部分；LLM 决议因通道死自动跳过）
+- **今日实证（2026-09-23）**：`20260923_153008` completed（15:30:08→16:16:15，5527→20，analyzed=0）；screening 当日 20 行；快照今日回写 719 行（候选池+钉选补录；其余行保留历史日期，既有滚动记录设计）；sector 487/719；首页行业均值 17 行（S8 调度内自动回填生效）
+- **AI 零触发六保险**：scheduler AI 调用已注释（`src/scheduler.py:236`，函数体留 dead code 未删）+ 日流水线走 orchestrator（无 AI 步骤）+ `run_pipeline` 步骤 6 只手动触发 + pi 无 crontab/systemd 定时任务 + `.env` 无 Key + 双通道本来就已死——零花钱、零限流风险，可无人值守
+- **AI 数据接口（保留，gate 覆盖）**：`GET /api/stocks` 当日候选全量、`GET /api/watchlist/{code}/full` 钉选一站式、`GET /api/search`、`GET /api/journal/*`、`GET /api/*/kline` 等（全表见 `docs/agent-api.md`）；外部 AI 自助拉数 + POST 写回分析/笔记/论文；手动脚本 `scripts/run_ai_analysis.py`、`retry_ai.py` 保留（通道死，需自备可用模型才跑得动）
+- **磁盘**：59G 卡用 25%（42G 空闲）；`data/db` 280M→122M（删 4 个陈年 .bak，留最新 2 个）；`data/backup` Sep 4-5 实验快照 8 个（323M，前 sector-schema 时代、恢复无用）已清；合计释放约 480M；`data/logs` 轮转 bounded（8.8M）；journal 4.3M；DB 42M 日增数千行，空间以年计充足
+- **基线 367 = main 现状**（冻结；后续无代码，gate 仅在动代码时重跑）
 
-## 下一步方向
-1. P2 体验优化 ⑤⑥⑦⑧（详情页上下只切换 / 财务红绿高亮 / 移动端适配 / 搜索按 PE·ROE·市值排序）——本项目唯一剩余排期面，做哪个由用户点单
-2. 本次收尾 docs（`nightly/20260923a`，纯文档）可与下次改动一起合或单独合——无代码，不影响运行
-3. 外部接入闭环、周六（09-26）复盘执行与决议、盯盘调度制度——使用者与外部 AI 自行发起，本项目不排期（接口 `docs/agent-api.md`、调度参考 `docs/scheduled-tasks.md` 已就绪）
+## 下一步方向（无开发任务；只剩看护）
+1. 看护（偶发）：服务 `active`？→ 本机 curl `/api/status`；今日 15:30 跑了？→ 查 `run_log` 最新行 / 首页候选日期；磁盘 → `df -h`（<80% 不理）
+2. 日后想恢复 AI 分析：自备可用 LLM（配 `.env`/config）→ 手动 `run_ai_analysis.py` 或外部 agent 按 `docs/agent-api.md` 自助；本地通道（Zen/Pollinations）已死别试
+3. 用户保留决策：`deep_research` 废表（5 行，无代码引用）是否 drop——留着无害，未动
 
-## 已知隐患
-- S8 覆盖口径（live 定数）：新浪 49 板块映射 2999 只，生产回填 2594/5527 行（47%）——缺口为板块名单未收录的新股 + `其它行业` 家数元数据陈旧 31 只；未映射行 sector 保持 NULL、行业均值 WHERE 过滤——已知限制非 bug
-- S8 上游不稳已实证：名单接口约 11s 慢响应、裸 curl 15s 超时（RC28）、背靠背连打被拖慢——0.6s 节奏 / 420s 护栏 / 磁盘缓存三级兜底已挂；新浪整体不可用时，缓存耗尽后回填自动跳过（不清旧值、不阻断流水线）
-- 重启验证时序：uvicorn 从 restart 到 `Application startup complete` 约 8s（scheduler 初始化），sleep 3 首检会 000——属正常启动时序非故障，验证等待须 ≥10s（2026-09-23 实证）
-- 本地 Zen/Pollinations 双通道已死；本地复盘 LLM 决议不可用（复盘决议按新分工归外部 AI 负责）
-- AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
-- `watchlist_thesis` 表为新表（init_database 自动建），生产服务器首次写入前未做 live 端到端验证（单测全过）
+## 已知隐患（冻结前状态，原样保留）
+- S8 覆盖约 47%（新浪 2999 只 ∩ 快照 5527 行 = 2594；今日子集 487/719）——未收录新股 sector NULL，均值 WHERE 过滤；非 bug
+- 快照表为滚动记录（每日仅回写候选池+钉选补录约 700 行，其余行日期旧）——既有设计；筛选扫描以当日流水线为准
+- 上游不稳（新浪 11s 慢响应/curl RC28/背靠背拖慢）——0.6s 节奏+420s 护栏+缓存兜底；全挂则跳过不清旧值
+- AKShare S4/S5 永久挂（C2.5 兜底）；82 只小盘无 roic/fcf（东财无数据）
+- `watchlist_thesis` 从未 live 端到端验证（单测过）；外部 AI 写回前建议先手动 POST 验证
+- 重启验证等待 ≥10s（uvicorn 启动约 8s，sleep 3 首检 000 系正常时序）
 
 ## 历史交接区（追加，不删）
+- 2026-09-23 维护模式收尾已合（nightly/20260923a → main：AI 零触发审计 + 备份清理约 480M + 文档冻结；停止投入，转维护模式）
 - 2026-09-23 P0-2 修复已合已同步（nightly/20260922e → main=c6175d1：生产 gate 367 + 重启三路 200；用户授权由 agent 把关合并）
 - 2026-09-22 四项拍板落地已合已同步（nightly/20260922d → main=1f0427c：生产 gate 360 + 重启 200 + sector 回填 2594 行 + 页面 16 行行业均值；同日 0922c/0922d 双合）
 - 2026-09-22 四项拍板落地待合（nightly/20260922d：残留④ + 测试规则落档 + S8 新浪行业回填，生产 worktree gate 360 + live 2999 只映射 + 缓存落盘；同日 0922c 已合入 main=2f0384e）
