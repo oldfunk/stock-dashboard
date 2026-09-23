@@ -161,6 +161,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-23（合并部署 nightly/20260922e：P0-2 修复上线，生产同步完成）
+- **合并**（用户批准「靠你把关」后执行）：`nightly/20260922e`（2 提交：P0-2 修复 `453dfdf` + 收尾 docs `c6175d1`）ff 入 main（= `c6175d1`）；合并前审计 `origin/main..HEAD` 恰 2 提交；远端/本地分支已删，远端仅 main + archive。
+- **部署**：生产服务器 git pull → 部署目录 `gate.sh` **367 passed / 29.71s / Gate passed** → 重启 `stock-dashboard.service`（验算闸/分析 prompt 改动需重启生效）→ active，ROOT/API/JOURNAL 全 200，自重启点起日志 0 Traceback。
+- **时序备注**：重启后 sleep 3 首检 ROOT 000——查日志系 uvicorn 启动中（scheduler 初始化，`Application startup complete` 约 8s），非故障；等待 10s 重试 200 + 端口 LISTEN 确认。以后重启验证等待须 ≥10s（已记入 handoff 已知隐患）。
+- **状态**：已合已同步；基线 367 与 main 一致；本次收尾 docs 入 `nightly/20260923a`（纯文档）待合。
+
 ### 2026-09-22（P0-2 修复：验算闸双源缺数不谎报，nightly/20260922e 待合）
 - **背景**（同日评审 P0-2，用户批准「p0-2修复」后实施）：双源都缺数据时验算恒 SKIP，prompt 却因 `elif` 分支渲染「双源验算通过」谎报成功；`verify_market_cap` 缺 `reported` 键致 prompt 渲染「快照None亿」；跳过原因（findings）不进 prompt，AI 把缺失字段当精确值引用。
 - **改了什么**：① `verify_market_cap` 三个返回分支补 `reported`（快照市值，供 prompt 渲染真实对照值）；② `verify_run` summary 加 `verified`（= pass+warn+fail，真实完成交叉验算的样本数）+ 全 SKIP 警告日志，CLI `main()` 全缺数 **exit 2**（fail>0 仍 exit 1、正常 exit 0——绝不以零失败冒充成功）；③ `_data_quality_text` 双源块三态重写：任一 WARN/FAIL → 明细行（带真实快照值）；**双全 SKIP → 「双源验算未执行（原因）——这不是通过，关键结论按缺数据降档」**；有验算项通过 → 「通过」+ 附跳过项原因（findings 透传）。

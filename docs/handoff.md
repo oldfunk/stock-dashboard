@@ -3,26 +3,27 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-22 四项拍板全部落地：0922d 已合已同步 + sector 回填 live 实证；P0-2 修复入 0922e 待合）
-- **0922d 已合并部署**：`nightly/20260922d`（残留④ + 测试规则 + S8 sector 回填 + 收尾 docs，4 提交）ff 入 main = `1f0427c`，远端/本地分支已删；生产同步 = git pull → 部署目录 gate 360 passed → 重启 `stock-dashboard.service`（active，ROOT/API/JOURNAL 全 200，日志 0 Traceback）
-- **sector 回填 live 实证（生产手动触发完整链路，等效 orchestrator 挂载点）**：`fetch_sector_map()` 真实新浪 92.3s 取 **2999 只**映射 → `backfill_sectors()` 回填 **2594 行**（DB total 5527；映射−回填差值 = 新浪收录但不在快照全集的代码）→ 最新快照日 Top 板块 金融40/机械33/生物制药30 → 首页 `行业均值` 渲染 **16 行**（此前 0）——板块归属→行业均值→卡片展示闭环打通
-- **P0-2 修复完成（`nightly/20260922e` = `453dfdf` + 本收尾 docs，待合）**：① `verify_market_cap` 三分支补 `reported` 键（prompt 曾渲染「快照None亿」）② `verify_run` 加 `verified` 计数 + 全 SKIP 警告日志，CLI 全缺数 **exit 2**（不再以零失败冒充成功）③ prompt 双源块三态重写（全 SKIP 如实报「验算未执行/这不是通过」+ 跳过原因 findings 透传；部分跳过附原因；WARN/FAIL 明细带真实快照值）+ 7 单测
-- 验证（生产服务器 worktree，按测试规则）：`gate.sh` **367 passed / Gate passed / 40.16s**（360 + 7；期间 gate 抓到测试内 SQL 用 `None` 的真 bug，改 `NULL` 后复跑全绿）；三扫描全绿（ast / 新增行 emoji 0 / 身份 0）
-- 合并 0922e 后同步生产：git pull + gate + **重启服务**（验算闸/分析 prompt 改动需重启生效）；sector 此后随每日 15:30 流水线自动回填（缓存兜底）
+## 最后状态（2026-09-23 P0-2 修复已合已同步；main=c6175d1；暂无待合代码）
+- **0922e 已合并部署**：`nightly/20260922e`（P0-2 修复 + 收尾 docs，2 提交）ff 入 main = `c6175d1`（审计 `origin/main..HEAD` 恰 2 提交），远端/本地分支已删，远端仅 main + archive；生产同步 = git pull → 部署目录 gate **367 passed / 29.71s** → 重启 `stock-dashboard.service`（active，ROOT/API/JOURNAL 全 200，自重启点起日志 0 Traceback）
+- **P0-2 已生效**：验算闸双源缺数 exit 2 不谎报 + `reported` 键 + prompt 双源三态（含 findings 透传）；sector 此后随每日 15:30 流水线自动回填（420s 护栏 + 磁盘缓存兜底）
+- **基线 367 与 main 一致**（worktree gate 367 + 部署目录 gate 367 双实证）；本次为纯合并无新代码，三扫描沿用上个分支结果（ast / 新增行 emoji 0 / 身份 0）
+- 本次收尾 docs 在 `nightly/20260923a`（纯文档，无代码）待合
 
 ## 下一步方向
-1. 等用户批准合并 `nightly/20260922e`（P0-2 修复）→ git pull + 重启 `stock-dashboard.service` + gate 验证
-2. P2 体验优化 ⑤⑥⑦⑧（详情页上下只切换 / 财务红绿高亮 / 移动端适配 / 搜索按 PE·ROE·市值排序）——本项目唯一剩余排期面，做哪个由用户点单
+1. P2 体验优化 ⑤⑥⑦⑧（详情页上下只切换 / 财务红绿高亮 / 移动端适配 / 搜索按 PE·ROE·市值排序）——本项目唯一剩余排期面，做哪个由用户点单
+2. 本次收尾 docs（`nightly/20260923a`，纯文档）可与下次改动一起合或单独合——无代码，不影响运行
 3. 外部接入闭环、周六（09-26）复盘执行与决议、盯盘调度制度——使用者与外部 AI 自行发起，本项目不排期（接口 `docs/agent-api.md`、调度参考 `docs/scheduled-tasks.md` 已就绪）
 
 ## 已知隐患
 - S8 覆盖口径（live 定数）：新浪 49 板块映射 2999 只，生产回填 2594/5527 行（47%）——缺口为板块名单未收录的新股 + `其它行业` 家数元数据陈旧 31 只；未映射行 sector 保持 NULL、行业均值 WHERE 过滤——已知限制非 bug
 - S8 上游不稳已实证：名单接口约 11s 慢响应、裸 curl 15s 超时（RC28）、背靠背连打被拖慢——0.6s 节奏 / 420s 护栏 / 磁盘缓存三级兜底已挂；新浪整体不可用时，缓存耗尽后回填自动跳过（不清旧值、不阻断流水线）
+- 重启验证时序：uvicorn 从 restart 到 `Application startup complete` 约 8s（scheduler 初始化），sleep 3 首检会 000——属正常启动时序非故障，验证等待须 ≥10s（2026-09-23 实证）
 - 本地 Zen/Pollinations 双通道已死；本地复盘 LLM 决议不可用（复盘决议按新分工归外部 AI 负责）
 - AKShare 利润表/现金流 API 永久挂（S4/S5 标"已挂"，C2.5 兜底）；82 只小盘股无 roic/fcf（东财无数据，非 bug）
 - `watchlist_thesis` 表为新表（init_database 自动建），生产服务器首次写入前未做 live 端到端验证（单测全过）
 
 ## 历史交接区（追加，不删）
+- 2026-09-23 P0-2 修复已合已同步（nightly/20260922e → main=c6175d1：生产 gate 367 + 重启三路 200；用户授权由 agent 把关合并）
 - 2026-09-22 四项拍板落地已合已同步（nightly/20260922d → main=1f0427c：生产 gate 360 + 重启 200 + sector 回填 2594 行 + 页面 16 行行业均值；同日 0922c/0922d 双合）
 - 2026-09-22 四项拍板落地待合（nightly/20260922d：残留④ + 测试规则落档 + S8 新浪行业回填，生产 worktree gate 360 + live 2999 只映射 + 缓存落盘；同日 0922c 已合入 main=2f0384e）
 - 2026-09-22 开发者身份清除待合（nightly/20260922c：23 文件占位符化 + deploy.local.md 本地化，本地与生产 worktree gate 均 348，身份扫描 0 命中）
