@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模拟交易 - {{ page_title }}</title>
+    <style>
+        :root {
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --green: #137333;
+            --red: #c5221f;
+            --gold: #b06000;
+            --divider: #e0e3e7;
+            --radius: 8px;
+            --font-sans: 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); }
+        .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--divider); }
+        .header h1 { font-size: 18px; margin: 0; }
+        .nav-link { color: var(--accent); text-decoration: none; font-size: 14px; margin-left: 16px; }
+        .wrap { max-width: 960px; margin: 0 auto; padding: 20px; }
+        .card { background: var(--bg-secondary); border: 1px solid var(--divider); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+        .card h2 { font-size: 16px; margin: 0 0 12px 0; }
+        .card p.hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px 0; }
+        .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+        label { font-size: 14px; min-width: 72px; color: var(--text-secondary); }
+        input[type=text], input[type=number], input[type=date], select, textarea { font-size: 14px; padding: 7px 10px; border: 1px solid var(--divider); border-radius: var(--radius); background: #fff; color: var(--text-primary); }
+        input.short { width: 110px; }
+        textarea.grow { flex: 1; min-width: 220px; font-family: var(--font-mono); font-size: 13px; }
+        button { font-size: 14px; padding: 7px 16px; border-radius: var(--radius); border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+        button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        button.primary:hover { background: var(--accent-hover); }
+        button:disabled { opacity: 0.5; cursor: default; }
+        .msg { font-size: 14px; margin-top: 8px; min-height: 20px; }
+        .msg.ok { color: var(--green); }
+        .msg.err { color: var(--red); }
+        .sum-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
+        .sum-cell { background: var(--bg-primary); border-radius: var(--radius); padding: 10px; }
+        .sum-cell .k { font-size: 12px; color: var(--text-secondary); }
+        .sum-cell .v { font-size: 18px; font-weight: 600; }
+        .sum-cell .v.up { color: var(--red); }
+        .sum-cell .v.down { color: var(--green); }
+        table.bt { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+        table.bt th, table.bt td { border-bottom: 1px solid var(--divider); padding: 6px 8px; text-align: left; }
+        table.bt td.num { font-family: var(--font-mono); text-align: right; }
+        .mono { font-family: var(--font-mono); font-size: 13px; }
+        .empty { padding: 24px; text-align: center; color: var(--text-secondary); font-size: 14px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>模拟交易</h1>
+        <div>
+            <a href="/" class="nav-link">首页</a>
+            <a href="/llm" class="nav-link">模型设置</a>
+        </div>
+    </header>
+    <div class="wrap">
+        <div class="card">
+            <h2>回测控制</h2>
+            <p class="hint" id="universeNote">标的池加载中…（默认=最新候选 Top20 + 钉选；K 线覆盖外自动跳过并明示）</p>
+            <div class="row">
+                <label>策略</label>
+                <select id="strategySel">
+                    <option value="ma">MA 均线（移植）</option>
+                    <option value="value">价值轮动（自研 TopN 等权）</option>
+                </select>
+                <label>资金</label>
+                <input type="number" id="cashInput" class="short" value="100000" min="1000" step="10000">
+            </div>
+            <div class="row">
+                <label>区间</label>
+                <input type="date" id="startInput" value="2026-06-01">
+                <span>至</span>
+                <input type="date" id="endInput" value="2026-09-25">
+            </div>
+            <div class="row">
+                <label>自定义代码</label>
+                <textarea id="codesInput" class="grow" rows="2" placeholder="留空用默认池；填 6 位代码，空格/换行分隔，最多50只"></textarea>
+            </div>
+            <div class="row">
+                <label>MA 参数</label>
+                <input type="number" id="shortInput" class="short" value="5" min="2" title="短窗口">
+                <input type="number" id="longInput" class="short" value="20" min="3" title="长窗口">
+                <input type="number" id="buyVolInput" class="short" value="100" step="100" min="100" title="买入股数">
+            </div>
+            <div class="row">
+                <label>价值参数</label>
+                <input type="number" id="topNInput" class="short" value="10" min="1" max="50" title="TopN">
+                <input type="number" id="dropInput" class="short" value="15" min="1" max="50" title="跌出 TopM 即卖">
+            </div>
+            <div class="row">
+                <button id="runBtn" class="primary" onclick="startBacktest()">开始回测</button>
+            </div>
+            <div class="msg" id="btMsg"></div>
+        </div>
+
+        <div class="card" id="resultCard" style="display:none;">
+            <h2>回测结果 <span class="mono" id="btId"></span></h2>
+            <div class="sum-grid" id="sumGrid"></div>
+            <h2 style="margin-top:14px;">净值曲线（按日）</h2>
+            <table class="bt"><thead><tr><th>日期</th><th style="text-align:right">总资产</th><th style="text-align:right">当日收益%</th></tr></thead>
+            <tbody id="navBody"></tbody></table>
+            <h2 style="margin-top:14px;">成交明细</h2>
+            <table class="bt"><thead><tr><th>日期</th><th>代码</th><th>方向</th><th style="text-align:right">数量</th><th style="text-align:right">价格</th><th style="text-align:right">费用</th></tr></thead>
+            <tbody id="tradeBody"></tbody></table>
+        </div>
+
+        <div class="card">
+            <h2>实盘跟随（live 模拟账户）</h2>
+            <div class="empty">v1 只有手动回测；每日自动跟随调仓为 v2（待用户批准后接入调度器）。<br>回测账本写临时文件、返回后删除，主库零写入。</div>
+        </div>
+    </div>
+
+<script>
+async function api(path, opts) {
+    const r = await fetch(path, opts);
+    return r.json();
+}
+function setMsg(text, ok) {
+    const el = document.getElementById('btMsg');
+    el.textContent = text;
+    el.className = 'msg' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+}
+async function loadUniverse() {
+    try {
+        const d = await api('/api/paper/universe');
+        document.getElementById('universeNote').textContent =
+            '标的池：' + d.note + '（' + d.codes.join(' ') + '）。K 线覆盖外自动跳过并明示。';
+    } catch (e) {
+        document.getElementById('universeNote').textContent = '标的池加载失败';
+    }
+}
+async function startBacktest() {
+    setMsg('回测启动中…');
+    document.getElementById('resultCard').style.display = 'none';
+    const d = await api('/api/paper/backtest', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            strategy: document.getElementById('strategySel').value,
+            codes: document.getElementById('codesInput').value,
+            start: document.getElementById('startInput').value,
+            end: document.getElementById('endInput').value,
+            initial_cash: parseFloat(document.getElementById('cashInput').value),
+            top_n: parseInt(document.getElementById('topNInput').value, 10),
+            dropout_n: parseInt(document.getElementById('dropInput').value, 10),
+            short_window: parseInt(document.getElementById('shortInput').value, 10),
+            long_window: parseInt(document.getElementById('longInput').value, 10),
+            buy_volume: parseInt(document.getElementById('buyVolInput').value, 10),
+            sell_volume: parseInt(document.getElementById('buyVolInput').value, 10)
+        })
+    });
+    if (d.status === 'started') {
+        setMsg('已启动（' + d.backtest_id + '）：' + d.note, true);
+        pollResult(d.backtest_id);
+    } else {
+        setMsg('启动失败：' + (d.detail || JSON.stringify(d)), false);
+    }
+}
+async function pollResult(bid) {
+    for (let i = 0; i < 120; i++) {
+        await new Promise(function (r) { setTimeout(r, 3000); });
+        const d = await api('/api/paper/backtest/' + bid);
+        if (d.status === 'pending') {
+            setMsg('运行中…（' + bid + '）', true);
+            continue;
+        }
+        renderResult(d);
+        return;
+    }
+    setMsg('超时未完成（' + bid + '），稍后刷新重试', false);
+}
+function renderResult(d) {
+    document.getElementById('resultCard').style.display = 'block';
+    document.getElementById('btId').textContent = d.backtest_id;
+    const s = d.summary;
+    const cls = s.return_pct >= 0 ? 'up' : 'down';
+    document.getElementById('sumGrid').innerHTML =
+        '<div class="sum-cell"><div class="k">期末总资产</div><div class="v">' + s.end_total + '</div></div>' +
+        '<div class="sum-cell"><div class="k">收益率%</div><div class="v ' + cls + '">' + s.return_pct + '</div></div>' +
+        '<div class="sum-cell"><div class="k">最大回撤%</div><div class="v">' + s.max_drawdown_pct + '</div></div>' +
+        '<div class="sum-cell"><div class="k">交易笔数</div><div class="v">' + s.trades + '</div></div>' +
+        '<div class="sum-cell"><div class="k">胜率</div><div class="v">' + (s.win_rate === null ? '--' : s.win_rate) + '</div></div>' +
+        '<div class="sum-cell"><div class="k">总费用</div><div class="v">' + s.fee_total + '</div></div>';
+    let navHtml = '';
+    d.nav.forEach(function (r) {
+        navHtml += '<tr><td class="mono">' + r.date + '</td><td class="num">' + r.total +
+            '</td><td class="num">' + r.pnl_pct + '</td></tr>';
+    });
+    document.getElementById('navBody').innerHTML = navHtml || '<tr><td colspan="3">无</td></tr>';
+    let trHtml = '';
+    d.trades.forEach(function (t) {
+        trHtml += '<tr><td class="mono">' + t.date + '</td><td class="mono">' + t.code +
+            '</td><td>' + t.direction + '</td><td class="num">' + t.volume +
+            '</td><td class="num">' + t.price + '</td><td class="num">' + t.fee + '</td></tr>';
+    });
+    document.getElementById('tradeBody').innerHTML = trHtml || '<tr><td colspan="6">无成交</td></tr>';
+    setMsg('完成：' + s.trades + ' 笔，收益率 ' + s.return_pct + '%', true);
+}
+window.onload = function () { loadUniverse(); };
+</script>
+</body>
+</html>

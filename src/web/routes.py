@@ -1114,9 +1114,127 @@ async def llm_ask(req: LLMAskRequest):
             "model": out.get("model"), "usage": out.get("usage") or {}}
 
 
+# ── 纸盘模拟 ───────────────────────────────────────────────────
+class PaperBacktestRequest(BaseModel):
+    strategy: str = "ma"
+    codes: str = ""
+    start: str = ""
+    end: str = ""
+    initial_cash: float = 100000.0
+    top_n: int = 10
+    dropout_n: int = 15
+    short_window: int = 5
+    long_window: int = 20
+    buy_volume: int = 100
+    sell_volume: int = 100
+
+
+def _paper_default_universe() -> tuple:
+    """默认标的池：最新候选 Top20 + 钉选（去重保序）。"""
+    from src.models.database import ScreeningResultDAO, WatchlistDAO, RunLogDAO
+    codes = []
+    run_id = RunLogDAO().get_latest_completed_run_id()
+    if run_id:
+        codes += [s["code"] for s in ScreeningResultDAO().get_results_for_run(run_id)[:20]]
+    codes += sorted(WatchlistDAO().get_watched_codes())
+    seen, out = set(), []
+    for c in codes:
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out, (f"最新候选+钉选 {len(out)} 只" if out else "池为空")
+
+
+@app.get("/paper", response_class=HTMLResponse)
+async def paper_page(request: Request):
+    """模拟交易页：回测控制 + 结果 + live 账户（v2 预留空位）。"""
+    config = load_config()
+    return templates.TemplateResponse(request, "paper.html", {
+        "request": request,
+        "page_title": config.get("web", {}).get("page_title", "价值投资选股看板"),
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/api/paper/universe")
+async def paper_universe():
+    codes, note = _paper_default_universe()
+    return {"codes": codes, "note": note}
+
+
+@app.post("/api/paper/backtest")
+async def paper_backtest_start(req: PaperBacktestRequest):
+    """启动回测（后台线程）：策略/标的/区间/资金/参数。返回 backtest_id 轮询。"""
+    from src.paper import backtest as bt
+    strategy = (req.strategy or "ma").strip()
+    if strategy not in ("ma", "value"):
+        raise HTTPException(status_code=400, detail="strategy 非法：ma|value")
+    if req.codes and req.codes.strip():
+        import re
+        codes = sorted(set(re.findall(r"\d{6}", req.codes)))[:50]
+        if not codes:
+            raise HTTPException(status_code=400, detail="自定义代码为空")
+        note = f"自定义 {len(codes)} 只"
+    else:
+        codes, note = _paper_default_universe()
+        if not codes:
+            raise HTTPException(status_code=400, detail="默认池为空（无候选/钉选）")
+    start, end = (req.start or "").strip(), (req.end or "").strip()
+    if not (start and end and start <= end):
+        raise HTTPException(status_code=400, detail="日期区间非法（YYYY-MM-DD）")
+    try:
+        cash = float(req.initial_cash or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="初始资金必须是数字")
+    if cash <= 0:
+        raise HTTPException(status_code=400, detail="初始资金须为正数")
+    params = {"top_n": req.top_n, "dropout_n": req.dropout_n,
+              "short_window": req.short_window, "long_window": req.long_window,
+              "buy_volume": req.buy_volume, "sell_volume": req.sell_volume}
+    for k in ("top_n", "dropout_n"):
+        if not 1 <= int(params[k]) <= 50:
+            raise HTTPException(status_code=400, detail=f"{k} 须在 1~50 之间")
+    if int(params["long_window"]) <= int(params["short_window"]):
+        raise HTTPException(status_code=400, detail="long_window 须大于 short_window")
+    if int(params["buy_volume"]) <= 0 or int(params["sell_volume"]) <= 0:
+        raise HTTPException(status_code=400, detail="买卖股数须为正数")
+    bid = bt.new_backtest_id()
+    import threading
+    from src.models.database import PipelineProgressDAO
+    progress = PipelineProgressDAO()
+    progress.init_run(bid, 'backtesting', f'回测 {strategy} 准备中...', ai_total=0)
+
+    def _run():
+        try:
+            def cb(done, total):
+                progress.update(bid, stage_label=f'回测 {done}/{total} 天...',
+                                processed=done, total=total)
+            bt.run_backtest(strategy, codes, start, end, cash, params,
+                            progress_cb=cb, backtest_id=bid)
+            progress.update(bid, 'done', '回测完成')
+        except Exception as e:
+            logger.warning("[纸盘] 回测异常：%s", e)
+            try:
+                progress.update(bid, 'done', f'回测异常：{e}')
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "backtest_id": bid, "note": note}
+
+
+@app.get("/api/paper/backtest/{bid}")
+async def paper_backtest_status(bid: str):
+    """回测结果（未完成返回 pending，可同时看 /api/progress）。"""
+    from src.paper import backtest as bt
+    out = bt.get_backtest((bid or "").strip())
+    if out is None:
+        return {"status": "pending"}
+    return out
+
+
 @app.get("/llm", response_class=HTMLResponse)
 async def llm_page(request: Request):
-    """模型设置页：厂商/Key/模型 + 三种分析触发 + 用量"""
+    """模型设置页：厂商/Key/模型 + 高级参数（执行已移至首页 AI 面板）"""
     config = load_config()
     return templates.TemplateResponse(request, "llm.html", {
         "request": request,

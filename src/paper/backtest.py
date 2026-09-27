@@ -30,6 +30,11 @@ def get_backtest(bid):
         return _RESULTS.get(bid)
 
 
+def new_backtest_id():
+    """预分配回测 id（路由先返回 id 再起后台线程）。"""
+    return _next_id()
+
+
 def _store(result):
     with _RESULTS_LOCK:
         _RESULTS[result["backtest_id"]] = result
@@ -149,7 +154,7 @@ def _stats(fills):
 
 
 def run_backtest(strategy, codes, start, end, initial_cash=100000.0,
-                 params=None, progress_cb=None):
+                 params=None, progress_cb=None, backtest_id=None):
     """跑一次回测，返回 JSON 可序列化结果（含 summary/nav/trades）。"""
     from src.paper.broker import PaperBroker
     from src.paper.risk import RiskManager
@@ -163,7 +168,7 @@ def run_backtest(strategy, codes, start, end, initial_cash=100000.0,
         raise ValueError("标的为空")
     if not (start and end and start <= end):
         raise ValueError("日期区间非法")
-    bid = _next_id()
+    bid = backtest_id or _next_id()
     tmp = tempfile.NamedTemporaryFile(prefix="paper_bt_", suffix=".db",
                                       delete=False)
     tmp.close()
