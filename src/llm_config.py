@@ -202,3 +202,41 @@ def save_llm_config(provider: str, api_base: str, model: str,
         os.environ[ENV_KEY] = api_key
     logger.info("[LLM配置] 已保存 provider=%s model=%s", provider, model)
     return llm_status(local_path)
+
+
+def get_concurrency(local_path: Path = None) -> int:
+    """并发数（local.yaml ai.concurrency，默认 2，钳制 1~5）。"""
+    try:
+        n = int(_read_local_ai(
+            Path(local_path) if local_path else _default_local_path()
+        ).get("concurrency", 2))
+    except (TypeError, ValueError):
+        n = 2
+    return min(5, max(1, n))
+
+
+def set_concurrency(n: int, local_path: Path = None) -> int:
+    """设置并发数（1~5），写 local.yaml；非法抛 LLMSetupError。"""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        raise LLMSetupError("并发数必须是整数") from None
+    if not 1 <= n <= 5:
+        raise LLMSetupError("并发数须在 1~5 之间")
+    lp = Path(local_path) if local_path else _default_local_path()
+    try:
+        with open(lp, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    ai = cfg.get("ai")
+    if not isinstance(ai, dict):
+        ai = {}
+    ai["concurrency"] = n
+    cfg["ai"] = ai
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    with open(lp, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    return n

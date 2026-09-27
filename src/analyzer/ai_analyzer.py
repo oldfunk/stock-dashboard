@@ -888,8 +888,9 @@ class AiAnalyzer:
     def configured(self) -> bool:
         return bool(self.api_key) or self._is_free_model
 
-    def analyze_stock(self, stock: dict) -> Optional[dict]:
-        """对一只股票进行 AI 分析，返回解析后的 dict（失败返回 None）。"""
+    def analyze_stock(self, stock: dict, extra_instruction: str = None) -> Optional[dict]:
+        """对一只股票进行 AI 分析，返回解析后的 dict（失败返回 None）。
+        extra_instruction：用户自定义附加要求（拼到 prompt 末尾，队列/自定义分析用）。"""
         if not self.api_key and not self._is_free_model:
             logger.error("[AI分析] 无 API Key，跳过分析")
             self._last_error = '未配置 API Key'
@@ -976,6 +977,10 @@ class AiAnalyzer:
                 "\n3. 本次结论相比之前是否有转变？为什么？"
             )
 
+        # 用户自定义附加要求（队列/自定义分析经 extra_instruction 传入）
+        if extra_instruction and str(extra_instruction).strip():
+            prompt += ("\n\n用户附加要求（必须遵守并体现在结论中）：\n"
+                       + str(extra_instruction).strip()[:2000])
         content, used_model, usage = self._call_llm(prompt)
         self._last_usage = usage  # 供调用方写入 ai_analysis_log
         if not content and self._fb_enabled:
