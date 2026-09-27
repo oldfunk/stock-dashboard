@@ -1066,7 +1066,10 @@ class WatchlistDAO:
         """清空钉选"""
         with db_conn() as conn:
             conn.execute("DELETE FROM watchlist")
-    """K线日线数据 DAO"""
+
+
+class KlineDAO:
+    """K线日线数据 DAO（2026-09-28 从 WatchlistDAO 迁回：历史重构误删类，致 routes/scheduler ImportError）"""
 
     def upsert_many(self, code: str, records: list[dict]) -> int:
         """批量写入日K（INSERT OR REPLACE）

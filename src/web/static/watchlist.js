@@ -84,7 +84,8 @@ function loadWatchlist() {
                 if (s.profit_growth != null) metricsHtml += '<div class="metric-cell"><div class="label">利润增</div><div class="value">' + s.profit_growth.toFixed(1) + '%</div></div>';
                 if (s.debt_ratio != null) metricsHtml += '<div class="metric-cell"><div class="label">负债率</div><div class="value">' + s.debt_ratio.toFixed(1) + '%</div></div>';
                 if (s.market_cap != null) metricsHtml += '<div class="metric-cell"><div class="label">市值</div><div class="value">' + s.market_cap.toFixed(0) + '亿</div></div>';
-                return '<div class="stock-card" data-code="' + s.code + '">' +
+                return '<div class="stock-card clickable" data-code="' + s.code + '"' +
+                    ' onclick="location.href=\'/stock/' + s.code + '\'" title="查看 ' + s.name + ' 详情">' +
                     '<div class="stock-row">' +
                     '<div class="stock-info">' +
                     '<div class="stock-code">' + s.code + '</div>' +
@@ -99,9 +100,10 @@ function loadWatchlist() {
                     '</div></div>' +
                     '</div>';
             }).join('');
-            // 绑定取消钉选按钮
+            // 绑定取消钉选按钮（阻断冒泡，否则先触发卡片跳转）
             el.querySelectorAll('[data-wcode]').forEach(function(btn) {
-                btn.addEventListener('click', function() {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
                     toggleWatch(btn.getAttribute('data-wcode'), btn);
                     setTimeout(loadWatchlist, 400);
                 });
