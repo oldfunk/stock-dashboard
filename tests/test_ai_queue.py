@@ -120,6 +120,8 @@ class TestQueue:
 class TestPolishMarket:
     def test_polish_passthrough(self, monkeypatch):
         from src import ai_queue
+        from src.llm_config import ENV_KEY
+        monkeypatch.setenv(ENV_KEY, "k")
         holder = {}
 
         def _fake_raw(self, prompt, system=None):
@@ -139,6 +141,8 @@ class TestPolishMarket:
 
     def test_explain_market(self, db, monkeypatch):
         from src import ai_queue
+        from src.llm_config import ENV_KEY
+        monkeypatch.setenv(ENV_KEY, "k")
         monkeypatch.setattr(
             "src.analyzer.ai_analyzer.AiAnalyzer.ask_raw",
             lambda self, prompt, system=None: ("震荡", "m",
