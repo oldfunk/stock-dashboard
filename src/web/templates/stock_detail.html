@@ -371,6 +371,7 @@
         .sd-wl-history-table th { color: var(--text-tertiary); font-weight: 500; }
     </style>
     <script src="/static/js/klinecharts.min.js"></script>
+    <script src="/static/ai.js"></script>
 </head>
 <body>
 <div class="stock-detail-page">
@@ -894,7 +895,11 @@
 
     <!-- 10.5 AI 问一问（2026-09-27：自带 Key 自由提问，不落库 analyzed；存笔记走现有 notes 接口） -->
     <section class="sd-section">
-        <h2 class="sd-section-title">AI 问一问</h2>
+        <h2 class="sd-section-title">AI 问一问
+            <button onclick="analyzeOne('{{ code }}', this)"
+                title="用已配置模型完整分析这一只（once 模式，结果进时间线）"
+                style="font-size:12px; padding:3px 12px; border-radius:6px; border:1px solid var(--accent); background:transparent; color:var(--accent); cursor:pointer; margin-left:8px;">AI 分析</button>
+        </h2>
         <div style="display:flex; gap:8px; margin-bottom:8px;">
             <input type="text" id="askInput" maxlength="500" placeholder="比如：这家自由现金流能覆盖分红吗？"
                 style="flex:1; font-size:14px; padding:7px 10px; border:1px solid var(--divider); border-radius:8px;">

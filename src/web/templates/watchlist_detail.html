@@ -181,6 +181,9 @@
             <h1>{{ snapshot.name }}</h1>
             <span class="wd-code">{{ code }}</span>
             <span class="wd-code">{{ snapshot.sector or '--' }}</span>
+            <button onclick="analyzeOne('{{ code }}', this)"
+                title="用已配置模型分析这一只（once 模式）"
+                style="font-size:12px; padding:3px 12px; border-radius:6px; border:1px solid var(--accent); background:transparent; color:var(--accent); cursor:pointer; margin-left:8px;">AI 分析</button>
         </div>
         {% if in_watchlist %}
         <span class="wd-watchlist-status in">✓ 在池（在池 {{ in_watchlist.review_count|default(1) }} 周）</span>
@@ -366,5 +369,6 @@
         {% endif %}
     </section>
 </div>
+<script src="/static/ai.js"></script>
 </body>
 </html>

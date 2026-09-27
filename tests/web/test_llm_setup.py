@@ -667,3 +667,24 @@ class TestConcurrency:
     def test_set_bad(self, client):
         assert client.post("/api/llm/concurrency",
                            json={"concurrency": 9}).status_code == 400
+
+
+class TestQueueUI:
+    """队列 UI 元素存在性（JS 逻辑由浏览器执行，单测只断言 markup 接线）。"""
+
+    def test_llm_page_has_concurrency_no_trigger(self, client):
+        resp = client.get("/llm")
+        assert resp.status_code == 200
+        assert 'id="concInput"' in resp.text
+        assert "整轮分析" not in resp.text
+
+    def test_static_ai_js(self, client):
+        resp = client.get("/static/ai.js")
+        assert resp.status_code == 200
+        assert "analyzeOne" in resp.text
+
+    def test_index_has_ai_panel(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert 'id="aiPanel"' in resp.text
+        assert 'id="aiQueueBody"' in resp.text

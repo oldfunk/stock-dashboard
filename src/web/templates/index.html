@@ -342,6 +342,25 @@
         .ai-btn { padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--accent); border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; margin-left: 6px; }
         .ai-btn:hover { background: var(--accent-soft); }
         .ai-btn:disabled { opacity: 0.6; cursor: default; }
+        .ai-panel { background: var(--bg-secondary); border: 1px solid var(--divider); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+        .ai-panel-head { display: flex; align-items: center; justify-content: space-between; }
+        .ai-panel-head h2 { font-size: 15px; margin: 0 0 10px 0; }
+        .ai-workers { font-size: 12px; color: var(--text-secondary); font-weight: normal; }
+        .ai-panel .nav-link { color: var(--accent); text-decoration: none; font-size: 13px; }
+        .ai-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+        .ai-row label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+        .ai-row select, .ai-row input[type=number] { font-size: 13px; padding: 5px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); background: #fff; }
+        .ai-row input[type=number] { width: 70px; }
+        .ai-row textarea { flex: 1; min-width: 220px; font-size: 13px; padding: 6px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); font-family: inherit; }
+        .ai-row button { font-size: 13px; padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+        .ai-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .ai-msg { font-size: 13px; min-height: 18px; margin: 4px 0; }
+        .ai-msg.ok { color: var(--green); }
+        .ai-msg.err { color: var(--red); }
+        .ai-answer { white-space: pre-wrap; font-size: 13px; line-height: 1.7; background: var(--bg-primary); border: 1px solid var(--divider); border-radius: var(--radius-sm); padding: 10px; margin: 6px 0; }
+        table.ai-queue { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+        table.ai-queue th, table.ai-queue td { border-bottom: 1px solid var(--divider); padding: 4px 6px; text-align: left; }
+        table.ai-queue button { font-size: 11px; padding: 2px 8px; }
         .signal-buy { color: var(--color-up); font-weight: 600; }
         .signal-hold { color: #ffc107; font-weight: 600; }
         .signal-avoid { color: var(--red); font-weight: 600; }
@@ -951,6 +970,46 @@
         </div>
     </div>
 
+    <!-- AI 分析常驻面板（2026-09-28：范围自选+需求润色+队列+大盘解盘；设置页只留参数） -->
+    <div class="ai-panel" id="aiPanel">
+        <div class="ai-panel-head">
+            <h2>AI 分析 <span class="ai-workers" id="aiWorkers"></span></h2>
+            <a href="/llm" class="nav-link">模型设置</a>
+        </div>
+        <div class="ai-row">
+            <label>范围</label>
+            <select id="aiScope" onchange="aiScopeChanged()">
+                <option value="candidates">最新20只候选</option>
+                <option value="watchlist">钉选股</option>
+                <option value="pool">AI 观察池</option>
+                <option value="custom">自定义代码</option>
+            </select>
+            <label>间隔秒</label>
+            <input type="number" id="aiInterval" value="60" min="5" max="600">
+            <button class="primary" onclick="aiEnqueue()">开始分析</button>
+            <button onclick="aiMarket()">大盘解盘</button>
+        </div>
+        <div class="ai-row" id="aiCodesRow" style="display:none;">
+            <label>代码</label>
+            <textarea id="aiCodes" rows="2" placeholder="600519 000858（空格/换行分隔，最多50只）"></textarea>
+        </div>
+        <div class="ai-row">
+            <label>自定义要求</label>
+            <textarea id="aiReq" rows="2" placeholder="比如：重点看现金流和分红；对比估值。不填则按默认维度分析。"></textarea>
+            <button onclick="aiPolish()">AI 润色</button>
+        </div>
+        <div class="ai-row" id="aiPolishedRow" style="display:none;">
+            <label>已润色</label>
+            <textarea id="aiPolished" rows="3"></textarea>
+        </div>
+        <div class="ai-msg" id="aiMsg"></div>
+        <div id="aiMarketAnswer" class="ai-answer" style="display:none;"></div>
+        <table class="ai-queue">
+            <thead><tr><th>任务</th><th>范围</th><th>总数</th><th>完成</th><th>失败</th><th>状态</th><th></th></tr></thead>
+            <tbody id="aiQueueBody"><tr><td colspan="7">暂无任务</td></tr></tbody>
+        </table>
+    </div>
+
     <!-- Stock Results -->
     <div class="section-header">
         <div class="view-tabs">
@@ -1273,6 +1332,90 @@
             });
         }, 3000);
     }
+
+    // ========== AI 分析常驻面板（2026-09-28） ==========
+    function aiPanelMsg(text, ok) {
+        var el = document.getElementById('aiMsg');
+        el.textContent = text;
+        el.className = 'ai-msg' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+    }
+    function aiScopeChanged() {
+        var s = document.getElementById('aiScope').value;
+        document.getElementById('aiCodesRow').style.display = s === 'custom' ? 'flex' : 'none';
+    }
+    function aiEnqueue() {
+        var polished = document.getElementById('aiPolished').value.trim();
+        var raw = document.getElementById('aiReq').value.trim();
+        aiPanelMsg('入队中…');
+        postJSON('/api/llm/enqueue', {
+            scope: document.getElementById('aiScope').value,
+            codes: document.getElementById('aiCodes').value,
+            requirement: polished || raw,
+            interval_seconds: parseInt(document.getElementById('aiInterval').value, 10) || 60
+        }).then(function(d) {
+            if (d.status === 'queued') {
+                aiPanelMsg('已入队：' + d.note + '（' + d.task_id + '）', true);
+                refreshQueue();
+            } else {
+                aiPanelMsg(d.detail || JSON.stringify(d), false);
+            }
+        }).catch(function(e) {
+            aiPanelMsg('入队失败：' + ((e.body && e.body.detail) || '请求失败'), false);
+        });
+    }
+    function aiPolish() {
+        var t = document.getElementById('aiReq').value.trim();
+        if (!t) { aiPanelMsg('先在自定义要求里写几句', false); return; }
+        aiPanelMsg('润色中…');
+        postJSON('/api/llm/polish', {text: t}).then(function(d) {
+            document.getElementById('aiPolished').value = d.polished;
+            document.getElementById('aiPolishedRow').style.display = 'flex';
+            aiPanelMsg('已润色，可再改，提交时优先用润色版', true);
+        }).catch(function(e) {
+            aiPanelMsg('润色失败：' + ((e.body && e.body.detail) || '请求失败'), false);
+        });
+    }
+    function aiMarket() {
+        var req = document.getElementById('aiPolished').value.trim() ||
+                  document.getElementById('aiReq').value.trim();
+        var box = document.getElementById('aiMarketAnswer');
+        box.style.display = 'block';
+        box.textContent = '解盘中…';
+        postJSON('/api/llm/market', {requirement: req}).then(function(d) {
+            box.textContent = d.answer + '\n—— 模型 ' + d.model +
+                '（prompt ' + (d.usage.prompt_tokens || 0) +
+                ' / completion ' + (d.usage.completion_tokens || 0) + '）';
+        }).catch(function(e) {
+            box.textContent = '解盘失败：' + ((e.body && e.body.detail) || '请求失败');
+        });
+    }
+    function refreshQueue() {
+        fetchJSON('/api/llm/queue').then(function(d) {
+            document.getElementById('aiWorkers').textContent =
+                '（' + d.workers + ' 并发）';
+            var body = document.getElementById('aiQueueBody');
+            if (!d.tasks || !d.tasks.length) {
+                body.innerHTML = '<tr><td colspan="7">暂无任务</td></tr>';
+                return;
+            }
+            var html = '';
+            d.tasks.slice().reverse().forEach(function(t) {
+                html += '<tr><td>' + t.id + ' ' + t.name + '</td><td>' + t.mode +
+                    '</td><td>' + t.total + '</td><td>' + t.done + '</td><td>' + t.failed +
+                    '</td><td>' + t.status + '</td><td>' +
+                    (t.status === 'queued'
+                        ? '<button onclick="aiCancelTask(\'' + t.id + '\')">取消</button>' : '') +
+                    '</td></tr>';
+            });
+            body.innerHTML = html;
+        }).catch(function() {});
+    }
+    function aiCancelTask(tid) {
+        postJSON('/api/llm/queue/cancel', {task_id: tid}).then(function() {
+            refreshQueue();
+        }).catch(function() { refreshQueue(); });
+    }
+    setInterval(refreshQueue, 5000);
 
     // ========== Score Detail Toggle ==========
     function toggleScoreDetail(code) {
