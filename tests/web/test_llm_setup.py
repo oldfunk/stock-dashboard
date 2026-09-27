@@ -237,3 +237,151 @@ class TestRoutes:
         for k in ("configured", "has_key", "key_preview",
                   "api_base", "model", "provider"):
             assert k in resp.json()
+
+
+def _reset_busy():
+    from src.web import routes as routes_mod
+    routes_mod._ai_state["running"] = False
+
+
+def _seed_run(codes):
+    """插 run_log completed + screening 行；codes: [(code, name, ai_failed)]。"""
+    from src.models import database as db_mod
+    db_mod.RunLogDAO().start_run("r-test")
+    db_mod.RunLogDAO().complete_run("r-test", 5527, len(codes), 0)
+    with db_mod.db_conn() as conn:
+        for code, name, failed in codes:
+            conn.execute(
+                "INSERT INTO screening_result "
+                "(run_id, run_date, code, name, score, ai_failed)"
+                " VALUES (?,?,?,?,?,?)",
+                ("r-test", "2026-09-27", code, name, 90.0, failed))
+
+
+class _FakeAnalyzer:
+    def __init__(self, cfg=None, ok=True):
+        self._ok = ok
+
+    @property
+    def configured(self):
+        return self._ok
+
+
+class TestAnalyze:
+    def test_bad_mode(self, client):
+        _reset_busy()
+        resp = client.post("/api/llm/analyze", json={"mode": "nope"})
+        assert resp.status_code == 400
+
+    def test_unconfigured(self, client, monkeypatch):
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=False))
+        resp = client.post("/api/llm/analyze", json={"mode": "all"})
+        assert resp.status_code == 400
+        assert "API Key" in resp.json()["detail"]
+
+    def test_busy_409(self, client):
+        from src.web import routes as routes_mod
+        routes_mod._ai_state["running"] = True
+        try:
+            resp = client.post("/api/llm/analyze", json={"mode": "all"})
+            assert resp.status_code == 409
+        finally:
+            routes_mod._ai_state["running"] = False
+
+    def test_once_unknown_code_404(self, client, monkeypatch):
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        _seed_run([("600519", "贵州茅台", 0)])
+        resp = client.post("/api/llm/analyze",
+                           json={"mode": "once", "code": "000001"})
+        assert resp.status_code == 404
+
+    def test_once_started(self, client, monkeypatch):
+        import time
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        calls = {}
+
+        def _fake_batch(stocks, run_id, interval_seconds=60, on_progress=None):
+            calls["n"] = len(stocks)
+            calls["interval"] = interval_seconds
+            if on_progress:
+                on_progress(len(stocks), 0, len(stocks) - 1)
+            return len(stocks), 0
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.analyze_batch", _fake_batch)
+        _seed_run([("600519", "贵州茅台", 0)])
+        resp = client.post("/api/llm/analyze",
+                           json={"mode": "once", "code": "600519",
+                                 "interval_seconds": 5})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "started"
+        assert resp.json()["total"] == 1
+        for _ in range(40):
+            if calls.get("n"):
+                break
+            time.sleep(0.05)
+        assert calls.get("n") == 1
+        assert calls.get("interval") == 5
+
+    def test_retry_noop(self, client, monkeypatch):
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        _seed_run([("600519", "贵州茅台", 0)])
+        resp = client.post("/api/llm/analyze", json={"mode": "retry"})
+        assert resp.json()["status"] == "noop"
+
+    def test_retry_picks_failed(self, client, monkeypatch):
+        import time
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        calls = {}
+
+        def _fake_batch(stocks, run_id, interval_seconds=60, on_progress=None):
+            calls["codes"] = sorted(s["code"] for s in stocks)
+            return len(stocks), 0
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.analyze_batch", _fake_batch)
+        _seed_run([("600519", "贵州茅台", 0), ("000858", "五粮液", 1)])
+        resp = client.post("/api/llm/analyze", json={"mode": "retry"})
+        assert resp.json()["status"] == "started"
+        assert resp.json()["total"] == 1
+        for _ in range(40):
+            if calls.get("codes"):
+                break
+            time.sleep(0.05)
+        assert calls.get("codes") == ["000858"]
+
+
+class TestUsageAndPage:
+    def test_usage_totals(self, client):
+        from src.models import database as db_mod
+        dao = db_mod.AiAnalysisLogDAO()
+        dao.log("r1", "600519", "m", 100, 50, 0.0)
+        dao.log("r1", "000858", "m", 200, 60, 0.0)
+        resp = client.get("/api/llm/usage", params={"run_id": "r1"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 2
+        assert data["total_prompt"] == 300
+        assert data["total_completion"] == 110
+
+    def test_usage_empty(self, client):
+        resp = client.get("/api/llm/usage")
+        assert resp.json()["rows"] == []
+
+    def test_llm_page(self, client):
+        resp = client.get("/llm")
+        assert resp.status_code == 200
+        assert "模型设置" in resp.text

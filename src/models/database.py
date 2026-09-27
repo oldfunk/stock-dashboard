@@ -638,6 +638,16 @@ class AiAnalysisLogDAO:
             """, (run_id, code, model, prompt_tokens, completion_tokens,
                   cost, now_cn().isoformat()))
 
+    def get_by_run(self, run_id: str) -> list:
+        """某轮 token 用量明细（供 /api/llm/usage 展示）。"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT code, model, prompt_tokens, completion_tokens, cost,"
+                " created_at FROM ai_analysis_log WHERE run_id = ? ORDER BY id",
+                (run_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 class RunLogDAO:
     def start_run(self, run_id: str) -> str:

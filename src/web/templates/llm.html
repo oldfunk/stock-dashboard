@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模型设置 - {{ page_title }}</title>
+    <style>
+        :root {
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --accent: #1a73e8;
+            --accent-hover: #1557b0;
+            --green: #137333;
+            --green-bg: #e6f4ea;
+            --red: #c5221f;
+            --red-bg: #fce8e6;
+            --gold: #b06000;
+            --gold-bg: #fef7e0;
+            --divider: #e0e3e7;
+            --radius: 8px;
+            --font-sans: 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); }
+        .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--divider); }
+        .header h1 { font-size: 18px; margin: 0; }
+        .nav-link { color: var(--accent); text-decoration: none; font-size: 14px; margin-left: 16px; }
+        .wrap { max-width: 860px; margin: 0 auto; padding: 20px; }
+        .card { background: var(--bg-secondary); border: 1px solid var(--divider); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+        .card h2 { font-size: 16px; margin: 0 0 12px 0; }
+        .card p.hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px 0; }
+        .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+        label { font-size: 14px; min-width: 96px; color: var(--text-secondary); }
+        input[type=text], input[type=password], input[type=number], select { font-size: 14px; padding: 7px 10px; border: 1px solid var(--divider); border-radius: var(--radius); background: #fff; color: var(--text-primary); }
+        input.grow, select.grow { flex: 1; min-width: 200px; }
+        input.short { width: 110px; }
+        button { font-size: 14px; padding: 7px 16px; border-radius: var(--radius); border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+        button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        button.primary:hover { background: var(--accent-hover); }
+        button:disabled { opacity: 0.5; cursor: default; }
+        .msg { font-size: 14px; margin-top: 8px; min-height: 20px; }
+        .msg.ok { color: var(--green); }
+        .msg.err { color: var(--red); }
+        .status { font-size: 14px; padding: 8px 12px; border-radius: var(--radius); background: var(--bg-primary); margin-bottom: 12px; }
+        .status b.ok { color: var(--green); }
+        .status b.no { color: var(--gold); }
+        .bar-wrap { height: 10px; background: var(--bg-primary); border: 1px solid var(--divider); border-radius: 6px; overflow: hidden; margin-top: 8px; display: none; }
+        .bar { height: 100%; width: 0; background: var(--accent); transition: width 0.5s; }
+        table.usage { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+        table.usage th, table.usage td { border-bottom: 1px solid var(--divider); padding: 6px 8px; text-align: left; }
+        table.usage td.num { font-family: var(--font-mono); text-align: right; }
+        table.usage tr.total td { font-weight: 600; border-top: 2px solid var(--divider); }
+        .mono { font-family: var(--font-mono); font-size: 13px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>模型设置</h1>
+        <div>
+            <a href="/" class="nav-link">首页</a>
+            <a href="/journal" class="nav-link">投资笔记</a>
+        </div>
+    </header>
+    <div class="wrap">
+        <div class="card">
+            <h2>连接状态</h2>
+            <div class="status" id="statusLine">加载中…</div>
+            <p class="hint">Key 只存本机 <span class="mono">.env</span>（不入库），页面只显示脱敏预览；局域网使用，不要暴露公网。</p>
+        </div>
+
+        <div class="card">
+            <h2>厂商与 Key</h2>
+            <div class="row">
+                <label>厂商预设</label>
+                <select id="providerSel" class="grow"></select>
+            </div>
+            <div class="row">
+                <label>API 地址</label>
+                <input type="text" id="baseInput" class="grow mono" placeholder="https://api.deepseek.com/v1">
+            </div>
+            <div class="row">
+                <label>API Key</label>
+                <input type="password" id="keyInput" class="grow mono" placeholder="留空表示保留现有 Key" autocomplete="off">
+            </div>
+            <div class="row">
+                <label>模型</label>
+                <select id="modelSel" class="grow mono"></select>
+            </div>
+            <div class="row">
+                <label>手动输入</label>
+                <input type="text" id="modelInput" class="grow mono" placeholder="如下拉无想要的型号，在此手填">
+            </div>
+            <div class="row">
+                <label>temperature</label>
+                <input type="number" id="tempInput" class="short" value="0.3" step="0.1" min="0" max="2">
+                <label style="min-width:0">max_tokens</label>
+                <input type="number" id="maxTokensInput" class="short" value="6000" step="500" min="1">
+            </div>
+            <div class="row">
+                <button id="testBtn" onclick="testConn()">测试连接并拉取模型</button>
+                <button id="saveBtn" class="primary" onclick="saveCfg()">保存配置</button>
+            </div>
+            <div class="msg" id="cfgMsg"></div>
+        </div>
+
+        <div class="card">
+            <h2>触发分析</h2>
+            <p class="hint">默认间隔 60 秒/只（防限流）；付费接口双击不会重复扣费（服务端防重入）。进度见下方，明细进用量表。</p>
+            <div class="row">
+                <label>间隔秒数</label>
+                <input type="number" id="intervalInput" class="short" value="60" min="5" max="600">
+            </div>
+            <div class="row">
+                <button class="primary" onclick="startAnalyze('all')">整轮分析（最新20只）</button>
+                <button onclick="startAnalyze('retry')">只补失败</button>
+            </div>
+            <div class="row">
+                <input type="text" id="codeInput" class="short mono" placeholder="600519" maxlength="6">
+                <button onclick="startAnalyze('once')">单股分析</button>
+            </div>
+            <div class="msg" id="runMsg"></div>
+            <div class="bar-wrap" id="progWrap"><div class="bar" id="progBar"></div></div>
+            <div class="msg" id="progLabel"></div>
+        </div>
+
+        <div class="card">
+            <h2>Token 用量</h2>
+            <div class="row">
+                <button onclick="loadUsage()">刷新用量</button>
+                <span class="hint" id="usageRun"></span>
+            </div>
+            <table class="usage">
+                <thead><tr><th>股票</th><th>模型</th><th style="text-align:right">prompt</th><th style="text-align:right">completion</th><th>时间</th></tr></thead>
+                <tbody id="usageBody"><tr><td colspan="5">暂无数据</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+<script>
+async function api(path, opts) {
+    const r = await fetch(path, opts);
+    return r.json();
+}
+function setMsg(id, text, ok) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'msg' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+}
+async function loadProviders() {
+    const d = await api('/api/llm/providers');
+    const sel = document.getElementById('providerSel');
+    sel.innerHTML = '';
+    (d.providers || []).forEach(function (p) {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = p.name; o.dataset.base = p.api_base;
+        sel.appendChild(o);
+    });
+    sel.onchange = function () {
+        const base = sel.options[sel.selectedIndex].dataset.base;
+        if (base) document.getElementById('baseInput').value = base;
+    };
+}
+async function loadStatus() {
+    const s = await api('/api/llm/status');
+    const line = document.getElementById('statusLine');
+    if (s.configured) {
+        line.innerHTML = '已配置 <b class="ok">✓</b> 模型 <span class="mono">' +
+            s.model + '</span> @ <span class="mono">' + s.api_base +
+            '</span>（Key ' + s.key_preview + '）';
+    } else {
+        line.innerHTML = '未配置 <b class="no">×</b> —— 先填 Key 并保存';
+    }
+    if (s.api_base) document.getElementById('baseInput').value = s.api_base;
+    if (s.model) document.getElementById('modelInput').value = s.model;
+    if (s.provider) document.getElementById('providerSel').value = s.provider;
+}
+async function testConn() {
+    setMsg('cfgMsg', '连接中…');
+    const d = await api('/api/llm/test', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            api_base: document.getElementById('baseInput').value,
+            api_key: document.getElementById('keyInput').value
+        })
+    });
+    if (d.ok) {
+        const sel = document.getElementById('modelSel');
+        sel.innerHTML = '';
+        d.models.forEach(function (m) {
+            const o = document.createElement('option');
+            o.value = m; o.textContent = m;
+            sel.appendChild(o);
+        });
+        if (d.models.length) document.getElementById('modelInput').value = d.models[0];
+        setMsg('cfgMsg', '连接成功，共 ' + d.models.length + ' 个模型（已填入下拉，可手改）', true);
+    } else {
+        setMsg('cfgMsg', '连接失败：' + (d.error || '未知错误'), false);
+    }
+}
+async function saveCfg() {
+    setMsg('cfgMsg', '保存中…');
+    const d = await api('/api/llm/save', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            provider: document.getElementById('providerSel').value,
+            api_base: document.getElementById('baseInput').value,
+            model: document.getElementById('modelInput').value,
+            api_key: document.getElementById('keyInput').value,
+            temperature: parseFloat(document.getElementById('tempInput').value),
+            max_tokens: parseInt(document.getElementById('maxTokensInput').value, 10)
+        })
+    });
+    if (d.configured || d.model) {
+        document.getElementById('keyInput').value = '';
+        setMsg('cfgMsg', '已保存（Key 已脱敏显示）', true);
+        loadStatus();
+    } else if (d.detail) {
+        setMsg('cfgMsg', '保存失败：' + d.detail, false);
+    } else {
+        setMsg('cfgMsg', '保存失败', false);
+    }
+}
+let pollTimer = null;
+async function startAnalyze(mode) {
+    setMsg('runMsg', '启动中…');
+    const d = await api('/api/llm/analyze', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            mode: mode,
+            code: document.getElementById('codeInput').value,
+            interval_seconds: parseInt(document.getElementById('intervalInput').value, 10) || 60
+        })
+    });
+    if (d.status === 'started') {
+        setMsg('runMsg', '已启动：' + d.mode + ' 共 ' + d.total + ' 只（' + d.run_id + '）', true);
+        pollProgress();
+    } else if (d.status === 'noop') {
+        setMsg('runMsg', d.message, true);
+    } else {
+        setMsg('runMsg', '启动失败：' + (d.detail || JSON.stringify(d)), false);
+    }
+}
+async function pollProgress() {
+    if (pollTimer) clearInterval(pollTimer);
+    document.getElementById('progWrap').style.display = 'block';
+    pollTimer = setInterval(async function () {
+        const p = await api('/api/progress');
+        const label = p.stage_label || p.stage || '';
+        document.getElementById('progLabel').textContent = label;
+        if (p.ai_total) {
+            const done = (p.ai_done || 0) + (p.ai_failed || 0);
+            document.getElementById('progBar').style.width =
+                Math.round(done / p.ai_total * 100) + '%';
+        }
+        if (p.stage === 'done' || p.stage === 'idle') {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            loadUsage();
+        }
+    }, 3000);
+}
+async function loadUsage() {
+    const u = await api('/api/llm/usage');
+    document.getElementById('usageRun').textContent = u.run_id ? ('轮次 ' + u.run_id) : '';
+    const body = document.getElementById('usageBody');
+    if (!u.rows || !u.rows.length) {
+        body.innerHTML = '<tr><td colspan="5">暂无数据</td></tr>';
+        return;
+    }
+    let html = '';
+    u.rows.forEach(function (r) {
+        html += '<tr><td class="mono">' + r.code + '</td><td class="mono">' + r.model +
+            '</td><td class="num">' + r.prompt_tokens + '</td><td class="num">' +
+            r.completion_tokens + '</td><td>' + (r.created_at || '') + '</td></tr>';
+    });
+    html += '<tr class="total"><td colspan="2">合计（' + u.count + ' 只）</td><td class="num">' +
+        u.total_prompt + '</td><td class="num">' + u.total_completion + '</td><td></td></tr>';
+    body.innerHTML = html;
+}
+document.getElementById('modelSel').onchange = function () {
+    document.getElementById('modelInput').value = this.value;
+};
+window.onload = function () {
+    loadProviders().then(loadStatus);
+    loadUsage();
+};
+</script>
+</body>
+</html>

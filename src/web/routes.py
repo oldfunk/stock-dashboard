@@ -4,6 +4,7 @@ Web 看板 - FastAPI 路由
 
 import json
 import logging
+import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -849,6 +850,122 @@ async def llm_save(req: LLMSaveRequest):
 async def llm_status():
     """LLM 配置状态（脱敏：只有 has_key 布尔值 + key_preview）"""
     return llm_config.llm_status()
+
+
+# ── LLM 分析触发 + 用量 ────────────────────────────────────────
+_ai_state = {"running": False}
+_ai_lock = threading.Lock()
+
+
+class LLMAnalyzeRequest(BaseModel):
+    mode: str = "all"
+    code: str = ""
+    interval_seconds: int = 60
+
+
+def _enrich_with_financial_summary(stocks: list) -> None:
+    """run_ai_analysis.py 同款富集：financial_summary 字段注入 stock（原地修改）。"""
+    from src.models.database import FinancialSummaryDAO
+    fs_dao = FinancialSummaryDAO()
+    for s in stocks:
+        fs = fs_dao.get(s['code'])
+        if fs:
+            for k, v in fs.items():
+                if k not in ('stock_code', 'updated_at') and v is not None:
+                    s[k] = v
+
+
+@app.post("/api/llm/analyze")
+async def llm_analyze(req: LLMAnalyzeRequest):
+    """触发 AI 分析（后台线程）：all 整轮 / retry 只补失败 / once 单股。409 防重入。"""
+    with _ai_lock:
+        if _ai_state["running"]:
+            raise HTTPException(status_code=409, detail="已有分析任务在跑")
+        mode = (req.mode or "all").strip()
+        if mode not in ("all", "retry", "once"):
+            raise HTTPException(status_code=400, detail="mode 非法：all|retry|once")
+        try:
+            interval = int(req.interval_seconds or 60)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="interval_seconds 必须是整数")
+        if not 5 <= interval <= 600:
+            raise HTTPException(status_code=400, detail="interval_seconds 须在 5~600 之间")
+        from src.analyzer.ai_analyzer import AiAnalyzer, analyze_batch
+        analyzer = AiAnalyzer(load_config().get('ai', {}))
+        if not analyzer.configured:
+            raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+        run_id = RunLogDAO().get_latest_completed_run_id()
+        if not run_id:
+            raise HTTPException(status_code=400, detail="暂无已完成的筛选批次")
+        stocks = ScreeningResultDAO().get_results_for_run(run_id)
+        if mode == "retry":
+            stocks = [s for s in stocks if s.get('ai_failed')]
+            if not stocks:
+                return {"status": "noop", "message": "本轮无失败项，无需补跑"}
+        elif mode == "once":
+            code = (req.code or "").strip()
+            if len(code) != 6 or not code.isdigit():
+                raise HTTPException(status_code=400, detail="code 须为 6 位数字")
+            stocks = [s for s in stocks if s.get('code') == code]
+            if not stocks:
+                raise HTTPException(status_code=404, detail=f"本轮无此股票：{code}")
+        if not stocks:
+            raise HTTPException(status_code=400, detail="本轮无候选股票")
+        total = len(stocks)
+        progress = PipelineProgressDAO()
+        progress.init_run(run_id, 'analyzing', f'AI分析 0/{total}...', ai_total=total)
+
+        def _run():
+            try:
+                _enrich_with_financial_summary(stocks)
+
+                def on_progress(ok: int, failed: int, idx: int):
+                    progress.update(run_id, stage_label=f'AI分析 {idx + 1}/{total}...',
+                                    ai_done=ok, ai_failed=failed)
+                ok, failed = analyze_batch(stocks, run_id, interval_seconds=interval,
+                                           on_progress=on_progress)
+                RunLogDAO().update_analyzed_count(run_id, ok)
+                progress.update(run_id, 'done', f'完成：AI分析{ok}只（失败{failed}只）',
+                                ai_done=ok, ai_failed=failed)
+            except Exception as e:
+                logger.warning("[LLM分析] 后台异常：%s", e)
+                try:
+                    progress.update(run_id, 'done', f'分析异常：{e}')
+                except Exception:
+                    pass
+            finally:
+                with _ai_lock:
+                    _ai_state["running"] = False
+
+        _ai_state["running"] = True
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        return {"status": "started", "mode": mode, "total": total, "run_id": run_id}
+
+
+@app.get("/api/llm/usage")
+async def llm_usage(run_id: str = ""):
+    """token 用量：某轮每只股的 prompt/completion + 合计（默认最新完成轮）"""
+    from src.models.database import AiAnalysisLogDAO
+    run_id = (run_id or "").strip() or RunLogDAO().get_latest_completed_run_id() or ""
+    if not run_id:
+        return {"run_id": "", "rows": [], "count": 0,
+                "total_prompt": 0, "total_completion": 0}
+    rows = AiAnalysisLogDAO().get_by_run(run_id)
+    return {"run_id": run_id, "rows": rows, "count": len(rows),
+            "total_prompt": sum(r.get("prompt_tokens", 0) or 0 for r in rows),
+            "total_completion": sum(r.get("completion_tokens", 0) or 0 for r in rows)}
+
+
+@app.get("/llm", response_class=HTMLResponse)
+async def llm_page(request: Request):
+    """模型设置页：厂商/Key/模型 + 三种分析触发 + 用量"""
+    config = load_config()
+    return templates.TemplateResponse(request, "llm.html", {
+        "request": request,
+        "page_title": config.get("web", {}).get("page_title", "价值投资选股看板"),
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
 
 @app.get("/api/data-quality")
