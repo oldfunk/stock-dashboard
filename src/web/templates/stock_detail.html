@@ -892,6 +892,23 @@
         {% endif %}
     </section>
 
+    <!-- 10.5 AI 问一问（2026-09-27：自带 Key 自由提问，不落库 analyzed；存笔记走现有 notes 接口） -->
+    <section class="sd-section">
+        <h2 class="sd-section-title">AI 问一问</h2>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <input type="text" id="askInput" maxlength="500" placeholder="比如：这家自由现金流能覆盖分红吗？"
+                style="flex:1; font-size:14px; padding:7px 10px; border:1px solid var(--divider); border-radius:8px;">
+            <button id="askBtn" onclick="askStock()"
+                style="font-size:14px; padding:7px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer;">提问</button>
+        </div>
+        <div id="askAnswer" style="display:none; white-space:pre-wrap; font-size:14px; line-height:1.7; background:var(--bg-primary); border:1px solid var(--divider); border-radius:8px; padding:12px;"></div>
+        <div id="askMeta" style="font-size:13px; color:var(--text-secondary); margin-top:6px;"></div>
+        <div id="askSaveWrap" style="display:none; margin-top:6px;">
+            <button onclick="saveAskNote()"
+                style="font-size:13px; padding:5px 12px; border-radius:8px; border:1px solid var(--divider); background:#fff; cursor:pointer;">存为笔记</button>
+        </div>
+    </section>
+
     <!-- 11. 历次 AI 分析时间线 -->
     <section class="sd-section">
         <h2 class="sd-section-title">历次 AI 分析时间线</h2>
@@ -1045,6 +1062,53 @@
     <script>
     (function() {
         var code = "{{ code }}";
+        var lastAskAnswer = '';
+        window.askStock = async function() {
+            var q = document.getElementById('askInput').value.trim();
+            if (!q) return;
+            var btn = document.getElementById('askBtn');
+            btn.disabled = true;
+            btn.textContent = '思考中…';
+            document.getElementById('askAnswer').style.display = 'none';
+            document.getElementById('askMeta').textContent = '';
+            document.getElementById('askSaveWrap').style.display = 'none';
+            try {
+                const r = await fetch('/api/llm/ask', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({code: code, question: q})});
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || '请求失败');
+                lastAskAnswer = d.answer;
+                var ans = document.getElementById('askAnswer');
+                ans.textContent = d.answer;
+                ans.style.display = 'block';
+                var u = d.usage || {};
+                document.getElementById('askMeta').textContent =
+                    '模型 ' + d.model + ' · 本次 prompt ' +
+                    (u.prompt_tokens || 0) + ' / completion ' +
+                    (u.completion_tokens || 0);
+                document.getElementById('askSaveWrap').style.display = 'block';
+            } catch (e) {
+                document.getElementById('askMeta').textContent = '提问失败：' + e.message;
+            }
+            btn.disabled = false;
+            btn.textContent = '提问';
+        };
+        window.saveAskNote = async function() {
+            if (!lastAskAnswer) return;
+            try {
+                await fetch('/api/watchlist/' + code, {method: 'POST'});
+                const r = await fetch('/api/watchlist/' + code + '/notes', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({note: lastAskAnswer, note_type: 'analysis',
+                                          model: 'manual-ask'})});
+                const d = await r.json();
+                document.getElementById('askMeta').textContent +=
+                    (d && d.ok) ? ' · 已存为笔记' : ' · 存笔记失败';
+            } catch (e) {
+                document.getElementById('askMeta').textContent += ' · 存笔记失败';
+            }
+        };
         var chart = null;
         // 指标状态：name → pane 信息（stack=主图叠加，false=副图；paneId 保存 createIndicator 返回值）
         var indicators = {

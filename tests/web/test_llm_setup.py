@@ -411,3 +411,85 @@ class TestCardButtons:
         html = templates.get_template("_watchlist_card.html").render(
             watchlist=[_fake_card_stock()], request=None)
         assert "analyzeOne('600519'" in html
+
+
+class TestAsk:
+    """直接提问：prompt 组装 + 路由校验 + 成功/失败形（analyzer 改动附单测）。"""
+
+    def test_answer_question_prompt(self, monkeypatch):
+        import os
+        from src.analyzer import ai_analyzer as mod
+        monkeypatch.setenv("STOCK_AI_API_KEY", "k")
+        holder = {}
+
+        def _fake_raw(self, prompt, system=None):
+            holder["prompt"] = prompt
+            return ("答复", "m", {"prompt_tokens": 10,
+                                  "completion_tokens": 5, "model": "m"})
+        monkeypatch.setattr(mod.AiAnalyzer, "ask_raw", _fake_raw)
+        out = mod.answer_question({"code": "600519", "name": "贵州茅台",
+                                   "pe": 20.0}, "分红能覆盖吗？")
+        assert out["answer"] == "答复"
+        assert "600519" in holder["prompt"]
+        assert "分红能覆盖吗？" in holder["prompt"]
+
+    def test_answer_question_empty(self):
+        from src.analyzer import ai_analyzer as mod
+        assert mod.answer_question({"code": "600519"}, "  ") is None
+
+    def test_ask_validation(self, client):
+        for payload, code in (({"code": "60051", "question": "q"}, 400),
+                              ({"code": "600519", "question": "  "}, 400),
+                              ({"code": "600519", "question": "x" * 501}, 400)):
+            resp = client.post("/api/llm/ask", json=payload)
+            assert resp.status_code == code
+
+    def test_ask_unknown_code_404(self, client):
+        resp = client.post("/api/llm/ask",
+                           json={"code": "000001", "question": "好吗？"})
+        assert resp.status_code == 404
+
+    def test_ask_unconfigured_400(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=False))
+        resp = client.post("/api/llm/ask",
+                           json={"code": "600519", "question": "好吗？"})
+        assert resp.status_code == 400
+
+    def _seed_snapshot(self, code="600519"):
+        from src.models import database as db_mod
+        with db_mod.db_conn() as conn:
+            conn.execute(
+                "INSERT INTO stock_snapshot (code, name) VALUES (?, ?)",
+                (code, "贵州茅台"))
+
+    def test_ask_success(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.answer_question",
+            lambda stock, q: {"answer": "挺好", "model": "m",
+                              "usage": {"prompt_tokens": 10,
+                                        "completion_tokens": 5}})
+        self._seed_snapshot()
+        resp = client.post("/api/llm/ask",
+                           json={"code": "600519", "question": "好吗？"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["answer"] == "挺好"
+        assert data["usage"]["prompt_tokens"] == 10
+
+    def test_ask_failure_502(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.answer_question",
+            lambda stock, q: None)
+        self._seed_snapshot()
+        resp = client.post("/api/llm/ask",
+                           json={"code": "600519", "question": "好吗？"})
+        assert resp.status_code == 502

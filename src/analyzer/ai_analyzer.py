@@ -1186,6 +1186,52 @@ class AiAnalyzer:
         logger.error("[AI分析] 已达最大重试次数 %s，放弃 (末模型=%s)", max_retries, current_model)
         return None, current_model, None
 
+    def ask_raw(self, prompt: str, system: str = None) -> tuple:
+        """自由问答瘦调用：单次 POST（异常重试 1 次），不进 20 次退避/模型轮换。
+        返回 (text, model, usage)，失败 text/usage 为 None。"""
+        if not self.api_key:
+            self._last_error = '未配置 API Key'
+            return None, self.model, None
+        system = system or ('你是A股价值投资助手，用中文简洁回答关于这只股票的问题；'
+                            '只依据提供的数字，不编造；不确定的直说。')
+        headers = {'Content-Type': 'application/json',
+                   'Authorization': f'Bearer {self.api_key}'}
+        payload = {'model': self.model,
+                   'messages': [{'role': 'system', 'content': system},
+                                {'role': 'user', 'content': prompt}],
+                   'temperature': self.temperature,
+                   'max_tokens': self.max_tokens}
+        url = f"{self.api_base}/chat/completions"
+        for attempt in range(2):
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    resp = client.post(url, headers=headers, json=payload)
+                if resp.status_code != 200:
+                    self._last_error = f'HTTP {resp.status_code}'
+                    logger.warning("[AI问答] HTTP %d (%s)", resp.status_code, self.model)
+                    return None, self.model, None
+                data = resp.json()
+                text = data['choices'][0]['message']['content']
+                if not text or len(text) < 2:
+                    self._last_error = '响应内容过短'
+                    return None, self.model, None
+                _u = data.get('usage') or {}
+                usage = {'prompt_tokens': int(_u.get('prompt_tokens', 0) or 0),
+                         'completion_tokens': int(_u.get('completion_tokens', 0) or 0),
+                         'model': self.model}
+                self._last_usage = usage
+                return text, self.model, usage
+            except (KeyError, IndexError, ValueError) as e:
+                self._last_error = f'响应结构异常：{e}'
+                logger.warning("[AI问答] 响应结构异常：%s", e)
+                return None, self.model, None
+            except Exception as e:
+                self._last_error = type(e).__name__
+                logger.warning("[AI问答] 异常（第%d次）：%s", attempt + 1, e)
+                if attempt == 0:
+                    time.sleep(3)
+        return None, self.model, None
+
     def _call_fallback_llm(self, prompt: str) -> tuple[Optional[str], Optional[str], Optional[dict]]:
         """免 Key 备用通道：主池全灭时每只股票兜底（轻量：retries 次）。
 
@@ -1585,6 +1631,42 @@ def _save_failure(stock: dict, run_id: str, reason: str = None):
     ScreeningResultDAO().mark_ai_failure(run_id, stock['code'], reason or 'unknown')
     StockAnalysisHistoryDAO().save(
         stock['code'], run_id, stock.get('score'), '{}', '{}', None)
+
+
+def build_qa_context(stock: dict) -> str:
+    """拼单股问答上下文（快照 + 财务摘要 + 筛选行，紧凑文本）。"""
+    def _g(k, d='未知'):
+        v = stock.get(k)
+        return d if v in (None, '') else v
+    lines = [f"【{_g('name')} {_g('code')}】现价{_g('current_price')} PE{_g('pe')} "
+             f"PB{_g('pb')} ROE{_g('roe')}% 市值{_g('market_cap')}亿 "
+             f"行业{_g('sector')} 评分{_g('score')}"]
+    if stock.get('reason'):
+        lines.append(f"入选理由：{stock['reason']}")
+    for k, label in (('roe_5y_avg', 'ROE5年均'), ('gross_margin', '毛利率'),
+                     ('fcf_5y_sum', '5年累计FCF'), ('debt_ratio', '资产负债率'),
+                     ('revenue_growth', '营收增长'), ('profit_growth', '净利增长')):
+        v = stock.get(k)
+        if v is not None and v != '':
+            lines.append(f"{label}：{v}")
+    return "\n".join(lines)
+
+
+def answer_question(stock: dict, question: str) -> Optional[dict]:
+    """单股自由问答：返回 {answer, model, usage}，失败返回 None。"""
+    from src.config import load_config
+    q = (question or '').strip()
+    if not q:
+        return None
+    analyzer = AiAnalyzer(load_config().get('ai', {}))
+    if not analyzer.configured:
+        analyzer._last_error = '未配置 API Key'
+        return None
+    prompt = build_qa_context(stock) + "\n\n用户问题：" + q[:500]
+    text, model, usage = analyzer.ask_raw(prompt)
+    if text is None:
+        return None
+    return {'answer': text, 'model': model, 'usage': usage or {}}
 
 
 def analyze_batch(stocks: list[dict], run_id: str,

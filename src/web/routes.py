@@ -957,6 +957,44 @@ async def llm_usage(run_id: str = ""):
             "total_completion": sum(r.get("completion_tokens", 0) or 0 for r in rows)}
 
 
+class LLMAskRequest(BaseModel):
+    code: str = ""
+    question: str = ""
+
+
+@app.post("/api/llm/ask")
+async def llm_ask(req: LLMAskRequest):
+    """单股自由问答（不落库 analyzed，只 inline 返回 + 用量；存笔记走现有 notes 接口）。"""
+    from src.analyzer.ai_analyzer import AiAnalyzer, answer_question
+    from src.models.database import StockSnapshotDAO
+    code = (req.code or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        raise HTTPException(status_code=400, detail="code 须为 6 位数字")
+    question = (req.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="问题不能为空")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="问题超长（≤500 字）")
+    analyzer = AiAnalyzer(load_config().get('ai', {}))
+    if not analyzer.configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+    snap = StockSnapshotDAO().get_by_code(code)
+    if not snap:
+        raise HTTPException(status_code=404, detail=f"快照无此股票：{code}")
+    stock = dict(snap)
+    latest = ScreeningResultDAO().get_latest_for_code(code)
+    if latest:
+        for k in ('score', 'reason', 'pe', 'pb', 'roe', 'market_cap'):
+            if stock.get(k) in (None, '') and latest.get(k) not in (None, ''):
+                stock[k] = latest[k]
+    _enrich_with_financial_summary([stock])
+    out = answer_question(stock, question)
+    if out is None:
+        raise HTTPException(status_code=502, detail="问答失败（见服务端日志）")
+    return {"ok": True, "code": code, "answer": out["answer"],
+            "model": out.get("model"), "usage": out.get("usage") or {}}
+
+
 @app.get("/llm", response_class=HTMLResponse)
 async def llm_page(request: Request):
     """模型设置页：厂商/Key/模型 + 三种分析触发 + 用量"""
