@@ -386,3 +386,4 @@ class TestUsageAndPage:
         assert resp.status_code == 200
         assert "模型设置" in resp.text
         assert "高级设置" in resp.text
+        assert '<select id="codeInput"' in resp.text

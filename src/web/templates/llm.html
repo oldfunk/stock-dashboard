@@ -128,9 +128,10 @@
                 <button onclick="startAnalyze('retry')">只补失败</button>
             </div>
             <div class="row">
-                <input type="text" id="codeInput" class="short mono" placeholder="600519" maxlength="6">
+                <select id="codeInput" class="mono" style="min-width:220px"></select>
                 <button onclick="startAnalyze('once')">单股分析</button>
             </div>
+            <p class="hint">下拉为最新一轮候选（手填未知代码会 404）。</p>
             <div class="msg" id="runMsg"></div>
             <div class="bar-wrap" id="progWrap"><div class="bar" id="progBar"></div></div>
             <div class="msg" id="progLabel"></div>
@@ -207,7 +208,7 @@ async function testConn() {
         if (d.models.length) document.getElementById('modelInput').value = d.models[0];
         setMsg('cfgMsg', '连接成功，共 ' + d.models.length + ' 个模型（已填入下拉，可手改）', true);
     } else {
-        setMsg('cfgMsg', '连接失败：' + (d.error || '未知错误'), false);
+        setMsg('cfgMsg', '连接失败：' + (d.error || '未知错误') + '（注：部分厂商测试接口 401 不代表 Key 无效，保存后单股实测为准）', false);
     }
 }
 async function saveCfg() {
@@ -293,9 +294,22 @@ async function loadUsage() {
 document.getElementById('modelSel').onchange = function () {
     document.getElementById('modelInput').value = this.value;
 };
+async function loadCandidates() {
+    try {
+        const d = await api('/api/stocks');
+        const sel = document.getElementById('codeInput');
+        sel.innerHTML = '';
+        (d.stocks || []).forEach(function (s) {
+            const o = document.createElement('option');
+            o.value = s.code; o.textContent = s.code + ' ' + (s.name || '');
+            sel.appendChild(o);
+        });
+    } catch (e) { /* 候选拉不到不阻断，单股按钮会报 404 明示 */ }
+}
 window.onload = function () {
     loadProviders().then(loadStatus);
     loadUsage();
+    loadCandidates();
 };
 </script>
 </body>
