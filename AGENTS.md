@@ -30,7 +30,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 - 提交信息中文，写清「改了什么 + 为什么」
 - 验证声明必须精确：手动分步验证 ≠ live 验证通过。任何"验证通过"必须附带实际执行的命令和输出作为证据，不能夸大验证范围。主动验证所有风险点，而非选择性验证。
 - 任务颗粒度必须细化到"单一可验证步骤"：复合任务必须拆分为独立子任务，每个子任务有明确的完成标准和验证命令。
-- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支（合并须用户批准，绝不自动合并）；2) 同步生产服务器（ssh git pull + gate.sh 验证）；3) 更新 handoff.md；4) 更新迭代日志。这个流程是强制性的，不是可选的。
+- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支；2) 合并入 main 并推送（2026-09-27 起用户长期授权直接合并/推送/生产调试，无需逐次批准）；3) 同步生产服务器（ssh git pull + gate.sh 验证，改 routes/模板/采集则重启服务）；4) 更新 handoff.md；5) 更新迭代日志。这个流程是强制性的，不是可选的。
 - 环境差异必须验证：PC 上测试通过 ≠ 生产服务器上能跑。涉及生产服务器的改动必须在生产服务器上实际执行验证，不能只在 PC 上跑测试就声称完成。
 - 文档更新是交付物的一部分：交接文档和迭代日志必须与代码同步更新，不能作为可选步骤。
 
@@ -44,10 +44,10 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 1. `git fetch origin && git rebase origin/main` 拉平上游
 2. 在 `nightly/YYYYMMDD` 分支上 commit
-3. `git push origin HEAD`（只推 nightly 分支）
-4. 多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
+3. `git push origin HEAD`（先推 nightly 分支留痕）
+4. 合并：ff 合并入 main 并 `git push origin main`（2026-09-27 起用户长期授权直接合并/推送，无需逐次批准）；多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
 
-**绝不**：在本地 main 上 commit、`git push origin main`、自动合并到 main。默认推送到 `nightly/*` 分支；合并须用户批准，合并后同步生产服务器并验证运行（`git pull` + 重启 `stock-dashboard.service` + 确认运行正常）。
+**绝不**：在本地 main 上直接 commit（合并的 ff 前进除外）。合并后同步生产服务器并验证运行（`git pull` + gate + 改 routes/模板/采集则重启 `stock-dashboard.service` + 确认运行正常）。
 
 ## 冒烟测试
 

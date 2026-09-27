@@ -3,26 +3,26 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-27 恢复部分投入：LLM 自带 Key 分析复活入 nightly/20260927a 待合）
-- **项目解冻（部分）**：2026-09-27 用户指令继续项目——网页建大模型 API 配置入口，兼容主流 AI（v1 只做 OpenAI-compatible），用户输 Key 后拉模型列表、手选或手填模型做分析；其余仍冻结
-- **分支 `nightly/20260927a`（3 提交）待合**：①后端（`src/llm_config.py`：厂商预设 10 家 + `fetch_models` + 保存 Key→`.env`/非敏感→`local.yaml`/即时写 environ + 脱敏 status；4 端点）②UI+触发+用量（`/llm` 设置页 + POST analyze 三模式 + GET usage + 首页导航）③gate 失败修复（status 读写路径不一致真 bug）
-- **不做的两件事（已和用户对齐）**：上下文压缩不建（单股 prompt 仅数千 token，现代模型轻松装下；只留超长降年限思路以后看）；提示词不重建（复用 `ANALYSIS_PROMPT` 全套：六关/镜子/veto/P0-2 findings）
-- **验证（生产服务器 worktree）**：`gate.sh` **396 passed / Gate passed / 82.59s**（367+29 新测）；首跑抓 2 真失败修复后全绿；三扫描全绿（ast / 新增行 emoji 0 / 身份 0）
-- **端到端待用户填 Key 后实测**：分析链路（analyze_batch→落库→用量）单测全过，但无真实 Key，打不通真模型；用户保存 Key 后点一次单股分析即闭环验证
-- 合并后同步生产：git pull + **重启服务**（routes/模板改动需重启）+ gate 复验
+## 最后状态（2026-09-27 LLM 自带 Key 已合已同步 + 长期授权直接合并；等用户填 Key 实测）
+- **`nightly/20260927a` 已合已同步**：4 提交 ff 入 main = `45be212`（后端/触发用量/gate 修复/收尾 docs），远端/本地分支已删；生产 git pull → 部署目录 gate **396 passed / 33.84s** → 重启 `stock-dashboard.service`（active，ROOT/API/LLM 三路 200，5 分钟内日志 0 Traceback）
+- **新页面 live**：`/llm` 200；`/api/llm/status` 如实返回 `configured:false`（无 Key，空状态诚实）；Key 到位前 analyzed 继续为 0，符合预期
+- **流程变更（用户长期授权，2026-09-27 起）**：nightly 直推、直接合并/推送、用生产调试，不再逐次请示；AGENTS.md 已落档（收尾流程 + Git 工作流两处）；仍禁止在 main 上直接 commit 代码
+- **收尾分支 `nightly/20260927b`（本批次 docs）随即合并**：AGENTS 规则变更 + 0927a 合并部署记录
 
 ## 下一步方向
-1. 等用户批准合并 `nightly/20260927a` → pull + 重启 + gate + 用户填 Key 后单股实测
-2. P2 体验优化仍冻结；外部接入/复盘/盯盘仍外部发起，本项目不排期
-3. 后续可选（v2）：Anthropic/Gemini 原生直连、prompt 超长降年限 guard、花费用量折算金额
+1. 用户上 `/llm` 页：选厂商 → 填 Key → 测试连接 → 选模型 → 保存 → **单股分析实测**（如 600519），看用量表出数字即闭环
+2. 实测若模型回 JSON 不兼容：parse/repair 小修（新单测同 commit）
+3. P2 仍冻结；外部接入/复盘/盯盘仍外部发起
+4. 后续可选（v2）：Anthropic/Gemini 原生直连、prompt 超长降年限 guard、金额折算
 
 ## 已知隐患
-- 真实 Key 花的是真钱：409 防重入 + 间隔 5~600s 可配 + 单股模式已给；整轮 20 只×60s 约 20 分钟，用户自己掌握节奏
-- 部分厂商 `/models` 非标准（Ollama 老版本/Anthropic 原生）→ 拉不到就用手动输入框（v1 范围内属已知限制）
-- S8 覆盖约 47%、AKShare S4/S5 永久挂、82 只小盘无 roic/fcf——冻结前状态，原样保留
+- 真实 Key 花真钱：409 防重入 + 间隔 5~600s + 单股模式；整轮约 20 分钟，用户自控节奏
+- 部分厂商 `/models` 非标准 → 手动输入框兜底（v1 已知限制）
+- S8 覆盖约 47%、AKShare S4/S5 永久挂、82 只小盘无 roic/fcf——冻结前状态保留
 - 快照表滚动记录、重启验证等待 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
+- 2026-09-27 LLM 自带 Key 已合已同步（nightly/20260927a → main=45be212：生产 gate 396 + 重启三路 200 + /llm 页 live；用户长期授权直接合并/推送/生产调试，不再逐次请示）
 - 2026-09-27 LLM 自带 Key 分析复活待合（nightly/20260927a：OpenAI-compatible + /llm 设置页 + 三触发 + 用量显示，生产 worktree gate 396；提示词/压缩不重建；端到端待用户 Key）
 - 2026-09-23 deep_research 废表已删（用户批准"脏数据别留"；5 行备份后 DROP，表已不存在；08-31"表不存在"系误记，今日才真删；docs 随 nightly/20260923b 合并）
 - 2026-09-23 维护模式收尾已合（nightly/20260923a → main：AI 零触发审计 + 备份清理约 480M + 文档冻结；停止投入，转维护模式）

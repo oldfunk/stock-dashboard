@@ -162,6 +162,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-27（合并 nightly/20260927a：LLM 自带 Key 上线 + 长期授权直接合并）
+- **合并**（用户长期授权，2026-09-27 起合并/推送/生产调试无需逐次批准）：`nightly/20260927a`（4 提交）ff 入 main（= `45be212`）；远端/本地分支已删。
+- **部署**：生产 git pull → 部署目录 `gate.sh` **396 passed / 33.84s / Gate passed** → 重启 `stock-dashboard.service`（routes/模板改动）→ active，ROOT/API/LLM 三路 200，5 分钟内日志 0 Traceback；`/api/llm/status` 如实返回未配置（无 Key）。
+- **流程变更入账**：AGENTS.md 收尾流程 + Git 工作流已改长期授权版；仍禁止在 main 上直接 commit 代码。
+- **状态**：已合已同步；收尾 docs（本条 + AGENTS + handoff）入 `nightly/20260927b` 随即合并。基线 396 与 main 一致。
+
 ### 2026-09-27（LLM 自带 Key 分析复活：OpenAI-compatible + /llm 设置页 + 三触发 + 用量，nightly/20260927a 待合）
 - **背景**（用户拍板恢复部分投入）：本地免费通道双死 → analyzed 常年 0；方案：用户自带 Key 做分析；用户三拍板：v1 只做 OpenAI-compatible / 触发整轮+重试+单股全给 / 用量显示要做。
 - **改了什么**：① `src/llm_config.py`（厂商预设 10 家 + `fetch_models` + 保存 Key→`.env`/非敏感→`local.yaml`/即时写 environ + 脱敏 status）+ 4 端点（providers/test/save/status）；② `/llm` 设置页（预设/测试/保存/三触发/进度轮询/用量表）+ POST analyze（all/retry/once，409 防重入，后台线程复用 `analyze_batch`，进度进 `/api/progress`）+ GET usage（`AiAnalysisLogDAO.get_by_run` 新增读方法）+ 首页导航；③提示词零重建（复用 `ANALYSIS_PROMPT`），压缩零构建（单股 prompt 仅数千 token）。
