@@ -167,6 +167,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **Bug2 钉选卡点不动**：桌面浏览器实证——钉选 tab 的 6 张卡可见但零 onclick。根因：该 tab 由 `watchlist.js` 纯 JS 渲染，拼卡片时漏了跳转（搜索项有，卡片无）。修复：补 `clickable` + onclick + title；已钉按钮加 `stopPropagation`（否则先跳详情）；`watchlist.js` 加版本戳（浏览器缓存旧 JS，`?v=20260928c`，以后改静态文件同理）。
 - **验证**：worktree gate **440 passed**（437+3）；生产部署目录 gate 全绿；K 线接口 200 + 真数据；浏览器实证点击跳转（见下）；三扫描全绿。
 - 基线刷新 437 → **440 passed**。
+- **流程自纠**：收尾 commit（`8398a80`，版本戳+基线扫换+入账）误落 main（忘切分支，且 `;` 连接掩盖了 push nightly 失败）；未强行改写远端历史，tip gate 440 passed 验证安全后放行；教训：commit 前 `git status --short --branch` 确认分支（此前每次收尾都有，这次漏了）。
 
 ### 2026-09-28（部署 gate 2 失败修复 + 队列路径 live 验证）
 - **失败**：部署目录 gate 435+2（worktree 全绿）：`test_polish_passthrough` + `test_explain_market`。根因：单测不 hermetic——部署目录有用户 `local.yaml`（model 非免费）+ pytest 不加载 `.env` → 真 analyzer configured False；worktree 干净环境掩盖了问题。
