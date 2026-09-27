@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：367 passed（2026-09-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：396 passed（2026-09-27 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 367 passed，只升不降）
+- 全仓 pytest 零失败（基线 396 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-27（LLM 自带 Key 分析复活：OpenAI-compatible + /llm 设置页 + 三触发 + 用量，nightly/20260927a 待合）
+- **背景**（用户拍板恢复部分投入）：本地免费通道双死 → analyzed 常年 0；方案：用户自带 Key 做分析；用户三拍板：v1 只做 OpenAI-compatible / 触发整轮+重试+单股全给 / 用量显示要做。
+- **改了什么**：① `src/llm_config.py`（厂商预设 10 家 + `fetch_models` + 保存 Key→`.env`/非敏感→`local.yaml`/即时写 environ + 脱敏 status）+ 4 端点（providers/test/save/status）；② `/llm` 设置页（预设/测试/保存/三触发/进度轮询/用量表）+ POST analyze（all/retry/once，409 防重入，后台线程复用 `analyze_batch`，进度进 `/api/progress`）+ GET usage（`AiAnalysisLogDAO.get_by_run` 新增读方法）+ 首页导航；③提示词零重建（复用 `ANALYSIS_PROMPT`），压缩零构建（单股 prompt 仅数千 token）。
+- **为什么**：Key 存 `.env`（gitignored，老惯例），非敏感存 `local.yaml`（热重载已存在）；409 防重入是花真钱后的必备（防双击重复扣费）。
+- **验证**（生产服务器 worktree，按测试规则）：`gate.sh` **396 passed / Gate passed / 82.59s**（367 + 29 新测：后端 18 + 触发用量 11）；首跑抓 2 真失败（测试 fake 签名 + `llm_status` 读写路径不一致设计 bug）修复后全绿；ast / 新增行 emoji 0 / 身份 0 三扫描全绿。
+- **如实声明**：端到端（真模型跑通）待用户填 Key 后实测——单测覆盖全链路逻辑，但无 Key 打不通真模型；用户保存 Key 后点一次单股分析即闭环。
+- **状态**：`nightly/20260927a` **待用户批准合并**；合并后生产 git pull + 重启 `stock-dashboard.service`（routes/模板改动需重启）+ gate 复验。基线刷新 367 → **396 passed**。
 
 ### 2026-09-23（deep_research 废表删除，用户批准，nightly/20260923b 已合）
 - **执行**（用户原话"脏数据别留了"）：生产 DB 删表前全仓 grep 确认零代码引用 → 5 行 JSON 备份（`data/backup/deep_research_backup_20260923.json`）→ 断言 5 行 → `DROP TABLE deep_research` → 验证 `sqlite_master` 已无此表。实际 5 行为格力/五粮液/茅台/伊利/海天（08-29 条目记的"平安/招商"有误，以本次实测为准）。

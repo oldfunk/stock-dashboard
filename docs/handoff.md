@@ -3,30 +3,27 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-23 维护模式收尾已合：停止投入，保采集+选股，AI 接口保留）
-- **项目冻结**：2026-09-23 用户指令停止投入、不再深入开发；日常只保留 pi 每日采集 + 算法选股；AI 分析不再投入，数据接口保留供日后外部 AI 自助分析
-- **收尾分支 `nightly/20260923a` 已合入 main**：AI 零触发审计 + 备份清理 + 文档冻结（handoff/账本/roadmap 维护模式），纯文档零代码；远端仅 main + archive
-- **在跑什么**：`stock-dashboard.service`（enabled，掉电自启）→ 内置调度器：交易日 15:30 `orchestrator.run_daily_pipeline`（采集+筛选+验算闸+S8 回填，不含 AI）+ 每 30min 大盘 + 交易时段每 5min 行情 + 周六本地复盘（规则部分；LLM 决议因通道死自动跳过）
-- **今日实证（2026-09-23）**：`20260923_153008` completed（15:30:08→16:16:15，5527→20，analyzed=0）；screening 当日 20 行；快照今日回写 719 行（候选池+钉选补录；其余行保留历史日期，既有滚动记录设计）；sector 487/719；首页行业均值 17 行（S8 调度内自动回填生效）
-- **AI 零触发六保险**：scheduler AI 调用已注释（`src/scheduler.py:236`，函数体留 dead code 未删）+ 日流水线走 orchestrator（无 AI 步骤）+ `run_pipeline` 步骤 6 只手动触发 + pi 无 crontab/systemd 定时任务 + `.env` 无 Key + 双通道本来就已死——零花钱、零限流风险，可无人值守
-- **AI 数据接口（保留，gate 覆盖）**：`GET /api/stocks` 当日候选全量、`GET /api/watchlist/{code}/full` 钉选一站式、`GET /api/search`、`GET /api/journal/*`、`GET /api/*/kline` 等（全表见 `docs/agent-api.md`）；外部 AI 自助拉数 + POST 写回分析/笔记/论文；手动脚本 `scripts/run_ai_analysis.py`、`retry_ai.py` 保留（通道死，需自备可用模型才跑得动）
-- **磁盘**：59G 卡用 25%（42G 空闲）；`data/db` 280M→122M（删 4 个陈年 .bak，留最新 2 个）；`data/backup` Sep 4-5 实验快照 8 个（323M，前 sector-schema 时代、恢复无用）已清；合计释放约 480M；`data/logs` 轮转 bounded（8.8M）；journal 4.3M；DB 42M 日增数千行，空间以年计充足
-- **基线 367 = main 现状**（冻结；后续无代码，gate 仅在动代码时重跑）
+## 最后状态（2026-09-27 恢复部分投入：LLM 自带 Key 分析复活入 nightly/20260927a 待合）
+- **项目解冻（部分）**：2026-09-27 用户指令继续项目——网页建大模型 API 配置入口，兼容主流 AI（v1 只做 OpenAI-compatible），用户输 Key 后拉模型列表、手选或手填模型做分析；其余仍冻结
+- **分支 `nightly/20260927a`（3 提交）待合**：①后端（`src/llm_config.py`：厂商预设 10 家 + `fetch_models` + 保存 Key→`.env`/非敏感→`local.yaml`/即时写 environ + 脱敏 status；4 端点）②UI+触发+用量（`/llm` 设置页 + POST analyze 三模式 + GET usage + 首页导航）③gate 失败修复（status 读写路径不一致真 bug）
+- **不做的两件事（已和用户对齐）**：上下文压缩不建（单股 prompt 仅数千 token，现代模型轻松装下；只留超长降年限思路以后看）；提示词不重建（复用 `ANALYSIS_PROMPT` 全套：六关/镜子/veto/P0-2 findings）
+- **验证（生产服务器 worktree）**：`gate.sh` **396 passed / Gate passed / 82.59s**（367+29 新测）；首跑抓 2 真失败修复后全绿；三扫描全绿（ast / 新增行 emoji 0 / 身份 0）
+- **端到端待用户填 Key 后实测**：分析链路（analyze_batch→落库→用量）单测全过，但无真实 Key，打不通真模型；用户保存 Key 后点一次单股分析即闭环验证
+- 合并后同步生产：git pull + **重启服务**（routes/模板改动需重启）+ gate 复验
 
-## 下一步方向（无开发任务；只剩看护）
-1. 看护（偶发）：服务 `active`？→ 本机 curl `/api/status`；今日 15:30 跑了？→ 查 `run_log` 最新行 / 首页候选日期；磁盘 → `df -h`（<80% 不理）
-2. 日后想恢复 AI 分析：自备可用 LLM（配 `.env`/config）→ 手动 `run_ai_analysis.py` 或外部 agent 按 `docs/agent-api.md` 自助；本地通道（Zen/Pollinations）已死别试
-3. ~~用户保留决策：`deep_research` 废表是否 drop~~——已删（2026-09-23 用户批准"脏数据别留"；5 行备份在生产 `data/backup/`，全仓零代码引用）
+## 下一步方向
+1. 等用户批准合并 `nightly/20260927a` → pull + 重启 + gate + 用户填 Key 后单股实测
+2. P2 体验优化仍冻结；外部接入/复盘/盯盘仍外部发起，本项目不排期
+3. 后续可选（v2）：Anthropic/Gemini 原生直连、prompt 超长降年限 guard、花费用量折算金额
 
-## 已知隐患（冻结前状态，原样保留）
-- S8 覆盖约 47%（新浪 2999 只 ∩ 快照 5527 行 = 2594；今日子集 487/719）——未收录新股 sector NULL，均值 WHERE 过滤；非 bug
-- 快照表为滚动记录（每日仅回写候选池+钉选补录约 700 行，其余行日期旧）——既有设计；筛选扫描以当日流水线为准
-- 上游不稳（新浪 11s 慢响应/curl RC28/背靠背拖慢）——0.6s 节奏+420s 护栏+缓存兜底；全挂则跳过不清旧值
-- AKShare S4/S5 永久挂（C2.5 兜底）；82 只小盘无 roic/fcf（东财无数据）
-- `watchlist_thesis` 从未 live 端到端验证（单测过）；外部 AI 写回前建议先手动 POST 验证
-- 重启验证等待 ≥10s（uvicorn 启动约 8s，sleep 3 首检 000 系正常时序）
+## 已知隐患
+- 真实 Key 花的是真钱：409 防重入 + 间隔 5~600s 可配 + 单股模式已给；整轮 20 只×60s 约 20 分钟，用户自己掌握节奏
+- 部分厂商 `/models` 非标准（Ollama 老版本/Anthropic 原生）→ 拉不到就用手动输入框（v1 范围内属已知限制）
+- S8 覆盖约 47%、AKShare S4/S5 永久挂、82 只小盘无 roic/fcf——冻结前状态，原样保留
+- 快照表滚动记录、重启验证等待 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
+- 2026-09-27 LLM 自带 Key 分析复活待合（nightly/20260927a：OpenAI-compatible + /llm 设置页 + 三触发 + 用量显示，生产 worktree gate 396；提示词/压缩不重建；端到端待用户 Key）
 - 2026-09-23 deep_research 废表已删（用户批准"脏数据别留"；5 行备份后 DROP，表已不存在；08-31"表不存在"系误记，今日才真删；docs 随 nightly/20260923b 合并）
 - 2026-09-23 维护模式收尾已合（nightly/20260923a → main：AI 零触发审计 + 备份清理约 480M + 文档冻结；停止投入，转维护模式）
 - 2026-09-23 P0-2 修复已合已同步（nightly/20260922e → main=c6175d1：生产 gate 367 + 重启三路 200；用户授权由 agent 把关合并）

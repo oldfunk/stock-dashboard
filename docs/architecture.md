@@ -113,7 +113,7 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 367 passed，2026-09-22 生产服务器 worktree gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 396 passed，2026-09-27 生产服务器 worktree gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；Hermes 只提交 GitHub 不部署（见 iteration-log 约束）。
