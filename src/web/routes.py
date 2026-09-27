@@ -11,6 +11,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+
+import src.llm_config as llm_config
 
 from src.config import load_config, start_config_watcher, stop_config_watcher
 from src.models.database import (
@@ -797,6 +800,55 @@ async def api_config():
                 else:
                     safe_config['ai'][key] = '****'
     return safe_config
+
+
+# ── LLM 自带 Key 接入 ──────────────────────────────────────────
+
+class LLMTestRequest(BaseModel):
+    api_base: str = ""
+    api_key: str = ""
+
+
+class LLMSaveRequest(BaseModel):
+    provider: str = "custom"
+    api_base: str = ""
+    model: str = ""
+    api_key: str = ""
+    temperature: float = 0.3
+    max_tokens: int = 6000
+
+
+@app.get("/api/llm/providers")
+async def llm_providers():
+    """厂商预设列表（无敏感信息）"""
+    return {"providers": llm_config.PROVIDERS}
+
+
+@app.post("/api/llm/test")
+async def llm_test(req: LLMTestRequest):
+    """连接测试 + 拉模型列表（不持久化，Key 不记日志）"""
+    try:
+        models = llm_config.fetch_models(req.api_base, req.api_key or "")
+    except llm_config.LLMSetupError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "models": models}
+
+
+@app.post("/api/llm/save")
+async def llm_save(req: LLMSaveRequest):
+    """保存 LLM 配置：Key → .env，非敏感 → local.yaml；返回脱敏状态"""
+    try:
+        return llm_config.save_llm_config(
+            req.provider, req.api_base, req.model, req.api_key or "",
+            req.temperature, req.max_tokens)
+    except llm_config.LLMSetupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/llm/status")
+async def llm_status():
+    """LLM 配置状态（脱敏：只有 has_key 布尔值 + key_preview）"""
+    return llm_config.llm_status()
 
 
 @app.get("/api/data-quality")
