@@ -690,9 +690,12 @@ class RunLogDAO:
         return dict(row) if row else None
 
     def get_latest_completed_run_id(self) -> Optional[str]:
+        """最新已完成的*筛选*轮（排除周六复盘 run：run_id 以 _review 结尾，
+        否则周六之后所有调用方都会拿到空集合）。"""
         with db_conn() as conn:
             row = conn.execute(
                 "SELECT run_id FROM run_log WHERE status='completed' "
+                "AND run_id NOT LIKE '%_review' "
                 "ORDER BY start_time DESC LIMIT 1"
             ).fetchone()
         return row['run_id'] if row else None
