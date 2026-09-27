@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-27（/llm 页参数收折叠：默认即可，高级自定义，nightly/20260927c 已合）
+- **改了什么**：`llm.html` temperature/max_tokens/间隔秒数移入 `<details>` 高级设置（默认值不变：0.3/6000/60，JS 取值逻辑不变）；测试加 1 断言（页面含"高级设置"）。
+- **为什么**（用户反馈）：普通用户用默认即可，自定义以后再说；减少设置页认知负担。
+- **验证**：生产 gate 396 passed（总数不变）；生产 pull + gate + 重启（模板改动）+ 三路 200。
+
 ### 2026-09-27（合并 nightly/20260927a：LLM 自带 Key 上线 + 长期授权直接合并）
 - **合并**（用户长期授权，2026-09-27 起合并/推送/生产调试无需逐次批准）：`nightly/20260927a`（4 提交）ff 入 main（= `45be212`）；远端/本地分支已删。
 - **部署**：生产 git pull → 部署目录 `gate.sh` **396 passed / 33.84s / Gate passed** → 重启 `stock-dashboard.service`（routes/模板改动）→ active，ROOT/API/LLM 三路 200，5 分钟内日志 0 Traceback；`/api/llm/status` 如实返回未配置（无 Key）。

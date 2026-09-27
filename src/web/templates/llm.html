@@ -47,6 +47,10 @@
         .status { font-size: 14px; padding: 8px 12px; border-radius: var(--radius); background: var(--bg-primary); margin-bottom: 12px; }
         .status b.ok { color: var(--green); }
         .status b.no { color: var(--gold); }
+        details.adv { margin: 4px 0 10px 0; }
+        details.adv summary { font-size: 13px; color: var(--text-secondary); cursor: pointer; }
+        details.adv summary:hover { color: var(--accent); }
+        details.adv .row { margin-top: 10px; }
         .bar-wrap { height: 10px; background: var(--bg-primary); border: 1px solid var(--divider); border-radius: 6px; overflow: hidden; margin-top: 8px; display: none; }
         .bar { height: 100%; width: 0; background: var(--accent); transition: width 0.5s; }
         table.usage { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
@@ -93,12 +97,15 @@
                 <label>手动输入</label>
                 <input type="text" id="modelInput" class="grow mono" placeholder="如下拉无想要的型号，在此手填">
             </div>
-            <div class="row">
-                <label>temperature</label>
-                <input type="number" id="tempInput" class="short" value="0.3" step="0.1" min="0" max="2">
-                <label style="min-width:0">max_tokens</label>
-                <input type="number" id="maxTokensInput" class="short" value="6000" step="500" min="1">
-            </div>
+            <details class="adv">
+                <summary>高级设置（默认即可，一般不用动）</summary>
+                <div class="row">
+                    <label>temperature</label>
+                    <input type="number" id="tempInput" class="short" value="0.3" step="0.1" min="0" max="2">
+                    <label style="min-width:0">max_tokens</label>
+                    <input type="number" id="maxTokensInput" class="short" value="6000" step="500" min="1">
+                </div>
+            </details>
             <div class="row">
                 <button id="testBtn" onclick="testConn()">测试连接并拉取模型</button>
                 <button id="saveBtn" class="primary" onclick="saveCfg()">保存配置</button>
@@ -109,10 +116,13 @@
         <div class="card">
             <h2>触发分析</h2>
             <p class="hint">默认间隔 60 秒/只（防限流）；付费接口双击不会重复扣费（服务端防重入）。进度见下方，明细进用量表。</p>
-            <div class="row">
-                <label>间隔秒数</label>
-                <input type="number" id="intervalInput" class="short" value="60" min="5" max="600">
-            </div>
+            <details class="adv">
+                <summary>高级设置（默认 60 秒/只，一般不用动）</summary>
+                <div class="row">
+                    <label>间隔秒数</label>
+                    <input type="number" id="intervalInput" class="short" value="60" min="5" max="600">
+                </div>
+            </details>
             <div class="row">
                 <button class="primary" onclick="startAnalyze('all')">整轮分析（最新20只）</button>
                 <button onclick="startAnalyze('retry')">只补失败</button>
