@@ -214,8 +214,8 @@ class TestRoutes:
     def test_save_masked(self, client, monkeypatch):
         from src import llm_config
 
-        def _fake_save(**kwargs):
-            assert kwargs["api_key"] == "sk-raw-secret-1234567890"
+        def _fake_save(*args, **kwargs):
+            assert args[3] == "sk-raw-secret-1234567890"
             return {"configured": True, "has_key": True,
                     "key_preview": "sk-r****7890", "api_base": "https://x.test/v1",
                     "model": "m", "provider": "custom"}

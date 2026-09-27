@@ -99,9 +99,10 @@ def _read_local_ai(local_path: Path) -> dict:
     return ai if isinstance(ai, dict) else {}
 
 
-def _effective() -> dict:
+def _effective(local_path: Path = None) -> dict:
     """生效值：env 优先（与 AiAnalyzer 一致），其次 local.yaml ai 段。"""
-    local_ai = _read_local_ai(_default_local_path())
+    lp = Path(local_path) if local_path else _default_local_path()
+    local_ai = _read_local_ai(lp)
     return {
         "api_base": os.getenv(ENV_BASE) or local_ai.get("api_base") or "",
         "model": os.getenv(ENV_MODEL) or local_ai.get("model") or "",
@@ -109,10 +110,10 @@ def _effective() -> dict:
     }
 
 
-def llm_status() -> dict:
+def llm_status(local_path: Path = None) -> dict:
     """脱敏状态：has_key 只有布尔值，key_preview 脱敏，绝不返回原值。"""
     key = os.getenv(ENV_KEY) or ""
-    eff = _effective()
+    eff = _effective(local_path)
     return {
         "configured": bool(key),
         "has_key": bool(key),
@@ -200,4 +201,4 @@ def save_llm_config(provider: str, api_base: str, model: str,
     if api_key:
         os.environ[ENV_KEY] = api_key
     logger.info("[LLM配置] 已保存 provider=%s model=%s", provider, model)
-    return llm_status()
+    return llm_status(local_path)
