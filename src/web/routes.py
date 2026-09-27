@@ -4,7 +4,6 @@ Web 看板 - FastAPI 路由
 
 import json
 import logging
-import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -852,15 +851,44 @@ async def llm_status():
     return llm_config.llm_status()
 
 
-# ── LLM 分析触发 + 用量 ────────────────────────────────────────
-_ai_state = {"running": False}
-_ai_lock = threading.Lock()
+# ── LLM 分析队列 + 自定义分析 ──────────────────────────────────
+def _check_interval(v) -> int:
+    try:
+        iv = int(v or 60)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="interval_seconds 必须是整数")
+    if not 5 <= iv <= 600:
+        raise HTTPException(status_code=400, detail="interval_seconds 须在 5~600 之间")
+    return iv
 
 
 class LLMAnalyzeRequest(BaseModel):
     mode: str = "all"
     code: str = ""
     interval_seconds: int = 60
+
+
+class LLMEnqueueRequest(BaseModel):
+    scope: str = "candidates"
+    codes: str = ""
+    requirement: str = ""
+    interval_seconds: int = 60
+
+
+class LLMCancelRequest(BaseModel):
+    task_id: str = ""
+
+
+class LLMPolishRequest(BaseModel):
+    text: str = ""
+
+
+class LLMMarketRequest(BaseModel):
+    requirement: str = ""
+
+
+class LLMConcurrencyRequest(BaseModel):
+    concurrency: int = 2
 
 
 def _enrich_with_financial_summary(stocks: list) -> None:
@@ -875,72 +903,163 @@ def _enrich_with_financial_summary(stocks: list) -> None:
                     s[k] = v
 
 
-@app.post("/api/llm/analyze")
-async def llm_analyze(req: LLMAnalyzeRequest):
-    """触发 AI 分析（后台线程）：all 整轮 / retry 只补失败 / once 单股。409 防重入。"""
-    with _ai_lock:
-        if _ai_state["running"]:
-            raise HTTPException(status_code=409, detail="已有分析任务在跑")
-        mode = (req.mode or "all").strip()
-        if mode not in ("all", "retry", "once"):
-            raise HTTPException(status_code=400, detail="mode 非法：all|retry|once")
-        try:
-            interval = int(req.interval_seconds or 60)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="interval_seconds 必须是整数")
-        if not 5 <= interval <= 600:
-            raise HTTPException(status_code=400, detail="interval_seconds 须在 5~600 之间")
-        from src.analyzer.ai_analyzer import AiAnalyzer, analyze_batch
-        analyzer = AiAnalyzer(load_config().get('ai', {}))
-        if not analyzer.configured:
-            raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
-        run_id = RunLogDAO().get_latest_completed_run_id()
+def _resolve_scope(scope: str, codes_text: str = "") -> tuple:
+    """范围解析 → (stocks, note, run_id)。stocks 未富集；调用方按需富集。"""
+    import re
+    from src.models.database import (
+        ScreeningResultDAO, StockSnapshotDAO, WatchlistDAO, RunLogDAO)
+    scope = (scope or "candidates").strip()
+    if scope not in ("candidates", "watchlist", "pool", "custom"):
+        raise HTTPException(status_code=400, detail="scope 非法：candidates|watchlist|pool|custom")
+    run_id = RunLogDAO().get_latest_completed_run_id()
+    if scope == "candidates":
         if not run_id:
             raise HTTPException(status_code=400, detail="暂无已完成的筛选批次")
         stocks = ScreeningResultDAO().get_results_for_run(run_id)
+        return stocks, f"最新轮 {len(stocks)} 只", run_id
+    if scope == "watchlist":
+        codes = sorted(WatchlistDAO().get_watched_codes())
+        label = "钉选"
+    elif scope == "pool":
+        from src.models.ai_watchlist import AiWatchlistDAO
+        codes = sorted({x.get("code") for x in AiWatchlistDAO().get_all() if x.get("code")})
+        label = "观察池"
+    else:
+        codes = sorted(set(re.findall(r"\d{6}", codes_text or "")))
+        if not codes:
+            raise HTTPException(status_code=400, detail="自定义代码为空（填 6 位代码，多个用空格/换行分隔）")
+        if len(codes) > 50:
+            raise HTTPException(status_code=400, detail="自定义最多 50 只")
+        label = "自定义"
+    dao = StockSnapshotDAO()
+    stocks, missing = [], []
+    for c in codes:
+        row = dao.get_by_code(c)
+        if row:
+            stocks.append(dict(row))
+        else:
+            missing.append(c)
+    note = f"{label} {len(stocks)} 只" + (f"（快照无：{','.join(missing)}）" if missing else "")
+    return stocks, note, run_id
+
+
+@app.post("/api/llm/analyze")
+async def llm_analyze(req: LLMAnalyzeRequest):
+    """单次触发（卡片/兼容）：all 整轮 / retry 只补失败 / once 单股，走队列，返回 task_id。"""
+    from src import ai_queue
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    mode = (req.mode or "all").strip()
+    if mode not in ("all", "retry", "once"):
+        raise HTTPException(status_code=400, detail="mode 非法：all|retry|once")
+    interval = _check_interval(req.interval_seconds)
+    analyzer = AiAnalyzer(load_config().get('ai', {}))
+    if not analyzer.configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+    if mode == "once":
+        code = (req.code or "").strip()
+        if len(code) != 6 or not code.isdigit():
+            raise HTTPException(status_code=400, detail="code 须为 6 位数字")
+        stocks, note, run_id = _resolve_scope("custom", code)
+        if not stocks:
+            raise HTTPException(status_code=404, detail=f"本轮无此股票：{code}")
+        name = f"单股{code}"
+    else:
+        stocks, note, run_id = _resolve_scope("candidates", "")
         if mode == "retry":
             stocks = [s for s in stocks if s.get('ai_failed')]
             if not stocks:
                 return {"status": "noop", "message": "本轮无失败项，无需补跑"}
-        elif mode == "once":
-            code = (req.code or "").strip()
-            if len(code) != 6 or not code.isdigit():
-                raise HTTPException(status_code=400, detail="code 须为 6 位数字")
-            stocks = [s for s in stocks if s.get('code') == code]
-            if not stocks:
-                raise HTTPException(status_code=404, detail=f"本轮无此股票：{code}")
+        name = "整轮分析" if mode == "all" else "补跑失败"
         if not stocks:
             raise HTTPException(status_code=400, detail="本轮无候选股票")
-        total = len(stocks)
-        progress = PipelineProgressDAO()
-        progress.init_run(run_id, 'analyzing', f'AI分析 0/{total}...', ai_total=total)
+    if not run_id:
+        run_id = now_cn().strftime("%Y%m%d_%H%M%S")
+    tid = ai_queue.get_queue().submit(name, mode, stocks, run_id, interval,
+                                      llm_config.get_concurrency())
+    return {"status": "started", "mode": mode, "total": len(stocks),
+            "run_id": run_id, "task_id": tid, "note": note}
 
-        def _run():
-            try:
-                _enrich_with_financial_summary(stocks)
 
-                def on_progress(ok: int, failed: int, idx: int):
-                    progress.update(run_id, stage_label=f'AI分析 {idx + 1}/{total}...',
-                                    ai_done=ok, ai_failed=failed)
-                ok, failed = analyze_batch(stocks, run_id, interval_seconds=interval,
-                                           on_progress=on_progress)
-                RunLogDAO().update_analyzed_count(run_id, ok)
-                progress.update(run_id, 'done', f'完成：AI分析{ok}只（失败{failed}只）',
-                                ai_done=ok, ai_failed=failed)
-            except Exception as e:
-                logger.warning("[LLM分析] 后台异常：%s", e)
-                try:
-                    progress.update(run_id, 'done', f'分析异常：{e}')
-                except Exception:
-                    pass
-            finally:
-                with _ai_lock:
-                    _ai_state["running"] = False
+@app.post("/api/llm/enqueue")
+async def llm_enqueue(req: LLMEnqueueRequest):
+    """入队：scope 范围 + 自定义要求（润色后文本）+ 间隔。"""
+    from src import ai_queue
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    interval = _check_interval(req.interval_seconds)
+    analyzer = AiAnalyzer(load_config().get('ai', {}))
+    if not analyzer.configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+    extra = (req.requirement or "").strip()[:2000] or None
+    stocks, note, run_id = _resolve_scope(req.scope, req.codes)
+    if not stocks:
+        raise HTTPException(status_code=400, detail=f"范围无股票（{note}）")
+    if not run_id:
+        run_id = now_cn().strftime("%Y%m%d_%H%M%S")
+    tid = ai_queue.get_queue().submit(note, req.scope, stocks, run_id, interval,
+                                      llm_config.get_concurrency(), extra)
+    return {"status": "queued", "task_id": tid, "total": len(stocks), "note": note}
 
-        _ai_state["running"] = True
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-        return {"status": "started", "mode": mode, "total": total, "run_id": run_id}
+
+@app.get("/api/llm/queue")
+async def llm_queue():
+    """队列快照 + 当前并发数。"""
+    from src import ai_queue
+    return {"tasks": ai_queue.get_queue().snapshot(),
+            "workers": llm_config.get_concurrency()}
+
+
+@app.post("/api/llm/queue/cancel")
+async def llm_queue_cancel(req: LLMCancelRequest):
+    """取消排队中的任务（运行中的停不下来，返回 false）。"""
+    from src import ai_queue
+    tid = (req.task_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="task_id 不能为空")
+    return {"cancelled": ai_queue.get_queue().cancel(tid)}
+
+
+@app.post("/api/llm/polish")
+async def llm_polish(req: LLMPolishRequest):
+    """需求润色：口语 → 结构化分析指令。"""
+    from src import ai_queue
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="需求不能为空")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="需求超长（≤2000 字）")
+    if not AiAnalyzer(load_config().get('ai', {})).configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+    out = ai_queue.polish_requirement(text)
+    if out is None:
+        raise HTTPException(status_code=502, detail="润色失败（见服务端日志）")
+    return {"polished": out}
+
+
+@app.post("/api/llm/market")
+async def llm_market(req: LLMMarketRequest):
+    """大盘解盘（指数快照 + 可选要求，不落库）。"""
+    from src import ai_queue
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    if len(req.requirement or "") > 2000:
+        raise HTTPException(status_code=400, detail="要求超长（≤2000 字）")
+    if not AiAnalyzer(load_config().get('ai', {})).configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+    out = ai_queue.explain_market(req.requirement)
+    if out is None:
+        raise HTTPException(status_code=502, detail="解盘失败（见服务端日志）")
+    return {"ok": True, "answer": out["answer"],
+            "model": out.get("model"), "usage": out.get("usage") or {}}
+
+
+@app.post("/api/llm/concurrency")
+async def llm_concurrency(req: LLMConcurrencyRequest):
+    """设置并发数（1~5，写 local.yaml，下个任务生效）。"""
+    try:
+        n = llm_config.set_concurrency(req.concurrency)
+    except llm_config.LLMSetupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"concurrency": n}
 
 
 @app.get("/api/llm/usage")

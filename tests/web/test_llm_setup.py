@@ -240,8 +240,7 @@ class TestRoutes:
 
 
 def _reset_busy():
-    from src.web import routes as routes_mod
-    routes_mod._ai_state["running"] = False
+    pass  # 队列模式无全局忙标志（旧 409 机制已移除，重复提交自动排队）
 
 
 def _seed_run(codes):
@@ -282,14 +281,21 @@ class TestAnalyze:
         assert resp.status_code == 400
         assert "API Key" in resp.json()["detail"]
 
-    def test_busy_409(self, client):
-        from src.web import routes as routes_mod
-        routes_mod._ai_state["running"] = True
-        try:
-            resp = client.post("/api/llm/analyze", json={"mode": "all"})
-            assert resp.status_code == 409
-        finally:
-            routes_mod._ai_state["running"] = False
+    def test_queues_not_409(self, client, monkeypatch):
+        """队列模式：重复提交自动排队，不再 409。"""
+        from src import ai_queue as ai_queue_mod
+        _reset_busy()
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            ai_queue_mod, "analyze_batch_parallel",
+            lambda *a, **k: (0, 0))
+        _seed_run([("600519", "贵州茅台", 0)])
+        r1 = client.post("/api/llm/analyze", json={"mode": "all"})
+        r2 = client.post("/api/llm/analyze", json={"mode": "all"})
+        assert r1.status_code == 200 and r2.status_code == 200
+        assert r1.json()["task_id"] != r2.json()["task_id"]
 
     def test_once_unknown_code_404(self, client, monkeypatch):
         _reset_busy()
@@ -302,32 +308,34 @@ class TestAnalyze:
         assert resp.status_code == 404
 
     def test_once_started(self, client, monkeypatch):
-        import time
         _reset_busy()
         monkeypatch.setattr(
             "src.analyzer.ai_analyzer.AiAnalyzer",
             lambda cfg=None: _FakeAnalyzer(ok=True))
+        from src import ai_queue as ai_queue_mod
         calls = {}
 
-        def _fake_batch(stocks, run_id, interval_seconds=60, on_progress=None):
+        def _fake_batch(stocks, run_id, interval_seconds=60,
+                        max_workers=2, extra_instruction=None,
+                        on_progress=None):
             calls["n"] = len(stocks)
             calls["interval"] = interval_seconds
             if on_progress:
-                on_progress(len(stocks), 0, len(stocks) - 1)
+                on_progress(len(stocks), 0, len(stocks))
             return len(stocks), 0
         monkeypatch.setattr(
-            "src.analyzer.ai_analyzer.analyze_batch", _fake_batch)
+            ai_queue_mod, "analyze_batch_parallel", _fake_batch)
         _seed_run([("600519", "贵州茅台", 0)])
+        _seed_snap(["600519"])
         resp = client.post("/api/llm/analyze",
                            json={"mode": "once", "code": "600519",
                                  "interval_seconds": 5})
         assert resp.status_code == 200
         assert resp.json()["status"] == "started"
         assert resp.json()["total"] == 1
-        for _ in range(40):
-            if calls.get("n"):
-                break
-            time.sleep(0.05)
+        assert "task_id" in resp.json()
+        st = _wait_task(client, resp.json()["task_id"])
+        assert st.get("status") == "done"
         assert calls.get("n") == 1
         assert calls.get("interval") == 5
 
@@ -341,26 +349,28 @@ class TestAnalyze:
         assert resp.json()["status"] == "noop"
 
     def test_retry_picks_failed(self, client, monkeypatch):
-        import time
         _reset_busy()
         monkeypatch.setattr(
             "src.analyzer.ai_analyzer.AiAnalyzer",
             lambda cfg=None: _FakeAnalyzer(ok=True))
+        from src import ai_queue as ai_queue_mod
         calls = {}
 
-        def _fake_batch(stocks, run_id, interval_seconds=60, on_progress=None):
+        def _fake_batch(stocks, run_id, interval_seconds=60,
+                        max_workers=2, extra_instruction=None,
+                        on_progress=None):
             calls["codes"] = sorted(s["code"] for s in stocks)
+            if on_progress:
+                on_progress(len(stocks), 0, len(stocks))
             return len(stocks), 0
         monkeypatch.setattr(
-            "src.analyzer.ai_analyzer.analyze_batch", _fake_batch)
+            ai_queue_mod, "analyze_batch_parallel", _fake_batch)
         _seed_run([("600519", "贵州茅台", 0), ("000858", "五粮液", 1)])
         resp = client.post("/api/llm/analyze", json={"mode": "retry"})
         assert resp.json()["status"] == "started"
         assert resp.json()["total"] == 1
-        for _ in range(40):
-            if calls.get("codes"):
-                break
-            time.sleep(0.05)
+        st = _wait_task(client, resp.json()["task_id"])
+        assert st.get("status") == "done"
         assert calls.get("codes") == ["000858"]
 
 
@@ -494,3 +504,166 @@ class TestAsk:
         resp = client.post("/api/llm/ask",
                            json={"code": "600519", "question": "好吗？"})
         assert resp.status_code == 502
+
+
+def _seed_snap(codes):
+    from src.models import database as db_mod
+    with db_mod.db_conn() as conn:
+        for c in codes:
+            conn.execute(
+                "INSERT INTO stock_snapshot (code, name, snapshot_date)"
+                " VALUES (?, ?, ?)", (c, "名" + c, "2026-09-28"))
+
+
+def _wait_task(client, tid, timeout_s=5.0):
+    import time
+    deadline = time.time() + timeout_s
+    last = {}
+    while time.time() < deadline:
+        tasks = client.get("/api/llm/queue").json()["tasks"]
+        last = {t["id"]: t for t in tasks}
+        if last.get(tid, {}).get("status") in ("done", "failed", "cancelled"):
+            break
+        time.sleep(0.05)
+    return last.get(tid, {})
+
+
+class TestEnqueue:
+    def test_bad_scope(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        resp = client.post("/api/llm/enqueue", json={"scope": "nope"})
+        assert resp.status_code == 400
+
+    def test_custom_empty(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        resp = client.post("/api/llm/enqueue",
+                           json={"scope": "custom", "codes": "abc"})
+        assert resp.status_code == 400
+
+    def test_custom_too_many(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        codes = " ".join(f"{i:06d}" for i in range(1, 52))
+        resp = client.post("/api/llm/enqueue",
+                           json={"scope": "custom", "codes": codes})
+        assert resp.status_code == 400
+
+    def test_watchlist_empty_400(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        resp = client.post("/api/llm/enqueue", json={"scope": "watchlist"})
+        assert resp.status_code == 400
+
+    def test_pool_empty_400(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        resp = client.post("/api/llm/enqueue", json={"scope": "pool"})
+        assert resp.status_code == 400
+
+    def test_candidates_no_run_400(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        resp = client.post("/api/llm/enqueue", json={"scope": "candidates"})
+        assert resp.status_code == 400
+
+    def test_custom_queued_extra(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        from src import ai_queue as ai_queue_mod
+        holder = {}
+
+        def _fake_batch(stocks, run_id, interval_seconds=60,
+                        max_workers=2, extra_instruction=None,
+                        on_progress=None):
+            holder["extra"] = extra_instruction
+            if on_progress:
+                on_progress(len(stocks), 0, len(stocks))
+            return len(stocks), 0
+        monkeypatch.setattr(
+            ai_queue_mod, "analyze_batch_parallel", _fake_batch)
+        _seed_snap(["600519", "000858"])
+        resp = client.post("/api/llm/enqueue", json={
+            "scope": "custom", "codes": "600519, 000858 000001",
+            "requirement": "重点看现金流"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "queued"
+        assert data["total"] == 2
+        st = _wait_task(client, data["task_id"])
+        assert st.get("status") == "done"
+        assert holder.get("extra") == "重点看现金流"
+
+
+class TestQueueAPI:
+    def test_snapshot_shape(self, client):
+        d = client.get("/api/llm/queue").json()
+        assert "tasks" in d and "workers" in d
+
+    def test_cancel_unknown(self, client):
+        assert client.post("/api/llm/queue/cancel",
+                           json={"task_id": "q-nope"}).json() == {"cancelled": False}
+
+    def test_cancel_empty_400(self, client):
+        assert client.post("/api/llm/queue/cancel",
+                           json={"task_id": ""}).status_code == 400
+
+
+class TestPolishMarket:
+    def test_polish_empty_400(self, client):
+        assert client.post("/api/llm/polish",
+                           json={"text": "  "}).status_code == 400
+
+    def test_polish_ok(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            "src.ai_queue.polish_requirement", lambda t: "1. 看现金流")
+        resp = client.post("/api/llm/polish", json={"text": "看看银行"})
+        assert resp.json() == {"polished": "1. 看现金流"}
+
+    def test_polish_fail_502(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            "src.ai_queue.polish_requirement", lambda t: None)
+        assert client.post("/api/llm/polish",
+                           json={"text": "看看银行"}).status_code == 502
+
+    def test_market_ok(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=True))
+        monkeypatch.setattr(
+            "src.ai_queue.explain_market",
+            lambda req=None: {"answer": "震荡市", "model": "m", "usage": {}})
+        resp = client.post("/api/llm/market", json={"requirement": ""})
+        assert resp.json()["answer"] == "震荡市"
+
+    def test_market_unconfigured_400(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "src.analyzer.ai_analyzer.AiAnalyzer",
+            lambda cfg=None: _FakeAnalyzer(ok=False))
+        assert client.post("/api/llm/market",
+                           json={"requirement": ""}).status_code == 400
+
+
+class TestConcurrency:
+    def test_set_ok(self, client, monkeypatch):
+        monkeypatch.setattr("src.llm_config.set_concurrency", lambda n: 3)
+        assert client.post("/api/llm/concurrency",
+                           json={"concurrency": 3}).json() == {"concurrency": 3}
+
+    def test_set_bad(self, client):
+        assert client.post("/api/llm/concurrency",
+                           json={"concurrency": 9}).status_code == 400
