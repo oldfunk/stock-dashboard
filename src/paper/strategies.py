@@ -99,7 +99,10 @@ def plan_value_rotation(holdings: dict, ranked: list, prices: dict,
 
     holdings: {code: 持有总量}；ranked: [(code, score)] 降序；
     prices: {code: 现价}；SELL 量为持有总量（调用方按可用量 clamp）。
+    ranked 为空表示无评分依据，直接返回 []（不清仓）。
     """
+    if not ranked:
+        return []
     top_set = {c for c, _ in ranked[:top_n]}
     drop_set = {c for c, _ in ranked[:dropout_n]}
     signals = []
