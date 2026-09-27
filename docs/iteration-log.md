@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：437 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：440 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 437 passed，只升不降）
+- 全仓 pytest 零失败（基线 440 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（双 bug 修复：KlineDAO 恢复 + 钉选卡跳转，nightly/20260928c 已合）
+- **Bug1 K 线空白**：`GET /api/stock/{code}/kline` 500——`routes.py:638` 引用不存在的 `KlineDAO`（`ImportError`，生产日志实证）。根因：历史重构把 K 线方法粘进 `WatchlistDAO`、类本身丢了（`database.py:1069` 流浪 docstring 为证；`pyproject norecursedirs` 排除 `_legacy` 致 gate 从未抓到）。修复：迁回独立 `KlineDAO`（WatchlistDAO 内无其他调用方）+ 3 单测。附带：调度增量拉取因此连挂 7 天（表停在 09-21），修复后明早 15:30 自动追平（start_date 续拉），无需手动补。
+- **Bug2 钉选卡点不动**：桌面浏览器实证——钉选 tab 的 6 张卡可见但零 onclick。根因：该 tab 由 `watchlist.js` 纯 JS 渲染，拼卡片时漏了跳转（搜索项有，卡片无）。修复：补 `clickable` + onclick + title；已钉按钮加 `stopPropagation`（否则先跳详情）；`watchlist.js` 加版本戳（浏览器缓存旧 JS，`?v=20260928c`，以后改静态文件同理）。
+- **验证**：worktree gate **440 passed**（437+3）；生产部署目录 gate 全绿；K 线接口 200 + 真数据；浏览器实证点击跳转（见下）；三扫描全绿。
+- 基线刷新 437 → **440 passed**。
 
 ### 2026-09-28（部署 gate 2 失败修复 + 队列路径 live 验证）
 - **失败**：部署目录 gate 435+2（worktree 全绿）：`test_polish_passthrough` + `test_explain_market`。根因：单测不 hermetic——部署目录有用户 `local.yaml`（model 非免费）+ pytest 不加载 `.env` → 真 analyzer configured False；worktree 干净环境掩盖了问题。

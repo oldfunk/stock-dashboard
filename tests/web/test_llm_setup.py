@@ -687,3 +687,4 @@ class TestQueueUI:
         assert resp.status_code == 200
         assert 'id="aiPanel"' in resp.text
         assert 'id="aiQueueBody"' in resp.text
+        assert "watchlist.js?v=" in resp.text
