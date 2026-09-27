@@ -461,8 +461,9 @@ class TestAsk:
         from src.models import database as db_mod
         with db_mod.db_conn() as conn:
             conn.execute(
-                "INSERT INTO stock_snapshot (code, name) VALUES (?, ?)",
-                (code, "贵州茅台"))
+                "INSERT INTO stock_snapshot (code, name, snapshot_date)"
+                " VALUES (?, ?, ?)",
+                (code, "贵州茅台", "2026-09-27"))
 
     def test_ask_success(self, client, monkeypatch):
         monkeypatch.setattr(
