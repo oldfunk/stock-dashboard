@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：440 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：466 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 440 passed，只升不降）
+- 全仓 pytest 零失败（基线 466 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,15 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（纸盘移植：子项目成果吸回母项目，M6，nightly/20260928f 已合）
+- **用户指令**：远端/本地/pi 子项目一字不动、保持独立；母项目新增模拟交易页吸取成果；MA+价值策略 / 手动回测先行 / 10 万+候选钉选（三拍板）。
+- **路线**：原生移植（未按 MERGE_GUIDE §1 整体迁入——用户要面板里的页面而非外链+独立 venv；偏差已记 `src/paper/__init__.py` 与此处）。读的是 TEMP 只读 clone（本批次收尾删除），远端零写入。
+- **改了什么**：① `src/paper/`（types/日历/broker 回测日期覆盖+T+1/风控/MA 移植/价值轮动自研/回测引擎 replay/NAV/胜率/临时账本零残留）② `/paper` 页 + universe/backtest 启动/状态接口 + 首页导航。
+- **数据诚实上限**：K 线 2025-07-23 起 42 只（稀疏：仅入池/Top25 时追加）；筛选 59 个交易日（2026-07-08 起）；区间超出自动截断，实际使用标的数明示（live：3 只里仅茅台有数）。
+- **v1 边界**：手动回测 only；live 账户区空位标注 v2；agent loop/LLM 交易员/8080 面板/独立 DB 文件/op_log/agent_plans 不碰。
+- **验证**：gate **466 passed / Gate passed**（440 + 26）；两轮失败修复（价值空评分不清仓真 bug、快照 NOT NULL）；ast / 新增行 emoji 0 / 身份 0 全绿；live：MA 干净跑完（38 天 0 信号）+ 价值默认池（21 只覆盖，59 天 11 笔，-1.87%，费用 55.94）。
+- 基线刷新 440 → **466 passed**。
 
 ### 2026-09-28（双 bug 修复：KlineDAO 恢复 + 钉选卡跳转，nightly/20260928c 已合）
 - **Bug1 K 线空白**：`GET /api/stock/{code}/kline` 500——`routes.py:638` 引用不存在的 `KlineDAO`（`ImportError`，生产日志实证）。根因：历史重构把 K 线方法粘进 `WatchlistDAO`、类本身丢了（`database.py:1069` 流浪 docstring 为证；`pyproject norecursedirs` 排除 `_legacy` 致 gate 从未抓到）。修复：迁回独立 `KlineDAO`（WatchlistDAO 内无其他调用方）+ 3 单测。附带：调度增量拉取因此连挂 7 天（表停在 09-21），修复后明早 15:30 自动追平（start_date 续拉），无需手动补。
