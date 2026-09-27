@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：408 passed（2026-09-27 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：437 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 408 passed，只升不降）
+- 全仓 pytest 零失败（基线 437 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（AI 队列并发+UI 重组：排队/N 并发/范围自选/需求润色/大盘解盘，nightly/20260928a 已合）
+- **用户需求**：分析不能排队（旧 409 顶掉）→ 自选并发数 + 排队执行；执行功能移出设置页（设置页只留参数）→ 主页常驻；自选股 direct 按钮；自定义范围（大盘/自定义盘股）；需求文本框 + AI 润色拆解。
+- **改了什么**：①后端（`src/ai_queue.py`：`analyze_batch_parallel` 独立实例线程隔离 + `AnalysisQueue` 批次串行批内并发 + 取消 + `polish_requirement`/`explain_market`；`analyze_stock` 附加指令注入 prompt 末尾；并发数 1~5 配 local.yaml）②端点（`/analyze` 转队列去 409 + `/enqueue` + `/queue` + `/queue/cancel` + `/polish` + `/market` + `/concurrency` + 范围解析 candidates/watchlist/pool/custom；旧 busy 单测改排队语义）③UI（`/llm` 瘦身只留参数 + 首页常驻面板 + `static/ai.js` 共享 + 详情/钉选详情分析按钮）。
+- **设计取舍（如实记录）**：队列内存态（重启丢失）；同轮并发批次共享 progress 行（显示交错）；问答/解盘不落库 analyzed（inline + 用量）；`index` 内联 analyzeOne 与 `ai.js` 双份待收敛。
+- **验证**（生产服务器 worktree）：`gate.sh` **437 passed / Gate passed**（408 + 29 新增：并发后端/端点/卡片渲染/UI 元素）；两轮失败修复（快照 NOT NULL、codeInput 过期断言）；ast / 新增行 emoji 0 / 身份 0 全绿。
+- **状态**：随即合并；合并后 pull + 重启（analyzer/routes/模板/静态 JS）+ gate；然后队列路径 live 验证（入队 1 只单股）。基线刷新 408 → **437 passed**。
 
 ### 2026-09-27（合并 nightly/20260927d：修坑+卡片按钮+直接提问上线）
 - **合并**（长期授权）：5 提交 ff 入 main（= `577b8e0`）；远端/本地分支已删。
