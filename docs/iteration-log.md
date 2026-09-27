@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：396 passed（2026-09-27 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：405 passed（2026-09-27 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 396 passed，只升不降）
+- 全仓 pytest 零失败（基线 405 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-27（用户报障修坑 + 卡片按钮 + 直接提问，nightly/20260927d 已合）
+- **背景**（用户配好智谱 Key 后"无法运行分析"）：生产日志审计结论——代码无错，全天零 `[AI分析]` 日志、screening 全员 ai_failed=None、用量 0 行，**没有任何一次分析真正启动过**；拦路三坑：单股手填未知代码 404、重试 noop 被误读、测试 401（智谱列表接口 quirks）吓退。
+- **修坑A**：单股改候选下拉（取 `/api/stocks` 20 只）+ 401 注记（测试 401 不代表 Key 无效）+ 下拉断言。
+- **B 卡片按钮**：候选卡 + 钉选卡"AI 分析"直达 once + index 共享 JS（postJSON/analyzeOne/错误映射/进度轮询/完成刷新）+ 卡片渲染 2 单测；09-21 旧注释同步更新。
+- **C 直接提问**：`AiAnalyzer.ask_raw` 瘦调用（单 POST + 超时重试 1 次，不进 20 次退避；system prompt 非 JSON）+ `answer_question`（快照+筛选+财务摘要上下文组装）+ POST `/api/llm/ask`（400/404/502 码齐）+ 详情页问答框（用量 inline + 存为笔记走现有 notes 接口，先自动钉选再写）+ 7 单测。
+- **验证**（生产服务器 worktree）：`gate.sh` **405 passed / Gate passed / 27.32s**（396 + 9：卡片渲染 2 + 提问 7）；首跑 2 失败（测试插快照行缺 NOT NULL 列）修复后全绿；ast / 新增行 emoji 0 / 身份 0 全绿。
+- **状态**：随即合并；合并后 pull + 重启（模板/routes/analyzer）+ gate；然后单股 live 实测（用户 Key：`glm-4.7-flash` 是否存在、Key 是否有效，一次即知）。基线刷新 396 → **405 passed**。
 
 ### 2026-09-27（/llm 页参数收折叠：默认即可，高级自定义，nightly/20260927c 已合）
 - **改了什么**：`llm.html` temperature/max_tokens/间隔秒数移入 `<details>` 高级设置（默认值不变：0.3/6000/60，JS 取值逻辑不变）；测试加 1 断言（页面含"高级设置"）。
