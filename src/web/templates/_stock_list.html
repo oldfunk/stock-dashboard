@@ -10,8 +10,11 @@
                     <button class="watch-btn {{ 'watched' if stock.watched else '' }}"
                     onclick="event.stopPropagation(); toggleWatch('{{ stock.code }}', this)"
                     title="钉选后不受 Top20 限制，持续跟踪">{{ '已钉' if stock.watched else '钉选' }}</button>
+                    <button class="ai-btn"
+                    onclick="event.stopPropagation(); analyzeOne('{{ stock.code }}', this)"
+                    title="用已配置模型分析这一只（once 模式）">AI 分析</button>
                 </div>
-                {# AI 分析由外部 AI 执行，列表卡片只展示数据（2026-09-21 方向） #}
+                {# 列表卡片只展示数据；2026-09-27 起卡片可直接触发单股分析（结果进详情时间线/用量表） #}
 
                 <div class="stock-metrics">
                     <div class="metric-cell">

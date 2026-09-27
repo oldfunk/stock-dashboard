@@ -339,6 +339,9 @@
         .watch-btn { padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; margin-left: 6px; }
         .watch-btn:hover { border-color: var(--accent); color: var(--accent); }
         .watch-btn.watched { background: var(--color-up); color: var(--text-on-green); border-color: var(--color-up); }
+        .ai-btn { padding: 2px 8px; border: 1px solid var(--border); background: transparent; color: var(--accent); border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; margin-left: 6px; }
+        .ai-btn:hover { background: var(--accent-soft); }
+        .ai-btn:disabled { opacity: 0.6; cursor: default; }
         .signal-buy { color: var(--color-up); font-weight: 600; }
         .signal-hold { color: #ffc107; font-weight: 600; }
         .signal-avoid { color: var(--red); font-weight: 600; }
@@ -1210,6 +1213,66 @@
     }
 
     setColorScheme(getPreferredColorScheme());
+
+    // ========== 单股 AI 分析（2026-09-27：卡片直达 once 模式） ==========
+    function postJSON(url, data) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.onload = function() {
+                var body = null;
+                try { body = JSON.parse(xhr.responseText); } catch(e) {}
+                if (xhr.status >= 200 && xhr.status < 300) { resolve(body); }
+                else { reject({status: xhr.status, body: body}); }
+            };
+            xhr.onerror = function() { reject({status: 0, body: null}); };
+            xhr.send(JSON.stringify(data));
+        });
+    }
+
+    function analyzeOneError(status, body) {
+        var detail = (body && body.detail) || '';
+        if (status === 409) return '任务在跑';
+        if (status === 404) return '不在本轮';
+        if (detail.indexOf('API Key') >= 0) return '未配Key';
+        return detail.slice(0, 8) || '启动失败';
+    }
+
+    function analyzeOne(code, btn) {
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '分析中…';
+        postJSON('/api/llm/analyze', {mode: 'once', code: code})
+            .then(function(d) {
+                if (d && d.status === 'started') { pollAnalyzeDone(btn, orig); }
+                else { btn.textContent = '无需补跑'; setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3000); }
+            })
+            .catch(function(e) {
+                btn.textContent = analyzeOneError(e.status, e.body);
+                setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 4000);
+            });
+    }
+
+    function pollAnalyzeDone(btn, orig) {
+        var tries = 0;
+        var timer = setInterval(function() {
+            tries++;
+            fetchJSON('/api/progress').then(function(p) {
+                if (p.stage === 'done' || tries > 60) {
+                    clearInterval(timer);
+                    btn.textContent = '完成✓';
+                    setTimeout(function() { location.reload(); }, 900);
+                }
+            }).catch(function() {
+                if (tries > 60) {
+                    clearInterval(timer);
+                    btn.textContent = orig;
+                    btn.disabled = false;
+                }
+            });
+        }, 3000);
+    }
 
     // ========== Score Detail Toggle ==========
     function toggleScoreDetail(code) {

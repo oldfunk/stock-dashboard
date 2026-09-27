@@ -13,6 +13,9 @@
             </div>
             <div class="wl-item-right">
                 <span class="wl-tag">池{{ stock.review_count or 1 }}周</span>
+                <button class="ai-btn"
+                    onclick="event.stopPropagation(); analyzeOne('{{ stock.code }}', this)"
+                    title="用已配置模型分析这一只（once 模式）">AI 分析</button>
             </div>
         </div>
 
@@ -146,7 +149,7 @@
         </div>
         {% endif %}
 
-        {# AI 摘要行 / AI 分析区 / 历史时间线已移除：分析由外部 AI 通过 API 消费数据后输出，面板不再内联展示（2026-09-21） #}
+        {# AI 展示区已移除：分析由外部 AI 通过 API 消费数据后输出（2026-09-21）；2026-09-27 起卡片头部带 AI 分析触发按钮（结果进详情时间线/用量表） #}
 
     </div>
     {% endfor %}

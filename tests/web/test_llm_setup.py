@@ -387,3 +387,27 @@ class TestUsageAndPage:
         assert "模型设置" in resp.text
         assert "高级设置" in resp.text
         assert '<select id="codeInput"' in resp.text
+
+
+def _fake_card_stock(code="600519"):
+    return {"code": code, "name": "贵州茅台", "score": 90.0, "watched": False,
+            "current_price": 1500.0, "change_percent": 1.0, "pe": 20.0,
+            "pb": 3.0, "roe": 20.0, "debt_ratio": 30.0, "revenue_growth": 5.0,
+            "profit_growth": 5.0, "market_cap": 1000.0, "gross_margin": 40.0,
+            "net_margin": 30.0, "ocf_per_share": 2.0, "reason": "测试"}
+
+
+class TestCardButtons:
+    """卡片 AI 分析按钮：纯模板渲染断言（endpoint 逻辑已有单测覆盖）。"""
+
+    def test_stock_list_has_analyze_button(self):
+        from src.web.routes import templates
+        html = templates.get_template("_stock_list.html").render(
+            stocks=[_fake_card_stock()], request=None)
+        assert "analyzeOne('600519'" in html
+
+    def test_watchlist_card_has_analyze_button(self):
+        from src.web.routes import templates
+        html = templates.get_template("_watchlist_card.html").render(
+            watchlist=[_fake_card_stock()], request=None)
+        assert "analyzeOne('600519'" in html
