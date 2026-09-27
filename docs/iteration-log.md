@@ -162,6 +162,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-28（部署 gate 2 失败修复 + 队列路径 live 验证）
+- **失败**：部署目录 gate 435+2（worktree 全绿）：`test_polish_passthrough` + `test_explain_market`。根因：单测不 hermetic——部署目录有用户 `local.yaml`（model 非免费）+ pytest 不加载 `.env` → 真 analyzer configured False；worktree 干净环境掩盖了问题。
+- **修复**：两单测显式 setenv Key；部署目录 gate **437 passed** 一次过。教训入 handoff 已知隐患：凡读 ambient 配置/环境的单测必须显式隔离。
+- **队列 live**（用户 Key）：enqueue 自定义 1 只 000792 → running → 约 2 分钟 done（1/0），用量落库（3215/3353）；附带发现用户 00:56 自己跑过一只 002215（3314/4375）——功能已在用。
+- 基线 437 不变（无新增测试）；docs 随 `nightly/20260928b` 合并。
+
 ### 2026-09-28（AI 队列并发+UI 重组：排队/N 并发/范围自选/需求润色/大盘解盘，nightly/20260928a 已合）
 - **用户需求**：分析不能排队（旧 409 顶掉）→ 自选并发数 + 排队执行；执行功能移出设置页（设置页只留参数）→ 主页常驻；自选股 direct 按钮；自定义范围（大盘/自定义盘股）；需求文本框 + AI 润色拆解。
 - **改了什么**：①后端（`src/ai_queue.py`：`analyze_batch_parallel` 独立实例线程隔离 + `AnalysisQueue` 批次串行批内并发 + 取消 + `polish_requirement`/`explain_market`；`analyze_stock` 附加指令注入 prompt 末尾；并发数 1~5 配 local.yaml）②端点（`/analyze` 转队列去 409 + `/enqueue` + `/queue` + `/queue/cancel` + `/polish` + `/market` + `/concurrency` + 范围解析 candidates/watchlist/pool/custom；旧 busy 单测改排队语义）③UI（`/llm` 瘦身只留参数 + 首页常驻面板 + `static/ai.js` 共享 + 详情/钉选详情分析按钮）。
