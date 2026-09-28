@@ -3,11 +3,10 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 子项目 bug 修完 + agent 真测通过；main 待合 0928v docs）
-- **修了什么**（母项目内改 vendored，用户已授权修子项目 bug）：`Scheme.source` 补字段（`scheme list` 500 根因）+ 切换策略凭 Key 接管（新浏览器恒 403 根因，与自家 llm/config 规则一致）+ 前端接管提示；附 2 单测，gate **486 passed**
-- **推给子项目审**：分支 `fix-scheme-admin-source` 已推子项目远端（未合，等子项目 Paper Trading Framework 自己审）；母 main 照常合并
-- **agent 真测**（母 universe + 我们的 Key + `--scheme mother`）：dry-run 决策买入天华新能/盐湖股份（理由引用母 PE/ROE/10 年均 ROE/评分）；真跑被幂等闸拦下（dry-run 实质决策计入 gate，未用 `--force` 硬闯；该语义供上游定夺）
-- **收尾分支（本批次 docs）随即合并**：M6 更新 + 基线 484→486
+## 最后状态（2026-09-28 定性纠偏：切换 403 非 bug，scheme list 真 bug 已补；main=6b8fb61）
+- **定性**：切换策略口令错误=没输模拟交易 API 导致，是预期鉴权非 bug；此前记为 bug 是夸大，已在账本纠偏（该改动定性为体验改进）
+- **真 bug**：`scheme list` 500 真实（生产复现 `AttributeError: allow_buy`）；首轮漏补 + 验证只看 dashboard 端是我的失误，本轮补上复测 `ok:true`
+- **状态**：`fix-scheme-admin-source` 已更新到含 allow_buy（未合等审）；生产 gate **486 passed**，部署 pull + 双服务 active + 两端口 200
 
 ## 下一步方向
 1. 明日（或用户说跑时）再跑一次真 agent run，看 AI 下不下单（幂等闸按自然日重置）
@@ -18,8 +17,10 @@
 ## 已知隐患
 - vendored 运行 CWD 必须是 `paper_trading/`；`:8080`（子项目独立部署）vs `:8081`（合并树面板）别混淆
 - 单测 hermetic 铁律；问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
+- 首轮验证教训：改了 CLI + dashboard 两处，只验一处就报“通过”=夸大；以后凡涉及双端必须双端实测
 
 ## 历史交接区（追加，不删）
+- 2026-09-28 定性纠偏 + allow_buy 补漏（切换 403 定性非 bug；scheme list 真 bug 补完；生产 gate 486；子项目分支已更新）
 - 2026-09-28 修子项目 bug + agent 真测（Scheme.source + 切换接管；推分支给子项目审；母策略 AI 决策跑通；生产 gate 486）
 - 2026-09-28 子项目 8 提交合流已合（母策略参照/方案三分法/盘中实时/`cli.py` 改名；生产 gate 484；母策略 dry-run + llm ask 全通；`scheme list` 上游 bug 已报）
 - 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）

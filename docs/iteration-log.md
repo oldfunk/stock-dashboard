@@ -162,6 +162,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-28（定性纠偏 + allow_buy 补漏：scheme list 真 bug，切换 403 非 bug，nightly/20260928w 已合）
+- **用户纠偏**：切换策略报口令错误，是因为没输模拟交易 API——这不算 bug，是预期鉴权（无口令 + 无 Key 就该 403）。此前记为“bug”是用词夸大，特此纠正：该改动是体验改进（403 文案指引 + 凭 Key 接管），不是缺陷修复。
+- **真 bug**：`scheme list` 500 是真实缺陷，已复现（生产 main 实测 `AttributeError: 'Scheme' object has no attribute 'allow_buy'`）；首轮只补了 `source`、漏了 `allow_buy`（首轮验证只看了 dashboard 端点、没跑 CLI 端，验证范围夸大一并认）。本轮补上，同一命令复测 `ok:true`。
+- **推给子项目审**：`fix-scheme-admin-source` 分支已更新到含 allow_buy（a31d575..d953fa2，未合，等审）。
+- **验证**：生产 worktree gate **486 passed / Gate passed**（73s）；部署 pull + 双服务 active + `scheme list` ok:true + :8081/:9527 均 200。基线维持 **486 passed**（本轮只改既有断言措辞，未新增用例）。
+
 ### 2026-09-28（修子项目 bug + agent 真测：母策略 AI 决策跑通，nightly/20260928u 已合）
 - **修了什么**（母项目 Stock Dashboard 内改 vendored，用户已授权；同步推分支给子项目 Paper Trading Framework 审，不合）：① `Scheme` 补 `source` 字段（三构造点赋值，`scheme list` 500 根因）；②切换策略凭 Key 接管（`_takeover_token` + `/api/schemes/active` 分支 + 前端 prompt 接管，与自家 llm/config 规则一致）；附 2 单测。
 - **推给子项目审**：分支 `fix-scheme-admin-source` 已推子项目远端（未合，等他们审）；母 main 照常合并（长期授权）。
