@@ -168,6 +168,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **两个如实记录**：① `scheme list` 500 系上游 bug（`Scheme.source` 不存在），不动，等上游修再 pull，交易主链路不受影响；②母 `strategy_tags` 全空（multi 开关默认关），`--pool-tag` 暂无数据可用（scheme 缺省不过滤，不影响运行；开 tag 是母行为变更，另议）。
 - **文档**：M6 更新 + 基线 474→484；表达统一为母项目（Stock Dashboard）/子项目（Paper Trading Framework）全名。
 - **验证**：gate **484 passed / Gate passed**（474+10，含上游面板/方案/实时新单测）；三扫描（vendored 豁免延续）。
+- 基线刷新 474 → **484 passed**。
+- **流程自纠**：收尾 commit（`53d5bf4`，本文档批次）误落 main（本轮忘了开分支；与 `8398a80` 同款）；未改写远端历史，tip gate 484 passed 验证安全后放行。
 
 ### 2026-09-28（解盘写笔记 + 深色/免横滑修复，nightly/20260928p 待合）
 - **用户需求**：大盘解盘改写投资笔记（长分析 + 不限 token + 加深思考）；深色模式 AI 文本框；候选信息免横滑。
