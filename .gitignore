@@ -56,3 +56,8 @@ data/stock_dashboard.db
 
 # 部署目标本地文件（含服务器身份，不入库）
 /deploy.local.md
+
+# paper-trading 全量合并（顶层 vendored 树，见 docs/iteration-log M6）
+# 密钥与运行时产物绝不入库（子项目 secrets_path 默认落仓根，lock 默认落 CWD）
+/secrets.local.json
+/paper_trading.lock

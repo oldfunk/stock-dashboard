@@ -1,12 +1,13 @@
-"""风控模块（移植自 paper-trading，规则一致）。"""
+"""风控模块。"""
 from __future__ import annotations
 
-import logging
+from datetime import datetime
 from typing import Dict, Optional
 
-from src.paper.types import Order, Position, Signal, TradingConfig
+from paper_trading.models import Order, Position, Signal, TradingConfig
+from paper_trading.utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RiskManager:
@@ -23,9 +24,9 @@ class RiskManager:
     def __init__(
         self,
         max_single_order_value: float = 200_000.0,
-        max_position_pct: float = 0.3,
-        max_total_position_pct: float = 0.95,
-        max_drawdown_pct: float = 0.20,
+        max_position_pct: float = 0.3,       # 单只股票最多30%仓位
+        max_total_position_pct: float = 0.95,  # 总仓位不超过95%
+        max_drawdown_pct: float = 0.20,      # 最大回撤20%止损
     ) -> None:
         self.max_single_order_value = max_single_order_value
         self.max_position_pct = max_position_pct
@@ -42,7 +43,13 @@ class RiskManager:
         total_value: float,
         prices: Optional[Dict[str, float]] = None,
     ) -> tuple[bool, str]:
-        """检查信号是否通过风控（5 项，见子项目；通过返回 (True, "")）。"""
+        """
+        检查信号是否通过风控。
+
+        Args:
+            prices: 可选的全市场价格表 {symbol: price}，用于多标的总仓位计算；
+                缺省时回退到 current_price（兼容单标的老调用）。
+        """
         order_value = signal.volume * current_price
 
         # 1. 单笔金额上限
@@ -67,7 +74,7 @@ class RiskManager:
             if new_pos_value / total_value > self.max_position_pct:
                 return False, f"Position limit exceeded for {signal.symbol}"
 
-        # 5. 总仓位上限（多标的按各自价格计算）
+        # 5. 总仓位上限（多标的按各自价格计算，参考 rqalpha 持仓市值口径）
         if signal.direction.value == 1 and total_value > 0:
             def _px(sym: str) -> float:
                 if prices and sym in prices:
@@ -89,7 +96,12 @@ class RiskManager:
             self._peak_value = total_value
 
     def check_drawdown(self, total_value: float) -> tuple[bool, float]:
-        """检查是否触发最大回撤止损。返回 (是否触发, 当前回撤比例)。"""
+        """
+        检查是否触发最大回撤止损。
+
+        Returns:
+            (是否触发, 当前回撤比例)
+        """
         if self._peak_value <= 0:
             return False, 0.0
         drawdown = (self._peak_value - total_value) / self._peak_value

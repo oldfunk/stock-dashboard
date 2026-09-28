@@ -1,10 +1,10 @@
-"""纸盘核心数据类型（移植自 paper-trading，行为一致）。"""
+"""核心数据类型定义。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Dict, Optional
 
 
 class OrderStatus(Enum):
@@ -36,7 +36,7 @@ class Bar:
     low: float
     close: float
     volume: int
-    turn: float = 0.0
+    turn: float = 0.0  # 换手率
 
 
 @dataclass
@@ -56,6 +56,7 @@ class Order:
     created_at: datetime = field(default_factory=datetime.now)
     filled_at: Optional[datetime] = None
     order_id: Optional[int] = None
+    # A股撮合参考价（可选，有则做涨跌停/high-low检查）
     prev_close: Optional[float] = None
     ref_high: Optional[float] = None
     ref_low: Optional[float] = None
@@ -110,13 +111,13 @@ class AccountSnapshot:
 
 @dataclass
 class TradingConfig:
-    """交易配置（费率/滑点口径与子项目一致；初始资金 10 万经用户拍板）。"""
-    commission_rate: float = 0.00025
-    commission_min: float = 5.0
-    stamp_duty_rate: float = 0.0005
-    transfer_fee_rate: float = 0.00001
-    slippage_fixed: float = 0.01
-    slippage_pct: float = 0.001
-    use_slippage_pct: bool = False
-    initial_cash: float = 100_000.0
-    holidays: tuple = ()
+    """交易配置。"""
+    commission_rate: float = 0.00025  # 佣金率 0.025%
+    commission_min: float = 5.0       # 单笔最低佣金
+    stamp_duty_rate: float = 0.0005   # 印花税 0.05%（卖出单边）
+    transfer_fee_rate: float = 0.00001  # 过户费 0.001%
+    slippage_fixed: float = 0.01      # 固定滑点（元）
+    slippage_pct: float = 0.001       # 百分比滑点（0.1%）
+    use_slippage_pct: bool = False    # 是否使用百分比滑点
+    initial_cash: float = 1_000_000.0  # 初始资金 100万
+    holidays: tuple = ()              # 额外节假日 YYYY-MM-DD 列表（交易日历用）

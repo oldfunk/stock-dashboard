@@ -1,20 +1,13 @@
-"""本地模拟撮合引擎（移植自 paper-trading，撮合语义一致）。
-
-与原版的唯一偏差：回测 replay 日期覆盖——`set_trade_date()` 后，
-冻结/解冻/时间戳全部走该日期；不清则与原版一样走 `datetime.now()`（live 语义）。
-op_log / agent_plans 未移植（agent loop 在 v1 范围外）。
-"""
+"""本地模拟撮合引擎。"""
 from __future__ import annotations
 
-import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterator, Optional
 
-from src.paper.calendar import as_date, is_trading_day, load_holidays, next_trading_day
-from src.paper.types import (
+from paper_trading.models import (
     AccountSnapshot,
     Fill,
     Order,
@@ -23,12 +16,10 @@ from src.paper.types import (
     Position,
     TradingConfig,
 )
+from paper_trading.utils import get_logger
+from paper_trading.utils.trading_calendar import as_date, is_trading_day, load_holidays, next_trading_day
 
-logger = logging.getLogger(__name__)
-
-
-def _default_db_path() -> Path:
-    return Path(__file__).parent.parent.parent / "data" / "paper_live.db"
+logger = get_logger(__name__)
 
 
 class PaperBroker:
@@ -40,41 +31,21 @@ class PaperBroker:
     - 撮合订单（支持滑点）
     - 计算交易成本（佣金/印花税/过户费）
     - T+1 持仓冻结
-    - 持久化到独立账本库（主库零写入）
+    - 持久化到 paper_account.db
     """
 
     def __init__(
         self,
-        db_path: str | Path | None = None,
+        db_path: str | Path = "paper_account.db",
         config: Optional[TradingConfig] = None,
     ) -> None:
-        self.db_path = Path(db_path) if db_path else _default_db_path()
+        self.db_path = Path(db_path)
         self.config = config or TradingConfig()
-        self._trade_date: Optional[date] = None
         self._init_schema()
         self._ensure_account()
 
-    # ── 回测日期覆盖 ──
-
-    def set_trade_date(self, d: date | datetime | str) -> None:
-        """回测 replay 日期；之后冻结/解冻/时间戳全部走该日期。"""
-        self._trade_date = as_date(d)
-
-    def clear_trade_date(self) -> None:
-        """清除覆盖，恢复 live 语义（datetime.now）。"""
-        self._trade_date = None
-
-    def _today(self) -> date:
-        return self._trade_date or date.today()
-
-    def _now(self) -> datetime:
-        if self._trade_date is None:
-            return datetime.now()
-        return datetime.combine(self._trade_date, datetime.min.time())
-
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         try:
@@ -159,6 +130,29 @@ class PaperBroker:
                     is_unfrozen INTEGER DEFAULT 0
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS op_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    params TEXT,
+                    ok INTEGER NOT NULL,
+                    result TEXT,
+                    cash_after REAL,
+                    total_value_after REAL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plan_date TEXT NOT NULL,
+                    symbols TEXT NOT NULL,
+                    plan_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    executed_at TEXT
+                )
+            """)
 
     def _ensure_account(self) -> None:
         with self._connect() as conn:
@@ -167,7 +161,7 @@ class PaperBroker:
                 conn.execute(
                     "INSERT INTO account (id, cash, initial_cash, created_at) VALUES (1, ?, ?, ?)",
                     (self.config.initial_cash, self.config.initial_cash,
-                     self._now().isoformat()),
+                     datetime.now().isoformat()),
                 )
                 logger.info(f"Account initialized with cash={self.config.initial_cash}")
 
@@ -326,7 +320,7 @@ class PaperBroker:
         order.commission = commission
         order.stamp_duty = stamp_duty
         order.transfer_fee = transfer_fee
-        order.filled_at = self._now()
+        order.filled_at = datetime.now()
 
         self._persist_order(order)
         self._persist_fill(order)
@@ -357,16 +351,16 @@ class PaperBroker:
                     """UPDATE positions SET total_volume=?, available_volume=?,
                        avg_cost=?, last_update=? WHERE symbol=?""",
                     (new_total, pos.available_volume, new_avg,
-                     self._now().isoformat(), order.symbol),
+                     datetime.now().isoformat(), order.symbol),
                 )
             else:
                 conn.execute(
                     """INSERT INTO positions (symbol, total_volume, available_volume, avg_cost, last_update)
                        VALUES (?, ?, 0, ?, ?)""",
-                    (order.symbol, order.volume, full_cost / order.volume, self._now().isoformat()),
+                    (order.symbol, order.volume, full_cost / order.volume, datetime.now().isoformat()),
                 )
             # T+1 冻结：解冻日为下一交易日（跳周末/节假日）
-            today = self._today()
+            today = datetime.now().date()
             unfreeze = next_trading_day(today, self._holidays(), steps=1)
             conn.execute(
                 """INSERT INTO t1_freeze (symbol, volume, freeze_date, unfreeze_date, is_unfrozen)
@@ -395,7 +389,7 @@ class PaperBroker:
                     conn.execute(
                         """UPDATE positions SET total_volume=?, available_volume=?,
                            last_update=? WHERE symbol=?""",
-                        (new_total, new_available, self._now().isoformat(), order.symbol),
+                        (new_total, new_available, datetime.now().isoformat(), order.symbol),
                     )
 
     def _persist_order(self, order: Order) -> None:
@@ -430,12 +424,12 @@ class PaperBroker:
         解冻 T+1 持仓。将指定日期之前冻结的持仓标记为可用。
 
         Args:
-            date: 结算日期，接受 datetime/date/ISO 字符串，缺省为今天（回测覆盖生效）。
+            date: 结算日期，接受 datetime/date/ISO 字符串，缺省为今天。
 
         Returns:
             解冻的笔数
         """
-        target_date = as_date(date or self._now()).isoformat()
+        target_date = as_date(date or datetime.now()).isoformat()
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM t1_freeze WHERE unfreeze_date <= ? AND is_unfrozen = 0""",
@@ -456,9 +450,8 @@ class PaperBroker:
                 logger.info(f"Unfroze {count} T+1 positions for {target_date}")
             return count
 
-    def get_nav(self, current_prices: dict[str, float],
-              timestamp: datetime | None = None) -> AccountSnapshot:
-        """计算当前 NAV（timestamp 缺省走回测覆盖/当前时间）。"""
+    def get_nav(self, current_prices: dict[str, float]) -> AccountSnapshot:
+        """计算当前 NAV。"""
         cash = self.get_cash()
         positions = self.get_all_positions()
         market_value = sum(
@@ -471,7 +464,7 @@ class PaperBroker:
         pnl = total_value - initial_cash
         pnl_pct = pnl / initial_cash if initial_cash > 0 else 0.0
         return AccountSnapshot(
-            timestamp=timestamp or self._now(),
+            timestamp=datetime.now(),
             cash=cash,
             market_value=market_value,
             total_value=total_value,
@@ -489,16 +482,93 @@ class PaperBroker:
                  snapshot.total_value, snapshot.available_cash, snapshot.pnl, snapshot.pnl_pct),
             )
 
-    def get_nav_history(self, limit: int = 500) -> list[dict]:
+    def log_operation(
+        self,
+        action: str,
+        params: Optional[dict] = None,
+        ok: bool = True,
+        result: Optional[dict] = None,
+        cash_after: Optional[float] = None,
+        total_value_after: Optional[float] = None,
+    ) -> None:
+        """记录一次 AI/CLI 操作流水（供仪表盘展示）。"""
+        import json as _json
+
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO op_log (timestamp, action, params, ok, result,
+                                       cash_after, total_value_after)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (datetime.now().isoformat(), action,
+                 _json.dumps(params, ensure_ascii=False, default=str) if params else None,
+                 1 if ok else 0,
+                 _json.dumps(result, ensure_ascii=False, default=str) if result else None,
+                 cash_after, total_value_after),
+            )
+
+    def get_op_log(self, limit: int = 50) -> list[dict]:
+        """读取操作流水（倒序）。"""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM nav_history ORDER BY id LIMIT ?", (limit,)
+                "SELECT * FROM op_log ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def save_plan(self, plan_date: str, symbols: list[str], plan: dict) -> int:
+        """存一条待执行计划（ai:plan），返回 id；同日旧 pending 自动作废。"""
+        import json as _json
+
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_plans SET status = 'superseded' "
+                "WHERE plan_date = ? AND status = 'pending'",
+                (plan_date,),
+            )
+            cur = conn.execute(
+                """INSERT INTO agent_plans (plan_date, symbols, plan_json, status, created_at)
+                   VALUES (?, ?, ?, 'pending', ?)""",
+                (plan_date, ",".join(symbols),
+                 _json.dumps(plan, ensure_ascii=False, default=str),
+                 datetime.now().isoformat()),
+            )
+            return int(cur.lastrowid)
+
+    def get_pending_plan(self, plan_date: str) -> Optional[dict]:
+        """取某日待执行的计划（无则 None）。"""
+        import json as _json
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM agent_plans WHERE plan_date = ? AND status = 'pending'
+                   ORDER BY id DESC LIMIT 1""",
+                (plan_date,),
+            ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["plan"] = _json.loads(d["plan_json"])
+        except Exception:
+            d["plan"] = {}
+        return d
+
+    def mark_plan_done(self, plan_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_plans SET status = 'done', executed_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), plan_id),
+            )
 
     def get_order_history(self, limit: int = 100) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM orders ORDER BY order_id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_fill_history(self, limit: int = 100) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM fills ORDER BY fill_id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]

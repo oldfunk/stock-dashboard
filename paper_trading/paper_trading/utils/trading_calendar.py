@@ -1,4 +1,4 @@
-"""交易日历（移植自 paper-trading：跳周末 + 可配置节假日）。"""
+"""交易日历工具（A股：跳周末 + 可配置节假日）。"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -14,9 +14,12 @@ def as_date(d: date | datetime | str) -> date:
     return d
 
 
+_as_date = as_date  # 内部别名，保持兼容
+
+
 def is_trading_day(d: date | datetime | str, holidays: Optional[Set[str]] = None) -> bool:
     """是否为交易日：周一~周五且不在 holidays(YYYY-MM-DD集合)内。"""
-    dd = as_date(d)
+    dd = _as_date(d)
     if dd.weekday() >= 5:
         return False
     if holidays and dd.isoformat() in holidays:
@@ -28,7 +31,7 @@ def next_trading_day(
     d: date | datetime | str, holidays: Optional[Set[str]] = None, steps: int = 1
 ) -> date:
     """下一个交易日（steps=1 即 T+1 解冻日）。"""
-    dd = as_date(d)
+    dd = _as_date(d)
     n = 0
     while n < steps:
         dd += timedelta(days=1)
