@@ -1038,18 +1038,25 @@ async def llm_polish(req: LLMPolishRequest):
 
 @app.post("/api/llm/market")
 async def llm_market(req: LLMMarketRequest):
-    """大盘解盘（指数快照 + 可选要求，不落库）。"""
+    """大盘解盘写笔记（后台跑，写 ai_journal；同日复盘行追加不覆盖）。"""
     from src import ai_queue
     from src.analyzer.ai_analyzer import AiAnalyzer
     if len(req.requirement or "") > 2000:
         raise HTTPException(status_code=400, detail="要求超长（≤2000 字）")
     if not AiAnalyzer(load_config().get('ai', {})).configured:
         raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
-    out = ai_queue.explain_market(req.requirement)
+    jid = ai_queue.submit_market_note(req.requirement)
+    return {"status": "started", "job_id": jid}
+
+
+@app.get("/api/llm/market-note/{jid}")
+async def llm_market_note_status(jid: str):
+    """解盘笔记任务状态（done 时带 journal_date/用量）。"""
+    from src import ai_queue
+    out = ai_queue.get_market_note_job((jid or "").strip())
     if out is None:
-        raise HTTPException(status_code=502, detail="解盘失败（见服务端日志）")
-    return {"ok": True, "answer": out["answer"],
-            "model": out.get("model"), "usage": out.get("usage") or {}}
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return out
 
 
 @app.post("/api/llm/concurrency")

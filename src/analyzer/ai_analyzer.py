@@ -1191,8 +1191,10 @@ class AiAnalyzer:
         logger.error("[AI分析] 已达最大重试次数 %s，放弃 (末模型=%s)", max_retries, current_model)
         return None, current_model, None
 
-    def ask_raw(self, prompt: str, system: str = None) -> tuple:
+    def ask_raw(self, prompt: str, system: str = None, timeout: float = 120.0,
+                unlimited: bool = False) -> tuple:
         """自由问答瘦调用：单次 POST（异常重试 1 次），不进 20 次退避/模型轮换。
+        unlimited=True 时不带 max_tokens（长文 analysis 用）；否则带 self.max_tokens。
         返回 (text, model, usage)，失败 text/usage 为 None。"""
         if not self.api_key:
             self._last_error = '未配置 API Key'
@@ -1204,12 +1206,13 @@ class AiAnalyzer:
         payload = {'model': self.model,
                    'messages': [{'role': 'system', 'content': system},
                                 {'role': 'user', 'content': prompt}],
-                   'temperature': self.temperature,
-                   'max_tokens': self.max_tokens}
+                   'temperature': self.temperature}
+        if not unlimited:
+            payload['max_tokens'] = self.max_tokens
         url = f"{self.api_base}/chat/completions"
         for attempt in range(2):
             try:
-                with httpx.Client(timeout=120.0) as client:
+                with httpx.Client(timeout=timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                 if resp.status_code != 200:
                     self._last_error = f'HTTP {resp.status_code}'

@@ -6,6 +6,7 @@
 - explain_market：大盘解盘（指数快照 + 用户要求 → ask_raw，不落库）。
 """
 
+import json
 import logging
 import threading
 import time
@@ -256,19 +257,141 @@ def build_market_context():
     return '大盘：' + '；'.join(parts)
 
 
-def explain_market(requirement=None):
-    """大盘解盘：返回 {answer, model, usage}，失败 None（不落库）。"""
+_NOTE_JOBS = {}
+_NOTE_LOCK = threading.Lock()
+_NOTE_SEQ = [0]
+
+
+def _next_note_id():
+    with _NOTE_LOCK:
+        _NOTE_SEQ[0] += 1
+        return f"mn{_NOTE_SEQ[0]:04d}"
+
+
+def get_market_note_job(jid):
+    with _NOTE_LOCK:
+        return _NOTE_JOBS.get(jid)
+
+
+def _note_stock_cards():
+    """持仓全景取数：AI观察池 + 钉选 + 最新候选 → [(分组名, [qa行])]。"""
+    from src.models.ai_watchlist import AiWatchlistDAO
+    from src.models.database import (RunLogDAO, ScreeningResultDAO,
+                                     StockSnapshotDAO, WatchlistDAO)
+    from src.analyzer.ai_analyzer import build_qa_context
+    snap = StockSnapshotDAO()
+    groups = []
+    pool = [(x.get('code'), x.get('name'))
+            for x in AiWatchlistDAO().get_all() if x.get('code')]
+    watched = sorted(WatchlistDAO().get_watched_codes())
+    cands, cand_map = [], {}
+    rid = RunLogDAO().get_latest_completed_run_id()
+    if rid:
+        cands = ScreeningResultDAO().get_results_for_run(rid)
+        cand_map = {s['code']: s for s in cands if s.get('code')}
+
+    def _card(code, fallback_name=None):
+        row = snap.get_by_code(code)
+        d = dict(row) if row else {'code': code, 'name': fallback_name}
+        extra = cand_map.get(code)
+        if extra:
+            for k in ('score', 'reason', 'pe', 'pb', 'roe', 'market_cap'):
+                if d.get(k) in (None, '') and extra.get(k) not in (None, ''):
+                    d[k] = extra[k]
+        return build_qa_context(d)
+
+    if pool:
+        groups.append(('AI观察池', [_card(c, n) for c, n in pool]))
+    if watched:
+        groups.append(('钉选股', [_card(c) for c in watched[:20]]))
+    if cands:
+        groups.append(('今日候选', [build_qa_context(s) for s in cands[:20]]))
+    return groups
+
+
+_NOTE_SYSTEM = ('你是A股价值投资主笔。用中文写长篇投资笔记（Markdown），'
+                '篇幅和思考都不设限，把问题想透写透。')
+
+
+def _looks_review(row):
+    try:
+        s = json.loads(row.get('actions_summary') or '{}')
+        return isinstance(s, dict) and any(k in s for k in ('add', 'remove', 'keep'))
+    except Exception:
+        return False
+
+
+def write_market_note(requirement=None, today=None):
+    """大盘+持仓全景深分析并写入投资笔记。
+    不限 token（unlimited=True）+ 600s 超时；同日已有复盘行则追加，不覆盖。
+    返回 {journal_date, title, chars, model, usage}，失败 None。"""
+    from datetime import date as _date
     from src.config import load_config
     from src.analyzer.ai_analyzer import AiAnalyzer
+    from src.models.ai_watchlist import AiJournalDAO
     analyzer = AiAnalyzer(load_config().get('ai', {}))
     if not analyzer.configured:
         return None
     req = (requirement or '').strip()[:2000]
-    prompt = (build_market_context()
-              + '\n\n请给出大盘解盘：趋势判断 + 关键点位/背离 + 操作建议（短线/中线分开一句）。')
+    parts = [build_market_context(), '']
+    for gname, cards in _note_stock_cards():
+        parts.append(f'【{gname}】')
+        parts.extend(cards or ['（本组暂无）'])
+        parts.append('')
+    prompt = '\n'.join(parts) + (
+        '\n请基于以上全部数据，写一篇非常详尽的投资笔记（Markdown），要求：\n'
+        '一、大盘研判（趋势/点位/背离/短线与中线操作分开写）\n'
+        '二、AI观察池逐股：生意一句/财务一句/估值一句/风险一句/操作一句\n'
+        '三、钉选股逐股：同上五句\n'
+        '四、今日候选池要点（只写值得关注的，不硬凑）\n'
+        '五、总体操作建议\n'
+        '写作纪律：每节第一句必须是结论；术语必须括号白话注释；禁用未解释缩写；'
+        '缺数据的写"数据不足"，不许编造；篇幅不设限，把逻辑写透。')
     if req:
         prompt += '\n\n用户附加要求：\n' + req
-    text, model, usage = analyzer.ask_raw(prompt)
+    text, model, usage = analyzer.ask_raw(prompt, system=_NOTE_SYSTEM,
+                                          timeout=600.0, unlimited=True)
     if text is None:
         return None
-    return {'answer': text, 'model': model, 'usage': usage or {}}
+    day = today or _date.today().isoformat()
+    title = f'大盘解盘 {day}'
+    dao = AiJournalDAO()
+    old = dao.get_by_date(day)
+    usage_blob = json.dumps({'usage': usage or {}, 'model': model},
+                            ensure_ascii=False)
+    if old and _looks_review(old):
+        content = ((old.get('content_md') or '')
+                   + '\n\n---\n\n# ' + title + '\n' + text)
+        dao.save(day, old.get('run_id') or '', old.get('title') or title,
+                 content, old.get('market_snapshot'), usage_blob)
+    else:
+        dao.save(day, '', title, '# ' + title + '\n' + text,
+                 build_market_context(), usage_blob)
+    return {'journal_date': day, 'title': title, 'chars': len(text),
+            'model': model, 'usage': usage or {}}
+
+
+def submit_market_note(requirement=None):
+    """后台跑 write_market_note，返回 job_id；get_market_note_job 轮询。"""
+    with _NOTE_LOCK:
+        _NOTE_SEQ[0] += 1
+        jid = f"mn{_NOTE_SEQ[0]:04d}"
+        _NOTE_JOBS[jid] = {'job_id': jid, 'status': 'running'}
+        while len(_NOTE_JOBS) > 10:
+            _NOTE_JOBS.pop(sorted(_NOTE_JOBS)[0], None)
+
+    def _run():
+        try:
+            out = write_market_note(requirement)
+            with _NOTE_LOCK:
+                if out is None:
+                    _NOTE_JOBS[jid] = {'job_id': jid, 'status': 'failed'}
+                else:
+                    _NOTE_JOBS[jid] = {'job_id': jid, 'status': 'done', **out}
+        except Exception as e:
+            logger.warning('[解盘笔记] 后台异常：%s', e)
+            with _NOTE_LOCK:
+                _NOTE_JOBS[jid] = {'job_id': jid, 'status': 'failed'}
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jid

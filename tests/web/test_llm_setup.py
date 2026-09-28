@@ -644,10 +644,22 @@ class TestPolishMarket:
             "src.analyzer.ai_analyzer.AiAnalyzer",
             lambda cfg=None: _FakeAnalyzer(ok=True))
         monkeypatch.setattr(
-            "src.ai_queue.explain_market",
-            lambda req=None: {"answer": "震荡市", "model": "m", "usage": {}})
+            "src.ai_queue.submit_market_note", lambda req=None: "mn0001")
+        monkeypatch.setattr(
+            "src.ai_queue.get_market_note_job",
+            lambda jid: {"job_id": jid, "status": "done",
+                         "journal_date": "2026-09-28", "chars": 100,
+                         "model": "m", "usage": {}})
         resp = client.post("/api/llm/market", json={"requirement": ""})
-        assert resp.json()["answer"] == "震荡市"
+        assert resp.json()["status"] == "started"
+        assert resp.json()["job_id"] == "mn0001"
+        st = client.get("/api/llm/market-note/mn0001").json()
+        assert st["status"] == "done"
+        assert st["chars"] == 100
+
+    def test_market_note_unknown_404(self, client):
+        assert client.get(
+            "/api/llm/market-note/mn9999").status_code == 404
 
     def test_market_unconfigured_400(self, client, monkeypatch):
         monkeypatch.setattr(
