@@ -403,10 +403,18 @@ document.getElementById("btn-scheme").onclick=async()=>{
   const sel=document.querySelector('input[name="scheme"]:checked');
   if(!sel){alert("先选一个方案");return}
   const iv=document.getElementById("instruction").value;
-  const body={admin_token:tok(),name:sel.value};
-  if(iv!==instructionInit)body.instruction=iv;  // 没改就不发，避免误清空已存指令
-  const r=await post("/api/schemes/active",body);
+  const send=async(extra)=>{
+    const body=Object.assign({admin_token:tok(),name:sel.value},extra||{});
+    if(iv!==instructionInit)body.instruction=iv;  // 没改就不发，避免误清空已存指令
+    return await post("/api/schemes/active",body);
+  };
+  let r=await send();
+  if(!r.ok&&r.error&&r.error.indexOf("口令")>=0){
+    const k=prompt("口令失效，输入 API Key 接管（仅本机使用）：");
+    if(k){r=await send({api_key:k});}
+  }
   if(!r.ok){alert("切换失败："+(r.error||""));return}
+  if(r.data&&r.data.admin_token)localStorage.setItem("pt_adm",r.data.admin_token);
   document.getElementById("schemestat").textContent=r.data.message;
   document.getElementById("instructionBox").style.display="none";
   await schemeStatus();refresh();
@@ -422,6 +430,22 @@ def _ro(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _takeover_token(body: dict, secrets_path) -> str:
+    """凭 Key 接管：body.api_key 与已存一致时返回可存的口令，否则空串。
+    供换浏览器/首次使用场景（与 llm/config 的接管规则一致）。"""
+    from paper_trading.llm import load_secrets
+    try:
+        data = load_secrets(secrets_path)
+    except Exception:
+        return ""
+    key = str((body or {}).get("api_key") or "").strip()
+    saved = ((data.get("provider") or {}).get("api_key") or "")
+    want = (data.get("admin_token") or "")
+    if key and saved and key == saved and want:
+        return want
+    return ""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -580,16 +604,23 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._read_json()
             if u.path == "/api/schemes/active":
+                _tok_out = ""
                 if not self._admin_ok(body):
-                    self._json({"ok": False, "error": "口令错误"}, code=403)
-                    return
+                    # 凭 Key 接管（换浏览器/首次使用；与 llm/config 接管规则一致）
+                    _tok_out = _takeover_token(body, self.secrets_path)
+                    if not _tok_out:
+                        self._json({"ok": False, "error": "口令错误（换了浏览器？切换时填写 API Key 即可接管）"}, code=403)
+                        return
                 from paper_trading.strategy import set_active
 
                 from pathlib import Path as _P
                 ok, msg = set_active(
                     _P(__file__).resolve().parents[1], str(body.get("name", "")),
                     body.get("instruction"))
-                self._json({"ok": ok, "data": {"message": msg} if ok else None,
+                _data = {"message": msg} if ok else None
+                if ok and _tok_out:
+                    _data["admin_token"] = _tok_out
+                self._json({"ok": ok, "data": _data,
                             "error": None if ok else msg},
                            code=200 if ok else 400)
             elif u.path == "/api/llm/config":
