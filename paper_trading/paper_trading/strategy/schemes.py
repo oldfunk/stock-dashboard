@@ -29,6 +29,7 @@ class Scheme:
     desc: str = ""
     available: bool = True
     source: str = ""  # 方案来源标识：mother / general / custom（面板分组与 CLI 展示用）
+    allow_buy: bool = True  # 是否允许买入（展示用；风控另行钳制）
     universe_source: str = "config"  # config | watchlist | screening | all
     universe_tag: str = ""  # 预留：screening 按母策略 tag 过滤（现缺省不过滤）
     universe_limit: int = 20

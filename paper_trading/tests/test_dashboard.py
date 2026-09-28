@@ -24,12 +24,13 @@ def test_entry_modules_import():
 
 
 def test_schemes_have_source():
-    """Scheme 必带 source（cli scheme list / 面板分组依赖；缺失曾 500）。"""
+    """Scheme 必带 source/allow_buy（cli scheme list 序列化依赖；缺失曾 500）。"""
     from paper_trading.strategy.schemes import all_schemes
     ss = all_schemes()
     assert set(ss) == {"mother", "general", "custom"} or set(ss) >= {"general", "custom"}
     for name, s in ss.items():
         assert s.source, name
+        assert isinstance(s.allow_buy, bool), name
 
 
 def test_takeover_token(tmp_path):
