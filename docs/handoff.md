@@ -3,29 +3,28 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 纸盘全量合并已合已同步；子项目原面板嵌回来了）
-- **纠偏**：M6 原生自研包被用户否决（"魔改页面"，要子项目原页面）→ 已删除（历史保留），按 MERGE_GUIDE §1 整体迁入顶层 `paper_trading/`（46 文件；`.git/venv/pycache/db/log/secrets` 排除；三处原件一字未动）
-- **`nightly/20260929a`（文档批次）待合**；代码批次 `62d4c52` 已合（main），生产 gate **469 passed**（自带 29 单测在树里全绿），服务 200
-- **parent 侧接线全通**：pool-from screening 实测 Top20；Key 经自家 `save_provider` 落独立 secrets（0600）；MA dry-run + 真跑（`no-fresh-bars`，行为正确）；agent dry-run 同守卫跳过（盘中无今日 bar，正确）；`llm ask` 走通（"国酒第一"，Key 在其栈内有效）
-- **`:8081` 面板已起**（`paper-trading-parent.service`，enabled，200；内容实证标题+资产走势在位）；`:8080` 原部署未动（200）；`/paper` 改嵌原面板 iframe（hostname 自适应 + 新窗口 fallback）
-- **首个真 agent 决策待收盘后**：今日 bar 落定后跑 `agent run --pool-from screening`（≤3 笔×2 万，幂等闸+熔断）；自动调度未配（需用户另批）
+## 最后状态（2026-09-28 纸盘 subtree 机制化完成，gate 473，随即合并）
+- **机制落地**：`paper-upstream` remote 已配；plain copy 转 subtree（删旧+graft 重建，内容一致）；首 `pull --squash` 带回上游 3 提交（单测禁网/上下文覆盖/NAV全口径），零冲突；以后更新一条命令
+- **双向独立验证**（grep 实证）：母仓 src/tests/scripts 零引用 `paper_trading.*`；vendored 零引用 `src/stock_dashboard`——父开发不被分心，子独立演进
+- **规则**：vendored 文件绝不手改（修先上游再 pull）；母推远端天然带上子树（单仓单推）
+- **验证（生产服务器 worktree）**：`gate.sh` **473 passed / Gate passed**（470+3 上游新单测）；三扫描全绿（vendored 豁免延续）
+- **文档全量**：本批次 README/AGENTS/architecture/roadmap/账本/paper-trading.md/agent-api 一次对齐
+- 合并后同步生产：git pull + gate + 远端含树实证（`git ls-tree`）+ HTTP（纯代码无变更不重启——subtree 嫁接只动 `paper_trading/`，服务不读它）
 
 ## 下一步方向
-1. 收盘后（15:00+）跑一次真 agent run，看 AI 下不下单
-2. 自动调度（cron/调度器跟随）是否配——等用户明确批准（交易自动化）
-3. K 线双 pipeline（母 42 只 vs 纸盘 20 只各拉各的）v2 统一
+1. 收盘后（15:00+）跑一次真 agent run（母 universe + 我们的 Key），看 AI 下不下单
+2. 自动调度是否配——等用户明确批准（交易自动化）
+3. K 线双 pipeline v2 统一；双份 JS 收敛；队列持久化——按需再说
 4. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
 
 ## 已知隐患
-- 双 dashboard：`:8080`（子项目独立部署，自有池账本）vs `:8081`（合并树，母 universe+我们的 Key）——互不干扰，别混淆
-- vendored 运行 CWD 必须是 `paper_trading/`（import 与相对路径都依赖它；踩过坑：从父根直调必挂）
-- 单测 hermetic 铁律：读 ambient 配置/环境的单测必须显式隔离
+- vendored 运行 CWD 必须是 `paper_trading/`（import 与相对路径都依赖它）
+- `:8080`（子项目独立部署）vs `:8081`（合并树面板）——互不干扰，别混淆
 - 问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
-- 2026-09-28 纸盘页改直达（/paper 跳转 :8081 原面板，用户反馈 iframe 不如直开；docs 随 nightly/20260928l 合并）
-- 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 嵌原面板；生产 gate 469；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
-- 2026-09-28 纸盘移植 M6 已合（后被用户否决转向全量合并，原生包已删，历史保留）
+- 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）
+- 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 改直达 :8081；生产 gate 469→470；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
 - 2026-09-28 双 bug 修复已合（nightly/20260928c → main：KlineDAO 恢复 + 钉选卡跳转 + 静态版本戳；生产 gate 440；K 线表停更 7 天，明早流水线自动追平）
 - 2026-09-28 AI 队列并发+UI 重组已合（nightly/20260928a → main：生产 gate 437；排队/N 并发/主页常驻/润色/大盘解盘；队列内存态重启丢任务已知）
 - 2026-09-27 首只真分析跑通 + 0927e 已合（DAO 排除复盘轮；盐湖股份 once 1/1，用量 3337/5103；用户自改对模型名 glm-4.5-flash；生产 gate 408）

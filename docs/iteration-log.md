@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：470 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：473 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（Hermes 必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 470 passed，只升不降）
+- 全仓 pytest 零失败（基线 473 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（纸盘 subtree 机制化：graft 上游 + 双向独立验证 + 全部文档，nightly/20260928n 已合）
+- **机制**：`paper-upstream` remote 已配；plain copy 转 subtree（删旧+graft 重建，内容一致）；首 `pull --squash` 带回上游 3 提交（单测禁网/上下文覆盖/NAV全口径），嫁接干净零冲突；以后更新一条命令。
+- **双向独立验证**（grep 实证）：母仓 src/tests/scripts 零引用 `paper_trading.*`；vendored 零引用 `src/stock_dashboard`——父开发不被分心，子独立演进。
+- **规则**：vendored 文件绝不手改（修先上游再 pull）；母推远端天然带上子树（单仓单推，部署时 `git ls-tree` 实证）。
+- **文档全量**：README 结构 + AGENTS（基线+subtree 工作流）+ architecture（§3 行+§5.3）+ roadmap（M6+基线）+ paper-trading.md 转向注记 + agent-api 纸盘指针 + 本账 + handoff。
+- **验证**：gate **473 passed / Gate passed**（470+3 上游新单测）；三扫描（vendored 豁免延续）。
+- 基线刷新 470 → **473 passed**。
 
 ### 2026-09-28（/paper 改直达 + 清原生回测孤儿端点，nightly/20260928l 已合）
 - **改了什么**（用户反馈 iframe 不如直开）：`/paper` 改 `location.replace` 直达 `:8081` 原面板（hostname 自适应 + 新窗口兜底）；删原生回测孤儿端点（`/api/paper/universe|backtest*`，调已删模块，调用即 500 的陷阱）；重建最小 `test_paper.py`（页面断言）。

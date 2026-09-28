@@ -38,12 +38,12 @@ flowchart LR
 
 ### 新开（2026-09-28 纸盘模拟）
 
-- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并（三处一字未动，顶层 `paper_trading/`）——原面板嵌回 `/paper`（iframe :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA dry-run/真跑与 agent dry-run 已验证；首个真 agent 决策待收盘后；自动调度未配
+- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并 + subtree 机制化（三处一字未动）——原面板嵌回 `/paper`（直达 :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA/agent dry-run 与 `llm ask` 已验证；首个真 agent 决策待收盘后；自动调度未配
 
 ### 防回归门禁（AKShare 事故不再犯）
 
 1. 数据源增删必须同步 `architecture.md` §5 注册表 + 契约单测，三者同 commit
-2. 全仓 pytest 零失败（基线 470 passed，只升不降）
+2. 全仓 pytest 零失败（基线 473 passed，只升不降）
 3. `collector/` `screener/` 改动必须附单测
 4. Hermes 约束：只提交 GitHub 不部署生产服务器；禁删 S1–S8 适配函数（除非替代 + 单测同到）
 

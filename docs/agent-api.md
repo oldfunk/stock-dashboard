@@ -117,3 +117,9 @@ curl -s -X POST $BASE/api/watchlist/000792/notes -H 'Content-Type: application/j
 3. **不改动流水线**：`trigger_update` 之外的系统级操作（重启服务、改配置）不在本 API 范围
 4. **数据新鲜度**：工作日 15:30 跑全量流水线；实时行情接口即拉即取。非交易时段数据为上次收盘
 5. **失败如实标**：分析失败时写明原因（`notes` 里说明），不要编造未执行的结论
+
+## 模拟交易面板（paper-trading 子项目）
+
+- 本面板 `/paper` 直达子项目原仪表盘（`:8081`，与本面板同机不同端口）
+- 外部 AI 也可直调它的读写面： universe/信号/下单/持仓/NAV（CLI `python -m paper_trading.hermes_bridge --help`，运行 CWD 须为 `paper_trading/`）；母库只读（screening/watchlist/快照/AI 历史），写操作只落它自己的账本库
+- 密钥与 Key：它用独立 `secrets.local.json`（0600），与本面板 `.env` 互不干扰

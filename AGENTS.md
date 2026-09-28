@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 470 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 473 passed，只升不降）。
 
 ## 技术栈
 
@@ -46,8 +46,9 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 2. 在 `nightly/YYYYMMDD` 分支上 commit
 3. `git push origin HEAD`（先推 nightly 分支留痕）
 4. 合并：ff 合并入 main 并 `git push origin main`（2026-09-27 起用户长期授权直接合并/推送，无需逐次批准）；多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
+5. 子项目更新：`git subtree pull --prefix=paper_trading paper-upstream main --squash`（remote 已配；`paper_trading/` 内文件绝不手改，修先上游再 pull）
 
-**绝不**：在本地 main 上直接 commit（合并的 ff 前进除外）。合并后同步生产服务器并验证运行（`git pull` + gate + 改 routes/模板/采集则重启 `stock-dashboard.service` + 确认运行正常）。
+**绝不**：在本地 main 上直接 commit（合并的 ff 前进除外）；手改 `paper_trading/` 内任何文件（上游漂移则以后 pull 冲突）。合并后同步生产服务器并验证运行（`git pull` + gate + 改 routes/模板/采集则重启 `stock-dashboard.service` + 确认运行正常）。
 
 ## 冒烟测试
 
