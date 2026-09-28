@@ -392,7 +392,9 @@ async function schemeStatus(){
     if(gone)radio.disabled=true;
     if(sc.name===d.active)radio.checked=true;
     const tx=document.createElement("span");
-    tx.innerHTML=`<b>${esc(label)} · ${esc(sc.title||sc.name)}</b>${gone?' <span class="mut">（需 Stock Dashboard 在同一台机器）</span>':""}<br><span class="mut">${esc(sc.desc||"")}</span><br><span class="mut">宇宙 ${esc(sc.universe||"")}</span>${sc.name==="custom"?' <a href="#" onclick="toggleInstruction(event)">设置</a>':""}`;
+    const uni=(sc.universe||"").includes("screening")?"选股范围：Stock Dashboard 筛选"
+      :((sc.universe||"").includes("watchlist")?"选股范围：观察池":"选股范围：本地配置池");
+    tx.innerHTML=`<b>${esc(label)} · ${esc(sc.title||sc.name)}</b>${gone?' <span class="mut">（需 Stock Dashboard 在同一台机器）</span>':""}<br><span class="mut">${esc(sc.desc||"")}</span><br><span class="mut">${uni}</span>${sc.name==="custom"?' <a href="#" onclick="toggleInstruction(event)">设置</a>':""}`;
     lab.appendChild(radio);lab.appendChild(tx);box.appendChild(lab);
   });
   if(d.instruction!==undefined){document.getElementById("instruction").value=d.instruction||"";instructionInit=d.instruction||"";}
