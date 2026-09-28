@@ -24,11 +24,15 @@ price 为 null 表示按最新收盘价成交；hold 也要写一行（说明为
 
 USER_TMPL = """股票池：{pool}
 日内上限：{max_orders} 笔，单笔 ≤{max_order_value} 元。
+{scheme}
 {candidates}
 参考信号（仅供参考，可不采纳）：{signals}
 项目实时状态：
 {context}
 请输出今日决策 JSON。"""
 
-CAND_TMPL = """母项目量化筛选依据（score 越高越优，可重点考虑高分者，但仍须自己判断）：
+SCHEME_TMPL = """当前投资方案：{title}（{name}）——{desc}
+离场纪律：{exits}"""
+
+CAND_TMPL = """Stock Dashboard 量化筛选依据（score 越高越优，可重点考虑高分者，但仍须自己判断）：
 {cand_lines}"""

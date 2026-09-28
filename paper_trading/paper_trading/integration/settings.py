@@ -1,4 +1,4 @@
-"""母项目路径解析。"""
+"""Stock Dashboard 路径解析。"""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def mother_dir(explicit: str | None = None) -> Path | None:
-    """母项目根目录；不存在返回 None（调用方回退独立模式）。"""
+    """Stock Dashboard 根目录；不存在返回 None（调用方回退独立模式）。"""
     cand = explicit or os.environ.get("STOCK_DASHBOARD_DIR") or "~/stock-dashboard"
     p = Path(cand).expanduser()
     if not p.is_dir():

@@ -54,6 +54,7 @@ htmlcov/
 
 # Config overrides
 config.local.yaml
+strategy.local.yaml
 
 # Secrets (LLM keys, NEVER commit)
 secrets.local.json

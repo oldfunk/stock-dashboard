@@ -72,6 +72,9 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font:400 14
 table{width:100%;border-collapse:collapse;font-size:13px;background:var(--bg-secondary)}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--divider);white-space:nowrap}
 th{color:var(--text-secondary);font-weight:600;font-size:12px}
+/* AI 操作流水：详情与结果列自动换行，不左右滑动 */
+#ops td:nth-child(3),#ops td:nth-child(4){white-space:normal;word-break:break-word;min-width:220px}
+#ops td:nth-child(1),#ops td:nth-child(2),#ops td:nth-child(5){white-space:nowrap}
 tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--bg-hover)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
@@ -79,6 +82,7 @@ tbody tr:hover{background:var(--bg-hover)}
 .ok{color:var(--green);font-weight:600} .bad{color:var(--red);font-weight:600}
 .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600}
 .tag.buy{background:var(--color-up-bg);color:var(--color-up)} .tag.sell{background:var(--color-down-bg);color:var(--color-down)}
+.tag.live{background:var(--accent-soft);color:var(--accent)}
 .scroll{overflow-x:auto}
 .mut{color:var(--text-tertiary)}
 .ai-panel{background:var(--bg-secondary);border:1px solid var(--divider);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;box-shadow:var(--shadow)}
@@ -114,11 +118,6 @@ tbody tr:hover{background:var(--bg-hover)}
 </section>
 
 <section>
-  <div class="section-header"><h2 class="section-title">AI 操作流水</h2><span class="section-count" id="c-ops"></span></div>
-  <div class="scroll"><table id="ops"></table></div>
-</section>
-
-<section>
   <div class="section-header"><h2 class="section-title">当前持仓</h2><span class="section-count" id="c-pos"></span></div>
   <div class="scroll"><table id="pos"></table></div>
 </section>
@@ -126,6 +125,40 @@ tbody tr:hover{background:var(--bg-hover)}
 <section>
   <div class="section-header"><h2 class="section-title">订单记录</h2><span class="section-count" id="c-orders"></span></div>
   <div class="scroll"><table id="orders"></table></div>
+</section>
+
+<section>
+  <div class="section-header"><h2 class="section-title">投资方案</h2><span class="section-count" id="c-scheme"></span></div>
+  <div class="ai-panel">
+    <div class="s">三种方案只选其一。母价值需 Stock Dashboard 在同一台机器；自定义点行内“设置”写自然语言交易策略。切换只写本地文件，不进 git。</div>
+    <div class="ai-row" id="schemelist"></div>
+    <div class="ai-row" id="instructionBox" style="display:none">
+      <textarea id="instruction" rows="3" placeholder="自定义指令，例如：只做银行股反弹，单只最多买5000元，跌破买入价5%就卖" style="flex:1;min-width:240px"></textarea>
+    </div>
+    <div class="ai-row">
+      <button id="btn-scheme" class="primary">保存方案与指令</button>
+      <span id="schemestat" class="mut" style="align-self:center"></span>
+    </div>
+    <div class="s" id="motherschemes"></div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header"><h2 class="section-title">AI 问答</h2></div>
+  <div class="ai-panel">
+    <div class="ai-row">
+      <textarea id="q" rows="3" placeholder="例如：结合持仓和行情，评价一下当前三只股票" style="flex:1;min-width:240px"></textarea>
+    </div>
+    <div class="ai-row">
+      <button id="btn-ask" class="primary">提问（记流水）</button>
+    </div>
+    <div id="ans" class="ai-msg">回答会显示在这里，同时记入下方操作流水。每次提问会自动附带账户、持仓、近期行情与操作记录，不用你贴数据。</div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header"><h2 class="section-title">AI 操作流水</h2><span class="section-count" id="c-ops"></span></div>
+  <div class="scroll"><table id="ops"></table></div>
 </section>
 
 <section>
@@ -162,19 +195,6 @@ tbody tr:hover{background:var(--bg-hover)}
     <div class="s">Key 只保存在本机 secrets.local.json（0600 权限），永不进 git、不进日志；页面只显示掩码。局域网使用，不要把面板暴露到公网。</div>
   </div>
 </section>
-
-<section>
-  <div class="section-header"><h2 class="section-title">AI 问答</h2></div>
-  <div class="ai-panel">
-    <div class="ai-row">
-      <textarea id="q" rows="3" placeholder="例如：结合持仓和行情，评价一下当前三只股票" style="flex:1;min-width:240px"></textarea>
-    </div>
-    <div class="ai-row">
-      <button id="btn-ask" class="primary">提问（记流水）</button>
-    </div>
-    <div id="ans" class="ai-msg">回答会显示在这里，同时记入下方操作流水。每次提问会自动附带账户、持仓、近期行情与操作记录，不用你贴数据。</div>
-  </div>
-</section>
 </div>
 
 <script>
@@ -189,6 +209,7 @@ function rows(t,head,body){t.innerHTML="<thead><tr>"+head.map(h=>`<th${h[1]?' cl
    展示规范：股票一律写成 名称(代码)，如 贵州茅台(600519)；
    名称缺失时只写代码，不写“未知”等占位词。 */
 let NAMES={};                                   // {symbol: 真实名称}
+let QUOTES={};                                  // {symbol: 腾讯实时}（盘中才有）
 const sym=c=>NAMES[c]?`${NAMES[c]}(${c})`:c;
 const ACTION_CN={
   "run":"每日结算","cron-run":"每日结算（定时任务）","run:dry-run":"试运行（仅预览，不下单）",
@@ -251,6 +272,7 @@ async function refresh(){
  try{
   const [s,ops,pos,ord,nav,nm]=await Promise.all(["/api/status","/api/ops?limit=30","/api/positions","/api/orders?limit=30","/api/nav?limit=60","/api/names"].map(get));
   NAMES=(nm&&nm.data)||{};
+  try{const qq=await get("/api/quotes");QUOTES=(qq&&qq.data)||{};}catch(e){QUOTES={};}
   const st=s.data;
   document.getElementById("clock").textContent="行情截至 "+(st.data_asof||"无数据")+" · 页面更新于 "+new Date().toLocaleTimeString("zh-CN");
   document.getElementById("statusbar").innerHTML=`
@@ -276,9 +298,11 @@ async function refresh(){
       `<td class="mut">${esc(paramCN(r.action,r.params))}</td>`+
       `<td class="${ok?"ok":"bad"}">${esc(resultCN(r.action,ok,r.result))}</td>`+
       `<td class="num">${r.total_value_after!=null?fmt(r.total_value_after):"-"}</td></tr>`}).join("")||`<tr><td colspan="5" class="mut">暂无操作记录 —— AI 执行每日结算、买入、卖出后会出现在这里</td></tr>`);
-  rows(document.getElementById("pos"),[["股票"],["总股数",1],["可卖股数",1],["买入成本",1],["当前价",1],["持股市值",1],["浮动盈亏",1]],
+  rows(document.getElementById("pos"),[["股票"],["总股数",1],["可卖股数",1],["买入成本",1],["当前价",1],["持股市值(收盘)",1],["浮动盈亏",1]],
     (st.positions||[]).map(p=>{const pn=(p.current_price-p.avg_cost)*p.total_volume;
-    return `<tr><td><b>${esc(sym(p.symbol))}</b></td><td class="num">${p.total_volume}</td><td class="num">${p.available_volume}</td><td class="num">${fmt(p.avg_cost)}</td><td class="num">${fmt(p.current_price)}</td><td class="num">${fmt(p.market_value,0)}</td><td class="num ${cls(pn)}">${pn>=0?"+":""}${fmt(pn)}</td></tr>`}).join("")||`<tr><td colspan="7" class="mut">空仓</td></tr>`);
+    const live=(QUOTES||{})[p.symbol];
+    const pxHtml=live&&live.price?`${fmt(live.price)} <span class="tag live">实时</span>`:`${fmt(p.current_price)}`;
+    return `<tr><td><b>${esc(sym(p.symbol))}</b></td><td class="num">${p.total_volume}</td><td class="num">${p.available_volume}</td><td class="num">${fmt(p.avg_cost)}</td><td class="num">${pxHtml}</td><td class="num">${fmt(p.market_value,0)}</td><td class="num ${cls(pn)}">${pn>=0?"+":""}${fmt(pn)}</td></tr>`}).join("")||`<tr><td colspan="7" class="mut">空仓</td></tr>`);
   rows(document.getElementById("orders"),[["时间"],["方向"],["股票"],["股数",1],["价格",1],["状态"],["手续费",1]],
     (ord.data||[]).map(r=>{const d=new Date(r.created_at);const buy=r.direction==1;
     const fee=(Number(r.commission)+Number(r.stamp_duty)+Number(r.transfer_fee));
@@ -348,6 +372,46 @@ document.getElementById("themeBtn").onclick=()=>{
   document.documentElement.setAttribute("data-theme",cur);
   try{localStorage.setItem("pt_theme",cur)}catch(e){}
 };
+/* ---- 投资方案（单选切换，写本地文件不进 git） ---- */
+let instructionInit="";
+function toggleInstruction(e){e.preventDefault();
+  const box=document.getElementById("instructionBox");
+  box.style.display=(box.style.display==="none")?"":"none";}
+async function schemeStatus(){
+  const s=await get("/api/schemes");const d=(s&&s.data)||{};
+  document.getElementById("c-scheme").textContent=d.active?`当前：${d.active}（${d.source}）`:"";
+  const box=document.getElementById("schemelist");box.innerHTML="";
+  const byName={};(d.schemes||[]).forEach(sc=>{byName[sc.name]=sc});
+  [["mother","母价值"], ["general","通用默认"], ["custom","自定义"]].forEach(([name,label])=>{
+    const sc=byName[name];if(!sc)return;
+    const lab=document.createElement("label");
+    lab.style.cssText="display:flex;gap:6px;align-items:flex-start;font-size:13px;min-width:220px;flex:1";
+    const gone=sc.available===false;
+    if(gone){lab.style.opacity="0.45"}
+    const radio=document.createElement("input");radio.type="radio";radio.name="scheme";radio.value=sc.name;
+    if(gone)radio.disabled=true;
+    if(sc.name===d.active)radio.checked=true;
+    const tx=document.createElement("span");
+    tx.innerHTML=`<b>${esc(label)} · ${esc(sc.title||sc.name)}</b>${gone?' <span class="mut">（需 Stock Dashboard 在同一台机器）</span>':""}<br><span class="mut">${esc(sc.desc||"")}</span><br><span class="mut">宇宙 ${esc(sc.universe||"")}</span>${sc.name==="custom"?' <a href="#" onclick="toggleInstruction(event)">设置</a>':""}`;
+    lab.appendChild(radio);lab.appendChild(tx);box.appendChild(lab);
+  });
+  if(d.instruction!==undefined){document.getElementById("instruction").value=d.instruction||"";instructionInit=d.instruction||"";}
+  const ms=document.getElementById("motherschemes");
+  ms.textContent=(d.mother&&d.mother.length)?"Stock Dashboard 策略（选股侧，供参照）："+d.mother.map(m=>`${m.name}(${m.key},${m.n_rules}条规则)`).join("、"):"Stock Dashboard 未在同一台机器，暂无母策略参照";
+}
+document.getElementById("btn-scheme").onclick=async()=>{
+  const sel=document.querySelector('input[name="scheme"]:checked');
+  if(!sel){alert("先选一个方案");return}
+  const iv=document.getElementById("instruction").value;
+  const body={admin_token:tok(),name:sel.value};
+  if(iv!==instructionInit)body.instruction=iv;  // 没改就不发，避免误清空已存指令
+  const r=await post("/api/schemes/active",body);
+  if(!r.ok){alert("切换失败："+(r.error||""));return}
+  document.getElementById("schemestat").textContent=r.data.message;
+  document.getElementById("instructionBox").style.display="none";
+  await schemeStatus();refresh();
+};
+schemeStatus();
 llmStatus();
 </script>
 </body>
@@ -430,6 +494,54 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "data": {r["symbol"]: r["name"] for r in rows}})
                 finally:
                     conn.close()
+            elif u.path == "/api/schemes":
+                from paper_trading.strategy import all_schemes, mother_strategies
+                from paper_trading.strategy.schemes import (
+                    CUSTOM_ID, GENERAL_ID, MOTHER_ID, custom_instruction)
+
+                from pathlib import Path as _P
+                cur = self._bridge()
+                _root = _P(__file__).resolve().parents[1]
+                _ss = all_schemes(_root)
+                _g = _ss.get(GENERAL_ID)
+                _items = [
+                    {"name": MOTHER_ID, "title": "Stock Dashboard 价值",
+                     "desc": "Stock Dashboard 价值投资理念；需在同一台机器",
+                     "source": "mother",
+                     "available": MOTHER_ID in _ss,
+                     "universe": "screening", "exits": "论点卖出条件一票否决"},
+                    {"name": GENERAL_ID, "title": _g.title, "desc": _g.desc,
+                     "source": "general", "available": True,
+                     "universe": _g.universe_source, "exits": _g.exits_note},
+                    {"name": CUSTOM_ID, "title": "自定义指令",
+                     "desc": "你用自然语言写交易策略，AI 照此执行（风控钳制不变）",
+                     "source": "custom", "available": True,
+                     "universe": "config", "exits": "以你的指令为准"},
+                ]
+                self._json({"ok": True, "data": {
+                    "active": cur.scheme.name, "source": cur.scheme_source,
+                    "instruction": custom_instruction(_root),
+                    "schemes": _items,
+                    "mother": mother_strategies()}})
+            elif u.path == "/api/quotes":                # 盘中实时行情（60s 服务端缓存；非交易时段回空）
+                from paper_trading.data import realtime as _rt
+
+                q = parse_qs(u.query)
+                syms = [s for s in (q.get("symbols") or [""])[0].split(",") if s.strip()]
+                if not syms:
+                    try:
+                        b0 = self._bridge()
+                        syms = [p.symbol for p in b0.broker.get_all_positions()]
+                        syms += [s for s in b0.data_db.get_pool_symbols()
+                                 if s not in syms]
+                    except Exception:
+                        syms = []
+                try:
+                    self._json({"ok": True, "data": _rt.get_quotes(syms[:20]),
+                                "live": _rt.is_trading_session()})
+                except Exception as e:
+                    self._json({"ok": True, "data": {}, "live": False,
+                                "error": str(e)[:120]})
             elif u.path == "/api/llm/status":
                 self._json({"ok": True, "data": self._bridge().llm_status()})
             elif u.path == "/api/llm/models":
@@ -467,7 +579,20 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         try:
             body = self._read_json()
-            if u.path == "/api/llm/config":
+            if u.path == "/api/schemes/active":
+                if not self._admin_ok(body):
+                    self._json({"ok": False, "error": "口令错误"}, code=403)
+                    return
+                from paper_trading.strategy import set_active
+
+                from pathlib import Path as _P
+                ok, msg = set_active(
+                    _P(__file__).resolve().parents[1], str(body.get("name", "")),
+                    body.get("instruction"))
+                self._json({"ok": ok, "data": {"message": msg} if ok else None,
+                            "error": None if ok else msg},
+                           code=200 if ok else 400)
+            elif u.path == "/api/llm/config":
                 st0 = self._bridge().llm_status()
                 # 口令规则：未配置过→直接存；已配置→要口令，或凭 Key 接管（换浏览器不用旧口令）
                 if st0.get("configured") and not self._admin_ok(body) \
