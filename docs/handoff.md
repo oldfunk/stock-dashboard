@@ -3,26 +3,24 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 纸盘 subtree 机制化完成，gate 473，随即合并）
-- **机制落地**：`paper-upstream` remote 已配；plain copy 转 subtree（删旧+graft 重建，内容一致）；首 `pull --squash` 带回上游 3 提交（单测禁网/上下文覆盖/NAV全口径），零冲突；以后更新一条命令
-- **双向独立验证**（grep 实证）：母仓 src/tests/scripts 零引用 `paper_trading.*`；vendored 零引用 `src/stock_dashboard`——父开发不被分心，子独立演进
-- **规则**：vendored 文件绝不手改（修先上游再 pull）；母推远端天然带上子树（单仓单推）
-- **验证（生产服务器 worktree）**：`gate.sh` **473 passed / Gate passed**（470+3 上游新单测）；三扫描全绿（vendored 豁免延续）
-- **文档全量**：本批次 README/AGENTS/architecture/roadmap/账本/paper-trading.md/agent-api 一次对齐
-- 合并后同步生产：git pull + gate + 远端含树实证（`git ls-tree`）+ HTTP（纯代码无变更不重启——subtree 嫁接只动 `paper_trading/`，服务不读它）
+## 最后状态（2026-09-28 文档准确性审计进行中，nightly/20260928o）
+- **用户指令**：项目不再需要外部 agent 帮忙——全仓文档去掉 Hermes 相关表述，审查所有文字准确性并修正
+- **已改**：AGENTS / README / architecture / roadmap / agent-api / ai-proxy（转备用）/ scheduled-tasks / setup-cron / 模板注释 / 账本现行区；历史条目按 append-only 保留（ dated 事实不改）
+- **新真相源**：AI 分析 = 用户自带 Key 内置执行（`/llm` + 队列，09-27 live）；外部程序 API 保留兼容；周六复盘 LLM 已具备调用条件，待 10-03 首验
+- **待合**：本批次 docs → gate（纯文档，计数不变）→ 合并 → 生产 pull（不重启）
 
 ## 下一步方向
-1. 收盘后（15:00+）跑一次真 agent run（母 universe + 我们的 Key），看 AI 下不下单
+1. 收盘后（15:00+）跑一次真 agent run（母 universe + 我们的 Key）
 2. 自动调度是否配——等用户明确批准（交易自动化）
-3. K 线双 pipeline v2 统一；双份 JS 收敛；队列持久化——按需再说
-4. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
+3. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
 
 ## 已知隐患
-- vendored 运行 CWD 必须是 `paper_trading/`（import 与相对路径都依赖它）
-- `:8080`（子项目独立部署）vs `:8081`（合并树面板）——互不干扰，别混淆
+- vendored 运行 CWD 必须是 `paper_trading/`；`:8080` vs `:8081` 别混淆
+- 单测 hermetic 铁律（读 ambient 配置/环境必须显式隔离）
 - 问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
+- 2026-09-28 文档准确性审计（去 Hermes/外部 agent 旧分工表述；自带 Key 为主；历史条目 append-only 保留）
 - 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）
 - 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 改直达 :8081；生产 gate 469→470；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
 - 2026-09-28 双 bug 修复已合（nightly/20260928c → main：KlineDAO 恢复 + 钉选卡跳转 + 静态版本戳；生产 gate 440；K 线表停更 7 天，明早流水线自动追平）

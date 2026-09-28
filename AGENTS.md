@@ -1,6 +1,6 @@
 # AGENTS.md
 
-AI 驱动的 A 股价值投资选股看板。工作日 15:30 后自动跑完全市场约 5500 只股票，经 7 条门规筛选输出候选池 ≤20 只（AI 分析由外部 AI 执行，面板不触发）。生产实例部署于生产服务器（端口 9527，部署目标见本地 `deploy.local.md`，该文件不入库）。
+AI 驱动的 A 股价值投资选股看板。工作日 15:30 后自动跑完全市场约 5500 只股票，经 7 条门规筛选输出候选池 ≤20 只（AI 分析用用户自带 Key 在面板触发：`/llm` 配置 + 队列执行，详见账本 M5）。生产实例部署于生产服务器（端口 9527，部署目标见本地 `deploy.local.md`，该文件不入库）。
 
 ## 运行
 
@@ -13,7 +13,7 @@ python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 
 ## 技术栈
 
-Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI 分析由外部 AI 执行（通用协议见 `docs/ai-proxy-ai-analysis.md`；本地 LLM 通道不可用）· 内置 scheduler daemon 线程。
+Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI 分析用用户自带 Key（`/llm` 页配置模型；免费通道已死；外部程序兼容见 `docs/agent-api.md`）· 内置 scheduler daemon 线程。
 
 ## 架构
 
@@ -62,5 +62,5 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 1. 文档放 `docs/`，文件名英文小写连字符（如 ai-proxy-ai-analysis.md）
 2. 格式跟随现有文档（参考 architecture.md），勿自创版式：`> 创建：日期 · 上游：来源 · 状态：…` 头部元信息行 + `## N.` 编号章节；表格、代码块按需
-3. 新文档先在 `nightly/*` 分支起草，用户批准后合入 main
+3. 新文档先在 `nightly/*` 分支起草，长期授权下可直接合并（历史要求用户批准的写法已废止）
 4. 不重复维护：同一信息只写一处，其他文件引用链接

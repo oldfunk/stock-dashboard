@@ -1,9 +1,9 @@
 #!/bin/bash
-# 设置 stock-dashboard 定时任务
-# 读取 docs/scheduled-tasks.md 配置，创建 Hermes cron 任务
+# 设置 stock-dashboard 定时任务（历史备用：需外部调度机，无外部调度方时不用）
+# 读取 docs/scheduled-tasks.md 配置，在外部机器注册 cron 任务；
+# 本项目现用内置 scheduler + 面板队列，不走这里。
 #
-# 运行位置：在 Hermes 所在机器上跑（作者的 Hermes 环境），不在生产服务器跑
-# （生产服务器无 hermes 命令；任务通过 SSH/API 操作生产服务器）。
+# 运行位置：外部调度机（不在生产服务器跑）。
 #
 # 用法：bash scripts/setup-cron.sh
 

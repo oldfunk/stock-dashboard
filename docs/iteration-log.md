@@ -1,7 +1,7 @@
 # Stock Dashboard — 迭代进程账 (Iteration Ledger)
 
-> 本文件是 nightly 工程迭代 agent 的全局上下文源。每次迭代前先通读它了解历史与现状，迭代后追加条目。
-> 维护者：Hermes nightly 迭代 agent + 用户。零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
+> 本文件是开发迭代 agent 的全局上下文源。每次迭代前先通读它了解历史与现状，迭代后追加条目。
+> 维护者：开发 agent + 用户。零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 
 ## 项目定位
 A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-dashboard.service`，端口 9527，每日 15:30 选股 + 实时行情（部署目标见本地 `deploy.local.md`，不入库）。代码真相源 = GitHub `origin/main`，生产服务器从 origin 拉取部署。
@@ -10,10 +10,10 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 当前真实状态（2026-09-21，用户定调路线调整后）
 
-- 项目定位：价值投资**数据面板**。生产服务器跑采集/筛选/展示；AI 分析由**外部 AI** 执行（不绑定具体实现，作者自用 Hermes），面板不再内联 AI 分析、不再本地触发 LLM。
+- 项目定位：价值投资**数据面板**。生产服务器跑采集/筛选/展示；AI 分析用用户自带 Key（`/llm` 配置 + 队列执行），面板不再内联 AI 分析。
 - 每日流水线：工作日 15:30 采集→筛选（5527 → 20 候选）→ K 线拉取，正常；本地 AI 自动触发已停用。
-- AI 现状：本地 Zen/Pollinations 双通道 9/07 起相继不可用；通用代理协议 `src/ai_proxy/` 已实现，外部 AI 消费方（取数/写回）待排期；周六复盘硬规则本地可跑，LLM 决议失败时整轮跳过。
-- 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示外部 AI 写回内容。
+- AI 现状：本地 Zen/Pollinations 双通道 9/07 起相继不可用；自带 Key 分析已上线（`/llm` 配置 + 队列执行，首只 09-27 跑通）；周六复盘硬规则本地可跑，LLM 决议已随用户 Key 具备调用条件，待 10-03 周六首验。
+- 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示 AI 分析写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
 - gate 基线：473 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
@@ -35,9 +35,9 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - M2 策略分化（目标 9-30）：B3 + B4 + 多策略接入流水线，三策略独立候选池
 - M3 持有纪律（目标 10 月）：B5 + B6 + B7 + 钉选股监控条件提醒
 
-## Hermes 自动迭代方向（2026-09-13 设立，09-12 更新）
+## 自动迭代方向（2026-09-13 设立，09-12 更新）
 
-> Hermes 只提交到 GitHub，不部署生产服务器。每次迭代前通读本文件 + `docs/architecture.md`。
+> 开发只提交到 GitHub，生产从 origin 拉取部署。每次迭代前通读本文件 + `docs/architecture.md`。
 
 ### 已完成清单（2026-09-12 人工 + Hermes 合计）
 - B1–B8：估值验算闸 / 三态结论 / 成长α / 豁免细化 / 论点漂移 / 状态机 / 周报模板 / total_shares 修复
@@ -61,7 +61,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 5. [x] **分析摘要前置**（2026-09-15 完成，`6256d58`，在 nightly/20260914 待合）：`_enrich_stocks()` 解析 `ai_analysis` JSON 提取 `moat_evaluation[0].type` / `management_score` / `intrinsic_value`，写入 `s['moat_type']` / `s['mgmt_score']` / `s['iv_range']`（NULL/异形行守卫为 None，有值才渲染）；候选卡新增摘要块；回归测试 4 例。注：2026-09-13 nightly 与 08-30 条目曾记一次前置，本次为合并冲突后存量丢失的重做，以本次为准。
 6. [x] **操作指引强化**（2026-09-15 完成，`4495b9c`，在 nightly/20260914 待合）：交易 Tab 在 trade-grid 下方新增 trade-guide 动态行，按 `trade_parsed.signal`（大小写归一）生成一句话指引（BUY 含置信度/目标价/止损、HOLD、AVOID），无 trade_parsed 不显示；Jinja 五用例渲染验证 5/5。
 
-**P2 — 可选（C3 或上游跟踪）**〔2026-09-23 维护模式：不再开发〕
+**P2 — 可选（C3 或上游跟踪）**〔P2 仍冻结；其余 09-27/28 已恢复投入〕
 7. ~~C3 AI 引用数字抽检~~（已取消，见 C3 注记）。
 8. ~~上游跟踪~~（已取消：上游已解绑）。
 9. ~~P2 体验优化 ⑤⑥⑦⑧~~（2026-09-23 停止投入，不再开发，roadmap 已归档）。
@@ -71,14 +71,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 验证要点：watch 动作是否触发（基本面恶化 → watch + 观察项 + 期限）；journal 是否按新模板输出（池变动章节 / 逐股财报五句 / 小白标准）；coverage 校验是否记录缺失。
 - 若验证通过：标记 B6/B7 为完成态。若不通过：根据实际输出修 prompt + 补单测。
 
-### 迭代约束（Hermes 必须遵守）
+### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
 - 全仓 pytest 零失败（基线 473 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
 - 提交到 nightly 分支，不直接 push main
-- 生产服务器部署：合并获批后由 agent 同步（pull + restart + 冒烟验证）
+- 生产服务器部署：合并后同步（pull + restart + 冒烟验证，长期授权直接合并）
 
 ## 分析能力方向（2026-09-04 用户定调）
 
@@ -103,12 +103,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 零 emoji（允许 Unicode 排版 → ↑ ↓ ✓）。
 - 每次迭代只做一件小而实的事，不求大改大动；禁止一次性改多个无关模块。
 - 改动必须冒烟测试：`ssh <生产服务器> "cd <部署目录> && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误；改动零 emoji（仅允许 → ↑ ↓ ✓）。
-- **部署**：默认推 nightly 分支、永不自动合并；合并获批后由 agent 同步生产服务器（pull + restart + 冒烟验证）。
+- **部署**：默认推 nightly 分支；长期授权直接合并后同步生产服务器（pull + restart + 冒烟验证）。
 - 提交信息中文，写清「改了什么 + 为什么（想法）」。
 - 改完：更新本账（勾掉 backlog 项、Changelog 追加）+ 推 Discord 简报。
-- **git 工作流硬约定（防污染 main）**：每晚迭代在**当前 nightly 分支**上继续（开头 `git fetch origin && git rebase origin/main` 拉平上游，再 commit），commit 后 `git push origin HEAD`。**绝不在本地 `main` 上 commit，绝不 `git push origin main`**。push 后保持 HEAD 在 nightly 分支，勿切回 main（本地 main 由用户/合并流程管理）。多日累积都落在同一个 nightly 分支，审计时一次性 `git log origin/main..HEAD --stat` 即可。
+- **git 工作流硬约定（防污染 main）**：每晚迭代在**当前 nightly 分支**上继续（开头 `git fetch origin && git rebase origin/main` 拉平上游，再 commit），commit 后 `git push origin HEAD`。**绝不在本地 `main` 上 commit**；合并走长期授权直接合并推送。push 后保持 HEAD 在 nightly 分支，勿切回 main（本地 main 由合并流程管理）。多日累积都落在同一个 nightly 分支，审计时一次性 `git log origin/main..HEAD --stat` 即可。
 
-### 踩坑铁律（从真实事故提炼，Hermes 每次迭代前必读）
+### 踩坑铁律（从真实事故提炼，每次迭代前必读）
 
 1. **提交前想清楚，不重复提交同一文件**：README 在 4 个 commit 内被改了 3 次（`d0f8176` 新写 → `2d18db1` 全覆盖 → `b801d36` 去重），等于前两次白做。规则：对同一文件的修改如果间隔 < 3 个 commit，说明没想清楚，应该 `git commit --amend` 或等想清楚再提。
 2. **handoff.md 只追加不删历史**：原文件有"历史交接区（追加，不删）"规则，但重写时整段消失。规则：重写 handoff.md 时，"历史交接区"段必须保留并追加新条目，不得删除已有历史。
@@ -161,6 +161,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（文档准确性审计：去 Hermes/外部 agent 旧分工，nightly/20260928o 待合）
+- **用户指令**：项目不再需要外部 agent 帮忙；全仓文档去掉 Hermes 相关表述，审查所有文字准确性并修正。
+- **新真相源**：AI 分析 = 用户自带 Key 内置执行（`/llm` + 队列，09-27 live）；外部程序 API 保留兼容；周六复盘 LLM 已具备调用条件（配置链完整），待 10-03 首验。
+- **改了什么**：AGENTS / README / architecture / roadmap / agent-api / ai-proxy（转备用）/ scheduled-tasks / setup-cron / 模板注释 / 账本现行区；历史条目按 append-only 保留（dated 事实不改）；vendored 树豁免（上游字节）。
+- **验证**：gate 473 passed（纯文档，计数不变）；三扫描全绿。
 
 ### 2026-09-28（纸盘 subtree 机制化：graft 上游 + 双向独立验证 + 全部文档，nightly/20260928n 已合）
 - **机制**：`paper-upstream` remote 已配；plain copy 转 subtree（删旧+graft 重建，内容一致）；首 `pull --squash` 带回上游 3 提交（单测禁网/上下文覆盖/NAV全口径），嫁接干净零冲突；以后更新一条命令。

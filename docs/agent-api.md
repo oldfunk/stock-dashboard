@@ -1,7 +1,7 @@
-# 外部 Agent 接入指南（Agent API）
+# 外部程序 API 参考（Agent API，保留兼容）
 
-> 任何外部 agent（Hermes、OpenCode、Claude、自写脚本）通过 HTTP 连入本面板：**读数据、写分析、写笔记**。
-> 面板本身不触发 AI 分析——分析由外部 agent 负责，面板只存储与展示。
+> 任何外部程序（自写脚本、定时任务、其他 AI）可通过 HTTP 连入本面板：**读数据、写分析、写笔记**。
+> 面板本身不触发 AI 分析——分析用用户自带 Key 在面板触发（`/llm` 配置 + 队列执行），面板只存储与展示；本接口保留兼容。
 > 相关协议：`docs/ai-proxy-ai-analysis.md`（分析结果的展示契约）。
 
 ## 连接
@@ -50,7 +50,7 @@ POST /api/watchlist/{code}/notes
 ```
 
 - `note_type`：`weekly`（周复盘）/ `analysis`（分析）/ `user`（人工），默认 `weekly`
-- `model`：溯源标识，外部 agent 必填（如 `hermes-gpt-5`、`opencode-claude`）
+- `model`：溯源标识，必填（如 `glm-4.5-flash`、`deepseek-chat`、自写脚本自定义）
 - 追加写入，每条独立成行；成功返回 `{"ok": true, ...}`
 
 ### 2. 投资论文（论点级结构化分析）
@@ -107,7 +107,7 @@ curl -s -X POST $BASE/api/watchlist/000792/thesis -H 'Content-Type: application/
   "sell_conditions": [...], "source": "ai_analysis"}'
 
 curl -s -X POST $BASE/api/watchlist/000792/notes -H 'Content-Type: application/json' -d '{
-  "note": "本周假设核验：毛利率91.3%，成立", "note_type": "analysis", "model": "hermes-xxx"}'
+  "note": "本周假设核验：毛利率91.3%，成立", "note_type": "analysis", "model": "glm-4.5-flash"}'
 ```
 
 ## 约定与红线
@@ -121,5 +121,5 @@ curl -s -X POST $BASE/api/watchlist/000792/notes -H 'Content-Type: application/j
 ## 模拟交易面板（paper-trading 子项目）
 
 - 本面板 `/paper` 直达子项目原仪表盘（`:8081`，与本面板同机不同端口）
-- 外部 AI 也可直调它的读写面： universe/信号/下单/持仓/NAV（CLI `python -m paper_trading.hermes_bridge --help`，运行 CWD 须为 `paper_trading/`）；母库只读（screening/watchlist/快照/AI 历史），写操作只落它自己的账本库
+- 读写面也对外开放： universe/信号/下单/持仓/NAV（CLI `python -m paper_trading.hermes_bridge --help`，运行 CWD 须为 `paper_trading/`）；母库只读（screening/watchlist/快照/AI 历史），写操作只落它自己的账本库
 - 密钥与 Key：它用独立 `secrets.local.json`（0600），与本面板 `.env` 互不干扰

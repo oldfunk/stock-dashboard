@@ -4,7 +4,7 @@
     <div class="wl-item clickable" data-code="{{ stock.code }}"
          onclick="location.href='/stock/{{ stock.code }}'">
 
-        {# ── 头部：代码 + 名称 + 评分 + 池信息（AI 信号徽标已移除，分析由外部 AI 执行，见 2026-09-21 方向） ── #}
+        {# ── 头部：代码 + 名称 + 评分 + 池信息（AI 信号徽标已移除；分析走自带 Key 队列，见账本 M5） ── #}
         <div class="wl-item-header">
             <div class="wl-item-left">
                 <span class="wl-code">{{ stock.code }}</span>
@@ -149,7 +149,7 @@
         </div>
         {% endif %}
 
-        {# AI 展示区已移除：分析由外部 AI 通过 API 消费数据后输出（2026-09-21）；2026-09-27 起卡片头部带 AI 分析触发按钮（结果进详情时间线/用量表） #}
+        {# AI 展示区已移除（2026-09-21；分析曾改走外部 API，同年 09-27 起改走自带 Key）；2026-09-27 起卡片头部带 AI 分析触发按钮（结果进详情时间线/用量表） #}
 
     </div>
     {% endfor %}
