@@ -1,0 +1,7 @@
+# 强制 LF：Windows 侧编辑也不再产生 CRLF，scp/拷贝不再污染 Pi
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.db binary
