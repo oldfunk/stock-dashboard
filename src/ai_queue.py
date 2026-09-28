@@ -3,7 +3,7 @@
 - analyze_batch_parallel：股票级并发（每只独立 AiAnalyzer，线程隔离），interval 为下发间隔。
 - AnalysisQueue：内存队列（重启丢失，见文档），批次串行、批次内 N 并发；get_queue() 单例。
 - polish_requirement：用户口语需求 → 结构化分析指令（ask_raw 复用）。
-- explain_market：大盘解盘（指数快照 + 用户要求 → ask_raw，不落库）。
+- write_market_note：大盘+持仓全景深分析并写入投资笔记（不限 token，同日复盘行追加）。
 """
 
 import json

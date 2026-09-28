@@ -139,18 +139,26 @@ class TestPolishMarket:
         from src import ai_queue
         assert ai_queue.build_market_context() == "大盘数据暂无"
 
-    def test_explain_market(self, db, monkeypatch):
+    def test_submit_job_lifecycle(self, db, monkeypatch):
+        import time
         from src import ai_queue
-        from src.llm_config import ENV_KEY
-        monkeypatch.setenv(ENV_KEY, "k")
         monkeypatch.setattr(
-            "src.analyzer.ai_analyzer.AiAnalyzer.ask_raw",
-            lambda self, prompt, system=None: ("震荡", "m",
-                                               {"prompt_tokens": 5,
-                                                "completion_tokens": 5}))
-        out = ai_queue.explain_market("重点看成交量")
-        assert out["answer"] == "震荡"
-        assert out["usage"]["prompt_tokens"] == 5
+            "src.ai_queue.write_market_note",
+            lambda requirement=None, today=None: {
+                "journal_date": "2026-09-28", "title": "t", "chars": 10,
+                "model": "m", "usage": {}})
+        jid = ai_queue.submit_market_note("看看")
+        assert jid.startswith("mn")
+        st = {}
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            st = ai_queue.get_market_note_job(jid) or {}
+            if st.get("status") == "done":
+                break
+            time.sleep(0.05)
+        assert st.get("status") == "done"
+        assert st.get("chars") == 10
+        assert ai_queue.get_market_note_job("mn9999") is None
 
 
 class TestConcurrency:

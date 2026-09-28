@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,31 +13,41 @@
             --accent: #1a73e8;
             --accent-hover: #1557b0;
             --green: #137333;
-            --green-bg: #e6f4ea;
             --red: #c5221f;
-            --red-bg: #fce8e6;
             --gold: #b06000;
-            --gold-bg: #fef7e0;
             --divider: #e0e3e7;
             --radius: 8px;
             --font-sans: 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
             --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+        }
+        [data-theme="dark"] {
+            --bg-primary: #1a1c1e;
+            --bg-secondary: #202124;
+            --text-primary: #e8eaed;
+            --text-secondary: #9aa0a6;
+            --accent: #8ab4f8;
+            --accent-hover: #aecbfa;
+            --green: #81c995;
+            --red: #f28b82;
+            --gold: #fdd663;
+            --divider: #3c4043;
         }
         * { box-sizing: border-box; }
         body { margin: 0; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); }
         .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--divider); }
         .header h1 { font-size: 18px; margin: 0; }
         .nav-link { color: var(--accent); text-decoration: none; font-size: 14px; margin-left: 16px; }
+        .theme-toggle { background: none; border: none; cursor: pointer; font-size: 14px; color: var(--text-secondary); margin-left: 16px; }
         .wrap { max-width: 860px; margin: 0 auto; padding: 20px; }
         .card { background: var(--bg-secondary); border: 1px solid var(--divider); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
         .card h2 { font-size: 16px; margin: 0 0 12px 0; }
         .card p.hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px 0; }
         .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
         label { font-size: 14px; min-width: 96px; color: var(--text-secondary); }
-        input[type=text], input[type=password], input[type=number], select { font-size: 14px; padding: 7px 10px; border: 1px solid var(--divider); border-radius: var(--radius); background: #fff; color: var(--text-primary); }
+        input[type=text], input[type=password], input[type=number], select { font-size: 14px; padding: 7px 10px; border: 1px solid var(--divider); border-radius: var(--radius); background: var(--bg-secondary); color: var(--text-primary); }
         input.grow, select.grow { flex: 1; min-width: 200px; }
         input.short { width: 110px; }
-        button { font-size: 14px; padding: 7px 16px; border-radius: var(--radius); border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+        button { font-size: 14px; padding: 7px 16px; border-radius: var(--radius); border: 1px solid var(--divider); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; }
         button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         button.primary:hover { background: var(--accent-hover); }
         button:disabled { opacity: 0.5; cursor: default; }
@@ -60,6 +70,7 @@
         <div>
             <a href="/" class="nav-link">首页</a>
             <a href="/journal" class="nav-link">投资笔记</a>
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="切换深色/浅色">&#9681;</button>
         </div>
     </header>
     <div class="wrap">
@@ -114,6 +125,20 @@
     </div>
 
 <script>
+(function () {
+    var stored = null;
+    try { stored = localStorage.getItem('stock-dashboard-theme'); } catch (e) {}
+    var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+    document.getElementById('themeToggle').innerHTML = theme === 'dark' ? '&#9728;' : '&#9681;';
+})();
+function toggleTheme() {
+    var cur = document.documentElement.getAttribute('data-theme');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('stock-dashboard-theme', next); } catch (e) {}
+    document.getElementById('themeToggle').innerHTML = next === 'dark' ? '&#9728;' : '&#9681;';
+}
 async function api(path, opts) {
     const r = await fetch(path, opts);
     return r.json();

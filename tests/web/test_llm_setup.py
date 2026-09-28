@@ -689,6 +689,21 @@ class TestQueueUI:
         assert 'id="concInput"' in resp.text
         assert "整轮分析" not in resp.text
 
+    def test_llm_page_dark_mode(self, client):
+        """深色模式：变量块 + 开关 + 输入框无硬编码白底。"""
+        resp = client.get("/llm")
+        assert resp.status_code == 200
+        assert 'data-theme="dark"' in resp.text
+        assert "toggleTheme" in resp.text
+        assert "background: #fff" not in resp.text
+
+    def test_index_metrics_wrap_no_hscroll(self, client):
+        """候选信息换行展示：metrics 容器 wrap、无横向滚动。"""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "flex-wrap: wrap" in resp.text
+        assert "overflow-x: auto" not in resp.text
+
     def test_static_ai_js(self, client):
         resp = client.get("/static/ai.js")
         assert resp.status_code == 200

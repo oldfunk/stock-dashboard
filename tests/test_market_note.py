@@ -16,7 +16,7 @@ def _seed(db_mod):
         conn.execute(
             "INSERT INTO market_index (index_code, index_name, current_value,"
             " change_percent, timestamp, date) VALUES (?,?,?,?,?,?)",
-            ("000001", "上证指数", 3000.0, 0.5,
+            ("sh000001", "上证指数", 3000.0, 0.5,
              "2026-09-28T15:00:00", "2026-09-28"))
         conn.execute(
             "INSERT INTO stock_snapshot (code, name, pe, current_price,"

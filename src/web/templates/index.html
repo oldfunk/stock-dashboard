@@ -349,10 +349,10 @@
         .ai-panel .nav-link { color: var(--accent); text-decoration: none; font-size: 13px; }
         .ai-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
         .ai-row label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
-        .ai-row select, .ai-row input[type=number] { font-size: 13px; padding: 5px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); background: #fff; }
+        .ai-row select, .ai-row input[type=number] { font-size: 13px; padding: 5px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-primary); }
         .ai-row input[type=number] { width: 70px; }
-        .ai-row textarea { flex: 1; min-width: 220px; font-size: 13px; padding: 6px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); font-family: inherit; }
-        .ai-row button { font-size: 13px; padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--divider); background: #fff; cursor: pointer; }
+        .ai-row textarea { flex: 1; min-width: 220px; font-size: 13px; padding: 6px 8px; border: 1px solid var(--divider); border-radius: var(--radius-sm); font-family: inherit; background: var(--bg-secondary); color: var(--text-primary); }
+        .ai-row button { font-size: 13px; padding: 5px 14px; border-radius: var(--radius-sm); border: 1px solid var(--divider); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; }
         .ai-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .ai-msg { font-size: 13px; min-height: 18px; margin: 4px 0; }
         .ai-msg.ok { color: var(--green); }
@@ -512,17 +512,12 @@
             flex: 1;
             min-width: 0;
             display: flex;
-            gap: 20px;
-            flex-wrap: nowrap;
-            overflow-x: auto;
+            gap: 8px 20px;
+            flex-wrap: wrap;
+            overflow-x: visible;
             padding-top: 2px;
             padding-bottom: 4px;
-            scrollbar-width: thin;
         }
-        .stock-metrics::-webkit-scrollbar { height: 6px; }
-        .stock-metrics::-webkit-scrollbar-track { background: transparent; }
-        .stock-metrics::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
-        .stock-metrics::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
         .metric-cell {
             min-width: 56px;
@@ -557,7 +552,7 @@
             border-radius: 3px;
             margin-left: 2px;
         }
-        .history-cell .value { font-size: 11px !important; white-space: nowrap; }
+        .history-cell .value { font-size: 11px !important; white-space: normal; }
 
         .stock-reason {
             font-size: 11px;
@@ -1381,14 +1376,36 @@
                   document.getElementById('aiReq').value.trim();
         var box = document.getElementById('aiMarketAnswer');
         box.style.display = 'block';
-        box.textContent = '解盘中…';
+        box.textContent = '解盘中（写投资笔记，约几分钟）…';
         postJSON('/api/llm/market', {requirement: req}).then(function(d) {
-            box.textContent = d.answer + '\n—— 模型 ' + d.model +
-                '（prompt ' + (d.usage.prompt_tokens || 0) +
-                ' / completion ' + (d.usage.completion_tokens || 0) + '）';
+            if (d && d.job_id) { aiPollMarketNote(d.job_id, box); }
+            else { box.textContent = '启动失败'; }
         }).catch(function(e) {
-            box.textContent = '解盘失败：' + ((e.body && e.body.detail) || '请求失败');
+            box.textContent = '启动失败：' + ((e.body && e.body.detail) || '请求失败');
         });
+    }
+    function aiPollMarketNote(jid, box) {
+        var tries = 0;
+        var timer = setInterval(function() {
+            tries++;
+            fetchJSON('/api/llm/market-note/' + jid).then(function(d) {
+                if (d.status === 'done' || d.status === 'failed' || tries > 120) {
+                    clearInterval(timer);
+                    if (d.status === 'done') {
+                        var u = d.usage || {};
+                        box.textContent = '已写入' + d.journal_date + '投资笔记（' + d.chars + '字）· prompt ' +
+                            (u.prompt_tokens || 0) + ' / completion ' + (u.completion_tokens || 0) +
+                            ' · 去投资笔记查看';
+                    } else {
+                        box.textContent = '解盘失败（后台异常，重试一次）';
+                    }
+                } else {
+                    box.textContent = '解盘中（写投资笔记，约几分钟）…' + tries;
+                }
+            }).catch(function() {
+                if (tries > 120) { clearInterval(timer); box.textContent = '状态查询失败'; }
+            });
+        }, 3000);
     }
     function refreshQueue() {
         fetchJSON('/api/llm/queue').then(function(d) {
