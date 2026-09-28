@@ -64,23 +64,6 @@ ai:
     max_tokens: 6000
     retries: 2
 
-# -------- 外部 AI 代理（通用，不绑定具体 AI 实现；作者自用 Hermes 接入） --------
-# 主通道：付费 API（OpenRouter 等），优先使用
-# 降级通道：免费 API（Pollinations 等），主通道失败时兜底
-# api_key 不存 Git，在 .env 或本地配置中设置
-ai_proxy:
-  primary:
-    api_base: "https://openrouter.ai/api/v1"
-    model: "anthropic/claude-sonnet-5"
-    api_key: null
-    timeout: 300
-  fallback:
-    api_base: "https://text.pollinations.ai/openai"
-    model: "openai-fast"
-    api_key: null
-    timeout: 300
-    retries: 2
-
 # -------- Web 服务配置 --------
 web:
   host: "0.0.0.0"

@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示 AI 分析写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：473 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：468 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 473 passed，只升不降）
+- 全仓 pytest 零失败（基线 468 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（删除无用功能：ai_proxy 参考实现 + setup-cron.sh + 代理规范文档，nightly/20260929a 待合）
+- **用户指令**：不需要 hermes/外部 agent 了，没用的功能删掉，不要留。
+- **删了什么**：`src/ai_proxy/`（独立 FastAPI，主程序零挂载，grep 实证）+ `tests/ai_proxy/`（5 单测）+ `scripts/setup-cron.sh`（要 hermes 二进制的死路径）+ `docs/ai-proxy-ai-analysis.md` + `config.yaml ai_proxy` 段。
+- **没动什么**：vendored `paper_trading/hermes_bridge.py`（文件名 proper noun + 上游字节，绝不手改）；历史条目（append-only）。
+- **文档同步**：README 树/配置表/技术栈语、architecture 图+§3+§6、agent-api、scheduled-tasks。
+- **验证**：gate 468 passed（473−5）；三扫描；部署 pull + HTTP（删的是未加载模块，不重启）。
+- 基线刷新 473 → **468 passed**。
 
 ### 2026-09-28（文档准确性审计：去 Hermes/外部 agent 旧分工，nightly/20260928o 待合）
 - **用户指令**：项目不再需要外部 agent 帮忙；全仓文档去掉 Hermes 相关表述，审查所有文字准确性并修正。

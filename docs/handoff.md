@@ -3,23 +3,23 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 文档准确性审计进行中，nightly/20260928o）
-- **用户指令**：项目不再需要外部 agent 帮忙——全仓文档去掉 Hermes 相关表述，审查所有文字准确性并修正
-- **已改**：AGENTS / README / architecture / roadmap / agent-api / ai-proxy（转备用）/ scheduled-tasks / setup-cron / 模板注释 / 账本现行区；历史条目按 append-only 保留（ dated 事实不改）
-- **新真相源**：AI 分析 = 用户自带 Key 内置执行（`/llm` + 队列，09-27 live）；外部程序 API 保留兼容；周六复盘 LLM 已具备调用条件，待 10-03 首验
-- **待合**：本批次 docs → gate（纯文档，计数不变）→ 合并 → 生产 pull（不重启）
+## 最后状态（2026-09-28 删除无用功能进行中，nightly/20260929a）
+- **用户指令**：不需要 hermes/外部 agent 了，没用的功能删掉，不要留；历史条目是否有必要保留（答：有，见下）
+- **删了什么**：`src/ai_proxy/`（主程序零挂载，grep 实证）+ `tests/ai_proxy/`（5 单测）+ `scripts/setup-cron.sh`（要 hermes 二进制的死路径）+ `docs/ai-proxy-ai-analysis.md` + `config.yaml ai_proxy` 段
+- **没动什么**：vendored `paper_trading/hermes_bridge.py`（文件名 proper noun + 上游字节，绝不手改）；历史条目（append-only，改了等于篡改账本）
+- **待合**：本批次（删除 + 文档同步）→ gate（预期 468）→ 合并 → 生产 pull + HTTP（删的是未加载模块，不重启）
 
 ## 下一步方向
 1. 收盘后（15:00+）跑一次真 agent run（母 universe + 我们的 Key）
-2. 自动调度是否配——等用户明确批准（交易自动化）
+2. 自动调度是否配——等用户明确批准（交易 automation）
 3. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
 
 ## 已知隐患
 - vendored 运行 CWD 必须是 `paper_trading/`；`:8080` vs `:8081` 别混淆
-- 单测 hermetic 铁律（读 ambient 配置/环境必须显式隔离）
-- 问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
+- 单测 hermetic 铁律；问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
+- 2026-09-28 删除无用功能（ai_proxy 参考实现 + setup-cron.sh + 代理规范文档；vendored 文件名与历史条目保留，见账本说明）
 - 2026-09-28 文档准确性审计（去 Hermes/外部 agent 旧分工表述；自带 Key 为主；历史条目 append-only 保留）
 - 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）
 - 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 改直达 :8081；生产 gate 469→470；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
@@ -59,7 +59,6 @@
 - 2026-09-14 M2 多策略后端 + AI 摘要前置合并（nightly/20260914 + nightly/20260913 → main）
 - 2026-09-14 M2 多策略筛选后端核心落地 + verify（strategy_tags + multi 开关 + 5 单测，全仓 229 passed）
 - 2026-09-12 架构治理 + README 重排（architecture.md + paper-trading.md + roadmap 升级 + README 重构）
-- 2026-09-12 C2.5 东财 datacenter 补 roic/fcf P0（全仓 221 passed，822/904 股有 roic/fcf）
 - 2026-09-11 C2 东财第二财务源 P0（全仓 218 passed）
 - 2026-09-09 建交接文件，三任务串联启动
 - 2026-09-09 白班试跑：豁免D夹具修复落袋（577cc83）

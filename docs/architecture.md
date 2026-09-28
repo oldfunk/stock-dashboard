@@ -11,7 +11,6 @@ flowchart TB
         AK[AKShare 接口群]
         EM[东财 datacenter 直连]
         TX[腾讯/新浪 行情]
-        HP[外部 AI 代理协议<br/>src/ai_proxy/]
     end
 
     subgraph PROD[生产服务器 · stock-dashboard.service :9527]
@@ -26,7 +25,6 @@ flowchart TB
     AK --> COL
     EM --> COL
     TX --> COL
-    HP -.API.-> WEB
     SCH --> ORCH
     ORCH --> COL --> SCR
     COL <--> DB
@@ -65,7 +63,6 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `scheduler.py` | 定时触发 + 并发 guard | `orchestrator` | 不得含业务逻辑（只做触发 + 防重入）；不得触发本地 AI 分析 |
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `ai_proxy/` | 备用 AI 代理协议（参考实现） | 外部 LLM API | 面板不触发，只提供接口；主力为内置自带 Key 分析 |
 | `paper_trading/` | 子项目全量合并树（subtree 机制，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
@@ -114,7 +111,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 473 passed，2026-09-28 生产服务器 worktree gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 468 passed，2026-09-28 生产服务器 worktree gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
@@ -123,7 +120,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 - **P1 面板深化**（目标 11 月）：评分体系透明化、AI 笔记增强、时间线交互、详情页体验优化
 - **P2 体验优化**（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
-- **AI 分析**：用用户自带 Key（`/llm` 配置 + 队列执行），面板只负责展示数据与 AI 笔记。备用协议见 `src/ai_proxy/` + `docs/ai-proxy-ai-analysis.md`
+- **AI 分析**：用用户自带 Key（`/llm` 配置 + 队列执行），面板只负责展示数据与 AI 笔记
 - **已删除**：`src/analyzer/` 保留（本地触发已停用，仅手动脚本可用；原 `src/paper/` M4a 已删，见下）
 - **量化交易系统**：M4a/原生包已归档；2026-09-29 起由 M6 全量合并接替（顶层 `paper_trading/` + `/paper` 嵌原面板；Universe 走母筛选 + AI 用我们的 Key；:8081 面板独立服务）
 

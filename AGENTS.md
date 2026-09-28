@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 473 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 468 passed，只升不降）。
 
 ## 技术栈
 
@@ -60,7 +60,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 ### 文档约定
 
-1. 文档放 `docs/`，文件名英文小写连字符（如 ai-proxy-ai-analysis.md）
+1. 文档放 `docs/`，文件名英文小写连字符（如 agent-api.md）
 2. 格式跟随现有文档（参考 architecture.md），勿自创版式：`> 创建：日期 · 上游：来源 · 状态：…` 头部元信息行 + `## N.` 编号章节；表格、代码块按需
 3. 新文档先在 `nightly/*` 分支起草，长期授权下可直接合并（历史要求用户批准的写法已废止）
 4. 不重复维护：同一信息只写一处，其他文件引用链接

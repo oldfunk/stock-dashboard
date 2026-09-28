@@ -35,7 +35,7 @@ STOCK_AI_MODEL=deepseek-chat
 
 > 现状（2026-09-27）：OpenCode Zen 免费通道自 9/07 起服务端不可用（403）；
 > 免 Key 备用通道（Pollinations）9/18 起同样失败。自带 Key 分析已上线（`/llm` 配置 + 队列执行，首只真分析 09-27 跑通）；
-> 外部程序经 API 读写保留兼容（通用协议见 `src/ai_proxy/` + `docs/agent-api.md`）。详见账本最新 Changelog。
+> 外部程序经 API 读写保留兼容（见 `docs/agent-api.md`）。详见账本最新 Changelog。
 
 ### 生产部署（systemd）
 
@@ -65,8 +65,6 @@ stock-dashboard/
 │   ├── analyzer/
 │   │   ├── ai_analyzer.py      # 自带 Key 分析（面板队列/手动脚本触发）
 │   │   └── watchlist_reviewer.py # 观察池复盘（硬规则本地执行；LLM 决议随用户 Key 调用，待周六 live 验证）
-│   ├── ai_proxy/               # 备用代理协议（POST /api/analyze + /api/health，参考实现）
-│   │   └── server.py           # 参考实现（主力为内置自带 Key 分析，不绑定具体外部实现）
 │   ├── models/
 │   │   ├── database.py         # SQLite DAO（screening/analysis 等）
 │   │   └── ai_watchlist.py     # 观察池 DAO
@@ -91,15 +89,13 @@ stock-dashboard/
 │   ├── retry_ai.py             # 补跑失败 AI 分析（手动，需已配 Key）
 │   ├── run_ai_analysis.py      # 慢喂模式（每次 1 只，手动）
 │   ├── backtest_topk.py        # TopK 离线回测（历史归档产物，路线已砍）
-│   ├── setup-cron.sh           # 定时任务注册脚本（可选，需外部调度机手动执行，历史备用）
 │   ├── verify_valuation.py     # B1 估值验算闸
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 473 passed，2026-09-27 生产服务器 gate 全绿）
+├── tests/                      # pytest（基线 468 passed，2026-09-27 生产服务器 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
-│   ├── ai_proxy/               # 备用代理协议单测
 │   ├── models/                 # DAO 表单测
 │   └── web/                    # 路由 + 模板渲染单测
 ├── data/db/                    # SQLite 数据库（gitignore）
@@ -109,7 +105,6 @@ stock-dashboard/
 │   ├── iteration-log.md        # 迭代进程账
 │   ├── handoff.md              # 班次交接速览
 │   ├── agent-api.md            # 外部程序 API 参考（读数据/写分析/写笔记，保留兼容）
-│   ├── ai-proxy-ai-analysis.md # 备用代理协议规范（参考实现）
 │   ├── scheduled-tasks.md      # 定时任务参考设计（制度由使用者自定）
 │   ├── paper-trading.md        # 历史归档（M4a 设计过程保留；现行路线见 roadmap M6）
 │   └── strategies-dry-run.md   # 多策略 dry-run 文档
@@ -168,7 +163,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 ```
 
 候选卡前置摘要已移除（2026-09-21 起列表不再内联 AI）。下述 JSON 仍是 AI 分析
-应输出/写回的数据契约（`ai_proxy` prompt 与 `ai_analysis` 落库格式以此为准）：
+应输出/写回的数据契约（`ai_analysis` 落库格式以此为准）：
 
 ---
 
@@ -214,7 +209,6 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 | `schedule.daily_update_time` | 每日运行时间（默认 15:30） |
 | `web.port` | 看板端口（默认 9527） |
 | `ai.*` | 自带 Key 的 LLM 配置（`/llm` 页写入；免费通道已死；`ai.fallback` 备用通道保留） |
-| `ai_proxy.*` | 备用代理协议配置（主/备双通道，参考实现） |
 | `ai_review.*` | 周六 AI 复盘配置（观察池容量、硬规则） |
 
 本地覆盖：`config/local.yaml`（gitignore），YAML 合并到 config.yaml。
@@ -228,7 +222,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
 - **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-27 生产服务器基线 473 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-27 生产服务器基线 468 passed）
 
 ---
 
@@ -250,7 +244,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 473 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 468 passed 只升不降，确切数见账本最新 Changelog）
 3. 推送 nightly → 直接合并到 main（用户长期授权）→ 同步生产服务器
 4. 生产环境：生产服务器 `stock-dashboard.service` :9527（部署目标见本地 `deploy.local.md`，不入库）
 
