@@ -1,6 +1,6 @@
 """AI 交易员（P2：日内一次决策，定时主动跑）。
 
-与 HermesBridge.run_daily（MA 规则）互斥：同一账户同一天只跑其一，
+与 TradingBridge.run_daily（MA 规则）互斥：同一账户同一天只跑其一，
 由 cron 二选一。本循环自带“今日已决策”幂等闸。
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from paper_trading.hermes_bridge import HermesBridge
+    from paper_trading.cli import TradingBridge
 
 from paper_trading.agent.prompts import TRADER_SYSTEM, USER_TMPL
 
@@ -73,7 +73,7 @@ def _extract_json(text: str) -> Optional[dict]:
 class AgentTrader:
     """日内一次的 AI 决策循环。"""
 
-    def __init__(self, bridge: "HermesBridge", cfg: Optional[AgentConfig] = None) -> None:
+    def __init__(self, bridge: "TradingBridge", cfg: Optional[AgentConfig] = None) -> None:
         self.bridge = bridge
         self.cfg = cfg or AgentConfig()
 

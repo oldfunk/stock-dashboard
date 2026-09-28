@@ -130,7 +130,7 @@ def test_op_log_roundtrip():
 
 
 def _fake_bridge(monkeypatch, tmp, bars):
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
 
     class FakeFetcher:
         @staticmethod
@@ -144,7 +144,7 @@ def _fake_bridge(monkeypatch, tmp, bars):
     monkeypatch.setattr(hb, "_get_fetcher", lambda: FakeFetcher)
     f1 = tempfile.mktemp(suffix=".db", dir=tmp)
     f2 = tempfile.mktemp(suffix=".db", dir=tmp)
-    return hb.HermesBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml")
+    return hb.TradingBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml")
 
 
 def test_sync_data_with_fake_fetcher(monkeypatch, tmp_path):

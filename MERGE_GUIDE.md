@@ -7,7 +7,7 @@
 
 母仓库顶层新建 `paper_trading/` 目录（与 `src/` 平级，不要放 `src/paper/`），
 本仓库除 `.git/` 外整体迁入。因为全仓 import 统一为 `paper_trading.*`，
-从母仓库根运行 `python -m paper_trading.hermes_bridge …` **零改动即跑**。
+从母仓库根运行 `python -m paper_trading.cli …` **零改动即跑**。
 没有第二个方案——改包名意味着全仓重写 import，不接受。
 
 ## 2. 表契约（三张表，红线清晰）
