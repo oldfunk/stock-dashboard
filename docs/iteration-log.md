@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示 AI 分析写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：484 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：486 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 484 passed，只升不降）
+- 全仓 pytest 零失败（基线 486 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-28（修子项目 bug + agent 真测：母策略 AI 决策跑通，nightly/20260928u 已合）
+- **修了什么**（母项目 Stock Dashboard 内改 vendored，用户已授权；同步推分支给子项目 Paper Trading Framework 审，不合）：① `Scheme` 补 `source` 字段（三构造点赋值，`scheme list` 500 根因）；②切换策略凭 Key 接管（`_takeover_token` + `/api/schemes/active` 分支 + 前端 prompt 接管，与自家 llm/config 规则一致）；附 2 单测。
+- **推给子项目审**：分支 `fix-scheme-admin-source` 已推子项目远端（未合，等他们审）；母 main 照常合并（长期授权）。
+- **agent 真测**（母 universe + 我们的 Key，`--scheme mother`）：dry-run 决策 2 笔买入（天华新能/盐湖股份，理由引用母 PE/ROE/10 年均 ROE/评分）；真跑被幂等闸拦下（`already-decided`——dry-run 的实质决策会计入 gate，有利有弊，已如实记下供上游定夺，未用 `--force` 硬闯）。
+- **验证**：gate **486 passed**（484+2 新单测）；三扫描；部署 pull + `:8081` 重启 200。
+- 基线刷新 484 → **486 passed**。
 
 ### 2026-09-28（子项目 8 提交合流：母策略参照已验证，nightly/20260928s 已合）
 - **合流**：`paper-upstream` 连拉 8 提交（母策略参照/方案三分法/盘中实时/`cli.py` 改名/单测禁网）→ main；远端/本地分支已清。

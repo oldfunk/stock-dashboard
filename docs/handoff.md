@@ -3,15 +3,15 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 子项目 8 提交合流已合已同步；母策略路径全通）
-- **合流**：`paper-upstream` 连拉 8 提交（母策略参照/方案三分法/盘中实时/`cli.py` 改名）→ `nightly/20260928s` → main（远端/本地分支已清）；生产 gate **484 passed**；`:8081` 已重启 200
-- **母策略验证（母项目 Stock Dashboard → 子项目 Paper Trading Framework）**：`--scheme mother` dry-run 全绿（宇宙=母最新轮 Top20，MA 执行规则，论点优先）；`llm ask` 走通（我们的 Key，glm-4.5-flash）；pool-tag 暂无数据（母 `strategy_tags` 全空，multi 开关默认关——开 tag 是母行为变更，另议）
-- **已知上游 bug（不动，等上游修再 pull）**：`scheme list` 500（`Scheme.source` 字段不存在，cli.py:938 + 面板 JS 显示空）；交易主链路不受影响
-- **收尾分支（本批次 docs）随即合并**：M6 更新 + 基线 473→484
+## 最后状态（2026-09-28 子项目 bug 修完 + agent 真测通过；main 待合 0928v docs）
+- **修了什么**（母项目内改 vendored，用户已授权修子项目 bug）：`Scheme.source` 补字段（`scheme list` 500 根因）+ 切换策略凭 Key 接管（新浏览器恒 403 根因，与自家 llm/config 规则一致）+ 前端接管提示；附 2 单测，gate **486 passed**
+- **推给子项目审**：分支 `fix-scheme-admin-source` 已推子项目远端（未合，等子项目 Paper Trading Framework 自己审）；母 main 照常合并
+- **agent 真测**（母 universe + 我们的 Key + `--scheme mother`）：dry-run 决策买入天华新能/盐湖股份（理由引用母 PE/ROE/10 年均 ROE/评分）；真跑被幂等闸拦下（dry-run 实质决策计入 gate，未用 `--force` 硬闯；该语义供上游定夺）
+- **收尾分支（本批次 docs）随即合并**：M6 更新 + 基线 484→486
 
 ## 下一步方向
-1. 收盘后跑一次真 agent run（母 universe + 我们的 Key，≤3 笔×2 万）
-2. 上游修好 `scheme list` 后再 pull 一次
+1. 明日（或用户说跑时）再跑一次真 agent run，看 AI 下不下单（幂等闸按自然日重置）
+2. 上游 Burg：`scheme list` 修法 + dry-run 是否该锁日，等子项目审分支时定夺
 3. 自动调度是否配——等用户明确批准（交易自动化）
 4. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
 
@@ -20,6 +20,7 @@
 - 单测 hermetic 铁律；问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
+- 2026-09-28 修子项目 bug + agent 真测（Scheme.source + 切换接管；推分支给子项目审；母策略 AI 决策跑通；生产 gate 486）
 - 2026-09-28 子项目 8 提交合流已合（母策略参照/方案三分法/盘中实时/`cli.py` 改名；生产 gate 484；母策略 dry-run + llm ask 全通；`scheme list` 上游 bug 已报）
 - 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）
 - 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 改直达 :8081；生产 gate 469→470；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
@@ -59,7 +60,6 @@
 - 2026-09-14 M2 多策略后端 + AI 摘要前置合并（nightly/20260914 + nightly/20260913 → main）
 - 2026-09-14 M2 多策略筛选后端核心落地 + verify（strategy_tags + multi 开关 + 5 单测，全仓 229 passed）
 - 2026-09-12 架构治理 + README 重排（architecture.md + paper-trading.md + roadmap 升级 + README 重构）
-- 2026-09-12 C2 东财 datacenter 补 roic/fcf P0（全仓 221 passed，822/904 股有 roic/fcf）
 - 2026-09-11 C2 东财第二财务源 P0（全仓 218 passed）
 - 2026-09-09 建交接文件，三任务串联启动
 - 2026-09-09 白班试跑：豁免D夹具修复落袋（577cc83）
