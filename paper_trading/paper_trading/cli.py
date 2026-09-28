@@ -1,22 +1,19 @@
-"""Hermes Agent 适配层。
-
-提供 CLI 接口和 Python API，让 Hermes 的 agent 能力与定时任务机制
-可以驱动 Paper Trading Framework 执行量化操作。
+"""Paper Trading 命令行入口（CLI + JSON 输出）。
 
 使用方式：
-    # CLI 模式
-    python -m paper_trading.hermes_bridge status
-    python -m paper_trading.hermes_bridge run --symbols 600519
-    python -m paper_trading.hermes_bridge buy --symbol 600519 --volume 100
-    python -m paper_trading.hermes_bridge sell --symbol 600519 --volume 100
-    python -m paper_trading.hermes_bridge nav
-    python -m paper_trading.hermes_bridge history --limit 20
+    # 状态与结算
+    python -m paper_trading.cli status
+    python -m paper_trading.cli run --symbols 600519
+    python -m paper_trading.cli buy --symbol 600519 --volume 100
+    python -m paper_trading.cli sell --symbol 600519 --volume 100
+    python -m paper_trading.cli nav
+    python -m paper_trading.cli history --limit 20
 
-    # Cron 模式（由 Hermes cronjob 调用）
-    python -m paper_trading.hermes_bridge cron-run --symbols 600519 000858
+    # 定时任务（系统 cron 调用）
+    python -m paper_trading.cli cron-run --symbols 600519 000858
 
-    # Agent 模式（返回 JSON，供 Hermes agent 解析）
-    python -m paper_trading.hermes_bridge status --json
+    # 机器可读输出（供外部 agent/脚本解析）
+    python -m paper_trading.cli status --json
 """
 from __future__ import annotations
 
@@ -47,14 +44,14 @@ def _get_fetcher():
 logger = get_logger(__name__)
 
 
-class HermesBridge:
+class TradingBridge:
     """
-    Hermes Agent 适配层。
+    交易编排层（应用总线）。
 
     职责：
     - 封装交易框架的启动、运行、查询操作
-    - 提供 CLI 接口供 Hermes cronjob / agent 调用
-    - 提供 JSON 输出供 Hermes agent 解析
+    - 提供 CLI 接口供系统 cron / 外部 agent 调用
+    - 提供 JSON 输出供机器解析
     """
 
     def __init__(
@@ -202,7 +199,7 @@ class HermesBridge:
         Returns:
             执行结果摘要
         """
-        logger.info(f"=== HermesBridge Run-Daily started at {datetime.now().isoformat()} ===")
+        logger.info(f"=== TradingBridge Run-Daily started at {datetime.now().isoformat()} ===")
 
         # 1. 更新行情 + 名称（复用 sync，与 sync 命令同一口径）
         self.sync_data(symbols)
@@ -308,7 +305,7 @@ class HermesBridge:
             ],
         }
 
-        logger.info("=== HermesBridge Run-Daily completed ===")
+        logger.info("=== TradingBridge Run-Daily completed ===")
         return result
 
     def get_status(self) -> dict:
@@ -653,7 +650,7 @@ class HermesBridge:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Paper Trading Framework - Hermes Agent Bridge"
+        description="Paper Trading Framework - CLI"
     )
     parser.add_argument("--data-db", default="data.db", help="行情数据库路径")
     parser.add_argument("--account-db", default="paper_account.db", help="账户数据库路径")
@@ -808,9 +805,9 @@ def main() -> None:
     from paper_trading.utils.run_lock import run_lock
 
     try:
-        bridge = HermesBridge(data_db=args.data_db, account_db=args.account_db,
-                              config_path=args.config, secrets_path=args.secrets,
-                              scheme=args.scheme)
+        bridge = TradingBridge(data_db=args.data_db, account_db=args.account_db,
+                               config_path=args.config, secrets_path=args.secrets,
+                               scheme=args.scheme)
     except Exception as e:
         emit(None, ok=False, error=f"Init failed: {e}")
         sys.exit(1)

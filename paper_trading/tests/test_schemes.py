@@ -79,7 +79,7 @@ def test_custom_instruction_flows_to_prompt(monkeypatch, tmp_path):
     import json
     import tempfile
 
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
     from paper_trading.agent import AgentTrader
     from paper_trading.llm import provider as prov
     from paper_trading.models import Bar
@@ -95,7 +95,7 @@ def test_custom_instruction_flows_to_prompt(monkeypatch, tmp_path):
     monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(tmp_path / "nothing"))
     f1 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
     f2 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
-    b = hb.HermesBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
+    b = hb.TradingBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
                         secrets_path=str(tmp_path / "s.json"))
     from paper_trading.strategy.schemes import Scheme as _Scheme
     b.scheme = _Scheme(name=CUSTOM_ID, title="自定义指令",

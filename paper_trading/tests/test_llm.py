@@ -109,12 +109,12 @@ def test_secrets_roundtrip_masked_and_mode(tmp_path):
 
 def test_llm_save_merge_keeps_key(tmp_path):
     """换模型不重填 Key：空 Key=沿用；首次无 Key 拒绝；换 Key 生效。"""
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
 
     sec = str(tmp_path / "s.json")
     db1 = str(tmp_path / "d.db")
     db2 = str(tmp_path / "a.db")
-    b = hb.HermesBridge(data_db=db1, account_db=db2, config_path="/nonexistent.yaml",
+    b = hb.TradingBridge(data_db=db1, account_db=db2, config_path="/nonexistent.yaml",
                         secrets_path=sec)
     r = b.llm_save("deepseek", "", "", "")
     assert not r["ok"] and "API Key" in r["error"]  # 首次必须给 Key
@@ -132,7 +132,7 @@ def test_llm_save_merge_keeps_key(tmp_path):
 
 def test_llm_ask_injects_project_context(monkeypatch, tmp_path):
     """ask 必须把项目快照塞进 system，且不泄露 Key。"""
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
     from paper_trading.llm import provider as prov
 
     captured: dict = {}
@@ -144,7 +144,7 @@ def test_llm_ask_injects_project_context(monkeypatch, tmp_path):
         return "答"
 
     monkeypatch.setattr(prov, "chat", fake_chat)
-    b = hb.HermesBridge(data_db=str(tmp_path / "d.db"),
+    b = hb.TradingBridge(data_db=str(tmp_path / "d.db"),
                         account_db=str(tmp_path / "a.db"),
                         config_path="/nonexistent.yaml",
                         secrets_path=str(tmp_path / "s.json"))

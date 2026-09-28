@@ -442,9 +442,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, body, "application/json; charset=utf-8")
 
     def _bridge(self):
-        from paper_trading.hermes_bridge import HermesBridge
+        from paper_trading.cli import TradingBridge
 
-        return HermesBridge(data_db=self.data_db, account_db=self.account_db,
+        return TradingBridge(data_db=self.data_db, account_db=self.account_db,
                             secrets_path=self.secrets_path)
 
     def _read_json(self) -> dict:
@@ -475,14 +475,14 @@ class Handler(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"):
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
             elif u.path == "/api/status":
-                from paper_trading.hermes_bridge import HermesBridge
+                from paper_trading.cli import TradingBridge
 
-                b = HermesBridge(data_db=self.data_db, account_db=self.account_db)
+                b = TradingBridge(data_db=self.data_db, account_db=self.account_db)
                 self._json({"ok": True, "data": b.get_status()})
             elif u.path == "/api/positions":
-                from paper_trading.hermes_bridge import HermesBridge
+                from paper_trading.cli import TradingBridge
 
-                b = HermesBridge(data_db=self.data_db, account_db=self.account_db)
+                b = TradingBridge(data_db=self.data_db, account_db=self.account_db)
                 self._json({"ok": True, "data": b.get_status()["positions"]})
             elif u.path == "/api/names":
                 conn = _ro(self.data_db)

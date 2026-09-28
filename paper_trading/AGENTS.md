@@ -19,30 +19,26 @@ Local event-driven paper trading framework for A-share markets. Pure local opera
 
 ```bash
 # Check account status
-python -m paper_trading.hermes_bridge status --json
+python -m paper_trading.cli status --json
 
 # Run daily settlement
-python -m paper_trading.hermes_bridge run --symbols 600519 000858 --json
+python -m paper_trading.cli run --symbols 600519 000858 --json
 
 # Place orders
-python -m paper_trading.hermes_bridge buy --symbol 600519 --volume 100 --json
-python -m paper_trading.hermes_bridge sell --symbol 600519 --volume 100 --price 1500.00 --json
+python -m paper_trading.cli buy --symbol 600519 --volume 100 --json
+python -m paper_trading.cli sell --symbol 600519 --volume 100 --price 1500.00 --json
 
 # View history
-python -m paper_trading.hermes_bridge nav --json
-python -m paper_trading.hermes_bridge history --type orders --limit 20 --json
-python -m paper_trading.hermes_bridge history --type fills --limit 20 --json
+python -m paper_trading.cli nav --json
+python -m paper_trading.cli history --type orders --limit 20 --json
+python -m paper_trading.cli history --type fills --limit 20 --json
 ```
 
 ### Cron Integration
 
 ```bash
-# Daily settlement at 4pm on weekdays
-hermes cron add \
-  --name "paper-trading-daily" \
-  --schedule "0 16 * * 1-5" \
-  --command "cd /path/to/paper-trading && python -m paper_trading.hermes_bridge cron-run --symbols 600519 000858 --json" \
-  --no-agent
+# 工作日 16:10 AI 结算（二选一，见 README Cron 章节）
+(crontab -l 2>/dev/null; echo "10 16 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent run --json >> agent.log 2>&1") | crontab -
 ```
 
 ## Database

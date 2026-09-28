@@ -18,10 +18,10 @@ from paper_trading.models import Bar  # noqa: E402
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     """禁网铁律：单测永不碰真实行情源（有网环境会拉回真数据污染断言）。"""
-    from paper_trading.hermes_bridge import HermesBridge
+    from paper_trading.cli import TradingBridge
 
     monkeypatch.setattr(
-        HermesBridge, "sync_data",
+        TradingBridge, "sync_data",
         lambda self, symbols: {"ok": True, "symbols": symbols, "updated": {}})
 
 
@@ -31,11 +31,11 @@ def mkbar(sym, day, close):
 
 
 def _bridge(tmp, bars):
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
 
     f1 = tempfile.mktemp(suffix=".db", dir=tmp)
     f2 = tempfile.mktemp(suffix=".db", dir=tmp)
-    b = hb.HermesBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
+    b = hb.TradingBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
                         secrets_path=str(Path(tmp) / "s.json"))
     b.data_db.upsert_bars(bars)
     b.llm_save("custom", "https://x/v1", "m", "k")  # fake 源，chat 由单测替换
@@ -291,12 +291,12 @@ def test_agent_prompt_includes_thesis(monkeypatch, tmp_path):
 
 def test_price_map_covers_positions_outside_pool(monkeypatch, tmp_path):
     """持仓不在 run 池里也要按现价计入 NAV（否则持仓归零误触发熔断）。"""
-    import paper_trading.hermes_bridge as hb
+    import paper_trading.cli as hb
     from paper_trading.models import Order, OrderType
 
     f1 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
     f2 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
-    b = hb.HermesBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
+    b = hb.TradingBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
                         secrets_path=str(tmp_path / "s.json"))
     b.data_db.upsert_bars([mkbar("600519", i, 10.0) for i in range(5)])
     b.data_db.upsert_bars([mkbar("000001", i, 20.0) for i in range(5)])
