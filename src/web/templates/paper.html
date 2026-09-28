@@ -21,10 +21,10 @@
         .header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--divider); }
         .header h1 { font-size: 18px; margin: 0; }
         .nav-link { color: var(--accent); text-decoration: none; font-size: 14px; margin-left: 16px; }
-        .wrap { max-width: 1440px; margin: 0 auto; padding: 16px 20px; }
-        .note { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px 0; }
+        .wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px; text-align: center; }
+        .note { font-size: 14px; color: var(--text-secondary); }
         .note .mono { font-family: var(--font-mono); font-size: 12px; }
-        iframe.sub { width: 100%; height: 82vh; border: 1px solid var(--divider); border-radius: var(--radius); background: #fff; }
+        .open-link { display: inline-block; margin-top: 12px; font-size: 15px; color: #fff; background: var(--accent); border-radius: var(--radius); padding: 9px 26px; text-decoration: none; }
     </style>
 </head>
 <body>
@@ -36,19 +36,19 @@
         </div>
     </header>
     <div class="wrap">
-        <p class="note" id="paperNote">加载子项目原面板…（与本面板同机不同端口；<span class="mono">:8080</span> 为子项目独立部署，互不干扰）</p>
-        <iframe class="sub" id="paperFrame" title="模拟交易仪表盘"></iframe>
+        <p class="note" id="msg">正在打开模拟交易仪表盘…（子项目原面板，直连 <span class="mono">:8081</span>）</p>
+        <p><a class="open-link" id="openLink" href="#">打不开？点这里手动打开</a></p>
+        <p class="note">另有子项目独立部署 <span class="mono">:8080</span>（自有策略池与账本，互不干扰）。</p>
     </div>
 
 <script>
 (function () {
-    var host = location.hostname || '127.0.0.1';
-    var url = 'http://' + host + ':8081/';
-    document.getElementById('paperFrame').src = url;
-    document.getElementById('paperNote').innerHTML =
-        '子项目原面板（merged tree <span class="mono">paper_trading/</span>，数据与 AI 挂母项目）直嵌如下，打不开请确认 8081 服务；' +
-        '<a href="' + url + '" target="_blank" rel="noopener">新窗口打开</a>；' +
-        '另有子项目独立部署 <span class="mono">:8080</span>（自有策略池与账本，互不干扰）。';
+    var url = 'http://' + (location.hostname || '127.0.0.1') + ':8081/';
+    var link = document.getElementById('openLink');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    window.location.replace(url);
 })();
 </script>
 </body>
