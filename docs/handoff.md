@@ -3,28 +3,24 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-09-28 解盘写笔记+UI修复已合已同步；live 解盘 mn0001 done）
-- **用户需求**：大盘解盘改写投资笔记（长分析+不限 token+加深思考）+ 深色模式文本框 + 候选信息免横滑
-- **分支 `nightly/20260928p`（3 提交）**：①后端（`ask_raw` 不限 token/超时参数 + `write_market_note` 全景上下文/600s/同日复盘追加 + 后台任务 + `/market` 改写 + `/market-note/{id}`；附单测）②UI（llm 页深色体系 + 首页指标换行 + 输入框主题色 + 解盘按钮改走写笔记任务；node 全验 JS）
-- **验证（生产服务器 worktree）**：`gate.sh` **474 passed / Gate passed**（468+6；两轮失败全是真问题：快照 seed 前缀、旧 inline 单测撞已删函数）；ast 全过；三扫描待收尾跑
-- 已合已同步；live 解盘 mn0001 done（5735 字，用量 prompt 6536/completion 6826，约 4 分钟），journal 行结构验证通过
+## 最后状态（2026-09-28 子项目 8 提交合流已合已同步；母策略路径全通）
+- **合流**：`paper-upstream` 连拉 8 提交（母策略参照/方案三分法/盘中实时/`cli.py` 改名）→ `nightly/20260928s` → main（远端/本地分支已清）；生产 gate **484 passed**；`:8081` 已重启 200
+- **母策略验证（母项目 Stock Dashboard → 子项目 Paper Trading Framework）**：`--scheme mother` dry-run 全绿（宇宙=母最新轮 Top20，MA 执行规则，论点优先）；`llm ask` 走通（我们的 Key，glm-4.5-flash）；pool-tag 暂无数据（母 `strategy_tags` 全空，multi 开关默认关——开 tag 是母行为变更，另议）
+- **已知上游 bug（不动，等上游修再 pull）**：`scheme list` 500（`Scheme.source` 字段不存在，cli.py:938 + 面板 JS 显示空）；交易主链路不受影响
+- **收尾分支（本批次 docs）随即合并**：M6 更新 + 基线 473→484
 
 ## 下一步方向
-1. 用户自助跑解盘写笔记（主页大盘解盘按钮；用量与 journal 页自查）
-2. 若换模型回 JSON 不兼容：贴报错修 parse/repair
-3. stock_detail 页本身无深色开关（历史遗留；Q&A 框已用变量色就绪）——按需再做
+1. 收盘后跑一次真 agent run（母 universe + 我们的 Key，≤3 笔×2 万）
+2. 上游修好 `scheme list` 后再 pull 一次
+3. 自动调度是否配——等用户明确批准（交易自动化）
 4. P2 仍冻结；v2（Anthropic/Gemini 原生、金额折算）以后再说
 
 ## 已知隐患
-- 解盘长文跑数分钟：后台任务 + 轮询；600s 超时；失败只记 failed 不抛
-- 同日复盘行存在则追加（标题保留复盘的）；纯笔记行则覆盖重写
-- 问答/单股分析仍限 token（默认 6000）；仅解盘不限
-- S8 覆盖约 47%、AKShare S4/S5 永久挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
+- vendored 运行 CWD 必须是 `paper_trading/`；`:8080`（子项目独立部署）vs `:8081`（合并树面板）别混淆
+- 单测 hermetic 铁律；问答/解盘不落库；S8 47%、S4/S5 挂、82 只无 roic/fcf；快照滚动记录；重启验证 ≥10s——沿用既有结论
 
 ## 历史交接区（追加，不删）
-- 2026-09-28 解盘写笔记+UI修复已合（nightly/20260928p：ask不限token/解盘写笔记/深色/免横滑；gate 474；live mn0001 done，5735 字，用量 6536/6826）
-- 2026-09-28 删除无用功能（ai_proxy 参考实现 + setup-cron.sh + 代理规范/config 段 + 文档同步 + 基线 473→468）
-- 2026-09-28 文档准确性审计（去 Hermes/外部 agent 旧分工表述；自带 Key 为主；历史条目 append-only 保留）
+- 2026-09-28 子项目 8 提交合流已合（母策略参照/方案三分法/盘中实时/`cli.py` 改名；生产 gate 484；母策略 dry-run + llm ask 全通；`scheme list` 上游 bug 已报）
 - 2026-09-28 纸盘 subtree 机制化已合（plain→subtree graft + 上游 3 提交 + 双向独立验证 + 文档全量；生产 gate 473；以后更新一条 pull）
 - 2026-09-28 纸盘全量合并已合（整体迁入顶层 + 原生包删除 + /paper 改直达 :8081；生产 gate 469→470；pool screening/Key/MA/agent dry/llm ask 全通；:8081 面板已起；真 agent 决策待收盘）
 - 2026-09-28 双 bug 修复已合（nightly/20260928c → main：KlineDAO 恢复 + 钉选卡跳转 + 静态版本戳；生产 gate 440；K 线表停更 7 天，明早流水线自动追平）
@@ -63,6 +59,7 @@
 - 2026-09-14 M2 多策略后端 + AI 摘要前置合并（nightly/20260914 + nightly/20260913 → main）
 - 2026-09-14 M2 多策略筛选后端核心落地 + verify（strategy_tags + multi 开关 + 5 单测，全仓 229 passed）
 - 2026-09-12 架构治理 + README 重排（architecture.md + paper-trading.md + roadmap 升级 + README 重构）
+- 2026-09-12 C2 东财 datacenter 补 roic/fcf P0（全仓 221 passed，822/904 股有 roic/fcf）
 - 2026-09-11 C2 东财第二财务源 P0（全仓 218 passed）
 - 2026-09-09 建交接文件，三任务串联启动
 - 2026-09-09 白班试跑：豁免D夹具修复落袋（577cc83）
