@@ -28,6 +28,8 @@ class Scheme:
     title: str = ""
     desc: str = ""
     available: bool = True
+    source: str = ""  # 方案来源标识：mother / general / custom（面板分组与 CLI 展示用）
+    allow_buy: bool = True  # 是否允许买入（展示用；风控另行钳制）
     universe_source: str = "config"  # config | watchlist | screening | all
     universe_tag: str = ""  # 预留：screening 按母策略 tag 过滤（现缺省不过滤）
     universe_limit: int = 20
@@ -66,7 +68,7 @@ def builtin_schemes() -> dict[str, Scheme]:
         GENERAL_ID: Scheme(
             name=GENERAL_ID, title="通用交易",
             desc="Paper Trading 默认策略：MA5/20 趋势跟踪，配置池内决策",
-            available=True, universe_source="config",
+            available=True, source=GENERAL_ID, universe_source="config",
             signal={"short_window": 5, "long_window": 20,
                     "buy_volume": 100, "sell_volume": 100},
             exits_note="MA 死叉离场；论点卖出条件优先于技术信号",
@@ -81,7 +83,7 @@ def mother_scheme() -> Scheme | None:
     return Scheme(
         name=MOTHER_ID, title="Stock Dashboard 价值",
         desc="Stock Dashboard 价值投资理念：宇宙取自 Stock Dashboard 最新筛选，执行沿用通用规则，论点优先",
-        available=True, universe_source="screening", universe_limit=15,
+        available=True, source=MOTHER_ID, universe_source="screening", universe_limit=15,
         signal={"short_window": 5, "long_window": 20,
                 "buy_volume": 100, "sell_volume": 100},
         sizing={"max_orders_per_run": 2, "max_order_value": 15000.0},
@@ -104,7 +106,7 @@ def all_schemes(root: str | Path = ".") -> dict[str, Scheme]:
     d[CUSTOM_ID] = Scheme(
         name=CUSTOM_ID, title="自定义指令",
         desc="你用自然语言写交易策略，AI 照此执行（风控钳制不变）",
-        available=True, universe_source="config",
+        available=True, source=CUSTOM_ID, universe_source="config",
         signal={"short_window": 5, "long_window": 20,
                 "buy_volume": 100, "sell_volume": 100},
         exits_note="以你的指令为准；指令冲突处置：风控与合规优先",
