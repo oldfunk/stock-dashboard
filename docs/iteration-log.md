@@ -166,7 +166,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **用户需求**：大盘解盘改写投资笔记（长分析 + 不限 token + 加深思考）；深色模式 AI 文本框；候选信息免横滑。
 - **改了什么**：①后端 `ask_raw` 加 `unlimited`/`timeout` 参数（默认行为不变）+ `write_market_note`（大盘+AI池+钉选+候选全景，600s，不限 token，同日复盘行追加）+ 后台任务 + `/market` 改写 + `/market-note/{id}` 轮询；②llm 页深色体系（变量+开关+去硬编码白）+ 首页指标 `flex-wrap` 免横滑 + 面板/detail 输入框主题色 + 解盘按钮改走写笔记任务。
 - **验证**（生产服务器 worktree）：`gate.sh` **474 passed / Gate passed**（468+6；两轮失败全是真问题：快照 seed 指数前缀、旧 inline 单测撞已删函数）；ast 全过；node 全验三页 JS；三扫描待收尾跑。
-- **状态**：待合；合并后生产 pull + **重启**（模板/routes/analyzer 改动）+ gate 复验，然后 live 跑一次解盘写笔记（用户 Key，数分钟 + 长文 token，花费如实记账）。
+- **状态**：已合已同步；live 解盘 mn0001 done（5735 字，用量 prompt 6536/completion 6826，约 4 分钟），journal 行结构验证通过。
 - 基线刷新 468 → **474 passed**。
 
 ### 2026-09-28（删除无用功能：ai_proxy 参考实现 + setup-cron.sh + 代理规范文档，nightly/20260929a 待合）
