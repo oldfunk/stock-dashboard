@@ -29,7 +29,7 @@ flowchart LR
 
 ### 已归档（不再开发）
 
-- **M4a 自研虚拟盘** — 已删除（`src/paper/`、`paper.html`、纸盘测试均已删；git 历史可查）→ 2026-09-28 起由 M6 原生移植接替（见下）
+- **M4a 自研虚拟盘** — 已删除（原生自研包 2026-09-28 上线又被用户否决转向全量合并，git 历史可查）→ 由 M6 全量合并接替（见下）
 - **M4b QLib 离线验证** — 不再开发（`scripts/backtest_topk.py` 保留为历史产物，不纳入流水线）
 - **M4c 券商仿真** — 不再开发
 - **M4d 实盘预备** — 不再开发
@@ -38,12 +38,12 @@ flowchart LR
 
 ### 新开（2026-09-28 纸盘模拟）
 
-- **M6 纸盘模拟**（进行中）：子项目 paper-trading 原生移植（三处一字未动）——撮合（T+1/费用/涨跌停）+ MA 移植 + 价值轮动自研 + 回测引擎 + `/paper` 页；账本独立文件，主库零写入；v1 手动回测，live 跟随待批
+- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并（三处一字未动，顶层 `paper_trading/`）——原面板嵌回 `/paper`（iframe :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA dry-run/真跑与 agent dry-run 已验证；首个真 agent 决策待收盘后；自动调度未配
 
 ### 防回归门禁（AKShare 事故不再犯）
 
 1. 数据源增删必须同步 `architecture.md` §5 注册表 + 契约单测，三者同 commit
-2. 全仓 pytest 零失败（基线 466 passed，只升不降）
+2. 全仓 pytest 零失败（基线 469 passed，只升不降）
 3. `collector/` `screener/` 改动必须附单测
 4. Hermes 约束：只提交 GitHub 不部署生产服务器；禁删 S1–S8 适配函数（除非替代 + 单测同到）
 

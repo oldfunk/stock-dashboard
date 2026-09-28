@@ -67,6 +67,7 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
 | `ai_proxy/` | 外部 AI 通用代理协议（参考实现） | 外部 LLM API | 面板不触发，只提供接口；不绑定具体 AI 实现 |
 | `paper/` | 纸盘模拟（独立账本文件，主库零写入） | `models/`（KlineDAO 只读）、`db_conn` | 不写主库任何表；v1 只手动回测，不自动交易 |
+| `paper_trading/` | 子项目全量合并树（原生页面，独立运行） | 母库只读（screening/watchlist/快照/AI 历史）、我们的 LLM Key | 与 `paper/`（已删原生包）无关；双 dashboard 端口隔离；vendored 运行 CWD 须为该目录 |
 
 ## 4. 数据表清单（现状）
 
@@ -114,7 +115,7 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 466 passed，2026-09-28 生产服务器 worktree gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 469 passed，2026-09-28 生产服务器 worktree gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；Hermes 只提交 GitHub 不部署（见 iteration-log 约束）。
@@ -125,7 +126,7 @@ AI 分析由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实�
 - **P2 体验优化**（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
 - **AI 分析**：由外部 AI 执行（作者自用 Hermes 接入，不绑定具体实现），面板只负责展示数据与外部 AI 笔记。通用协议见 `src/ai_proxy/` + `docs/ai-proxy-ai-analysis.md`
 - **已删除**：`src/analyzer/` 保留（本地触发已停用，仅手动脚本可用；原 `src/paper/` M4a 已删，见下）
-- **量化交易系统**：M4a 已归档；2026-09-28 起由 M6 原生移植接替（`src/paper/` + `/paper` 页，账本独立文件，主库零写入；v1 手动回测，live 跟随待批）
+- **量化交易系统**：M4a/原生包已归档；2026-09-29 起由 M6 全量合并接替（顶层 `paper_trading/` + `/paper` 嵌原面板；Universe 走母筛选 + AI 用我们的 Key；:8081 面板独立服务）
 
 ## 7. 方法论与内化避坑（2026-09-22 定稿）
 
