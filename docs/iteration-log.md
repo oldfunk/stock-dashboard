@@ -162,6 +162,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-28（子项目更新合流：宇宙中文显示，上游 2 提交，nightly/20260928y 已合）
+- **合流**：`git subtree pull --prefix=paper_trading paper-upstream main --squash`（ae823a7..e4661ae，共 2 提交）：① `5777671` 方案行宇宙改中文显示（`宇宙 screening` → `选股范围：Stock Dashboard 筛选/观察池/本地配置池`，纯展示）；② `e4661ae` 子项目合入了我们回推的修复（source/allow_buy + 凭 Key 接管）——分支审过，闭环。
+- **实际变更**：仅 `paper_trading/paper_trading/dashboard.py` 4 行（+3/-1）；回推部分与母树已有内容一致，合并无冲突。
+- **验证**：生产 worktree gate **486 passed / Gate passed**（80s，基线维持）；部署 pull + `:8081` 重启双 active；`:8081` 200 且页面含新文案 2 处，`/api/schemes` ok，`:9527` 200；worktree/bundle 已清。
+- 基线维持 **486 passed**（JS 纯展示改动，无新增用例）。
+
 ### 2026-09-28（定性纠偏 + allow_buy 补漏：scheme list 真 bug，切换 403 非 bug，nightly/20260928w 已合）
 - **用户纠偏**：切换策略报口令错误，是因为没输模拟交易 API——这不算 bug，是预期鉴权（无口令 + 无 Key 就该 403）。此前记为“bug”是用词夸大，特此纠正：该改动是体验改进（403 文案指引 + 凭 Key 接管），不是缺陷修复。
 - **真 bug**：`scheme list` 500 是真实缺陷，已复现（生产 main 实测 `AttributeError: 'Scheme' object has no attribute 'allow_buy'`）；首轮只补了 `source`、漏了 `allow_buy`（首轮验证只看了 dashboard 端点、没跑 CLI 端，验证范围夸大一并认）。本轮补上，同一命令复测 `ok:true`。
