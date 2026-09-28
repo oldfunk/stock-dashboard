@@ -1,4 +1,4 @@
-"""股票池来源：config（默认，独立模式）+ 母项目只读（合并模式）。
+"""股票池来源：config（默认，独立模式）+ Stock Dashboard 只读（合并模式）。
 
 --pool-from config      只用 config.yaml（默认；母项目不存在时自动回退到此）
 --pool-from watchlist   母库观察池（ai_watchlist + watchlist 并集）
@@ -46,8 +46,12 @@ def _read_watchlist(db: Path) -> list[str]:
     return out
 
 
-def _read_screening(db: Path, limit: int = 20) -> list[dict]:
-    """最新一轮 active 候选，含 score/reason（给 LLM 做选择依据）。"""
+def _read_screening(db: Path, limit: int = 20, tag: str = "") -> list[dict]:
+    """最新一轮 active 候选，含 score/reason（给 LLM 做选择依据）。
+
+    tag 非空时按 strategy_tags 模糊匹配；该列为空则无匹配→返回空，
+    调用方回退处理（不清池、不报错）。
+    """
     conn = _ro(db)
     try:
         row = conn.execute(
@@ -55,12 +59,15 @@ def _read_screening(db: Path, limit: int = 20) -> list[dict]:
         ).fetchone()
         if not row:
             return []
-        rows = conn.execute(
-            """SELECT code, name, score, pe, pb, roe, reason FROM screening_result
-               WHERE run_id = ? AND (status IS NULL OR status = 'active')
-               ORDER BY score DESC LIMIT ?""",
-            (row["run_id"], limit),
-        ).fetchall()
+        sql = """SELECT code, name, score, pe, pb, roe, reason FROM screening_result
+                 WHERE run_id = ? AND (status IS NULL OR status = 'active')"""
+        params: list = [row["run_id"]]
+        if tag:
+            sql += " AND strategy_tags LIKE ?"
+            params.append(f"%{tag}%")
+        sql += " ORDER BY score DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
         out = []
         for r in rows:
             c = _norm(r["code"])
@@ -79,7 +86,8 @@ def resolve_pool(symbols_arg: Optional[list[str]],
                  config_pool: list[str],
                  pool_from: str = "config",
                  pool_limit: int = 20,
-                 mother: Optional[Path] = None) -> tuple[list[str], str, list[dict]]:
+                 mother: Optional[Path] = None,
+                 tag: str = "") -> tuple[list[str], str, list[dict]]:
     """解析最终股票池。
 
     Returns:
@@ -99,12 +107,14 @@ def resolve_pool(symbols_arg: Optional[list[str]],
         syms = wl or list(config_pool)
         return syms, ("watchlist" if wl else "config(fallback:观察池为空)"), []
     if pool_from == "screening":
-        cands = _read_screening(db, pool_limit)
+        cands = _read_screening(db, pool_limit, tag)
         if not cands:
-            return list(config_pool), "config(fallback:无筛选结果)", []
-        return [c["symbol"] for c in cands], f"screening(最新一轮Top{len(cands)})", cands
+            hint = f"tag={tag} " if tag else ""
+            return list(config_pool), f"config(fallback:无筛选结果{hint})", []
+        note = f"screening(最新一轮Top{len(cands)}{',tag=' + tag if tag else ''})"
+        return [c["symbol"] for c in cands], note, cands
     if pool_from == "all":
-        cands = _read_screening(db, pool_limit)
+        cands = _read_screening(db, pool_limit, tag)
         merged = list(config_pool)
         for c in cands:
             if c["symbol"] not in merged:

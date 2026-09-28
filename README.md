@@ -203,8 +203,22 @@ python -m paper_trading.hermes_bridge agent run --dry-run --json
 python -m paper_trading.hermes_bridge agent run --json
 # 休盘做计划（存着，开盘自动执行；不碰账本）
 python -m paper_trading.hermes_bridge agent run --plan-only --json
-# 股票池来源（需母项目在同一台机器，否则自动回退 config）
+# 股票池来源（需 Stock Dashboard 在同一台机器，否则自动回退 config）
 python -m paper_trading.hermes_bridge agent run --pool-from screening --pool-limit 20 --json
+
+### 投资方案（永远 3 种；合并/独立通用）
+
+```bash
+# 查看与切换（写 gitignored 的 strategy.local.yaml，git 树保持干净）
+python -m paper_trading.hermes_bridge scheme list --json
+python -m paper_trading.hermes_bridge scheme use --name custom --instruction "只做银行股反弹" --json
+# 单次指定
+python -m paper_trading.hermes_bridge agent run --scheme custom --dry-run --json
+```
+
+三类：① 母价值（Stock Dashboard 价值理念，需 Stock Dashboard 在同一台机器，否则不可选；
+ merged 后宇宙取母筛选）；② 通用交易（默认，MA5/20）；
+③ 自定义（面板/CLI 用自然语言写交易指令，AI 照此执行，风控钳制不变）。
 
 # 下单前试算（不落库）
 python -m paper_trading.hermes_bridge preview --symbol 600519 --direction buy --volume 100 --json

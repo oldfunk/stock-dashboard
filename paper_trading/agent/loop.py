@@ -95,6 +95,18 @@ class AgentTrader:
                 return True
         return False
 
+    def _scheme_txt(self) -> str:
+        from paper_trading.agent.prompts import SCHEME_TMPL
+
+        s = self.bridge.scheme
+        txt = SCHEME_TMPL.format(title=s.title or s.name, name=s.name,
+                                 desc=s.desc or "（无说明）",
+                                 exits=s.exits_note or "MA 死叉离场")
+        if s.name == "custom" and (s.instruction or "").strip():
+            txt += ("\n用户自定义交易指令（最高优先级，风控与合规除外）：\n"
+                    + s.instruction.strip()[:2000])
+        return txt
+
     def _cand_txt(self, candidates: Optional[list]) -> str:
         if not candidates:
             return ""
@@ -140,6 +152,7 @@ class AgentTrader:
             max_order_value=int(self.cfg.max_order_value),
             candidates=self._cand_txt(candidates),
             signals=ref_txt,
+            scheme=self._scheme_txt(),
             context=_json.dumps(ctx, ensure_ascii=False))
         system = (TRADER_SYSTEM.format(
             max_order_value=int(self.cfg.max_order_value),
@@ -263,6 +276,7 @@ class AgentTrader:
             max_order_value=int(self.cfg.max_order_value),
             candidates=self._cand_txt(candidates),
             signals=ref_txt,
+            scheme=self._scheme_txt(),
             context=_json.dumps(ctx, ensure_ascii=False))
         system = TRADER_SYSTEM.format(
             max_order_value=int(self.cfg.max_order_value),

@@ -1,7 +1,7 @@
 # 合并指南（MERGE GUIDE）：paper-trading → stock-dashboard
 
 > 本仓库保持独立可运行；以下为合并时的执行契约。
-> 原则：**只读母库、不写一字；合并工作流用母项目的规矩。**
+> 原则：**只读 Stock Dashboard 库、不写一字；合并工作流用母项目的规矩。**
 
 ## 1. 放哪里（零改 import 方案）
 
