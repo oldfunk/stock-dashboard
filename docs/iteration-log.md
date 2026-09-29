@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示 AI 分析写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：486 passed（2026-09-28 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：501 passed（2026-09-29 生产服务器 worktree `gate.sh` 实测全绿，盘中三连；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -73,7 +73,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 486 passed，只升不降）
+- 全仓 pytest 零失败（基线 501 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S8 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -161,6 +161,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-09-29（盘中 flake 修好 + 三分支全合：基线 486→501）
+- **修法**（`paper_trading/tests/test_realtime.py` +3 行）：用例先清 60s 模块缓存再断言时段行为。只动测试隔离，不动线上行为（`get_quotes` 缓存优先是刻意设计，休盘面板还指着它显示最后一批行情）。分支 `fix-realtime-cache-isolation` 已推子项目远端（未合，等审）。
+- **验证**：修复分支 gate **486 passed 全绿（盘中！）**——此前同时段必红，当场证伪/证实。随后黄框分支变基重跑 **489 passed**、节奏分支变基重跑 **501 passed**，三连绿全在盘中。
+- **合并**：flake 修 → 黄框 → 节奏，依次 ff 合入 main；生产 pull + 重启双 active；首页 200 新池 5 只；worktree/bundle 全清。
+- 基线刷新 486 → **501 passed**（+3 黄框单测 +12 节奏单测）。
 
 ### 2026-09-29（手动 AI 复盘：旧池硬规则全调出，新 5 只已上线）
 - **跑了什么**（生产实操，用户明确要求）：`WatchlistReviewer.review()` 手动跑一次（run_id `20260929_092556_review_manual`，glm-4.5-flash + 用户 Key；服务启动时 `.env` 已加载，Key 链路通）。

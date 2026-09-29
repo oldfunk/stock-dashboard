@@ -45,7 +45,7 @@ flowchart LR
 ### 防回归门禁（AKShare 事故不再犯）
 
 1. 数据源增删必须同步 `architecture.md` §5 注册表 + 契约单测，三者同 commit
-2. 全仓 pytest 零失败（基线 486 passed，只升不降）
+2. 全仓 pytest 零失败（基线 501 passed，只升不降）
 3. `collector/` `screener/` 改动必须附单测
 4. 部署约束：开发只提交 GitHub，生产从 origin 拉取部署；禁删 S1–S8 适配函数（除非替代 + 单测同到）
 
