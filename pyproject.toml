@@ -2,6 +2,7 @@
 name = "stock-dashboard"
 version = "0.1.0"
 description = "A股价值投资选股看板 - AI 驱动的价值投资选股工具"
+license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110,<1",

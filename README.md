@@ -6,19 +6,25 @@
 
 ---
 
-## 快速开始
+## 快速开始（Python ≥3.10）
 
 ```bash
 git clone https://github.com/oldfunk/stock-dashboard.git
 cd stock-dashboard
 
-# 安装依赖
+# 安装依赖（建议先建 venv）
+python -m venv .venv && source .venv/bin/activate
 pip install -e .
+
+# 配 Key（AI 分析用你自己的 Key；复制模板按需改，不配也能看数据面板）
+cp .env.example .env
 
 # 启动 Web + 内置调度器
 python -m src.main serve
 # 浏览器打开 http://localhost:9527/
 ```
+
+首次数据：内置调度器在交易日 15:30 后自动跑全市场采集 + 筛选；等不及可手动跑一次流水线（`python -m src.main run`，约数分钟），再去 `/llm` 页配 Key 做 AI 分析。
 
 ### AI 配置（用户自带 Key）
 

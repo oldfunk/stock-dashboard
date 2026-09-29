@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（公开前母项目必做项：MIT LICENSE + 外人 Quickstart）
+- **加了什么**：`LICENSE`（MIT，持有人 oldfunk）+ `pyproject.toml` 声明 `license MIT` + README 快速开始补 venv / `cp .env.example` / 首次数据说明 + `.env.example` 过时注释修正（Zen 已死，改走用户 Key 口径）。
+- **没动**：运行代码零改动，无需 gate（纯文档/元数据收尾）；仓库可见性未翻（等子项目协商结论再一起定）。
+- **验证**：`git status` 干净；生产 pull 后服务免重启（无运行时变更）。
+
 ### 2026-09-29（盘中 flake 修好 + 三分支全合：基线 486→501）
 - **修法**（`paper_trading/tests/test_realtime.py` +3 行）：用例先清 60s 模块缓存再断言时段行为。只动测试隔离，不动线上行为（`get_quotes` 缓存优先是刻意设计，休盘面板还指着它显示最后一批行情）。分支 `fix-realtime-cache-isolation` 已推子项目远端（未合，等审）。
 - **验证**：修复分支 gate **486 passed 全绿（盘中！）**——此前同时段必红，当场证伪/证实。随后黄框分支变基重跑 **489 passed**、节奏分支变基重跑 **501 passed**，三连绿全在盘中。
