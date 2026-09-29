@@ -162,6 +162,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（手动 AI 复盘：旧池硬规则全调出，新 5 只已上线）
+- **跑了什么**（生产实操，用户明确要求）：`WatchlistReviewer.review()` 手动跑一次（run_id `20260929_092556_review_manual`，glm-4.5-flash + 用户 Key；服务启动时 `.env` 已加载，Key 链路通）。
+- **结果**：旧 5 只全部硬规则强制调出（中邮/朗姿/锦江 `roe_below_5`，博俊叠加 `roe_collapse_10`，菜百 `roe_collapse_10`——旧池基本面确实恶化了）；新调入天华新能（91.0）/盐湖股份（88.0）/融捷股份（88.0）/羚锐制药（81.4）/好想你（80.5）。软删除：旧行 status=dropped 留作审计，首页实查只剩新 5 只。
+- **附带发现**：中邮科技监控条件真触发了（PE < 20，实际值 -45.2，已转负）；journal 仅 846 字（偏短，prompt 要求的五段深度没写全）；数字抽检偏离 2 只（warn-only）；LLM 首次返回字段不全，走 fallback 解析成功。以上均如实记录，不粉饰。
+- **验证**：`ai_watchlist` 状态位 5 dropped/5 core；首页 5 新名零旧名；journal 当日行已落。
+
+### 2026-09-29（黄框可读化待合 + 上游盘中 flake 致 gate 红，nightly/20260929a 未合）
+- **改了什么**（未合并）：`format_monitor_condition()`（JSON→“PE < 20 时提醒”，失败原样回退）+ 卡片模板用人话 + 3 单测。文件内 63/63 全绿。
+- **没合的原因**：全仓 gate 488 passed + **1 failed**（`paper_trading/tests/test_realtime.py::test_fetch_batch_empty_and_off_hours`）。根因已查：`get_quotes` 先读 60s 缓存再判交易时段（`realtime.py:102-109`），盘中跑 gate 时缓存被前序用例灌入 live 行情，monkeypatch 的 session=False 盖不住——纯上游时间相关 flake，与本次改动无关（改动 3 文件无一在 paper 内；此前晚间 gate 全绿佐证）。
+- **计划**：中午休市（11:30-13:00）重跑 gate，绿了再合 + 部署。按门禁铁律红灯不合并。
+
 ### 2026-09-28（子项目更新合流：宇宙中文显示，上游 2 提交，nightly/20260928y 已合）
 - **合流**：`git subtree pull --prefix=paper_trading paper-upstream main --squash`（ae823a7..e4661ae，共 2 提交）：① `5777671` 方案行宇宙改中文显示（`宇宙 screening` → `选股范围：Stock Dashboard 筛选/观察池/本地配置池`，纯展示）；② `e4661ae` 子项目合入了我们回推的修复（source/allow_buy + 凭 Key 接管）——分支审过，闭环。
 - **实际变更**：仅 `paper_trading/paper_trading/dashboard.py` 4 行（+3/-1）；回推部分与母树已有内容一致，合并无冲突。
