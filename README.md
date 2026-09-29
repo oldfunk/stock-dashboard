@@ -12,10 +12,6 @@
 |---|---|
 | ![首页](docs/screenshots/home.png) | ![详情](docs/screenshots/stock.png) |
 
-| 模型设置（自带 Key） | 模拟交易面板 | 手机端首页 |
-|---|---|---|
-| ![模型](docs/screenshots/llm.png) | ![纸盘](docs/screenshots/paper.png) | ![手机](docs/screenshots/mobile.png) |
-
 ---
 
 ## 快速开始（Python ≥3.10）
