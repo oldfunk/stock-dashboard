@@ -1,5 +1,9 @@
 # Stock Dashboard — A 股价值投资数据面板
 
+[![release](https://img.shields.io/github/v/release/oldfunk/stock-dashboard)](https://github.com/oldfunk/stock-dashboard/releases/latest)
+[![license](https://img.shields.io/github/license/oldfunk/stock-dashboard)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10-blue)](pyproject.toml)
+
 > 全自动 · 量化筛选 + 数据展示 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
 > AI 分析用用户自带 Key（`/llm` 页配置模型，面板队列执行）；面板本身只展示数据，不再内联 AI 分析
 > 当前状态：v1.0.0 已公开发布；日常维护 + 按需迭代（AI 分析/定时复盘/纸盘合流已落地，P2 已冻结）
@@ -78,7 +82,7 @@ stock-dashboard/
 │   │   └── value_screener.py   # 7 条门规筛选 + 多策略评分
 │   ├── analyzer/
 │   │   ├── ai_analyzer.py      # 自带 Key 分析（面板队列/手动脚本触发）
-│   │   └── watchlist_reviewer.py # 观察池复盘（硬规则本地执行；LLM 决议随用户 Key 调用，待周六 live 验证）
+│   │   └── watchlist_reviewer.py # 观察池复盘（硬规则本地执行；LLM 决议走用户 Key；节奏 ai_review.days/time 可配，默认周六）
 │   ├── models/
 │   │   ├── database.py         # SQLite DAO（screening/analysis 等）
 │   │   └── ai_watchlist.py     # 观察池 DAO
@@ -86,7 +90,7 @@ stock-dashboard/
 │   │   ├── routes.py           # FastAPI 路由
 │   │   ├── templates/          # Jinja2 模板
 │   │   │   ├── index.html            # 首页（候选股总览 + AI 观察池 + 钉选 Tab）
-│   │   │   ├── stock_detail.html     # 详情页（数据 + 财务 + K 线；AI 章节为历史展示）
+│   │   │   ├── stock_detail.html     # 详情页（数据 + 财务 + K 线 + AI 问答/分析触发/笔记时间线）
 │   │   │   ├── watchlist_detail.html # 观察池详情
 │   │   │   ├── journal.html          # 投资日记（AI 笔记展示）
 │   │   │   ├── journal_compare.html  # 日记对比
@@ -122,8 +126,7 @@ stock-dashboard/
 │   ├── scheduled-tasks.md      # 定时任务参考设计（制度由使用者自定）
 │   ├── paper-trading.md        # 历史归档（M4a 设计过程保留；现行路线见 roadmap M6）
 │   └── strategies-dry-run.md   # 多策略 dry-run 文档
-├── tools/                    # 工具目录（对照工具已移除）
-└── paper_trading/            # 子项目全量合并树（subtree，上游独立演进；详见 docs/iteration-log M6）
+├── paper_trading/            # 子项目全量合并树（subtree，上游独立演进；详见 docs/iteration-log M6）
 ```
 
 ---
@@ -145,7 +148,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 3. 历史财务采集 → financial_history → financial_summary（5y/10y 均值）
 4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只
 5. K 线拉取（面板队列触发分析；`retry_ai.py` 等手动脚本需已配 Key）
-6. 每周六：复盘（硬规则 + 监控条件本地执行；LLM 决议已随用户 Key 具备调用条件，待周六 live 验证）→ ai_watchlist + ai_journal
+6. 定时复盘（`ai_review.days/time`，默认周六 00:00）：硬规则 + 监控条件本地执行，LLM 决议走用户 Key（已验证跑通）→ ai_watchlist + ai_journal
 ```
 
 ### 7 条硬性门规
@@ -223,7 +226,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 | `schedule.daily_update_time` | 每日运行时间（默认 15:30） |
 | `web.port` | 看板端口（默认 9527） |
 | `ai.*` | 自带 Key 的 LLM 配置（`/llm` 页写入；免费通道已死；`ai.fallback` 备用通道保留） |
-| `ai_review.*` | 周六 AI 复盘配置（观察池容量、硬规则） |
+| `ai_review.*` | 定时 AI 复盘（`days`/`time` 节奏 + 观察池容量 + 硬规则） |
 
 本地覆盖：`config/local.yaml`（gitignore），YAML 合并到 config.yaml。
 
