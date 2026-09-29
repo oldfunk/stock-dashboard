@@ -585,6 +585,8 @@ class Handler(BaseHTTPRequestHandler):
                 limit = int(q.get("limit", ["30"])[0])
                 conn = _ro(self.account_db)
                 try:
+                    # 表名/列名只取自下方固定映射（用户输入仅决定走哪条分支），
+                    # limit 走参数化，因此此处 f-string 无注入面
                     table = {"nav": "nav_history", "ops": "op_log",
                              "orders": "orders", "fills": "fills"}[u.path.split("/")[2]]
                     order_col = {"nav_history": "id", "op_log": "id",

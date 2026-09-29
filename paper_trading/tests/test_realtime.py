@@ -43,9 +43,7 @@ def test_fetch_batch_empty_and_off_hours(monkeypatch):
     import paper_trading.data.realtime as rtm
 
     assert rt.fetch_batch([]) == {}
-    # 先清 60s 模块缓存：get_quotes 先查缓存再判时段，全仓盘中跑时
-    # 缓存可能被前序用例灌入 live 行情，不清则下面的时段断言被污染
+    # 非交易时段直接回空，不发请求（先清模块缓存，避免他单测预热干扰）
     rtm._cache = {"at": 0.0, "data": {}}
-    # 非交易时段直接回空，不发请求
     monkeypatch.setattr(rtm, "is_trading_session", lambda now=None: False)
     assert rt.get_quotes(["600519"]) == {}

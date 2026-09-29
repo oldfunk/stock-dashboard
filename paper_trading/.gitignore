@@ -36,9 +36,11 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project specific (ledger + market DBs, never commit — any name)
 data.db
 paper_account.db
+*.db
+*.sqlite3
 *.db-journal
 *.db-wal
 *.db-shm
