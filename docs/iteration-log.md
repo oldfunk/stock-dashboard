@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（公开后复扫：泄漏零命中 + README 门面 4 修 + topics）
+- **复扫**（已公开状态下重查）：tip 无 IP/身份/Key/掩码片段；无敏感跟踪文件；status 干净；12+ 位 `sk-` 全是测试假 Key；历史 Key 占位/空 db/未跟踪 .env 结论不变。**结论：无泄漏。**
+- **门面 4 修**：README 开发重心过时（M5/M6 已落地→v1.0.0 维护态）、2 处基线日期笔误（09-27→09-29）、工作流内部黑话转贡献者口径（外部 PR/维护者合并/部署不入库）。
+- **仓库元数据**：topics 已加（a-share/value-investing/fastapi/sqlite/paper-trading/llm）。零运行时改动，免 gate。
+
 ### 2026-09-29（公开 + 首 Release：双仓 public，母 v1.0.0 发出）
 - **翻开关**：`stock-dashboard` + `paper-trading` 均已 PUBLIC（gh 实查）。
 - **发版**：母 `v1.0.0` 首个公开版已发（手写中文 notes：功能盘点/501 门禁/部署三行/局域网警告/MIT）。子 `v0.1.0` Release 待子方发（tag 已有）。

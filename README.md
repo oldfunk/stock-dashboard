@@ -2,7 +2,7 @@
 
 > 全自动 · 量化筛选 + 数据展示 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
 > AI 分析用用户自带 Key（`/llm` 页配置模型，面板队列执行）；面板本身只展示数据，不再内联 AI 分析
-> 开发重心：M5 AI 分析复活 + M6 纸盘全量合并（P1 已收口，P2 已冻结）
+> 当前状态：v1.0.0 已公开发布；日常维护 + 按需迭代（AI 分析/定时复盘/纸盘合流已落地，P2 已冻结）
 
 ---
 
@@ -99,7 +99,7 @@ stock-dashboard/
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 501 passed，2026-09-27 生产服务器 gate 全绿）
+├── tests/                      # pytest（基线 501 passed，2026-09-29 生产服务器 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO 表单测
@@ -228,7 +228,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
 - **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-27 生产服务器基线 501 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-29 生产服务器基线 501 passed）
 
 ---
 
@@ -249,15 +249,15 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 
 ### 工作流
 
-1. 从 `main` 切出 `nightly/YYYYMMDD` 分支
+1. 从 `main` 切出 `nightly/YYYYMMDD` 分支（外部贡献走 Pull Request）
 2. 改动 + 单测 + 全仓 pytest 零失败（基线 501 passed 只升不降，确切数见账本最新 Changelog）
-3. 推送 nightly → 直接合并到 main（用户长期授权）→ 同步生产服务器
-4. 生产环境：生产服务器 `stock-dashboard.service` :9527（部署目标见本地 `deploy.local.md`，不入库）
+3. 合并到 `main`（维护者直接合并；外部 PR 由维护者审核合并）
+4. 生产部署由维护者执行（systemd `stock-dashboard.service` :9527；部署目标配置不入库）
 
 ### 约束
 
 - 单模块改动 + 单测 + 零 emoji（仅 → ↑ ↓ ✓）
-- 迭代在 `nightly/*`，合并到 `main` 走长期授权直接合并（规则见 `AGENTS.md`）
+- 迭代在 `nightly/*`，合并到 `main`（维护者直接合并，外部 PR 审核合并；规则见 `AGENTS.md`）
 - 踩坑铁律 6 条：见 `iteration-log.md` §工程约定
 
 ### 文档约定
