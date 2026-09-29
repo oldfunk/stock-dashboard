@@ -162,6 +162,10 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（公开准备补件：母 `SECURITY.md`；翻开关与 Release 待定）
+- **加了什么**：根目录 `SECURITY.md`（报漏洞走 Issue + Key 处理 + 局域网边界 + 泄露应急）。零运行时改动，免 gate。
+- **没动**：双仓 visibility、私有；母 `v1.0.0` Release、子 `v0.1.0` Release 都没发。按下葫芦：等用户拍板再翻。
+
 ### 2026-09-29（首 tag-vendor：v0.1.0 基线，协议正式运转）
 - **拉取**：`git subtree pull --prefix=paper_trading paper-upstream v0.1.0 --squash`（tag→`493ee01`，注解带 changelog；母方 vendored 版本锁 v0.1.0）。
 - **内容**（10 文件，71+/8-）：LICENSE/SECURITY/CI（ vendor 进来存档用，不参与母 gate 外的事）、README 安全+免责、DB 忽略收紧、pyyaml 补齐、SQL 注入注释、pool 去 import 异味（只读性不变，三表契约仍成立）、测试假 Key 改名。
