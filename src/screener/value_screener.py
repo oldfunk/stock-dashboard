@@ -461,7 +461,7 @@ def _score_breakdown(stock: dict) -> dict:
                        'weight': weights['margin'],
                        'contribution': round(gm_s * weights['margin'], 2)}
 
-    # ── 6) 10年一致性/趋势加分（巴菲特风格）──
+    # ── 6) 10年一致性/趋势加分（长期稳定偏好）──
     consistency = 0
     # ROE波动性低 → 加分（稳定）
     volatility = stock.get('roe_volatility')

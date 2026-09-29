@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS financial_summary (
     fcf_5y_sum REAL,                   -- 5年累积自由现金流
     share_dilution_5y REAL,            -- 5年股本稀释率 %
     roic_5y_avg REAL,                  -- 5年平均ROIC
-    -- 10年拓展字段（2026-07-08 新增，用于巴菲特风格10年评估）
+    -- 10年拓展字段（2026-07-08 新增，用于长期一致性评估）
     roe_10y_avg REAL,                  -- 10年平均ROE
     net_margin_10y_avg REAL,           -- 10年平均净利率
     intcov_10y_avg REAL,               -- 10年平均利息覆盖

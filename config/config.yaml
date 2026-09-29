@@ -8,7 +8,7 @@ data_source:
 
 # -------- 量化筛选条件 (价值投资) --------
 screener:
-  # 格雷厄姆/巴菲特风格价值投资过滤
+  # 价值投资风格过滤（低估值+质量门槛，见 value_screener.py）
   # A 股适配版——可根据市场情况调整
   conditions:
     max_pe: 20              # 市盈率上限（TTM）
