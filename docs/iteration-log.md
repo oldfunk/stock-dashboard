@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（realtime 两边同修确认 + 公开就绪判定）
+- **核实**（应子项目反馈）：realtime 缓存清零两边各修各的（母 `82586aa` / 子 `d53105c`），逐行对过，行为一致；母推过去的分支对方已清，无残留；**两边都不用再合**，此事闭环。
+- **故意不拉**：vendored 树落后上游 3 提交（`4ade184` LICENSE/免责、`d53105c` 同款修、`493ee01` CI/SECURITY），全是非功能项；公开前夕不制造冲突 churn，待公开后常规 pull。
+- **公开就绪判定**：母（MIT/Quickstart/env 示例/审计/邮箱接受）+ 子（LICENSE/SECURITY/CI/README 介绍/交叉审计干净）双绿；子 README 已是对外介绍体。只差翻开关。
+
 ### 2026-09-29（公开前母项目必做项：MIT LICENSE + 外人 Quickstart）
 - **加了什么**：`LICENSE`（MIT，持有人 oldfunk）+ `pyproject.toml` 声明 `license MIT` + README 快速开始补 venv / `cp .env.example` / 首次数据说明 + `.env.example` 过时注释修正（Zen 已死，改走用户 Key 口径）。
 - **没动**：运行代码零改动，无需 gate（纯文档/元数据收尾）；仓库可见性未翻（等子项目协商结论再一起定）。
