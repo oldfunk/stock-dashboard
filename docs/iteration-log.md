@@ -162,6 +162,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（首 tag-vendor：v0.1.0 基线，协议正式运转）
+- **拉取**：`git subtree pull --prefix=paper_trading paper-upstream v0.1.0 --squash`（tag→`493ee01`，注解带 changelog；母方 vendored 版本锁 v0.1.0）。
+- **内容**（10 文件，71+/8-）：LICENSE/SECURITY/CI（ vendor 进来存档用，不参与母 gate 外的事）、README 安全+免责、DB 忽略收紧、pyyaml 补齐、SQL 注入注释、pool 去 import 异味（只读性不变，三表契约仍成立）、测试假 Key 改名。
+- **冲突**：realtime 三行如预期撞车，按预裁决取上游（已逐字节验证一致），我方 `82586aa` 注释版自动作废留档。
+- **验证**：生产 worktree gate **501 passed**（基线维持）；部署 pull + `:8081` 重启双 active + schemes ok + `:9527` 200；残留全清。
+
 ### 2026-09-29（协作机制落档：`docs/subproject-protocol.md` + AGENTS 工作流改 tag 制）
 - **为什么**：realtime 两边同修证明双向修 = 流程浪费；母 repo 体量决定 AI 修小 bug 又贵又险。定案：母整合（接缝）/ 子施工（域内）/ 人包工头，单向 tag 流，Issue 为唯一跨仓通道（用户已拍板，复用给未来子项目）。
 - **改了什么**：新增协议模板（含新子项目开张清单 §8）；AGENTS.md 工作流第 5 条改 tag 制 + 分诊一句话。零运行时改动，免 gate。
