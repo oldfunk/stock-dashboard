@@ -162,6 +162,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-29（公开 + 首 Release：双仓 public，母 v1.0.0 发出）
+- **翻开关**：`stock-dashboard` + `paper-trading` 均已 PUBLIC（gh 实查）。
+- **发版**：母 `v1.0.0` 首个公开版已发（手写中文 notes：功能盘点/501 门禁/部署三行/局域网警告/MIT）。子 `v0.1.0` Release 待子方发（tag 已有）。
+- **公开后规矩**（落档即执行）：开发流不变；有份量批次才打 tag + Release；版本号各走各；外部 PR 改 vendored/无单测/贴 Key 直接关；main 禁 force-push；母不上 CI（生产 gate 为唯一门禁）。
+
 ### 2026-09-29（公开准备补件：母 `SECURITY.md`；翻开关与 Release 待定）
 - **加了什么**：根目录 `SECURITY.md`（报漏洞走 Issue + Key 处理 + 局域网边界 + 泄露应急）。零运行时改动，免 gate。
 - **没动**：双仓 visibility、私有；母 `v1.0.0` Release、子 `v0.1.0` Release 都没发。按下葫芦：等用户拍板再翻。
