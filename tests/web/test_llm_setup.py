@@ -422,6 +422,37 @@ class TestCardButtons:
         assert "analyzeOne('600519'" in html
 
 
+class TestMonitorText:
+    """监控条件人话文案：JSON→可读文本（黄框展示用）。"""
+
+    def test_format_pe_condition(self):
+        from src.web.routes import format_monitor_condition
+        out = format_monitor_condition(
+            '{"metric": "pe", "operator": "lt", "threshold": 20}')
+        assert out == "PE < 20 时提醒"
+
+    def test_format_empty_and_garbage(self):
+        from src.web.routes import format_monitor_condition
+        assert format_monitor_condition(None) is None
+        assert format_monitor_condition("") is None
+        assert format_monitor_condition("not-json") == "not-json"
+        # 未知指标/缺字段：原样返回，不丢信息
+        assert format_monitor_condition('{"metric": "xxx", "operator": "lt",'
+                                        ' "threshold": 1}') == \
+            '{"metric": "xxx", "operator": "lt", "threshold": 1}'
+
+    def test_card_renders_readable_monitor(self):
+        from src.web.routes import format_monitor_condition, templates
+        stock = _fake_card_stock()
+        stock["monitor_condition"] = ('{"metric": "pe", "operator": "lt",'
+                                      ' "threshold": 20}')
+        stock["monitor_text"] = format_monitor_condition(
+            stock["monitor_condition"])
+        html = templates.get_template("_watchlist_card.html").render(
+            watchlist=[stock], request=None)
+        assert "PE &lt; 20 时提醒" in html
+
+
 class TestAsk:
     """直接提问：prompt 组装 + 路由校验 + 成功/失败形（analyzer 改动附单测）。"""
 

@@ -41,6 +41,38 @@ from src.utils import now_cn
 logger = logging.getLogger(__name__)
 
 
+# 监控条件 JSON→人话（观察池黄框展示用；解析失败原样返回，不丢信息）
+_MONITOR_METRIC_CN = {
+    "pe": "PE", "roe": "ROE", "gross_margin": "毛利率",
+    "net_margin": "净利率", "debt_ratio": "负债率",
+    "dividend_yield": "股息率", "roe_volatility": "ROE波动",
+    "fcf_yield": "FCF收益率", "current_price": "现价",
+}
+_MONITOR_OP_CN = {"lt": "<", "le": "≤", "gt": ">", "ge": "≥", "eq": "="}
+
+
+def format_monitor_condition(raw) -> str | None:
+    """把 monitor_condition 存的 JSON（如 {"metric":"pe","operator":"lt",
+    "threshold":20}）转成 “PE < 20 时提醒”；空值返回 None，
+    解析失败/字段不全原样返回 raw。"""
+    if not raw:
+        return None
+    if not isinstance(raw, str):
+        return raw
+    try:
+        cond = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    if not isinstance(cond, dict):
+        return raw
+    metric = _MONITOR_METRIC_CN.get(cond.get("metric"))
+    op = _MONITOR_OP_CN.get(cond.get("operator"))
+    threshold = cond.get("threshold")
+    if metric is None or op is None or threshold is None:
+        return raw
+    return f"{metric} {op} {threshold} 时提醒"
+
+
 def _enrich_stocks(stocks: list[dict]) -> None:
     """给候选股列表补充解析后的 AI 分析字段、财务历史、分析历史（原地修改）。
 
@@ -347,6 +379,9 @@ async def index(request: Request):
     for item in ai_watchlist:
         code = item['code']
         item['sector'] = sector_map.get(code)
+        # 监控条件人话文案（黄框展示；无条件则为 None，模板回退原样）
+        item['monitor_text'] = format_monitor_condition(
+            item.get('monitor_condition'))
         # 实时行情：优先实时缓存，降级到 stock_snapshot
         item['current_price'] = None
         item['change_percent'] = None
