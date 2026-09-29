@@ -38,13 +38,13 @@ def test_takeover_token(tmp_path):
     from paper_trading.llm.secrets import save_provider
     from paper_trading.dashboard import _takeover_token
     p = save_provider({"preset": "custom", "base_url": "https://x.test/v1",
-                       "model": "m", "api_key": "sk-live-key"},
+                       "model": "m", "api_key": "sk-fake-key"},
                       path=str(tmp_path / "s.json"))
     import json as _json
     stored = _json.loads(p.read_text(encoding="utf-8"))
     token = stored["admin_token"]
     assert token
-    assert _takeover_token({"api_key": "sk-live-key"}, str(tmp_path / "s.json")) == token
+    assert _takeover_token({"api_key": "sk-fake-key"}, str(tmp_path / "s.json")) == token
     assert _takeover_token({"api_key": "wrong"}, str(tmp_path / "s.json")) == ""
     assert _takeover_token({}, str(tmp_path / "s.json")) == ""
     assert _takeover_token({"api_key": "k"}, str(tmp_path / "nope.json")) == ""

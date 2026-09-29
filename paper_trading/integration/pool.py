@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -24,7 +25,7 @@ def _norm(code) -> str:
     t = str(code or "").strip()
     if t.isdigit():
         t = t.zfill(6)
-    m = __import__("re").search(r"(\d{6})", t)
+    m = re.search(r"(\d{6})", t)
     return m.group(1) if m else ""
 
 
