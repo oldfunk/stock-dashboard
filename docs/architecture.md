@@ -51,7 +51,7 @@ flowchart LR
     L --> N[K线拉取<br/>池 + Top25]
 ```
 
-AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板只负责展示数据与 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（硬规则 + 监控条件本地执行；LLM 决议已随用户 Key 具备调用条件，待 10-03 周六首验 → `ai_watchlist` / `ai_journal`）。
+AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板只负责展示数据与 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（定时节奏见 `ai_review.days/time`，默认周六 00:00；硬规则 + 监控条件本地执行；LLM 决议走用户 Key → `ai_watchlist` / `ai_journal`）。
 
 ## 3. 模块边界（跨层调用禁令）
 

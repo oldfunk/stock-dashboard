@@ -83,7 +83,9 @@ schedule:
 
 # -------- AI 观察池复盘配置 --------
 ai_review:
-  enabled: true                    # 是否启用周六 AI 复盘
+  enabled: true                    # 是否启用定时 AI 复盘
+  days: ["sat"]                    # 复盘星期：mon..sun 任选多项；"daily" 表每天；默认周六
+  time: "00:00"                    # 当天该时刻（HH:MM）后触发一次
   candidate_pool_weeks: 4          # 候选池回看周数（从 screening_result 取）
   watchlist_size: 5                # 观察池固定容量
   hard_rules:

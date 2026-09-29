@@ -37,7 +37,7 @@ def test_full_flow_empty_db(app_client):
 
 
 def test_scheduler_triggers_review(monkeypatch, tmp_path):
-    """模拟周六触发复盘"""
+    """模拟周六触发复盘（默认节奏 days=[sat] time=00:00）"""
     from datetime import datetime
     from src.models import database as db_mod
     db_path = str(tmp_path / "test.db")
@@ -67,7 +67,7 @@ def test_scheduler_triggers_review(monkeypatch, tmp_path):
         "src.analyzer.watchlist_reviewer.WatchlistReviewer.review", fake_review
     )
 
-    scheduler._check_weekly_review()
+    scheduler._check_scheduled_review()
     # 异步线程启动，等待完成
     import time
     time.sleep(2)

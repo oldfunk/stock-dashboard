@@ -53,6 +53,59 @@ def _is_trading_time() -> bool:
             dtime(13, 0) <= t <= dtime(15, 0))
 
 
+# ── 复盘节奏解析（ai_review.days/time，纯函数可单测） ──
+
+_WEEKDAY_ALIAS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3,
+                  "fri": 4, "sat": 5, "sun": 6}
+
+
+def _parse_review_days(raw) -> set:
+    """解析 ai_review.days → weekday() 数字集合。
+
+    支持 ["sat"] / ["mon","wed","fri"] / ["daily"] / [5]；
+    全非法回退 {5}（周六，保持历史行为）。
+    """
+    days = set()
+    items = raw if isinstance(raw, list) else [raw]
+    for it in items:
+        if isinstance(it, bool):
+            continue
+        if isinstance(it, int) and 0 <= it <= 6:
+            days.add(it)
+            continue
+        s = str(it or "").strip().lower()
+        if s == "daily":
+            return set(range(7))
+        if s in _WEEKDAY_ALIAS:
+            days.add(_WEEKDAY_ALIAS[s])
+    if not days:
+        logger.warning("[复盘] ai_review.days 非法（%r），回退周六", raw)
+        return {5}
+    return days
+
+
+def _parse_review_time(raw) -> dtime:
+    """解析 ai_review.time（HH:MM）→ time；非法回退 00:00。"""
+    try:
+        h, m = str(raw or "00:00").strip().split(":")
+        t = dtime(int(h), int(m))
+        if not (0 <= t.hour <= 23 and 0 <= t.minute <= 59):
+            raise ValueError(raw)
+        return t
+    except (ValueError, AttributeError):
+        logger.warning("[复盘] ai_review.time 非法（%r），回退 00:00", raw)
+        return dtime(0, 0)
+
+
+def _review_due(now, days: set, at: dtime, last_date) -> bool:
+    """纯判定：今天在 days 内 + 已过当天时刻 + 今天没跑过。"""
+    if last_date is not None and last_date == now.date():
+        return False
+    if now.weekday() not in days:
+        return False
+    return now.time() >= at
+
+
 # ── 数据采集任务 ──
 
 def fetch_stock_realtime(codes: list[str]) -> dict[str, dict]:
@@ -167,8 +220,8 @@ class MarketScheduler:
                 # 每日收盘流水线（交易日 15:30 后触发一次）
                 self._check_daily_pipeline()
 
-                # 每周六 00:00 触发 AI 观察池复盘
-                self._check_weekly_review()
+                # 定时 AI 观察池复盘（ai_review.days/time，默认周六 00:00）
+                self._check_scheduled_review()
 
             except Exception as e:
                 logger.warning(f"[调度器] 运行异常: {e}")
@@ -267,17 +320,18 @@ class MarketScheduler:
                 success += 1
         logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功")
 
-    def _check_weekly_review(self):
-        """检查是否需要触发周六 AI 复盘
+    def _check_scheduled_review(self):
+        """检查是否需要触发定时 AI 复盘（节奏见 ai_review.days/time）。
 
-        周六任意时刻进程还活着且当天没跑过就触发一次。
-        _last_review_date 在 _run_review 成功后才设置，
+        当天已跑过（_last_review_date）或正在跑就跳过一次。
+        _last_review_date 在 _run_review 成功/失败后才设置，
         避免失败重试时被错误跳过。
         """
-        now = now_cn()
-        if now.weekday() != 5:  # 周六
-            return
-        if self._last_review_date == now.date():
+        from src.config import load_config
+        ai_review_cfg = load_config().get("ai_review", {})
+        days = _parse_review_days(ai_review_cfg.get("days", ["sat"]))
+        at = _parse_review_time(ai_review_cfg.get("time", "00:00"))
+        if not _review_due(now_cn(), days, at, self._last_review_date):
             return
         if self._review_in_progress:
             logger.info("[复盘] 上次复盘仍在进行，跳过本次触发")
