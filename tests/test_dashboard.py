@@ -11,6 +11,7 @@ def test_dashboard_imports():
 
     assert hasattr(d, "Handler") and hasattr(d, "main")
     assert "market-row" in d.PAGE and "/api/quotes" in d.PAGE
+    assert "AI 定时" in d.PAGE and "/api/agent/schedule" in d.PAGE
 
 
 def test_entry_modules_import():

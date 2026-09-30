@@ -37,8 +37,8 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 ### Cron Integration
 
 ```bash
-# 工作日 16:10 AI 结算（二选一，见 README Cron 章节）
-(crontab -l 2>/dev/null; echo "10 16 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent run --json >> agent.log 2>&1") | crontab -
+# AI 定时 tick（工作日 16:00-18:00 每 15 分钟；时刻未到/队列跑完空转，默认 16:45 跑一次交易）
+(crontab -l 2>/dev/null; echo "*/15 16-18 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
 ```
 
 ## Database
@@ -96,9 +96,10 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 3. **LLM 不碰下单链**：`llm:ask` 只问答记流水；任何决策环（P2）必须走 fail-closed 钳制（schema/白名单/100 股倍数/金额上限），再经 `RiskManager`，缺一不可。
 4. 命令行传 Key 会留 shell 历史，敏感环境一律用面板设置页。
 
-## AI 交易员自治规则（P2，日内一次决策）
+## AI 交易员自治规则（P2，定时队列）
 
-1. **单交易员原则**：同一账户同一天只跑 `run`（MA）或 `agent run`（AI）其一，cron 二选一；`ai:decide` 当日已落子则拒绝再跑（`--force` 除外）。
+1. **定时闸（时刻 → 动作队列）**：cron 高频 tick 调 `agent tick`，进程内按 `strategy.local.yaml` 的 `agent_schedule.queue` 消费——动作仅 sync（同步）/analyze（试运行分析）/plan（做计划）/trade（实盘交易）四种，每条每天最多跑一次，保序。时刻未到/队列跑完记 `not-in-schedule` 跳过，不问 LLM。直接 `agent run` = 跑一次 trade，只看 trade 条目。`--ignore-schedule` 仅手动补跑用。
+2. **单交易员原则**：同一账户同一天只跑 `run`（MA）或 `agent run`（AI）其一，cron 二选一；默认每日 1 次时沿用 `already-decided` 幂等（`--force` 除外）。
 2. **三道闸**：单子数上限（`agent.max_orders_per_run`，默认 3）+ 单笔金额上限（默认 2 万）+ 日亏熔断（默认 -5%，另有回撤熔断 20% 兜底）。
 3. **fail-closed**：LLM 输出非严格 JSON / 标的不在池 / 非 100 倍数 / 超限 / 风控拒绝 → 整单作废，只记 `ai:decide` 流水，不下单。坏输出永不重试下单。
 4. **可审计**：每次决策记原文摘要 + 逐条处置（已成交/拒绝原因）+ 决策后资产；面板“AI 决策”中文渲染。
@@ -110,7 +111,7 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| max_single_order_value | 200,000 CNY | Max value per single order |
+| max_single_order_value | 30,000 CNY | Max value per single order（以 `config.yaml` 为准，代码缺省 200,000 仅兜底） |
 | max_position_pct | 30% | Max single-stock position |
 | max_total_position_pct | 95% | Max total portfolio exposure |
 | max_drawdown_pct | 20% | Max drawdown before halt |

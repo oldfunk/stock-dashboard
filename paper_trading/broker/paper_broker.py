@@ -514,6 +514,16 @@ class PaperBroker:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_op_log_day(self, day: str) -> list[dict]:
+        """读某日全量流水（YYYY-MM-DD；定时闸用，不受条数窗口限制——
+        面板高频问答会把决策记录挤出最近 N 条窗口，曾致同日重复跑）。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM op_log WHERE substr(timestamp, 1, 10) = ? "
+                "ORDER BY id DESC", (day,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def save_plan(self, plan_date: str, symbols: list[str], plan: dict) -> int:
         """存一条待执行计划（ai:plan），返回 id；同日旧 pending 自动作废。"""
         import json as _json
