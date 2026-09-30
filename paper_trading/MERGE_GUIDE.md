@@ -2,6 +2,7 @@
 
 > 本仓库保持独立可运行；以下为合并时的执行契约。
 > 原则：**只读 Stock Dashboard 库、不写一字；合并工作流用母项目的规矩。**
+> 注：普通用户本地使用可忽略本文档；它只面向下游 Stock Dashboard 的 subtree 集成。
 
 ## 1. 放哪里（零改 import 方案）
 
@@ -41,7 +42,7 @@
 1. 母仓库开 `nightly/paper-trading-merge` 分支（遵守母 AGENTS.md 工作流）。
 2. 本仓库整体迁入顶层 `paper_trading/`（`git subtree` 或文件拷贝，保留 `.gitignore` 的 `secrets.local.json` 豁免）。
 3. `config.yaml` 五段并入命名空间；`--pool-from` 默认仍 `config`（行为零变化）。
-4. 生产跑 `bash scripts/gate.sh`：本 29+ 单测必须全绿（hermetic：假路径+monkeypatch，不读 ambient）。
+4. 生产跑母方 `scripts/gate.sh`（母仓库脚本）：本 44 单测必须全绿（hermetic：假路径+monkeypatch，不读 ambient）。
 5. 冒烟：`agent run --dry-run` + 面板三路 200 + `llm ask` 一次。
 6. 合 main + handoff 入账（按母规矩）。
 

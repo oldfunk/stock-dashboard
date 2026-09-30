@@ -25,6 +25,14 @@ def _no_network(monkeypatch):
         lambda self, symbols: {"ok": True, "symbols": symbols, "updated": {}})
 
 
+@pytest.fixture(autouse=True)
+def _sched_due(monkeypatch):
+    """定时闸固定在 17:00（默认 16:45 时段已到），历史用例不受真实时钟影响。"""
+    from paper_trading.agent import schedule as sch
+
+    monkeypatch.setattr(sch, "_now", lambda: datetime(2026, 9, 29, 17, 0))
+
+
 def mkbar(sym, day, close):
     return Bar(symbol=sym, timestamp=datetime(2024, 1, 1) + timedelta(days=day),
                open=close, high=close + 1, low=close - 1, close=close, volume=100)

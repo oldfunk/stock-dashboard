@@ -543,7 +543,7 @@ class TradingBridge:
 
         合并模式下自动附加 Stock Dashboard 的价值视角（基本面/AI 分析/论点/大盘），
         母库不可读时该段为空，绝不影响主流程。
-        symbols 传入时并入覆盖范围（决策上下文与交易宇宙一致）。
+        symbols 传入时并入覆盖范围（决策上下文与选股范围一致）。
         """
         st = self.get_status()
         names = self.data_db.get_stock_names()
@@ -748,7 +748,7 @@ def main() -> None:
     llm_ask.add_argument("--json", action="store_true")
 
     # agent
-    agent_parser = subparsers.add_parser("agent", help="AI 交易员（日内一次决策，可自动下单）")
+    agent_parser = subparsers.add_parser("agent", help="AI 交易员（按定时触发决策，可自动下单）")
     agent_parser.add_argument("--json", action="store_true")
     agent_sub = agent_parser.add_subparsers(dest="agent_command")
     agent_run = agent_sub.add_parser("run", help="执行一次 AI 决策（默认走配置池）")
@@ -762,8 +762,27 @@ def main() -> None:
     agent_run.add_argument("--json", action="store_true")
     agent_run.add_argument("--dry-run", action="store_true", help="只决策不下单")
     agent_run.add_argument("--force", action="store_true", help="忽略今日已决策闸")
+    agent_run.add_argument("--ignore-schedule", action="store_true",
+                           help="忽略定时闸（时段/次数限制），立即执行")
     agent_run.add_argument("--plan-only", action="store_true",
                            help="休盘做计划存着，开盘执行（不碰账本）")
+    agent_tick = agent_sub.add_parser("tick", help="队列 tick：消费最早已到未跑的条目并执行")
+    agent_tick.add_argument("--symbols", nargs="*", default=None)
+    agent_tick.add_argument("--pool-from", default="config",
+                            choices=["config", "watchlist", "screening", "all"])
+    agent_tick.add_argument("--pool-tag", default="")
+    agent_tick.add_argument("--pool-limit", type=int, default=20)
+    agent_tick.add_argument("--json", action="store_true")
+    agent_tick.add_argument("--force", action="store_true",
+                            help="忽略已消费标记，执行最早已到条目")
+    agent_sched = agent_sub.add_parser("schedule", help="AI 定时队列查看与设置")
+    agent_sched_sub = agent_sched.add_subparsers(dest="agent_sched_command")
+    agent_sched_list = agent_sched_sub.add_parser("list", help="查看当前定时队列与今日执行情况")
+    agent_sched_list.add_argument("--json", action="store_true")
+    agent_sched_set = agent_sched_sub.add_parser("set", help="设置定时队列（写本地文件，不进 git）")
+    agent_sched_set.add_argument("--entry", action="append", default=None,
+                                 help="队列条目，可重复：TIME=ACTION，如 --entry 09:00=sync --entry 16:45=trade；动作仅 sync/analyze/plan/trade")
+    agent_sched_set.add_argument("--json", action="store_true")
 
     # nav
     nav_parser = subparsers.add_parser("nav", help="查看 NAV 历史")
@@ -969,6 +988,37 @@ def main() -> None:
         elif args.command == "agent":
             from paper_trading.agent import AgentTrader
 
+            if args.agent_command == "schedule":
+                from paper_trading.agent import schedule as _sched
+
+                if getattr(args, "agent_sched_command", None) == "set":
+                    if not getattr(args, "entry", None):
+                        emit(None, ok=False,
+                             error="须指定至少一个 --entry（示例：--entry 09:00=sync --entry 16:45=trade）")
+                        sys.exit(2)
+                    ok, msg = _sched.save_schedule(".", args.entry)
+                    emit({"message": msg} if ok else None, ok=ok,
+                         error=None if ok else msg)
+                    if not ok:
+                        sys.exit(3)
+                else:
+                    from paper_trading.agent.schedule import due_entries as _due
+
+                    cur = _sched.load_schedule(".")
+                    emit({"entries": cur["entries"], "source": cur["source"],
+                          "now": _sched._now().strftime("%H:%M"),
+                          "due": _due(cur["entries"])})
+                return
+            if args.agent_command == "tick":
+                syms, note, cands = _resolve_syms(bridge, args)
+                with run_lock(args.lock_file):
+                    trader = AgentTrader(bridge, bridge.agent_cfg)
+                    res = trader.tick(syms, candidates=cands, pool_source=note,
+                                      force=args.force)
+                emit(res, ok=res.get("ok", False), error=res.get("error"))
+                if not res.get("ok"):
+                    sys.exit(3)
+                return
             if args.agent_command != "run":
                 parser.print_help()
                 sys.exit(2)
@@ -980,7 +1030,8 @@ def main() -> None:
                 trader = AgentTrader(bridge, bridge.agent_cfg)
                 res = trader.run(syms, dry_run=args.dry_run, force=args.force,
                                  plan_only=args.plan_only, candidates=cands,
-                                 pool_source=note)
+                                 pool_source=note,
+                                 ignore_schedule=args.ignore_schedule)
             emit(res, ok=res.get("ok", False), error=res.get("error"))
             if not res.get("ok"):
                 sys.exit(3)

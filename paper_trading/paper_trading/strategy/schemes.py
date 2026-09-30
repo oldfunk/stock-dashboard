@@ -1,7 +1,7 @@
 """投资方案：永远只有 3 种。
 
 1. mother   Stock Dashboard 价值投资理念方案（需检测到 Stock Dashboard 才可用；
-            宇宙=母筛选，执行沿用通用规则，论点优先）
+            选股范围=母筛选，执行沿用通用规则，论点优先）
 2. general  Paper Trading 默认通用交易策略（默认选中，开箱即用）
 3. custom   自定义：用户用自然语言写交易指令，直接喂给 AI
 
@@ -82,7 +82,7 @@ def mother_scheme() -> Scheme | None:
         return None
     return Scheme(
         name=MOTHER_ID, title="Stock Dashboard 价值",
-        desc="Stock Dashboard 价值投资理念：宇宙取自 Stock Dashboard 最新筛选，执行沿用通用规则，论点优先",
+        desc="Stock Dashboard 价值投资理念：选股范围取自 Stock Dashboard 最新筛选，执行沿用通用规则，论点优先",
         available=True, source=MOTHER_ID, universe_source="screening", universe_limit=15,
         signal={"short_window": 5, "long_window": 20,
                 "buy_volume": 100, "sell_volume": 100},
