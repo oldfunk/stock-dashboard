@@ -111,7 +111,7 @@ stock-dashboard/
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 501 passed，2026-09-29 生产服务器 gate 全绿）
+├── tests/                      # pytest（基线 512 passed，2026-09-29 生产服务器 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO 表单测
@@ -249,7 +249,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
 - **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-29 生产服务器基线 501 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-09-29 生产服务器基线 512 passed）
 
 ---
 
@@ -271,7 +271,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支（外部贡献走 Pull Request）
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 501 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 512 passed 只升不降，确切数见账本最新 Changelog）
 3. 合并到 `main`（维护者直接合并；外部 PR 由维护者审核合并）
 4. 生产部署由维护者执行（systemd `stock-dashboard.service` :9527；部署目标配置不入库）
 
