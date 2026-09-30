@@ -40,7 +40,7 @@ flowchart LR
 
 ### 新开（2026-09-28 纸盘模拟）
 
-- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并 + subtree 机制化（三处一字未动）——原面板嵌回 `/paper`（直达 :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA/agent dry-run 与 `llm ask` 已验证；首个真 agent 决策待收盘后；自动调度未配
+- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并 + subtree 机制化（三处一字未动）——原面板嵌回 `/paper`（直达 :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA/agent dry-run 与 `llm ask` 已验证；自动调度已开（2026-09-30 用户批准，母价值路线：workday 16:45 tick，`--scheme mother` + screening 15 只，一日一决策，三道闸不变）
 
 ### 防回归门禁（AKShare 事故不再犯）
 

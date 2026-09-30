@@ -162,6 +162,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-09-30（自动交易开了：母价值路线，workday 16:45 tick 一日一决策）
+- **批准**：用户明确批准 + 定路线（价值投资：收盘后、母宇宙、论点优先）。pending 项关闭。
+- **配了什么**（生产运行时配置，未动仓库代码）：`agent schedule` 队列 `16:45=trade`（source: local）；系统 cron `*/15 16-17 * * 1-5` 调 `agent tick --scheme mother --pool-from screening --pool-limit 15`（:8081 实例专属；:8080 独立实例原 cron 一字未动）。钳制沿用：3 单×2 万/日亏 5%/回撤熔断/幂等闸（dry-run 计入）。
+- **开前验证**（dry-run，零下单）：母池 15 只决策买入天华新能/盐湖股份各 100（理由引母 PE/ROE/10 年均），余下 hold（触日买上限）；NAV 100000 未动。Key/母方案/agent 开关三样齐。
+- **首跑预期**：明日国庆休市（无新 bars → skip）；首个真决策在下个交易日 16:45 tick。今日 dry-run 已占今日闸，不影响明日。
+- **回退**：删 cron 行 + `agent schedule` 清队列即停（30 秒操作，记此处备用）。
+
 ### 2026-09-30（v0.3.0 vendor：定时动作队列，基线 501→512）
 - **拉取**：`git subtree pull --prefix=paper_trading paper-upstream v0.3.0 --squash`（tag 注解带 54 单测证据；账本锁 v0.3.0）。干净合入，零冲突。
 - **内容**（14 文件，819+/56-）：定时动作队列（时刻→同步/分析/计划/交易动作 + tick 分发 + 面板行编辑 + 定时闸失忆修复）为大头；其余文档（回链/审计/截图/IP 写法）+ scheme 改字 + import 除味。
