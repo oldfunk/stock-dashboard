@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 512 passed，只升不降）。
+测试门禁：`bash scripts/gate.sh`（**在生产服务器执行**——开发在本机、测试在生产，本机不跑 pytest；全仓零失败；基线 516 passed，只升不降）。
 
 ## 技术栈
 
