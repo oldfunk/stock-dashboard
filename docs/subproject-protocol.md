@@ -14,7 +14,7 @@
 ## 2. 流向（单向 tag 流）
 
 1. 子项目只在自家仓库开发，**母方永不反向推分支**。
-2. 子方按功能打 tag（`v0.x.y` + changelog + 单测证据）；母方**只跟 tag，不跟 main**。
+2. 子方按功能打 tag（`v0.x.y` + changelog + 单测证据）；母方**默认跟最新 tag**（包工头可指定版本/分支为例外，例外入账），不跟 main。
 3. Vendor 命令：`git subtree pull --prefix=<dir> <remote> <tag> --squash`（nightly 分支操作）。
 4. 母方按需拉取，不承诺跟进时效；账本记录 vendored 版本号（当 lockfile 用）。
 
