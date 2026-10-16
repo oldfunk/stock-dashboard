@@ -656,12 +656,37 @@ def _to_klinecharts(records: list[dict]) -> list[dict]:
     return result
 
 
+def _build_kline_on_demand(code: str, limit: int) -> list[dict]:
+    """库内无该股日K时拉取并落库（用户搜索新股/冷门股；重启用，流水线仍只覆盖池内）。
+
+    拉取失败一律回空列表：详情页照常开，只是图空着，不让 5xx 冒到页面。
+    """
+    from src.collector.akshare_fetcher import fetch_kline_data
+    from src.models.database import KlineDAO
+
+    try:
+        records = fetch_kline_data(code)
+    except Exception as e:
+        logger.warning("[K线] %s 按需拉取失败: %s", code, e)
+        return []
+    if not records:
+        logger.info("[K线] %s 数据源无返回", code)
+        return []
+    try:
+        KlineDAO().upsert_many(code, records)
+        logger.info("[K线] %s 按需构建 %d 根", code, len(records))
+    except Exception as e:
+        logger.warning("[K线] %s 落库失败（仍返回数据）: %s", code, e)
+    return KlineDAO().get_daily(code, limit=limit)
+
+
 @app.get("/api/stock/{code}/kline")
 async def stock_kline(code: str, period: str = "daily", limit: int = 250):
     """K线数据 API
 
     period: daily / weekly / monthly
     返回 klinecharts 所需格式
+    库内无该股日K（如用户搜索的冷门股）时按需拉取并落库，避免图表空白。
     """
     import re
     if not re.match(r"^\d{6}$", code):
@@ -672,6 +697,8 @@ async def stock_kline(code: str, period: str = "daily", limit: int = 250):
     from src.models.database import KlineDAO
     dao = KlineDAO()
     daily = dao.get_daily(code, limit=limit)
+    if not daily:
+        daily = _build_kline_on_demand(code, limit)
 
     if period != "daily":
         daily = _aggregate_kline(daily, period)
@@ -1756,7 +1783,22 @@ async def api_journal_by_date(journal_date: str):
 # 注：已移除路由的注释尸体于 2026-09-21 清理（git 历史可查）；B5 漂移逻辑见下方 live 的 _detect_pool_drift。
 
 
-def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:
+def _load_summary(raw) -> dict:
+    """actions_summary（JSON 文本/None）→ dict；坏了就当空，绝不抛。"""
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("[矛盾检测] actions_summary 解析失败，按空处理")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _detect_pool_drift(current_json: dict, previous_json: dict,
+                         prev_date: str = '', cur_date: str = '') -> list[dict]:
     """B5 论点漂移（实时计算）：打脸回归 + 池内股跨轮 Signal/verdict 翻转。
     输入为两期 actions_summary 解析后的 dict；screening 跨轮取最近两轮。"""
     drifts = []
@@ -1805,7 +1847,55 @@ def _detect_pool_drift(current_json: dict, previous_json: dict) -> list[dict]:
                 "message": f"结论反转：{code} 上轮 {pv} → 本轮 {cv}",
                 "severity": "warning",
             })
+    # 兜底：筛选轮次里没存 AI 信号时（信号多在 ai_analysis_history），
+    # 用该股最近两期带信号的分析记录比 Signal——否则漂移检测长期空转。
+    drifts.extend(_detect_history_signal_flips(pool_codes, prev_date, cur_date))
     return drifts
+
+
+def _signal_asof(rows: list[dict], cutoff: str) -> tuple[str, str] | None:
+    """rows（按时间倒序）里 <= cutoff 的最新一条有 Signal 的记录 → (日期, Signal)。"""
+    for r in rows or []:
+        day = (r.get('analysis_date') or '')[:10]
+        if cutoff and day > cutoff:
+            continue
+        sig = _trade_signal(r)
+        if sig:
+            return day, sig
+    return None
+
+
+def _detect_history_signal_flips(pool_codes: set, prev_date: str = '',
+                                 cur_date: str = '') -> list[dict]:
+    """两期笔记之间池内股的 Signal 翻转（数据源：stock_analysis_history）。
+
+    语义：取「上期笔记当日或之前」的 Signal 与「本期笔记当日或之前」的 Signal 比，
+    不同即报——这正是论点是否被打脸。筛选轮次没存信号时靠它兜底。
+    """
+    if not prev_date or not cur_date:
+        return []
+    from src.models.database import StockAnalysisHistoryDAO
+
+    flips = []
+    dao = StockAnalysisHistoryDAO()
+    for code in sorted(c for c in pool_codes if c):
+        try:
+            rows = dao.get_history(code, limit=20)
+        except Exception:
+            logger.warning("[矛盾检测] %s 分析历史读取失败，跳过", code)
+            continue
+        old = _signal_asof(rows, prev_date)
+        new = _signal_asof(rows, cur_date)
+        if not old or not new or old[0] == new[0]:
+            continue
+        if old[1] != new[1]:
+            flips.append({
+                "type": "signal_flip_history",
+                "message": (f"Signal 反转（两期之间）：{code} "
+                            f"{old[1]}（{old[0]}）→ {new[1]}（{new[0]}）"),
+                "severity": "warning",
+            })
+    return flips
 
 
 def _latest_two_run_ids() -> list[str]:
@@ -1865,23 +1955,18 @@ async def api_journal_conflicts(journal_date: str):
             "severity": "info"
         })
     
-    # 检查模型变化
-    current_actions = journal['actions_summary']
-    previous_actions = previous['actions_summary']
-    
-    if current_actions and previous_actions:
-        try:
-            current_json = json.loads(current_actions)
-            previous_json = json.loads(previous_actions)
-            
-            if current_json.get('model') != previous_json.get('model'):
-                conflicts.append({
-                    "type": "model_change",
-                    "message": f"分析模型从 {previous_json.get('model', '未知')} 变为 {current_json.get('model', '未知')}",
-                    "severity": "info"
-                })
-        except:
-            pass
+    # 检查模型变化（actions_summary 缺失也要能继续：解析统一走 _load_summary，
+    # 2026-10-16 修：原来 current_json/previous_json 只在 if 分支内赋值，
+    # 任一期为空时下方漂移检测 NameError 被裸 except 吞掉，漂移检测等于从未运行）
+    current_json = _load_summary(journal['actions_summary'])
+    previous_json = _load_summary(previous['actions_summary'])
+
+    if current_json.get('model') != previous_json.get('model'):
+        conflicts.append({
+            "type": "model_change",
+            "message": f"分析模型从 {previous_json.get('model', '未知')} 变为 {current_json.get('model', '未知')}",
+            "severity": "info"
+        })
     
     # 检查市场环境变化
     if journal['market_snapshot'] != previous['market_snapshot']:
@@ -1892,10 +1977,9 @@ async def api_journal_conflicts(journal_date: str):
         })
 
     # B5 论点漂移：打脸回归 + 池内股跨轮 Signal/verdict 翻转（实时计算，免新表）
-    try:
-        conflicts.extend(_detect_pool_drift(current_json, previous_json))
-    except Exception:
-        pass
+    conflicts.extend(_detect_pool_drift(
+        current_json, previous_json,
+        previous.get('journal_date', ''), journal.get('journal_date', '')))
 
     return {
         "has_conflicts": len(conflicts) > 0,

@@ -267,7 +267,8 @@
             const [date1, date2] = selectedDates.sort();
             window.location.href = `/journal/compare/${date1}/${date2}`;
         };
-    
+    }
+
         // 矛盾检测加载
         function loadConflicts() {
             const journalDate = '{{ journal.journal_date }}';
@@ -308,12 +309,17 @@
         }
     
         // 页面加载完成后执行矛盾检测
-        document.addEventListener('DOMContentLoaded', function() {
-            if (document.querySelector('.conflict-panel')) {
-                loadConflicts();
-            }
-        });
+    // 本脚本位于 body 末尾、矛盾面板之后，面板必已存在 → 直接跑；
+    // 不再只挂 DOMContentLoaded（该事件在本页偶发不触发，会永远停在“检测中…”）。
+    var __conflictStarted = false;
+    function startConflictCheck() {
+        if (__conflictStarted) return;
+        if (!document.querySelector('.conflict-panel')) return;
+        __conflictStarted = true;
+        loadConflicts();
     }
+    startConflictCheck();
+    document.addEventListener('DOMContentLoaded', startConflictCheck);
 </script>
 </body>
 </html>
