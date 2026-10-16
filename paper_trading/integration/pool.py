@@ -1,9 +1,12 @@
-"""股票池来源：config（默认，独立模式）+ Stock Dashboard 只读（合并模式）。
+"""股票池来源（默认 auto：全市场筛选优先，手填池只作最后兜底）。
 
---pool-from config      只用 config.yaml（默认；母项目不存在时自动回退到此）
+--pool-from auto        自动择优：screening → watchlist → config（缺一降级）
+--pool-from screening   母库最新一轮全市场筛选 active 候选（按 score 降序，限 N 只）
 --pool-from watchlist   母库观察池（ai_watchlist + watchlist 并集）
---pool-from screening   母库最新一轮筛选 active 候选（按 score 降序，限 N 只）
---pool-from all         config + watchlist + screening 全并集
+--pool-from all         screening + watchlist 并集（不含手填池）
+--pool-from config      只用 config.yaml 手填池（独立模式/临时指定）
+
+原则：手填池是兜底不是常态——程序与 AI 选出的标的才是主路径。
 """
 from __future__ import annotations
 
@@ -103,6 +106,18 @@ def resolve_pool(symbols_arg: Optional[list[str]],
     db = mother_db_path(mother)
     if db is None:
         return list(config_pool), "config(fallback:母库不可用)", []
+    if pool_from in ("auto", "Auto"):
+        # 自动择优：全市场筛选 > 观察池 > 手填池（手填只兜底，不叠加）
+        cands = _read_screening(db, pool_limit, tag)
+        if cands:
+            note = f"screening(全市场筛选Top{len(cands)}"
+            note += f",tag={tag}" if tag else ""
+            note += ",auto)"
+            return [c["symbol"] for c in cands], note, cands
+        wl = _read_watchlist(db)
+        if wl:
+            return wl, "watchlist(auto:无筛选结果)", []
+        return list(config_pool), "config(fallback:auto无候选)", []
     if pool_from == "watchlist":
         wl = _read_watchlist(db)
         syms = wl or list(config_pool)
@@ -116,12 +131,10 @@ def resolve_pool(symbols_arg: Optional[list[str]],
         return [c["symbol"] for c in cands], note, cands
     if pool_from == "all":
         cands = _read_screening(db, pool_limit, tag)
-        merged = list(config_pool)
-        for c in cands:
-            if c["symbol"] not in merged:
-                merged.append(c["symbol"])
+        merged: list[str] = [c["symbol"] for c in cands]
         for c in _read_watchlist(db):
             if c not in merged:
                 merged.append(c)
-        return merged, "all(config+screening+watchlist)", cands
+        note = f"all(screening{len(cands)}+watchlist)" if cands else "all(仅观察池)"
+        return merged, note, cands
     return list(config_pool), "config", []

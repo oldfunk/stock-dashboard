@@ -8,8 +8,10 @@
 from .analysis import read_market_regime, read_stock_cards
 from .pool import resolve_pool
 from .settings import is_merged, mother_db_path, mother_dir
+from .universe import is_a_share, search_symbols, universe_size
 
 __all__ = [
     "is_merged", "mother_dir", "mother_db_path",
     "resolve_pool", "read_stock_cards", "read_market_regime",
+    "search_symbols", "is_a_share", "universe_size",
 ]

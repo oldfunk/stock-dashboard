@@ -100,12 +100,13 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 
 1. **定时闸（时刻 → 动作队列）**：cron 高频 tick 调 `agent tick`，进程内按 `strategy.local.yaml` 的 `agent_schedule.queue` 消费——动作仅 sync（同步）/analyze（试运行分析）/plan（做计划）/trade（实盘交易）四种，每条每天最多跑一次，保序。时刻未到/队列跑完记 `not-in-schedule` 跳过，不问 LLM。直接 `agent run` = 跑一次 trade，只看 trade 条目。`--ignore-schedule` 仅手动补跑用。
 2. **单交易员原则**：同一账户同一天只跑 `run`（MA）或 `agent run`（AI）其一，cron 二选一；默认每日 1 次时沿用 `already-decided` 幂等（`--force` 除外）。
-2. **三道闸**：单子数上限（`agent.max_orders_per_run`，默认 3）+ 单笔金额上限（默认 2 万）+ 日亏熔断（默认 -5%，另有回撤熔断 20% 兜底）。
-3. **fail-closed**：LLM 输出非严格 JSON / 标的不在池 / 非 100 倍数 / 超限 / 风控拒绝 → 整单作废，只记 `ai:decide` 流水，不下单。坏输出永不重试下单。
-4. **可审计**：每次决策记原文摘要 + 逐条处置（已成交/拒绝原因）+ 决策后资产；面板“AI 决策”中文渲染。
-5. dry-run 不碰账本（不解冻不下单不记 NAV），只走校验链。
-6. **休盘计划开盘执行**：`--plan-only` 基于最新定稿数据做计划存 `agent_plans`（不碰账本、不锁日）；开盘 `agent run` 优先消费当日待执行计划（价格沿用计划基准，风控重验），消费后标记 done。开盘 gap 与定稿价的差异是已知简化。
-7. **Stock Dashboard 连接只读**：`paper_trading/integration/` 是唯一允许碰母库的地方，且只能 SQLite 只读打开；母库缺失/异常时静默回退本地，永不阻断交易。`--pool-from`（config/watchlist/screening/all）是唯一的池来源开关，缺省 `config`（行为零变化）。
+3. **三道闸**：单子数上限（`agent.max_orders_per_run`，默认 3）+ 单笔金额上限（默认 2 万）+ 日亏熔断（默认 -5%，另有回撤熔断 20% 兜底）。
+4. **fail-closed**：LLM 输出非严格 JSON / 标的不在池 / 非 100 倍数 / 超限 / 风控拒绝 → 整单作废，只记 `ai:decide` 流水，不下单。坏输出永不重试下单。
+5. **可审计**：每次决策记原文摘要 + 逐条处置（已成交/拒绝原因）+ 决策后资产；面板“AI 决策”中文渲染。
+5. **全市场选股漏斗（程序 + AI 共同选）**：`--pool-from auto`（缺省）= 母项目全市场量化筛选→ 观察池 → 手填 config 池逐级降级（手填只兜底、不叠加，`all` 也不含手填池）。随后 pass1 让 AI 在候选之外**自主提名任意 A 股**（写名称或 6 位代码），程序用母库全市场代码表（`stock_snapshot`，约 5500 只，只读）解析+校验 A 股前缀、过滤指数/ETF、去重、上限 `agent.picks_max`（默认 5），补齐 K 线后并入本轮决策范围；提名进 `ai:decide` 流水可审计。pass1 任何失败（坏 JSON/库不可读/全不合法）一律降级为“只用候选池”，绝不阻断；新鲜守卫拦下时不浪费提名调用。`--no-picks` 或 `agent.picks_enabled=false` 关闭。
+6. dry-run 不碰账本（不解冻不下单不记 NAV），只走校验链。
+7. **休盘计划开盘执行**：`--plan-only` 基于最新定稿数据做计划存 `agent_plans`（不碰账本、不锁日）；开盘 `agent run` 优先消费当日待执行计划（价格沿用计划基准，风控重验），消费后标记 done。开盘 gap 与定稿价的差异是已知简化。
+8. **Stock Dashboard 连接只读**：`paper_trading/integration/` 是唯一允许碰母库的地方，且只能 SQLite 只读打开；母库缺失/异常时静默回退本地，永不阻断交易。`--pool-from`（auto/config/watchlist/screening/all）是唯一的池来源开关，缺省 `auto`。
 
 ## Risk Parameters
 

@@ -45,3 +45,5 @@ agent:
   llm_retries: 1
   llm_max_tokens: 8192
   llm_thinking: disabled
+  picks_enabled: true     # AI 自主提名：候选之外允许它点名全市场任意 A 股
+  picks_max: 5            # 单轮最多提名几只（1-10）

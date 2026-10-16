@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -33,6 +35,45 @@ def test_schemes_have_source():
     for name, s in ss.items():
         assert s.source, name
         assert isinstance(s.allow_buy, bool), name
+
+
+def test_models_endpoint_has_no_token_gate():
+    """拉模型不得被口令门禁拦（用户抱怨点：重启后提示"必须保存 Key 才能拉"）。
+    源码级锁定：/api/llm/models 分支内不得出现 _admin_ok / 403。"""
+    import inspect
+
+    import paper_trading.dashboard as d
+
+    src = inspect.getsource(d.Handler.do_GET)
+    start = src.index('u.path == "/api/llm/models"')
+    seg = src[start:start + 700]
+    seg = seg.split("elif u.path", 1)[0]
+    assert "_admin_ok" not in seg
+    assert "403" not in seg
+    # 前端不得再有"先保存配置才能拉"的拦截
+    assert "请先保存一次配置" not in d.PAGE
+    assert '/api/llm/models"' in d.PAGE  # 直接拉，不带 token
+
+
+def test_read_json_bad_body_raises():
+    """坏 JSON 必须报真实原因（以前静默变空 body → 用户看到误导性报错）。"""
+    import io
+
+    import paper_trading.dashboard as d
+
+    h = d.Handler.__new__(d.Handler)          # 不跑 __init__（不绑 socket）
+    h.headers = {"Content-Length": "7"}
+    h.rfile = io.BytesIO(b"{bad js")
+    with pytest.raises(ValueError) as ei:
+        h._read_json()
+    assert "合法 JSON" in str(ei.value)
+    h.headers = {"Content-Length": "0"}
+    h.rfile = io.BytesIO(b"")
+    assert h._read_json() == {}
+    h.headers = {"Content-Length": "2"}
+    h.rfile = io.BytesIO(b"[]")
+    with pytest.raises(ValueError):
+        h._read_json()
 
 
 def test_takeover_token(tmp_path):

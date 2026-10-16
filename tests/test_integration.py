@@ -80,6 +80,54 @@ def test_pool_watchlist_and_screening(tmp_path, monkeypatch):
     assert syms == ["000001"] and note == "cli"  # CLI 显式优先（短码补零）
 
 
+def test_search_symbols_from_full_market_table(tmp_path, monkeypatch):
+    """AI 提名解析：母库全市场代码表（5527 只量级）按代码/名称/模糊匹配，只读。"""
+    from paper_trading.integration import is_a_share, search_symbols, universe_size
+
+    mdir = _mother(tmp_path)
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(mdir))
+    db = mother_db_path()
+    before = db.stat().st_mtime_ns
+    assert universe_size() == 1        # fake 母库只有 1 只
+    # 代码精确
+    got = search_symbols(["600519"])
+    assert got and got[0]["symbol"] == "600519" and got[0]["name"] == "贵州茅台"
+    assert got[0]["matched"] == "code"
+    # 名称精确 / 模糊
+    assert search_symbols(["贵州茅台"])[0]["matched"] == "name"
+    assert search_symbols(["茅台"])[0]["symbol"] == "600519"
+    assert search_symbols(["茅台"])[0]["matched"] == "name~"
+    # 噪声词与非法代码一律拒绝
+    assert search_symbols(["沪深300指数", "上证ETF"]) == []
+    assert search_symbols(["999999"]) == []          # 表里没有
+    # 去重
+    assert len(search_symbols(["600519", "贵州茅台"])) == 1
+    assert is_a_share("600519") and is_a_share("000858") and is_a_share("300750")
+    assert not is_a_share("510300") and not is_a_share("12345") and not is_a_share("")
+    assert db.stat().st_mtime_ns == before            # 只读，未写母库
+    # 母库缺席：退化本地表，仍不崩
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(tmp_path / "nothing"))
+    assert universe_size() == 0
+    assert search_symbols(["600519"], local_names={"600519": "贵州茅台"})[0]["matched"] \
+        == "local"
+    assert search_symbols(["不存在的票"], local_names={"600519": "贵州茅台"}) == []
+
+
+def test_pool_auto_prefers_screening(tmp_path, monkeypatch):
+    """auto：全市场筛选优先，缺失时降级观察池，再降级手填池（手填只兜底）。"""
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(tmp_path / "nothing"))
+    syms, note, c = resolve_pool(None, ["600519"], "auto")
+    assert syms == ["600519"] and "fallback" in note and c == []
+    mdir = _mother(tmp_path)
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(mdir))
+    syms, note, c = resolve_pool(None, ["111111"], "auto")
+    assert syms == ["600519"] and note.startswith("screening") and c
+    assert "111111" not in syms          # 手填池不叠加进 auto
+    # all 不再含手填池
+    syms, note, _ = resolve_pool(None, ["111111"], "all")
+    assert syms == ["600519", "600036", "000858"] and note.startswith("all")
+
+
 def test_analysis_readonly_and_content(tmp_path, monkeypatch):
     mdir = _mother(tmp_path)
     monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(mdir))

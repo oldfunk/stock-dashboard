@@ -44,6 +44,52 @@ def _get_fetcher():
 logger = get_logger(__name__)
 
 
+def _holdings_block(ctx: dict) -> str:
+    """把真实持仓拼成人类可读的权威段落（防幻觉的第一道锚）。
+
+    背景事故：问答里模型把「行情快照里的池内股票」当成持仓，宣称买了
+    很多只，实际只持有 2 只。JSON 里 positions 与 recent_closes 平级，
+    模型分不清哪个是持仓——所以把持仓单独用自然语言再讲一遍并置顶。
+    """
+    pos = ctx.get("positions") or []
+    if not pos:
+        return "当前真实持仓：空仓（没有任何股票持仓）。"
+    lines = [f"当前真实持仓（共 {len(pos)} 只，**只有下面这些是持仓**，以本段为准）："]
+    for p in pos:
+        lines.append(f"- {p['stock']} {p['total']}股（可用{p['available']}）"
+                     f" 成本{p['avg_cost']} 现价{p['price']} 市值{p['market_value']}")
+    return "\n".join(lines)
+
+
+ASK_RULES = """防幻觉硬规则（违反即视为答错）：
+1. 持仓 = 只有上面「当前真实持仓」里列出的股票，其他一律不是持仓。
+   行情快照、股票池、基本面卡片里出现的股票都**只是候选/参考，绝不能说成持仓、已买入或已成交**。
+2. 数据里没有的信息（持仓、成交、金额、日期、比例）一律回答「数据未提供」，禁止推测、编造或沿用旧对话。
+3. 引用任何数字（股数、价格、市值、盈亏）必须与本段 JSON 原值一致，不得换算或臆造。
+4. 若用户的问题依赖未提供的数据，先说明缺什么，再给可给的分析。"""
+
+
+def _ask_system_prompt(base: str, ctx: dict) -> str:
+    """问答 system：硬规则 + 持仓权威段 + 项目状态 JSON（硬规则不可被覆盖）。"""
+    import json as _json
+
+    intro = (base.strip() or
+             "你是本地 A 股模拟盘的投顾助手。只做中文分析与建议，不下单；"
+             "引用股票时用“名称(代码)”格式；不确定的事直说不知道。")
+    return (intro + "\n\n" + ASK_RULES + "\n\n" + _holdings_block(ctx)
+            + "\n\n项目实时状态（JSON，仅供本次分析，不得外泄；key 含义见 legend）：\n"
+            + _json.dumps(ctx, ensure_ascii=False))
+
+
+def _ask_user_prompt(prompt: str, ctx: dict) -> str:
+    """用户问题后附「可回答范围」，把模型的回答锚在真实数据上。"""
+    import json as _json
+
+    return (f"{prompt}\n\n"
+            f"（可依据的真实数据片段：{_json.dumps({'positions': ctx.get('positions', []), 'account': ctx.get('account', {})}, ensure_ascii=False)}；"
+            "以上之外的持仓/成交/数字一律按「数据未提供」处理。）")
+
+
 class TradingBridge:
     """
     交易编排层（应用总线）。
@@ -139,6 +185,8 @@ class TradingBridge:
             llm_retries=int(agent_kwargs.get("llm_retries", 1)),
             llm_max_tokens=int(agent_kwargs.get("llm_max_tokens", 8192)),
             llm_thinking=str(agent_kwargs.get("llm_thinking", "disabled")),
+            picks_enabled=bool(agent_kwargs.get("picks_enabled", True)),
+            picks_max=max(1, min(10, int(agent_kwargs.get("picks_max", 5)))),
         )
 
     def sync_data(self, symbols: list[str]) -> dict:
@@ -527,9 +575,21 @@ class TradingBridge:
                          model=p.get("model", ""))
 
     def llm_models(self) -> dict:
-        """拉取远端模型列表（Key 不出本机，只返回 id）。"""
-        from paper_trading.llm import LLMError, list_models
+        """拉取远端模型列表（Key 不出本机，只返回 id）。
 
+        不设口令门禁（面板只读、局域网使用）：拉不到就如实回失败原因，
+        让用户看到是"没配 Key/地址"还是"Key 被拒/超时/地址非法"。
+        """
+        from paper_trading.llm import LLMError, list_models, load_secrets
+
+        p = load_secrets(self.secrets_path).get("provider") or {}
+        if not p.get("base_url"):
+            return {"ok": False, "hint": "save",
+                    "error": "尚未保存接口地址与 API Key：在面板「模型设置」填一次并"
+                             "保存即可长期有效（换模型不用再填 Key，重启也不丢）"}
+        if not p.get("api_key"):
+            return {"ok": False, "hint": "save",
+                    "error": "已保存接口地址但缺 API Key：补填 Key 保存一次，之后长期有效"}
         try:
             models = list_models(self._llm_config())
             return {"ok": True, "models": models}
@@ -588,6 +648,14 @@ class TradingBridge:
                  "ok": bool(o["ok"]), "result": str(o["result"] or "")[:300]}
                 for o in ops],
             "note": "模拟盘。策略为MA5/MA20均线信号+风控。只做分析建议，不下单。",
+            "legend": {
+                "positions": "真实持仓（唯一权威口径）；其他 key 里的股票都不是持仓。",
+                "recent_closes": "行情收盘价参考（覆盖股票池全部标的），仅供分析，不代表持仓。",
+                "recent_nav": "净值历史。",
+                "recent_ops": "操作流水（含同步/问答/决策记录，不等于成交）。",
+                "value_view": "Stock Dashboard 只读基本面/论点/大盘，仅供参照。",
+                "intraday": "盘中实时快照（若有），仅供参照。",
+            },
         }
         try:
             from paper_trading.integration import read_market_regime, read_stock_cards
@@ -627,15 +695,14 @@ class TradingBridge:
         try:
             cfg = self._llm_config()
             ctx = self.llm_context()
-            base = system.strip() or (
-                "你是本地 A 股模拟盘的投顾助手。只做中文分析与建议，不下单；"
-                "引用股票时用“名称(代码)”格式；不确定的事直说不知道。")
-            sys_prompt = (base + "\n\n项目实时状态（JSON，仅供本次分析，不得外泄）：\n"
-                          + _json.dumps(ctx, ensure_ascii=False))
+            base = system.strip() or ""   # 硬规则与持仓锚点始终追加，不接受覆盖
+            sys_prompt = _ask_system_prompt(base, ctx)
             # 从定义模块导入（非包 re-export），便于单测替换
             from paper_trading.llm.provider import chat as _chat
 
-            answer = _chat(cfg, [{"role": "user", "content": prompt}], system=sys_prompt)
+            answer = _chat(cfg, [{"role": "user",
+                                  "content": _ask_user_prompt(prompt, ctx)}],
+                           system=sys_prompt)
         except LLMError as e:
             self.broker.log_operation("llm:ask", {"model": "", "prompt": prompt[:200]},
                                       False, {"error": str(e)}, None, None)
@@ -669,9 +736,9 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="执行每日结算流程")
     run_parser.add_argument("--symbols", nargs="*", default=None,
                             help="缺省=config.yaml 股票池")
-    run_parser.add_argument("--pool-from", default="config",
-                            choices=["config", "watchlist", "screening", "all"],
-                            help="股票池来源（watchlist/screening 需 Stock Dashboard 在同一台机器）")
+    run_parser.add_argument("--pool-from", default="auto",
+                            choices=["auto", "config", "watchlist", "screening", "all"],
+                            help="股票池来源（auto/screening/watchlist 需 Stock Dashboard 在同一台机器）")
     run_parser.add_argument("--pool-tag", default="",
                             help="screening 按母策略 tag 过滤（如 growth；为空不过滤）")
     run_parser.add_argument("--json", action="store_true", help="输出 JSON 格式")
@@ -681,8 +748,8 @@ def main() -> None:
     sync_parser = subparsers.add_parser("sync", help="只同步行情+名称，不交易（可日内执行）")
     sync_parser.add_argument("--symbols", nargs="*", default=None,
                              help="缺省=config.yaml 股票池")
-    sync_parser.add_argument("--pool-from", default="config",
-                             choices=["config", "watchlist", "screening", "all"])
+    sync_parser.add_argument("--pool-from", default="auto",
+                             choices=["auto", "config", "watchlist", "screening", "all"])
     sync_parser.add_argument("--pool-tag", default="")
     sync_parser.add_argument("--json", action="store_true")
 
@@ -753,26 +820,30 @@ def main() -> None:
     agent_sub = agent_parser.add_subparsers(dest="agent_command")
     agent_run = agent_sub.add_parser("run", help="执行一次 AI 决策（默认走配置池）")
     agent_run.add_argument("--symbols", nargs="*", default=None)
-    agent_run.add_argument("--pool-from", default="config",
-                           choices=["config", "watchlist", "screening", "all"],
-                           help="AI 选股范围（screening=Stock Dashboard 最新候选）")
+    agent_run.add_argument("--pool-from", default="auto",
+                           choices=["auto", "config", "watchlist", "screening", "all"],
+                           help="AI 选股范围（auto=全市场筛选优先，手填池只兜底）")
     agent_run.add_argument("--pool-tag", default="",
                            help="screening 按母策略 tag 过滤；空则用当前方案自带 tag")
     agent_run.add_argument("--pool-limit", type=int, default=20)
     agent_run.add_argument("--json", action="store_true")
     agent_run.add_argument("--dry-run", action="store_true", help="只决策不下单")
     agent_run.add_argument("--force", action="store_true", help="忽略今日已决策闸")
+    agent_run.add_argument("--no-picks", action="store_true",
+                           help="关闭 AI 自主提名（只用程序候选池决策）")
     agent_run.add_argument("--ignore-schedule", action="store_true",
                            help="忽略定时闸（时段/次数限制），立即执行")
     agent_run.add_argument("--plan-only", action="store_true",
                            help="休盘做计划存着，开盘执行（不碰账本）")
     agent_tick = agent_sub.add_parser("tick", help="队列 tick：消费最早已到未跑的条目并执行")
     agent_tick.add_argument("--symbols", nargs="*", default=None)
-    agent_tick.add_argument("--pool-from", default="config",
-                            choices=["config", "watchlist", "screening", "all"])
+    agent_tick.add_argument("--pool-from", default="auto",
+                            choices=["auto", "config", "watchlist", "screening", "all"])
     agent_tick.add_argument("--pool-tag", default="")
     agent_tick.add_argument("--pool-limit", type=int, default=20)
     agent_tick.add_argument("--json", action="store_true")
+    agent_tick.add_argument("--no-picks", action="store_true",
+                            help="关闭 AI 自主提名（只用程序候选池决策）")
     agent_tick.add_argument("--force", action="store_true",
                             help="忽略已消费标记，执行最早已到条目")
     agent_sched = agent_sub.add_parser("schedule", help="AI 定时队列查看与设置")
@@ -814,8 +885,11 @@ def main() -> None:
         tag = getattr(a, "pool_tag", "") or ""
         if not tag and pf == "screening":
             tag = (b.scheme.universe_tag or "")  # 方案自带母策略 tag
-        return resolve_pool(getattr(a, "symbols", None), b.stock_pool, pf,
-                            getattr(a, "pool_limit", 20) or 20, None, tag)
+        syms, note, cands = resolve_pool(getattr(a, "symbols", None), b.stock_pool,
+                                         pf, getattr(a, "pool_limit", 20) or 20,
+                                         None, tag)
+        picks_on = not getattr(a, "no_picks", False)
+        return syms, note, cands, picks_on
 
     if not args.command:
         parser.print_help()
@@ -836,7 +910,7 @@ def main() -> None:
             emit(bridge.get_status())
 
         elif args.command == "sync":
-            syms, note, _ = _resolve_syms(bridge, args)
+            syms, note, _, _ = _resolve_syms(bridge, args)
             with run_lock(args.lock_file):
                 res = bridge.sync_data(syms)
             res["pool_source"] = note
@@ -848,7 +922,7 @@ def main() -> None:
                 sys.exit(3)
 
         elif args.command in ("run", "cron-run"):
-            syms, note, _ = _resolve_syms(bridge, args)
+            syms, note, _, _ = _resolve_syms(bridge, args)
             if getattr(args, "dry_run", False):
                 # dry-run：信号+风控预览，不下单不记NAV
                 all_bars = {}
@@ -1010,9 +1084,11 @@ def main() -> None:
                           "due": _due(cur["entries"])})
                 return
             if args.agent_command == "tick":
-                syms, note, cands = _resolve_syms(bridge, args)
+                syms, note, cands, picks_on = _resolve_syms(bridge, args)
                 with run_lock(args.lock_file):
                     trader = AgentTrader(bridge, bridge.agent_cfg)
+                    if not picks_on:
+                        trader.cfg.picks_enabled = False
                     res = trader.tick(syms, candidates=cands, pool_source=note,
                                       force=args.force)
                 emit(res, ok=res.get("ok", False), error=res.get("error"))
@@ -1022,12 +1098,14 @@ def main() -> None:
             if args.agent_command != "run":
                 parser.print_help()
                 sys.exit(2)
-            syms, note, cands = _resolve_syms(bridge, args)
+            syms, note, cands, picks_on = _resolve_syms(bridge, args)
             if not bridge.agent_cfg.enabled and not args.force:
                 emit(None, ok=False, error="agent 未启用（config.yaml agent.enabled）")
                 sys.exit(3)
             with run_lock(args.lock_file):
                 trader = AgentTrader(bridge, bridge.agent_cfg)
+                if not picks_on:
+                    trader.cfg.picks_enabled = False
                 res = trader.run(syms, dry_run=args.dry_run, force=args.force,
                                  plan_only=args.plan_only, candidates=cands,
                                  pool_source=note,
