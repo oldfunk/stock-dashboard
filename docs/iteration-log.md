@@ -16,7 +16,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 面板：首页三视图（候选总览默认/AI 观察池/钉选）；列表卡片只展示数据（指标/评分拆解/监控条件/笔记入口）；投资笔记（journal + 钉选股 notes）正常展示 AI 分析写回内容。
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
-- gate 基线：516 passed（2026-09-30 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：526 passed（2026-10-16 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -162,10 +162,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-16（两个线上故障：K线不自动构建 + 矛盾检测从不启动；基线 516→526）
+- **K线**：`/api/stock/{code}/kline` 原来只读库，用户搜索的冷门股/新股库里没数据 → 空图。改为空库时按需拉取并落库（`_build_kline_on_demand`，失败回空不 5xx）；实测 002230 首次 11s 建 242 根，二次直读。
+- **矛盾检测**：真凶是前端——journal.html 里 `showCompareDialog()` 缺一个收尾 `}`，整段脚本（含 `loadConflicts` 与 DOMContentLoaded 注册）被吞进该函数，对比框能用但检测是死代码，面板永远停在“检测中…”。另发现 DOMContentLoaded 在该页偶发不触发，改为脚本末尾直接调用（幂等 + 保留事件兜底）。
+- **后端补漏**：actions_summary 为空时 `current_json` 未定义 → NameError 被裸 `except: pass` 吞掉，漂移检测等于从未运行；改用 `_load_summary` 统一解析。新增两期笔记之间的 Signal 翻转检测（比对两期各自当日或之前的 AI 信号；信号多在 ai_analysis_history，筛选轮次常常没存）。
+- **测试事故与处置**：新单测首版漏做库隔离，2 行测试数据写进生产库 `stock_analysis_history`；已删除并加临时库 fixture，备份 `data/backup/stock_dashboard.db.pre-testleak_20261016`。
+- **验证**：生产 worktree gate **526 passed**；部署双服务 active；浏览器实测矛盾检测出结果、K线 242 根渲染。
+
 ### 2026-09-30（hotfix 僵尸锁：生产自动交易被掐停，基线 512→516）
 - **根因**：`run_lock` 是 PID 文件锁，无僵尸检测；占位进程被 kill/断连后锁文件永久残留，此后所有 tick/fire/run 每次白等 30s 后失败。生产已现形（20:20 僵尸锁，用户手动执行被拒；:8080 不受影响因锁文件独立）。
 - **修法**（协议 §5 hotfix，24h 内 backport 上游）：占位 PID 不存在/非法则删重抢；活着或判不准一律保守等（fail-closed 不双跑）。+4 单测。
-- **验证**：gate **516 passed**；生产实测僵尸锁秒级接管；部署 pull + `:8081` 重启 active + 200；基线 512 → **516 passed**。
+- **验证**：gate **526 passed**；生产实测僵尸锁秒级接管；部署 pull + `:8081` 重启 active + 200；基线 512 → **526 passed**。
 
 ### 2026-09-30（例外跟 main 取每行执行按钮 + 安全事项披露）
 - **例外**：协议未定版本条款（包工头指正），本次特批跟 main 取 `a2735e0`（每行执行按钮）；gate 512 全绿后合入。协议补款：默认跟最新 tag，包工头可指定版本/分支（例外入账）。
