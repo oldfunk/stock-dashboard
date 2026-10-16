@@ -207,7 +207,7 @@ tbody tr:hover{background:var(--bg-hover)}
       <button id="btn-save" class="primary">保存配置</button>
       <span id="llmstat" class="mut" style="align-self:center"></span>
     </div>
-    <div class="s">Key 只保存在本机 secrets.local.json（0600 权限），永不进 git、不进日志；页面只显示掩码。局域网使用，不要把面板暴露到公网。</div>
+    <div class="s">Key 只保存在本机 secrets.local.json（0600 权限），永不进 git、不进日志；页面只显示掩码。保存一次长期有效：重启不丢、换模型不用重填。拉取模型列表不需要口令，拉不到会直接显示原因（未配置 / Key 被拒 / 超时 / 地址非法）。局域网使用，不要把面板暴露到公网。</div>
   </div>
 </section>
 </div>
@@ -342,20 +342,23 @@ document.getElementById("preset").addEventListener("change",e=>{
 async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});return r.json()}
 async function llmStatus(){
   const s=await get("/api/llm/status");const d=s.data||{};
-  document.getElementById("llmstat").textContent=d.configured?`已配置：${d.preset} / ${d.model||"未选模型"} / Key ${d.key_masked}`:"未配置：先填接口地址与 Key，点保存配置";
+  document.getElementById("llmstat").textContent=d.configured?`已配置：${d.preset} / ${d.model||"未选模型"} / Key ${d.key_masked}（长期保存，重启不丢）`:"未配置：先填接口地址与 Key，点保存配置（只需一次，之后长期有效）";
   document.getElementById("apikey").placeholder=d.has_key?`已保存 Key（${d.key_masked}），换模型不用重填；换 Key 才需填写`:"API Key（只存本机，不回显）";
   if(d.preset)document.getElementById("preset").value=d.preset;
   if(d.base_url)document.getElementById("base").value=d.base_url;
   if(d.model)document.getElementById("model").value=d.model;
 }
 document.getElementById("btn-models").onclick=async()=>{
-  const t=tok();if(!t){alert("请先保存一次配置（口令会自动生成并由浏览器保管）");return}
-  document.getElementById("llmstat").textContent="拉取中…";
-  const r=await get("/api/llm/models?token="+encodeURIComponent(t));
-  if(!r.ok){document.getElementById("llmstat").textContent="拉取失败："+(r.error||"");return}
+  const st=document.getElementById("llmstat");
+  st.textContent="拉取中…";
+  const r=await get("/api/llm/models");   // 不带口令：拉取不被门禁拦截，失败看原因
+  if(!r.ok){
+    st.textContent="拉取失败："+(r.error||"未知原因")+(r.hint==="save"?"（在下面填好点「保存配置」即可）":"");
+    return;
+  }
   const sel=document.getElementById("modelsel");sel.innerHTML='<option value="">下拉选择…</option>';
   (r.models||[]).forEach(m=>{const o=document.createElement("option");o.value=m;o.textContent=m;sel.appendChild(o)});
-  document.getElementById("llmstat").textContent=`共 ${(r.models||[]).length} 个模型，下拉选一个（会自动填入右侧），或直接手填`;
+  st.textContent=`共 ${(r.models||[]).length} 个模型，下拉选一个（会自动填入右侧），或直接手填`;
 };
 document.getElementById("modelsel").addEventListener("change",e=>{
   if(e.target.value)document.getElementById("model").value=e.target.value;
@@ -559,10 +562,18 @@ class Handler(BaseHTTPRequestHandler):
             n = 0
         if n <= 0:
             return {}
-        try:
-            return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
-        except Exception:
+        raw = self.rfile.read(n).decode("utf-8", "ignore")
+        if not raw.strip():
             return {}
+        try:
+            data = json.loads(raw)
+        except ValueError as e:
+            # 坏 JSON 以前静默变空 body，用户看到的是误导性报错（如"未知厂商"）。
+            # 这里直接报出真实原因：请求体不是合法 JSON。
+            raise ValueError(f"请求体不是合法 JSON：{e}") from None
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        return data
 
     def _admin_ok(self, body: dict) -> bool:
         """写操作口令校验（头 X-Admin-Token 或 body.admin_token）。"""
@@ -670,15 +681,11 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/llm/status":
                 self._json({"ok": True, "data": self._bridge().llm_status()})
             elif u.path == "/api/llm/models":
-                # GET 携带口令：/api/llm/models?token=xxx（仅本机局域网使用，勿外网暴露）
-                q = parse_qs(u.query)
-                tok = (q.get("token") or [""])[0]
-                if not self._admin_ok({"admin_token": tok}):
-                    self._json({"ok": False, "error": "口令错误或未设置（先保存一次配置生成口令）"},
-                               code=403)
-                else:
-                    r = self._bridge().llm_models()
-                    self._json(r, code=200 if r.get("ok") else 502)
+                # 拉模型不设口令门禁：面板是局域网只读页，Key 不出本机、不回显。
+                # 拉不到就如实回失败原因（未配置/Key 被拒/超时/地址非法），一律 200 + ok 字段，
+                # 前端按 ok 显示原因，不做"先保存配置才能拉"这类拦截。
+                r = self._bridge().llm_models()
+                self._json(r, code=200)
             elif u.path in ("/api/nav", "/api/ops", "/api/orders", "/api/fills"):
                 q = parse_qs(u.query)
                 limit = int(q.get("limit", ["30"])[0])
@@ -828,6 +835,8 @@ class Handler(BaseHTTPRequestHandler):
                            code=200 if ok else 400)
             else:
                 self._send(404, b"not found", "text/plain")
+        except ValueError as e:            # 请求体不合法：400 + 真实原因（不是 500）
+            self._json({"ok": False, "error": str(e)}, code=400)
         except Exception as e:
             self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, code=500)
 

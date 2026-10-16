@@ -26,6 +26,8 @@ class AgentConfig:
     llm_retries: int = 1  # 仅超时重试一次，其他错误直接失败
     llm_max_tokens: int = 8192  # 答案区预算（实测推理 3000+ thinking 会挤掉答案）
     llm_thinking: str = "disabled"  # 格式受限决策默认关 thinking，又快又省又稳
+    picks_enabled: bool = True   # AI 自主提名池外标的（候选之外也允许它选股）
+    picks_max: int = 5           # 单轮最多提名多少只（1-10）
 
 
 def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
@@ -68,6 +70,31 @@ def _extract_json(text: str) -> Optional[dict]:
         return obj if isinstance(obj, dict) else None
     except Exception:
         return None
+
+
+def parse_picks(raw: Optional[str], cap: int = 5) -> list[dict]:
+    """解析 LLM 提名（pass1）：只取 query 字段，脏输出/坏 JSON 一律返回 []。"""
+    obj = _extract_json(raw or "")
+    if not obj:
+        return []
+    picks = obj.get("picks")
+    if not isinstance(picks, list):
+        return []
+    out: list[dict] = []
+    for p in picks:
+        if isinstance(p, str):
+            q, reason = p, ""
+        elif isinstance(p, dict):
+            q, reason = p.get("query") or p.get("name") or p.get("symbol") or "", \
+                str(p.get("reason") or "")[:120]
+        else:
+            continue
+        q = str(q).strip()
+        if q:
+            out.append({"query": q, "reason": reason})
+        if len(out) >= max(1, cap):
+            break
+    return out
 
 
 class AgentTrader:
@@ -174,6 +201,80 @@ class AgentTrader:
                 f"理由：{str(c.get('reason') or '')[:80]}")
         return CAND_TMPL.format(cand_lines="\n".join(lines)) if lines else ""
 
+    def _picks_txt(self, picks: list[dict]) -> str:
+        if not picks:
+            return ""
+        from paper_trading.agent.prompts import PICK_TMPL
+
+        lines = [f"- {p.get('name') or p['symbol']}({p['symbol']})：{p.get('reason') or '（未给理由）'}"
+                 for p in picks]
+        return PICK_TMPL.format(pick_lines="\n".join(lines))
+
+    def _pick_extra(self, symbols: list[str], candidates: Optional[list],
+                    enable: bool = True) -> list[dict]:
+        """AI 自主提名（pass1）：让它在全市场里点名想研究的股票。
+
+        流程：LLM 提名 → 程序用母库全市场代码表解析/校验 → 只留合法 A 股。
+        任何失败（LLM 坏 JSON / 库不可读 / 全不合法）都返回 []，绝不阻断决策。
+        """
+        from paper_trading.agent.prompts import PICK_SYSTEM, PICK_USER
+        from paper_trading.integration import search_symbols
+        from paper_trading.llm import LLMError
+        from paper_trading.utils import get_logger
+
+        logger = get_logger(__name__)
+        if not (enable and self.cfg.picks_enabled):
+            return []
+        b = self.bridge
+        try:
+            cfg = b._llm_config()
+            ctx = b.llm_context(max_ops=3, max_nav=2, closes_n=3)
+            hold = ["无（空仓）"] if not ctx.get("positions") else [
+                f"{p['stock']} {p['total']}股@{p['avg_cost']}" for p in ctx["positions"]]
+            cand_lines = "\n".join(
+                f"- {c.get('name')}({c.get('symbol')}) score={c.get('score')} "
+                f"PE={c.get('pe')}" for c in (candidates or [])[:20]) or "（本次无程序候选）"
+            prompt = PICK_USER.format(
+                n=len(candidates or []), cand_lines=cand_lines,
+                scheme=self._scheme_txt(), holdings="\n".join(hold),
+                context=_json.dumps(ctx, ensure_ascii=False)[:3000],
+                max_picks=self.cfg.picks_max)
+            system = PICK_SYSTEM.format(max_picks=self.cfg.picks_max)
+            raw = _ask_llm(cfg, prompt, system, self.cfg.llm_timeout,
+                           self.cfg.llm_retries, min(2048, self.cfg.llm_max_tokens),
+                           self.cfg.llm_thinking)
+        except (LLMError, Exception) as e:   # noqa: BLE001 - 提名失败不阻断
+            logger.warning(f"AI picks skipped: {type(e).__name__}: {e}")
+            return []
+        wanted = parse_picks(raw, self.cfg.picks_max)
+        if not wanted:
+            return []
+        found = search_symbols([w["query"] for w in wanted],
+                               local_names=b.data_db.get_stock_names())
+        reason_by_q = {w["query"]: w.get("reason", "") for w in wanted}
+        out: list[dict] = []
+        for hit in found:
+            if hit["symbol"] in symbols:
+                continue
+            rec = dict(hit)
+            rec["reason"] = reason_by_q.get(hit.get("query", ""), "")
+            out.append(rec)
+        logger.info(f"AI picks resolved: {[(p['symbol'], p.get('name')) for p in out]}")
+        return out
+
+    def _enrich(self, symbols: list[str], candidates: Optional[list],
+                enable: bool = True) -> tuple[list[str], list[dict]]:
+        """候选池 + AI 提名 = 本轮决策范围；提名股票同步补数据。"""
+        picks = self._pick_extra(symbols, candidates, enable)
+        if not picks:
+            return list(symbols), []
+        merged = list(symbols) + [p["symbol"] for p in picks]
+        try:
+            self.bridge.sync_data([p["symbol"] for p in picks])
+        except Exception:
+            pass   # 补数据失败：决策阶段若无 K 线会被新鲜守卫拦下，安全
+        return merged, picks
+
     def _plan(self, symbols: list[str], candidates: Optional[list] = None,
               pool_source: str = "config",
               slot: Optional[str] = None) -> dict:
@@ -185,6 +286,7 @@ class AgentTrader:
         now = datetime.now().isoformat()
 
         b.sync_data(symbols)
+        symbols, picks = self._enrich(symbols, candidates)
         all_bars: dict[str, list] = {}
         for sym in symbols:
             bars = b.data_db.get_bars(sym, limit=30)
@@ -203,7 +305,8 @@ class AgentTrader:
             pool="、".join(symbols),
             max_orders=self.cfg.max_orders_per_run,
             max_order_value=int(self.cfg.max_order_value),
-            candidates=self._cand_txt(candidates),
+            candidates=self._cand_txt(candidates)
+            + ("\n" + self._picks_txt(picks) if picks else ""),
             signals=ref_txt,
             scheme=self._scheme_txt(),
             context=_json.dumps(ctx, ensure_ascii=False))
@@ -231,12 +334,17 @@ class AgentTrader:
         summary = str((plan or {}).get("summary", ""))[:200]
         pid = b.broker.save_plan(today_str(), symbols,
                                  {"actions": actions, "summary": summary, "asof": asof,
-                                  "pool_source": pool_source})
+                                  "pool_source": pool_source,
+                                  "picks": [{k: p.get(k) for k in ("symbol", "name", "reason")}
+                                            for p in picks]})
         b.broker.log_operation("ai:plan", {"symbols": symbols, "asof": asof,
                                            "pool_source": pool_source,
+                                           "n_picks": len(picks),
                                            **({"slot": slot} if slot else {})}, True,
                                {"plan_id": pid, "summary": summary,
                                 "n_actions": len(actions),
+                                "picks": [{"symbol": p["symbol"],
+                                           "name": p.get("name", "")} for p in picks],
                                 "raw": str(raw or "")[:1500]}, None, None)
         logger.info(f"AI plan saved id={pid} asof={asof}")
         return {"ok": True, "mode": "plan", "plan_id": pid, "asof": asof,
@@ -417,6 +525,19 @@ class AgentTrader:
             return {"ok": True, "skipped": "no-fresh-bars", "latest": _asof,
                     "timestamp": now, "symbols": symbols}
 
+        # 4.7 AI 自主提名（pass1）：候选之外允许它点名全市场任意 A 股。
+        #     放在新鲜守卫之后——没新行情就不必白花一次 LLM 与补数。
+        #     有待执行计划时不提名（按计划原样执行，不临时扩池）。
+        picks: list[dict] = []
+        if not plan_only and not b.broker.get_pending_plan(today_str()):
+            symbols, picks = self._enrich(symbols, candidates)
+            if picks:
+                for sym in (p["symbol"] for p in picks):
+                    bars = b.data_db.get_bars(sym, limit=30)
+                    if bars:
+                        all_bars[sym] = bars
+                latest = b.price_map(symbols)
+
         # 5. 参考信号 + 上下文，问 LLM
         ref = b.strategy.generate_signals(all_bars)
         ref_txt = "无" if not ref else "、".join(
@@ -427,13 +548,19 @@ class AgentTrader:
             pool="、".join(symbols),
             max_orders=self.cfg.max_orders_per_run,
             max_order_value=int(self.cfg.max_order_value),
-            candidates=self._cand_txt(candidates),
+            candidates=self._cand_txt(candidates)
+            + ("\n" + self._picks_txt(picks) if picks else ""),
             signals=ref_txt,
             scheme=self._scheme_txt(),
             context=_json.dumps(ctx, ensure_ascii=False))
         system = TRADER_SYSTEM.format(
             max_order_value=int(self.cfg.max_order_value),
             max_orders=self.cfg.max_orders_per_run)
+        if picks:
+            # AI 提名的股票已由程序校验并补齐数据，可直接决策（仍在风控钳制内）
+            system += ("\n本轮额外纳入以下 AI 自主提名标的（程序已校验为合法 A 股并补齐数据）："
+                       + "、".join(f"{p.get('name') or p['symbol']}({p['symbol']})"
+                                   for p in picks))
         from paper_trading.llm import LLMError
 
         try:
@@ -443,7 +570,7 @@ class AgentTrader:
                            self.cfg.llm_max_tokens, self.cfg.llm_thinking)
         except LLMError as e:
             b.broker.log_operation("ai:decide", {"symbols": symbols, "pool_source": pool_source,
-                                                 "mode": mode},
+                                                 "mode": mode, "n_picks": len(picks)},
                                    False, {"error": str(e)}, None, None)
             return {"ok": False, "error": str(e), "timestamp": now}
 
@@ -460,7 +587,9 @@ class AgentTrader:
             all_bars=all_bars, latest_prices=latest, cash=cash,
             positions=positions, nav_total=nav.total_value,
             dry_run=dry_run, mode=mode, now=now, from_plan=False,
-            pool_source=pool_source, slot=_slot_s)
+            pool_source=pool_source, slot=_slot_s,
+            picks=[{"symbol": p["symbol"], "name": p.get("name", "")}
+                   for p in picks])
 
     def _execute_plan(self, pending: dict, all_bars: dict,
                       latest: dict, slot: Optional[str] = None) -> dict:
@@ -494,7 +623,8 @@ class AgentTrader:
                          positions: dict, nav_total: float, dry_run: bool,
                          mode: str, now: str, from_plan: bool,
                          pool_source: str = "config",
-                         slot: Optional[str] = None) -> dict:
+                         slot: Optional[str] = None,
+                         picks: Optional[list] = None) -> dict:
         """逐条钳制执行（dry_run 不碰账本；from_plan 仅标记来源）。"""
         from paper_trading.models import Order, OrderType, Signal, SignalType
         from paper_trading.utils import get_logger
@@ -572,10 +702,13 @@ class AgentTrader:
         b.broker.log_operation(
             "ai:decide", {"symbols": symbols, "mode": mode, "from_plan": from_plan,
                           "pool_source": pool_source, "summary": summary,
+                          "n_picks": len(picks or []),
                           **({"slot": slot} if slot else {})}, True,
-            {"decisions": decided}, nav2.cash, nav2.total_value)
+            {"decisions": decided, "picks": picks or []},
+            nav2.cash, nav2.total_value)
         logger.info(f"AI decide done: {len(decided)} actions, mode={mode}, from_plan={from_plan}")
         return {"ok": True, "timestamp": now, "symbols": symbols, "mode": mode,
                 "from_plan": from_plan, "pool_source": pool_source,
                 "summary": summary, "decisions": decided,
+                "picks": picks or [],
                 "nav": nav2.__dict__}

@@ -20,9 +20,10 @@
 - **风控管理**：单笔限额、仓位上限、最大回撤止损
 - **AI 交易员**：面板/CLI 自定时队列触发（默认 16:45 跑一次交易，保守时间），日内 LLM 决策（JSON 钳制执行+幂等闸+日亏熔断），休盘做计划、开盘执行
 - **投资方案三选一**：[Stock Dashboard](https://github.com/oldfunk/stock-dashboard) 价值 / 通用交易（默认）/ 自定义自然语言指令
+- **全市场选股漏斗**：母项目夜间扫全市场 → 候选池；AI 还可在候选之外**自主提名任意 A 股**（程序校验代码+补数据后才进决策），手填池只作兜底
 - **LLM 万能接入**：OpenAI 兼容接口 + 主流厂商预设 + 手填模型名，只咨询不交易
 - **盘中实时**：腾讯行情同源，面板现价盘中实时展示（NAV/结算永远收盘口径）
-- **只读集成**：[Stock Dashboard](https://github.com/oldfunk/stock-dashboard) 在同一台机器时，选股池/基本面/论点自动可用，缺席静默回退
+- **只读集成**：[Stock Dashboard](https://github.com/oldfunk/stock-dashboard) 在同一台机器时，全市场候选池/代码表/基本面/论点自动可用，缺席静默回退
 
 ## 目录结构
 
@@ -53,7 +54,7 @@ paper-trading/
     ├── portfolio/portfolio.py
     ├── risk/risk_manager.py       # 多标的价格表+回撤熔断
     ├── llm/                       # OpenAI兼容调用+密钥管理（只咨询）
-    ├── integration/               # Stock Dashboard 只读连接（池/基本面/论点）
+    ├── integration/               # Stock Dashboard 只读连接（全市场代码表/池/基本面/论点）
     └── utils/                     # logger/trading_calendar/config/run_lock
 ```
 
@@ -129,7 +130,13 @@ agent:
   llm_retries: 1              # 仅超时重试
   llm_max_tokens: 8192
   llm_thinking: disabled      # 格式受限决策默认关 thinking
+  picks_enabled: true         # AI 自主提名（候选之外点名全市场个股）
+  picks_max: 5                # 单轮最多提名几只（1-10）
 ```
+
+> `stock_pool` 只是兜底（母项目缺席且无观察池时才用）。默认 `--pool-from auto`：
+> 全市场量化筛选 → 观察池 → 手填池逐级降级；AI 另可在候选之外自主提名个股
+> （`--no-picks` 关闭）。
 
 ## 界面预览
 
@@ -260,8 +267,10 @@ python -m paper_trading.cli agent schedule set --entry 09:00=sync --entry 13:00=
 python -m paper_trading.cli agent run --ignore-schedule --json
 # 休盘做计划（存着，开盘自动执行；不碰账本）
 python -m paper_trading.cli agent run --plan-only --json
-# 股票池来源（需 Stock Dashboard 在同一台机器，否则自动回退 config）
+# 股票池来源（auto=全市场筛选优先→观察池→手填池兜底；需 Stock Dashboard 在同一台机器）
 python -m paper_trading.cli agent run --pool-from screening --pool-limit 20 --json
+# 关闭 AI 自主提名（只用程序候选池）
+python -m paper_trading.cli agent run --no-picks --json
 ```
 
 ### 投资方案（永远 3 种；合并/独立通用）
@@ -311,7 +320,7 @@ python -m paper_trading.dashboard --port 8080
 - **AI 操作流水**：每次操作的时间、动作、参数、结果（成交价/拒单原因）、操作后资产，详情列自动换行
 - **投资方案**：母价值 / 通用 / 自定义三选一（自定义指令折叠填写）
 - **AI 定时队列**：时刻 → 动作（同步/分析/计划/交易），如 09:00 同步 → 13:00 做计划 → 16:45 交易；每条每天最多跑一次，面板直接增删改，cron 侧用 15 分钟 tick 配合；每行末尾可单独手动执行该行（立即跑，不占队列名额）
-- **模型设置**：厂商预设 + 拉取模型列表 + 手填模型名（Key 掩码显示）
+- **模型设置**：厂商预设 + 拉取模型列表（不需要口令，失败直接显示原因）+ 手填模型名（Key 掩码显示，保存一次长期有效）
 
 流水写入 `paper_account.db` 的 `op_log` 表（`broker.log_operation`），仪表盘纯只读，可与交易进程并存。
 
@@ -353,7 +362,7 @@ python -m paper_trading.dashboard --port 8080
 ## 安全说明
 
 - 面板无登录鉴权：仅限局域网使用，**禁止暴露到公网**（如需外网访问请自行加反向代理鉴权）。
-- LLM Key 只存本机 `secrets.local.json`（0600 权限，已 gitignore）；面板只显示掩码，日志永不记录原文。
+- LLM Key 只存本机 `secrets.local.json`（0600 权限，已 gitignore）；面板只显示掩码，日志永不记录原文。保存一次长期有效：重启不丢、换模型不用重填。
 - 切换电脑/浏览器后，凭 API Key 保存一次即接管面板口令（详见 AGENTS.md）。
 
 ## 免责声明
