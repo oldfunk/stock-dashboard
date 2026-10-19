@@ -38,7 +38,7 @@ def test_news_jobs_triggers_once_per_day(sch, monkeypatch):
                         staticmethod(lambda: fired.append("summary")))
     import src.config as cfgmod
     monkeypatch.setattr(cfgmod, "load_config", lambda: {"news": {
-        "ingest_times": ["09:05"], "summary_time": "18:30"}}, raising=False)
+        "poll_interval_min": 15, "active_hours": [7, 23], "summary_time": "18:30"}}, raising=False)
 
     s = sch.MarketScheduler()
     calls = []
@@ -67,15 +67,16 @@ def test_news_jobs_triggers_once_per_day(sch, monkeypatch):
     assert len(calls) == 2, "抓取 + 摘要各一次"
 
 
-def test_news_jobs_respects_time_gate(sch, monkeypatch):
-    """未到点不触发。"""
+def test_news_jobs_respects_active_window(sch, monkeypatch):
+    """活跃时段外不轮询（不打扰数据源）；间隔未到不重复触发。"""
     monkeypatch.setattr(sch.MarketScheduler, "_run_news_ingest",
                         staticmethod(lambda: None))
     monkeypatch.setattr(sch.MarketScheduler, "_run_news_summary",
                         staticmethod(lambda: None))
     import src.config as cfgmod
     monkeypatch.setattr(cfgmod, "load_config", lambda: {"news": {
-        "ingest_times": ["09:05"], "summary_time": "18:30"}}, raising=False)
+        "poll_interval_min": 15, "active_hours": [7, 23],
+        "summary_time": "18:30"}}, raising=False)
     calls = []
 
     class FakeThread:
@@ -87,10 +88,21 @@ def test_news_jobs_respects_time_gate(sch, monkeypatch):
 
     monkeypatch.setattr(sch.threading, "Thread", FakeThread)
     s = sch.MarketScheduler()
-    monkeypatch.setattr(sch, "now_cn", lambda: _at(sch, 2026, 10, 19, 9, 4))
+    monkeypatch.setattr(sch, "now_cn", lambda: _at(sch, 2026, 10, 19, 3, 0))
     s._check_news_jobs()
-    assert calls == [], "09:04 未到 09:05"
-
+    assert calls == [], "活跃时段外不该轮询"
+    calls.clear()
+    s._last_news_ingest_at = None
+    monkeypatch.setattr(sch, "now_cn", lambda: _at(sch, 2026, 10, 19, 10, 0))
+    s._check_news_jobs()
+    assert len(calls) == 1, "窗口内首轮应触发"
+    calls.clear()
+    monkeypatch.setattr(sch, "now_cn", lambda: _at(sch, 2026, 10, 19, 10, 5))
+    s._check_news_jobs()
+    assert calls == [], "间隔未到不重复触发"
+    monkeypatch.setattr(sch, "now_cn", lambda: _at(sch, 2026, 10, 19, 10, 16))
+    s._check_news_jobs()
+    assert len(calls) == 1, "超过间隔应再触发"
 
 def test_news_jobs_disabled(sch, monkeypatch):
     import src.config as cfgmod

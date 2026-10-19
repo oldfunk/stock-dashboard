@@ -161,7 +161,7 @@ class MarketScheduler:
         # 复盘进行中标志：防止并发/30s 洪水式重复触发
         self._review_in_progress = False
         # 新闻舆情幂等标记（2026-10-19）：{时刻: 日期} / 摘要日期
-        self._last_news_ingest = {}
+        self._last_news_ingest_at = None
         self._last_news_summary = None
 
     def _get_last_completed_date(self):
@@ -337,39 +337,41 @@ class MarketScheduler:
         logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功")
 
     def _check_news_jobs(self):
-        """新闻抓取与 AI 舆情摘要（时刻见 config.yaml news 段）。
+        """新闻后台轮询 + AI 舆情摘要（节奏见 config.yaml news 段）。
 
-        与复盘同一个 30s 轮询：到点且当天没跑过才触发，幂等靠 _last_news_*。
+        抓取：活跃时段内按 poll_interval_min 循环拉，每只票有 code_cooldown_min
+        冷却（以库内 fetched_at 为准，重启不失效）——既保证"即时"，又不刷爆数据源。
+        摘要：每天到点跑一次，写 news_digest。
         """
         from src.config import load_config
         cfg = load_config().get("news", {})
         if not cfg or cfg.get("enabled", True) is False:
             return
-        today = now_cn().date()
+        now = now_cn()
+        today = now.date()
 
-        for hhmm in (cfg.get("ingest_times") or []):
-            at = _parse_hhmm(hhmm)
-            if at is None:
-                continue
-            key = str(hhmm)
-            if self._last_news_ingest.get(key) == today:
-                continue
-            if now_cn().time() < at:
-                continue
-            self._last_news_ingest[key] = today
-            threading.Thread(target=self._run_news_ingest, daemon=True).start()
+        # ① 后台轮询抓取
+        hours = cfg.get("active_hours") or [7, 23]
+        in_window = (hours[0] <= now.hour <= hours[1])
+        interval = int(cfg.get("poll_interval_min", 15))
+        if in_window and interval > 0:
+            last = self._last_news_ingest_at
+            if last is None or (now - last).total_seconds() >= interval * 60:
+                self._last_news_ingest_at = now
+                threading.Thread(target=self._run_news_ingest, daemon=True).start()
 
+        # ② 每日 AI 摘要
         sat = _parse_hhmm(cfg.get("summary_time", "18:30"))
         if sat is None or self._last_news_summary == today:
             return
-        if now_cn().time() < sat:
+        if now.time() < sat:
             return
         self._last_news_summary = today
         threading.Thread(target=self._run_news_summary, daemon=True).start()
 
     @staticmethod
     def _run_news_ingest():
-        """抓取新闻入库（后台线程）。"""
+        """抓取新闻入库（后台线程）：带每票冷却，避免频繁打数据源。"""
         try:
             from src.collector import news_fetcher
             from src.config import load_config
@@ -377,8 +379,11 @@ class MarketScheduler:
             scope = {"include_pinned": True,
                      "include_watchlist_ai": True,
                      "include_pool": bool(cfg.get("include_pool", False))}
-            news_fetcher.ingest(source=cfg.get("source", "akshare_em"),
-                                per_code=int(cfg.get("per_code", 8)), **scope)
+            news_fetcher.ingest(
+                source=cfg.get("source", "akshare_em"),
+                per_code=int(cfg.get("per_code", 8)),
+                cooldown_min=int(cfg.get("code_cooldown_min", 60)),
+                **scope)
         except Exception as e:
             logger.warning("[调度器] 新闻抓取异常: %s", e)
 

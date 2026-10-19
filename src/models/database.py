@@ -325,6 +325,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_news_unique ON news_item(COALESCE(url,''),
 CREATE INDEX IF NOT EXISTS idx_news_published ON news_item(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_news_code ON news_item(code, published_at DESC);
 
+-- 新闻抓取尝试日志（2026-10-19）：冷却判定按"尝试"而非"有无内容"，
+-- 否则抓不到内容的票每轮都会重打数据源。
+CREATE TABLE IF NOT EXISTS news_fetch_log (
+    code        TEXT PRIMARY KEY,
+    fetched_at  TEXT NOT NULL,
+    ok_count    INTEGER DEFAULT 0
+);
+
 -- AI 舆情日报（每日一条，正文 Markdown；与 ai_journal 分开，避免污染复盘对比）
 CREATE TABLE IF NOT EXISTS news_digest (
     digest_date     TEXT PRIMARY KEY,

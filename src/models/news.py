@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-import sqlite3
+from datetime import timedelta
 from typing import Optional
 
 from src.utils import now_cn
@@ -93,6 +93,36 @@ class NewsDAO:
                 rows = conn.execute(sql, args).fetchall()
             out.extend(dict(r) for r in rows)
         return out
+
+    def mark_fetched(self, codes: list, ok: bool = True) -> None:
+        """记录本轮抓取尝试（冷却按它算，与是否有内容无关）。"""
+        if not codes:
+            return
+        now = now_cn().isoformat()
+        with self._conn() as conn:
+            for c in codes:
+                conn.execute(
+                    "INSERT INTO news_fetch_log (code, fetched_at, ok_count)"
+                    " VALUES (?,?,?) ON CONFLICT(code) DO UPDATE SET"
+                    " fetched_at=excluded.fetched_at,"
+                    " ok_count=news_fetch_log.ok_count + ?",
+                    (c, now, 1 if ok else 0, 1 if ok else 0))
+
+    def recently_fetched(self, codes: list, cooldown_min: int) -> set:
+        """返回 codes 里最近 cooldown_min 分钟内已抓过的那些（避免重复打数据源）。
+
+        以库里最新 fetched_at 为准；进程重启后依然有效（不依赖内存状态）。
+        """
+        if not codes or cooldown_min <= 0:
+            return set()
+        cutoff = (now_cn() - timedelta(minutes=cooldown_min)).isoformat()
+        with self._conn() as conn:
+            marks = ",".join("?" * len(codes))
+            rows = conn.execute(
+                "SELECT code, MAX(fetched_at) AS last FROM news_fetch_log "
+                "WHERE code IN (" + marks + ") GROUP BY code",
+                list(codes)).fetchall()
+        return {r["code"] for r in rows if (r["last"] or "") >= cutoff}
 
     def unsummarized_count(self, since: Optional[str] = None) -> int:
         sql = "SELECT COUNT(*) AS n FROM news_item WHERE summarized_at IS NULL"

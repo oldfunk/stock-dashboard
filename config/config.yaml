@@ -89,7 +89,9 @@ news:
   summary_time: "18:30"         # AI 舆情日报时刻（时机待定，先按收盘后跑）
   lookback_hours: 24            # 摘要回看窗口
   max_items: 30                 # 单次摘要最多喂给模型的条数
-  ingest_times: ["09:05", "15:05"]   # 抓取时刻（盘前+收盘后各一次）
+  poll_interval_min: 15         # 后台轮询间隔（活跃时段内循环拉取）
+  active_hours: [7, 23]         # 活跃时段（点），其余时间不打扰数据源
+  code_cooldown_min: 60         # 同一只票两次抓取的最小间隔（以库内 fetched_at 为准）
 
 # -------- AI 观察池复盘配置 --------
 ai_review:

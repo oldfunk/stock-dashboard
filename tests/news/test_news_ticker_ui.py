@@ -25,10 +25,27 @@ def test_index_has_news_ticker(client):
     assert 'id="newsTicker"' in html
     assert 'id="newsTrack"' in html
     assert '/static/news.js' in html
-    # 滚动条样式在（类名唯一即可）
     assert ".news-ticker" in html
     assert "@keyframes news-scroll" in html
 
+
+def test_ticker_has_no_manual_refresh_button(client):
+    """用户要求：不要刷新按钮，后台持续拉取。"""
+    html = client.get("/").text
+    assert "news-refresh" not in html
+    assert "newsRefresh" not in html
+    js = open("src/web/static/news.js", encoding="utf-8").read()
+    assert "newsRefresh" not in js
+    assert "/api/news/ingest" not in js, "前端不该再触发手动抓取"
+
+
+def test_ticker_speed_follows_content_length(client):
+    """速度自适应：不能是固定秒数（条数少时飞一样快）。"""
+    html = client.get("/").text
+    assert "var(--news-speed" in html
+    js = open("src/web/static/news.js", encoding="utf-8").read()
+    assert "--news-speed" in js
+    assert "Math.max(180" in js
 
 def test_ticker_js_is_wired(client):
     """脚本要挂在首页上，且内容含渲染/刷新逻辑。"""
@@ -37,7 +54,7 @@ def test_ticker_js_is_wired(client):
     assert m, "news.js 未挂载"
     js = open("src/web/static/news.js", encoding="utf-8").read()
     assert "/api/news/latest" in js
-    assert "/api/news/ingest" in js
+    assert "/api/news/latest" in js
     # 情绪三态都要有映射
     for w in ("利好", "利空"):
         assert w in js

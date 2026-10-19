@@ -277,3 +277,35 @@ def test_api_news_summary_without_key(client, monkeypatch):
 def test_api_news_digest_none(client):
     r = client.get("/api/news/digest")
     assert r.status_code == 200 and r.json()["data"] is None
+
+
+def test_ingest_respects_code_cooldown(client, monkeypatch):
+    """冷却期内不重复打数据源（后台轮询的节流手段）。client 隔离到 tmp 库。"""
+    from src.collector import news_fetcher
+
+    monkeypatch.setattr(news_fetcher, "target_codes",
+                        lambda **kw: [("300390", "天华新能"), ("000792", "盐湖股份")])
+    calls = []
+
+    def fake_fetch(codes, source="", per_code=10):
+        calls.append([c for c, _ in codes])
+        return [_item()] if codes else []
+
+    monkeypatch.setattr(news_fetcher, "fetch_news", fake_fetch)
+    r1 = news_fetcher.ingest(per_code=3, cooldown_min=60)
+    assert r1["codes"] == 2 and r1["skipped"] == 0
+    r2 = news_fetcher.ingest(per_code=3, cooldown_min=60)
+    assert r2["skipped"] == 2 and r2["codes"] == 0, "冷却期内应全部跳过"
+    assert len(calls) == 2, "仍会调用 fetch_news（对空列表不打网络）"
+    r3 = news_fetcher.ingest(per_code=3, cooldown_min=0)
+    assert r3["skipped"] == 0 and r3["codes"] == 2, "关掉冷却则全抓"
+
+
+def test_recently_fetched_uses_db(client):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    dao.upsert_many([_item(code="300390", url="u1")])
+    dao.mark_fetched(["300390"])
+    assert "300390" in dao.recently_fetched(["300390", "000792"], 60)
+    assert dao.recently_fetched(["000792"], 60) == set(), "没抓过的票不算"
+    assert dao.recently_fetched(["300390"], 0) == set(), "冷却为 0 则不过滤"

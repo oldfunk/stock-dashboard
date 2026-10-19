@@ -1,8 +1,6 @@
-/* 新闻滚动条（2026-10-19）：数据源 /api/news/latest，刷新按钮触发抓取 */
-/* eslint-disable */
+/* 新闻滚动条（2026-10-19）：数据源 /api/news/latest，后台持续拉取，前端只读 */
 (function () {
   const track = document.getElementById("newsTrack");
-  const btn = document.getElementById("newsRefresh");
   if (!track) return;
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({
@@ -11,7 +9,7 @@
 
   function render(items) {
     if (!items || !items.length) {
-      track.innerHTML = '<span class="news-empty">暂无新闻，点击刷新抓取</span>';
+      track.innerHTML = '<span class="news-empty">暂无新闻，后台采集中</span>';
       return;
     }
     const one = (it) => {
@@ -29,9 +27,12 @@
         : body;
       return '<span class="news-item">' + sent + tag + inner + "</span>";
     };
-    // 复制一份用于无缝滚动
     const html = items.map(one).join("");
     track.innerHTML = '<div class="news-inner">' + html + html + "</div>";
+    // 速度与内容长度挂钩：内容越多滚得越久，阅读节奏恒定（约 14 字/秒）
+    const chars = track.querySelector(".news-inner").textContent.length;
+    const seconds = Math.max(180, Math.min(1200, Math.round(chars / 14)));
+    track.querySelector(".news-inner").style.setProperty("--news-speed", seconds + "s");
   }
 
   async function load() {
@@ -44,26 +45,6 @@
     }
   }
 
-  if (btn) {
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = "抓取中";
-      try {
-        await fetch("/api/news/ingest", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ per_code: 8 }),
-        });
-        await load();
-      } catch (e) {
-        track.innerHTML = '<span class="news-empty">抓取失败，稍后再试</span>';
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "刷新";
-      }
-    };
-  }
-
   load();
-  setInterval(load, 300000);
+  setInterval(load, 60000);
 })();

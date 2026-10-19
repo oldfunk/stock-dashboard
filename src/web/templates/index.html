@@ -209,7 +209,8 @@
         }
 
         /* ========== Market Row ========== */
-        /* 新闻滚动条：横向匀速滚动，悬停暂停；情绪标签着色 */
+        /* 新闻滚动条：横向匀速滚动，悬停暂停；情绪标签着色。
+       速度由 JS 按内容长度设定 --news-speed，保证阅读速度恒定而非越短越快 */
         .news-ticker {
             display: flex; align-items: center; gap: 10px;
             padding: 6px 0 10px; margin-bottom: 4px;
@@ -224,7 +225,7 @@
         .news-track {
             flex: 1 1 auto; overflow: hidden; white-space: nowrap;
         }
-        .news-inner { display: inline-block; animation: news-scroll 60s linear infinite; }
+        .news-inner { display: inline-block; animation: news-scroll var(--news-speed, 300s) linear infinite; }
         .news-track:hover .news-inner { animation-play-state: paused; }
         @keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         @media (prefers-reduced-motion: reduce) { .news-inner { animation: none; } }
@@ -237,12 +238,6 @@
         .news-sent.flat { color: var(--text-tertiary); }
         .news-code { color: var(--text-tertiary); margin-right: 5px; }
         .news-empty { font-size: 12px; color: var(--text-tertiary); }
-        .news-refresh {
-            flex: 0 0 auto; font-size: 11px; padding: 3px 10px; cursor: pointer;
-            background: var(--bg-secondary); color: var(--text-secondary);
-            border: 1px solid var(--divider); border-radius: var(--radius-sm);
-        }
-        .news-refresh:hover { background: var(--bg-hover); color: var(--text-primary); }
 
         .market-row {
             display: grid;
@@ -941,7 +936,6 @@
     <div class="news-ticker" id="newsTicker">
         <span class="news-tag">舆情</span>
         <div class="news-track" id="newsTrack"><span class="news-empty">暂无新闻，点击刷新</span></div>
-        <button class="news-refresh" id="newsRefresh" title="抓取最新新闻">刷新</button>
     </div>
 
     <!-- Market Indices -->

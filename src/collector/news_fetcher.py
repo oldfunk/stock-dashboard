@@ -137,11 +137,27 @@ def fetch_news(codes=None, source: str = 'akshare_em', per_code: int = 10) -> li
     return out
 
 
-def ingest(source: str = 'akshare_em', per_code: int = 10, **scope) -> dict:
-    """抓取 → 落库，返回统计摘要（供 API/定时任务用）。"""
+def ingest(source: str = 'akshare_em', per_code: int = 10, cooldown_min: int = 0,
+           **scope) -> dict:
+    """抓取 → 落库，返回统计摘要（供 API/定时任务用）。
+
+    cooldown_min > 0 时跳过最近抓过的股票：后台轮询下这是主要节流手段
+    （一只票 60 分钟抓一次足够，不去重复打数据源）。
+    """
     from src.models.news import NewsDAO
+    dao = NewsDAO()
     codes = target_codes(**scope)
+    skipped = 0
+    if cooldown_min > 0 and codes:
+        hot = dao.recently_fetched([c for c, _ in codes], cooldown_min)
+        if hot:
+            skipped = len(hot)
+            codes = [(c, n) for c, n in codes if c not in hot]
     items = fetch_news(codes, source=source, per_code=per_code)
-    added = NewsDAO().upsert_many(items)
-    logger.info("[新闻] 抓取 %d 只 / %d 条，新增入库 %d 条", len(codes), len(items), added)
-    return {'codes': len(codes), 'fetched': len(items), 'added': added}
+    added = dao.upsert_many(items)
+    # 记录尝试（含空结果）：冷却按尝试算，抓不到内容的票也不会被反复打
+    dao.mark_fetched([c for c, _ in codes], ok=bool(items))
+    logger.info("[新闻] 抓取 %d 只（冷却跳过 %d）/ %d 条，新增入库 %d 条",
+                len(codes), skipped, len(items), added)
+    return {'codes': len(codes), 'skipped': skipped, 'fetched': len(items),
+            'added': added}
