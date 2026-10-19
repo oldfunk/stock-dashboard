@@ -15,7 +15,7 @@
 import logging
 import threading
 import time
-from datetime import time as dtime, datetime
+from datetime import time as dtime, datetime, timedelta
 from typing import Optional
 
 from src.utils import now_cn, curl_get, tc_encode, parse_tc_line, split_tc_response
@@ -106,6 +106,16 @@ def _review_due(now, days: set, at: dtime, last_date) -> bool:
     return now.time() >= at
 
 
+def _parse_hhmm(raw):
+    """HH:MM → time；非法回 None（调度器用）。"""
+    try:
+        parts = str(raw).split(":")
+        return dtime(int(parts[0]), int(parts[1]))
+    except (ValueError, TypeError, IndexError):
+        logger.warning("[调度器] 时刻格式非法: %r", raw)
+        return None
+
+
 # ── 数据采集任务 ──
 
 def fetch_stock_realtime(codes: list[str]) -> dict[str, dict]:
@@ -150,6 +160,9 @@ class MarketScheduler:
         self._last_review_date = self._get_last_review_date()
         # 复盘进行中标志：防止并发/30s 洪水式重复触发
         self._review_in_progress = False
+        # 新闻舆情幂等标记（2026-10-19）：{时刻: 日期} / 摘要日期
+        self._last_news_ingest = {}
+        self._last_news_summary = None
 
     def _get_last_completed_date(self):
         """从数据库获取最新完成运行的日期，用于避免重启后重复触发当日流水线"""
@@ -222,6 +235,9 @@ class MarketScheduler:
 
                 # 定时 AI 观察池复盘（ai_review.days/time，默认周六 00:00）
                 self._check_scheduled_review()
+
+                # 新闻舆情（2026-10-19）：到点抓取 + 到点 AI 摘要
+                self._check_news_jobs()
 
             except Exception as e:
                 logger.warning(f"[调度器] 运行异常: {e}")
@@ -319,6 +335,96 @@ class MarketScheduler:
                 dao.upsert_many(code, records)
                 success += 1
         logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功")
+
+    def _check_news_jobs(self):
+        """新闻抓取与 AI 舆情摘要（时刻见 config.yaml news 段）。
+
+        与复盘同一个 30s 轮询：到点且当天没跑过才触发，幂等靠 _last_news_*。
+        """
+        from src.config import load_config
+        cfg = load_config().get("news", {})
+        if not cfg or cfg.get("enabled", True) is False:
+            return
+        today = now_cn().date()
+
+        for hhmm in (cfg.get("ingest_times") or []):
+            at = _parse_hhmm(hhmm)
+            if at is None:
+                continue
+            key = str(hhmm)
+            if self._last_news_ingest.get(key) == today:
+                continue
+            if now_cn().time() < at:
+                continue
+            self._last_news_ingest[key] = today
+            threading.Thread(target=self._run_news_ingest, daemon=True).start()
+
+        sat = _parse_hhmm(cfg.get("summary_time", "18:30"))
+        if sat is None or self._last_news_summary == today:
+            return
+        if now_cn().time() < sat:
+            return
+        self._last_news_summary = today
+        threading.Thread(target=self._run_news_summary, daemon=True).start()
+
+    @staticmethod
+    def _run_news_ingest():
+        """抓取新闻入库（后台线程）。"""
+        try:
+            from src.collector import news_fetcher
+            from src.config import load_config
+            cfg = load_config().get("news", {})
+            scope = {"include_pinned": True,
+                     "include_watchlist_ai": True,
+                     "include_pool": bool(cfg.get("include_pool", False))}
+            news_fetcher.ingest(source=cfg.get("source", "akshare_em"),
+                                per_code=int(cfg.get("per_code", 8)), **scope)
+        except Exception as e:
+            logger.warning("[调度器] 新闻抓取异常: %s", e)
+
+    @staticmethod
+    def _run_news_summary():
+        """AI 逐条情绪判定 + 舆情日报（后台线程）。"""
+        try:
+            from src.analyzer.ai_analyzer import AiAnalyzer
+            from src.analyzer.news_summarizer import summarize_news
+            from src.collector import news_fetcher
+            from src.config import load_config
+            from src.models.news import NewsDAO
+
+            cfg = load_config()
+            news_cfg = cfg.get("news", {})
+            hours = int(news_cfg.get("lookback_hours", 24))
+            since = (now_cn() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+            scope = {"include_pinned": True,
+                     "include_watchlist_ai": True,
+                     "include_pool": bool(news_cfg.get("include_pool", False))}
+            codes = news_fetcher.target_codes(**scope)
+            dao = NewsDAO()
+            items = dao.for_codes([c for c, _ in codes],
+                                  limit_per_code=int(news_cfg.get("per_code", 8)),
+                                  since=since, unsummarized_only=True)
+            if not items:
+                logger.info("[调度器] 无新新闻可摘要，跳过")
+                return
+            analyzer = AiAnalyzer(cfg.get("ai", {}))
+            res = summarize_news(analyzer, items,
+                                 {c: n for c, n in codes},
+                                 now_cn().strftime("%Y-%m-%d"),
+                                 scope="钉选股 + AI观察池",
+                                 max_items=int(news_cfg.get("max_items", 30)))
+            if not res:
+                logger.warning("[调度器] 舆情摘要失败")
+                return
+            dao.apply_sentiment(res["judgments"])
+            dao.save_digest(now_cn().strftime("%Y-%m-%d"), res["content_md"],
+                            overall=res["overall"], scope=res["scope"],
+                            model=res["model"], item_count=len(items),
+                            usage=res["usage"])
+            logger.info("[调度器] 舆情日报已写入（%d 条 / 判定 %d）",
+                        len(items), len(res["judgments"]))
+        except Exception as e:
+            logger.warning("[调度器] 舆情摘要异常: %s", e)
 
     def _check_scheduled_review(self):
         """检查是否需要触发定时 AI 复盘（节奏见 ai_review.days/time）。
