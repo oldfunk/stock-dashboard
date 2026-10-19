@@ -209,6 +209,41 @@
         }
 
         /* ========== Market Row ========== */
+        /* 新闻滚动条：横向匀速滚动，悬停暂停；情绪标签着色 */
+        .news-ticker {
+            display: flex; align-items: center; gap: 10px;
+            padding: 6px 0 10px; margin-bottom: 4px;
+            border-bottom: 1px solid var(--divider-thin);
+            overflow: hidden;
+        }
+        .news-tag {
+            flex: 0 0 auto; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+            color: var(--text-tertiary); text-transform: uppercase;
+            padding: 2px 6px; border: 1px solid var(--divider); border-radius: var(--radius-sm);
+        }
+        .news-track {
+            flex: 1 1 auto; overflow: hidden; white-space: nowrap;
+        }
+        .news-inner { display: inline-block; animation: news-scroll 60s linear infinite; }
+        .news-track:hover .news-inner { animation-play-state: paused; }
+        @keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @media (prefers-reduced-motion: reduce) { .news-inner { animation: none; } }
+        .news-item { margin-right: 34px; font-size: 12.5px; color: var(--text-secondary); }
+        .news-item a { color: inherit; text-decoration: none; }
+        .news-item a:hover { text-decoration: underline; }
+        .news-sent { font-size: 11px; margin-right: 5px; }
+        .news-sent.good { color: var(--color-up); }
+        .news-sent.bad { color: var(--color-down); }
+        .news-sent.flat { color: var(--text-tertiary); }
+        .news-code { color: var(--text-tertiary); margin-right: 5px; }
+        .news-empty { font-size: 12px; color: var(--text-tertiary); }
+        .news-refresh {
+            flex: 0 0 auto; font-size: 11px; padding: 3px 10px; cursor: pointer;
+            background: var(--bg-secondary); color: var(--text-secondary);
+            border: 1px solid var(--divider); border-radius: var(--radius-sm);
+        }
+        .news-refresh:hover { background: var(--bg-hover); color: var(--text-primary); }
+
         .market-row {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -901,6 +936,13 @@
             <button class="theme-toggle" onclick="toggleColorScheme()" id="colorToggle" title="切换涨跌颜色方案">红涨</button>
         </div>
     </header>
+
+    <!-- 新闻滚动条（2026-10-19）-->
+    <div class="news-ticker" id="newsTicker">
+        <span class="news-tag">舆情</span>
+        <div class="news-track" id="newsTrack"><span class="news-empty">暂无新闻，点击刷新</span></div>
+        <button class="news-refresh" id="newsRefresh" title="抓取最新新闻">刷新</button>
+    </div>
 
     <!-- Market Indices -->
     <div class="market-row" id="marketRow">
@@ -1699,5 +1741,6 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 <script src="/static/watchlist.js?v=20260928c"></script>
+<script src="/static/news.js?v=20261019a"></script>
 </body>
 </html>

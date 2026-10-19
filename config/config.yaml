@@ -81,6 +81,16 @@ schedule:
 
 # 纸盘交易配置已移除（2026-09-20 路线调整，量化交易系统归档）
 
+# -------- 新闻舆情（2026-10-19）--------
+news:
+  source: "akshare_em"        # 临时源（东财个股新闻）；换媒体只改这里 + registry
+  per_code: 8                   # 每只股票抓几条
+  include_pool: false           # 是否连候选池 Top20 一起抓（太吵，默认只钉选+观察池）
+  summary_time: "18:30"         # AI 舆情日报时刻（时机待定，先按收盘后跑）
+  lookback_hours: 24            # 摘要回看窗口
+  max_items: 30                 # 单次摘要最多喂给模型的条数
+  ingest_times: ["09:05", "15:05"]   # 抓取时刻（盘前+收盘后各一次）
+
 # -------- AI 观察池复盘配置 --------
 ai_review:
   enabled: true                    # 是否启用定时 AI 复盘

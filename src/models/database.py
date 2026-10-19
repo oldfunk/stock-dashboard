@@ -305,6 +305,38 @@ CREATE TABLE IF NOT EXISTS watchlist_thesis (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_thesis_code ON watchlist_thesis(code);
 
+-- 新闻舆情（2026-10-19 新增）：滚动条 + AI 每日摘要的事实底座。
+-- code 为空串 = 市场级新闻；同一 URL 只存一条（UNIQUE 去重，重复拉取不膨胀）。
+CREATE TABLE IF NOT EXISTS news_item (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT NOT NULL DEFAULT '',   -- 关联股票代码，'' = 市场级
+    name            TEXT,
+    title           TEXT NOT NULL,
+    summary         TEXT,
+    url             TEXT,
+    source          TEXT,
+    published_at    TEXT,                       -- 源站发布时间（可能为空）
+    fetched_at      TEXT NOT NULL,
+    sentiment       TEXT,                       -- AI 判定：利好/中性/利空（未摘要为 NULL）
+    ai_brief        TEXT,                       -- AI 一句话解读
+    summarized_at   TEXT                        -- 摘要时间，未摘要为 NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_news_unique ON news_item(COALESCE(url,''), title);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news_item(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_code ON news_item(code, published_at DESC);
+
+-- AI 舆情日报（每日一条，正文 Markdown；与 ai_journal 分开，避免污染复盘对比）
+CREATE TABLE IF NOT EXISTS news_digest (
+    digest_date     TEXT PRIMARY KEY,
+    scope           TEXT,                       -- 覆盖范围描述
+    overall         TEXT,                       -- 市场情绪结论一句话
+    content_md      TEXT NOT NULL,
+    model           TEXT,
+    item_count      INTEGER DEFAULT 0,
+    usage_json      TEXT,                       -- {prompt_tokens, completion_tokens}
+    created_at      TEXT NOT NULL
+);
+
 -- 注：M4a 纸盘五表（paper_account/orders/trades/positions/nav）已随 2026-09-20
 -- 路线调整删除（git 历史可查）。存量库残留表不自动删（只读历史），新库不再建。
 """

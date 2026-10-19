@@ -953,6 +953,119 @@ class LLMConcurrencyRequest(BaseModel):
     concurrency: int = 2
 
 
+class NewsIngestRequest(BaseModel):
+    source: str = ""
+    per_code: int = 8
+    include_pinned: bool = True
+    include_watchlist_ai: bool = True
+    include_pool: bool = False
+    pool_limit: int = 20
+
+
+class NewsSummaryRequest(BaseModel):
+    digest_date: str = ""
+    hours: int = 24
+    max_items: int = 30
+
+
+# ── 新闻舆情（2026-10-19）────────────────────────────────────
+
+@app.get("/api/news/latest")
+async def api_news_latest(limit: int = 30, only_market: bool = False):
+    """滚动条数据：最新新闻（含 AI 情绪判定）。"""
+    from src.models.news import NewsDAO
+    rows = NewsDAO().latest(limit=limit, only_market=only_market)
+    return {"items": rows, "count": len(rows)}
+
+
+@app.get("/api/news/by-code/{code}")
+async def api_news_by_code(code: str, limit: int = 20):
+    from src.models.news import NewsDAO
+    rows = NewsDAO().by_code(code, limit=limit)
+    return {"code": code, "items": rows, "count": len(rows)}
+
+
+@app.post("/api/news/ingest")
+async def api_news_ingest(req: NewsIngestRequest):
+    """手动抓取入库（源可插拔；当前默认东财临时源）。"""
+    from src.collector import news_fetcher
+    cfg = load_config().get("news", {})
+    source = req.source or cfg.get("source", "akshare_em")
+    if req.per_code < 1 or req.per_code > 30:
+        raise HTTPException(status_code=400, detail="per_code 须在 1~30")
+    scope = {
+        "include_pinned": req.include_pinned,
+        "include_watchlist_ai": req.include_watchlist_ai,
+        "include_pool": req.include_pool,
+        "limit": max(1, min(req.pool_limit, 50)),
+    }
+    return news_fetcher.ingest(source=source, per_code=req.per_code, **scope)
+
+
+@app.get("/api/news/digest")
+async def api_news_digest(digest_date: str = ""):
+    """舆情日报（写进投资笔记那一节）。"""
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    row = dao.get_digest(digest_date) if digest_date else dao.latest_digest()
+    if not row:
+        return {"ok": True, "data": None, "message": "暂无舆情日报"}
+    if row.get("usage_json"):
+        try:
+            row["usage"] = json.loads(row["usage_json"])
+        except (json.JSONDecodeError, TypeError):
+            row["usage"] = None
+    return {"ok": True, "data": row}
+
+
+@app.post("/api/news/summary")
+async def api_news_summary(req: NewsSummaryRequest):
+    """AI 逐条判情绪 + 生成当日舆情日报（写 news_digest）。"""
+    from datetime import timedelta
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    from src.analyzer.news_summarizer import summarize_news
+    from src.collector import news_fetcher
+    from src.models.news import NewsDAO
+
+    analyzer = AiAnalyzer(load_config().get("ai", {}))
+    if not analyzer.configured:
+        raise HTTPException(status_code=400, detail="未配置 API Key，先在模型设置页保存")
+
+    hours = max(1, min(req.hours, 72))
+    digest_date = (req.digest_date or now_cn().strftime("%Y-%m-%d"))[:10]
+    cfg = load_config().get("news", {})
+    include_pool = bool(cfg.get("include_pool", False))
+
+    # 先保证有数据可摘要（没抓到就现抓）
+    news_dao = NewsDAO()
+    since = (now_cn() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+    scope = {"include_pinned": True, "include_watchlist_ai": True,
+             "include_pool": include_pool}
+    codes = news_fetcher.target_codes(**scope)
+    if news_dao.unsummarized_count(since=since) == 0:
+        news_fetcher.ingest(source=cfg.get("source", "akshare_em"),
+                            per_code=int(cfg.get("per_code", 8)), **scope)
+    items = news_dao.for_codes([c for c, _ in codes],
+                               limit_per_code=int(cfg.get("per_code", 8)),
+                               since=since, unsummarized_only=True)
+    if not items:
+        return {"ok": False, "message": "近 %d 小时内没有新新闻可摘要" % hours}
+
+    code_name = {c: n for c, n in codes}
+    res = summarize_news(analyzer, items, code_name, digest_date,
+                         scope="钉选股 + AI观察池",
+                         max_items=max(5, min(req.max_items, 60)))
+    if not res:
+        return {"ok": False, "message": "AI 摘要失败（模型返回无法解析或未返回正文）"}
+    news_dao.apply_sentiment(res["judgments"])
+    news_dao.save_digest(digest_date, res["content_md"], overall=res["overall"],
+                         scope=res["scope"], model=res["model"],
+                         item_count=len(items), usage=res["usage"])
+    return {"ok": True, "digest_date": digest_date,
+            "judgments": len(res["judgments"]), "items": len(items),
+            "model": res["model"], "usage": res["usage"]}
+
+
 def _enrich_with_financial_summary(stocks: list) -> None:
     """run_ai_analysis.py 同款富集：financial_summary 字段注入 stock（原地修改）。"""
     from src.models.database import FinancialSummaryDAO
