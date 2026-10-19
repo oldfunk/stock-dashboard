@@ -1,0 +1,267 @@
+"""新闻舆情功能单测（2026-10-19）：DAO 幂等/排序/回写、源解析、摘要 JSON 容错、路由。
+
+hermetic：一律 tmp 库 + monkeypatch 掉真实抓取，绝不联网。
+"""
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    from src.models import database as db_mod
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: str(tmp_path / "t.db"))
+    db_mod.init_database()
+    from src.scheduler import MarketScheduler
+    monkeypatch.setattr(MarketScheduler, "start", lambda self: None)
+    monkeypatch.setattr(MarketScheduler, "stop", lambda self: None)
+    from src.config import start_config_watcher, stop_config_watcher
+    monkeypatch.setattr("src.config.start_config_watcher", lambda *a, **k: None)
+    monkeypatch.setattr("src.config.stop_config_watcher", lambda *a, **k: None)
+    from src.web.routes import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def tmp_db(tmp_path, monkeypatch):
+    from src.models import database as db_mod
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: str(tmp_path / "n.db"))
+    db_mod.init_database()
+    return db_mod
+
+
+def _item(code="300390", title="宁德时代获大额订单", url="http://x/1",
+          pub="2026-10-19 10:00", name="天华新能"):
+    return {"code": code, "name": name, "title": title, "summary": "正文",
+            "url": url, "source": "test", "published_at": pub}
+
+
+# ── DAO ──────────────────────────────────────────────────────
+
+def test_upsert_is_idempotent(tmp_db):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    assert dao.upsert_many([_item()]) == 1
+    assert dao.upsert_many([_item()]) == 0, "同 URL+标题不该重复入库"
+    assert len(dao.latest()) == 1
+
+
+def test_upsert_skips_blank_title(tmp_db):
+    from src.models.news import NewsDAO
+    assert NewsDAO().upsert_many([_item(title="  ")]) == 0
+
+
+def test_latest_orders_by_published_desc(tmp_db):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    dao.upsert_many([
+        _item(title="旧", url="u1", pub="2026-10-01 09:00"),
+        _item(title="新", url="u2", pub="2026-10-19 09:00"),
+    ])
+    assert [r["title"] for r in dao.latest()] == ["新", "旧"]
+
+
+def test_for_codes_and_unsummarized(tmp_db):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    dao.upsert_many([_item(code="300390", url="u1"),
+                     _item(code="000792", title="盐湖提价", url="u2")])
+    assert len(dao.for_codes(["300390"])) == 1
+    assert len(dao.for_codes(["300390", "000792"])) == 2
+    assert dao.unsummarized_count() == 2
+    dao.apply_sentiment([{"id": dao.for_codes(["300390"])[0]["id"],
+                          "sentiment": "利好", "brief": "订单落地"}])
+    assert dao.unsummarized_count() == 1
+
+
+def test_digest_roundtrip(tmp_db):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    dao.save_digest("2026-10-19", "# 舆情日报", overall="偏中性", model="m",
+                    item_count=7, usage={"prompt_tokens": 10})
+    row = dao.get_digest("2026-10-19")
+    assert row["overall"] == "偏中性" and row["item_count"] == 7
+    assert json.loads(row["usage_json"])["prompt_tokens"] == 10
+    assert dao.latest_digest()["digest_date"] == "2026-10-19"
+    dao.save_digest("2026-10-19", "# 覆盖")   # 同日覆盖
+    assert dao.get_digest("2026-10-19")["content_md"] == "# 覆盖"
+
+
+# ── 源 ───────────────────────────────────────────────────────
+
+def test_normalize_time_variants():
+    from src.collector.news_fetcher import _normalize_time
+    assert _normalize_time("2026-10-19 14:30:00") == "2026-10-19 14:30"
+    assert _normalize_time("20261019143000") == "2026-10-19 14:30"
+    assert _normalize_time("20261019") == "2026-10-19"
+    assert _normalize_time("") == ""
+    assert _normalize_time(None) == ""
+
+
+def test_source_registry_and_unknown():
+    from src.collector.news_fetcher import get_source
+    assert get_source("akshare_em") is not None
+    assert get_source("no-such-source") is None
+
+
+def test_fetch_news_swallows_source_error(monkeypatch):
+    """源挂了要回空，不能拖垮调用方"""
+    from src.collector import news_fetcher
+
+    class Boom:
+        name = "boom"
+
+        def fetch(self, code, name="", limit=10):
+            raise RuntimeError("down")
+
+    news_fetcher._REGISTRY["boom"] = Boom
+    out = news_fetcher.fetch_news([("300390", "x")], source="boom")
+    assert out == []
+
+
+def test_fetch_news_dedupes(monkeypatch):
+    from src.collector import news_fetcher
+
+    class Same:
+        name = "same"
+
+        def fetch(self, code, name="", limit=10):
+            return [_item(url="u1", title="同一条")]
+
+    news_fetcher._REGISTRY["same"] = Same
+    out = news_fetcher.fetch_news([("300390", "x"), ("000792", "y")],
+                                  source="same")
+    assert len(out) == 1
+
+
+def test_target_codes_dedupes(client):
+    from src.models.database import WatchlistDAO
+    from src.models.ai_watchlist import AiWatchlistDAO
+    WatchlistDAO().add("300390", "天华新能")
+    AiWatchlistDAO().add("300390", "天华新能")
+    AiWatchlistDAO().add("000792", "盐湖股份")
+    from src.collector.news_fetcher import target_codes
+    codes = [c for c, _ in target_codes()]
+    assert codes.count("300390") == 1
+    assert "000792" in codes
+
+
+# ── AI 摘要器 ────────────────────────────────────────────────
+
+class _FakeAnalyzer:
+    configured = True
+
+    def __init__(self, text):
+        self.text = text
+        self.prompt = ""
+
+    def ask_raw(self, prompt, system=None):
+        self.prompt = prompt
+        return (self.text, "fake-model", {"prompt_tokens": 100,
+                                         "completion_tokens": 50})
+
+
+def _items():
+
+    return [{"id": 1, "code": "300390", "name": "天华新能",
+             "title": "公司获海外大单", "summary": "",
+             "published_at": "2026-10-19 09:00"},
+            {"id": 2, "code": "000792", "name": "盐湖股份",
+             "title": "行业综述", "summary": "",
+             "published_at": "2026-10-19 09:30"}]
+
+
+def test_summarize_news_ok():
+    from src.analyzer.news_summarizer import summarize_news
+    payload = json.dumps({
+        "judgments": [{"id": 1, "sentiment": "利好", "brief": "订单落地"},
+                      {"id": 2, "sentiment": "中性", "brief": "综述"}],
+        "overall": "整体偏正面",
+        "content_md": "# 舆情日报 2026-10-19" + chr(10) + "正文",
+    })
+    res = summarize_news(_FakeAnalyzer(payload), _items(),
+                         {"300390": "天华新能", "000792": "盐湖股份"},
+                         "2026-10-19")
+    assert res["overall"] == "整体偏正面"
+    assert len(res["judgments"]) == 2
+    assert res["model"] == "fake-model"
+
+
+def test_summarize_rejects_unknown_ids_and_bad_sentiment():
+    from src.analyzer.news_summarizer import summarize_news
+    payload = json.dumps({
+        "judgments": [{"id": 999, "sentiment": "利好", "brief": "越界"},
+                      {"id": 1, "sentiment": "暴涨", "brief": "非法倾向"}],
+        "content_md": "# 正文",
+    })
+    res = summarize_news(_FakeAnalyzer(payload), _items(), {}, "2026-10-19")
+    assert [j["id"] for j in res["judgments"]] == [1]
+    assert res["judgments"][0]["sentiment"] == "中性", "非法倾向一律归中性"
+
+
+def test_summarize_handles_code_fence_and_garbage():
+    from src.analyzer.news_summarizer import summarize_news
+    fenced = "```json" + chr(10) + json.dumps({"content_md": "# 正文"}) + chr(10) + "```"
+    assert summarize_news(_FakeAnalyzer(fenced), _items(), {}, "2026-10-19")
+    assert summarize_news(_FakeAnalyzer("完全不是JSON"), _items(), {}, "2026-10-19") is None
+    assert summarize_news(_FakeAnalyzer('{"judgments": []}'), _items(), {}, "2026-10-19") is None
+
+
+def test_summarize_requires_items_and_analyzer():
+    from src.analyzer.news_summarizer import summarize_news
+    assert summarize_news(_FakeAnalyzer("{}"), [], {}, "2026-10-19") is None
+    assert summarize_news(None, _items(), {}, "2026-10-19") is None
+
+
+def test_summarize_survives_llm_exception():
+    from src.analyzer.news_summarizer import summarize_news
+
+    class Boom:
+        configured = True
+
+        def ask_raw(self, prompt, system=None):
+            raise RuntimeError("llm down")
+
+    assert summarize_news(Boom(), _items(), {}, "2026-10-19") is None
+
+
+# ── 路由 ──────────────────────────────────────────────────────
+
+def test_api_news_latest_empty(client):
+    r = client.get("/api/news/latest")
+    assert r.status_code == 200 and r.json()["items"] == []
+
+
+def test_api_news_ingest_and_list(client, monkeypatch):
+    from src.models.news import NewsDAO
+    from src.collector import news_fetcher
+
+    monkeypatch.setattr(news_fetcher, "target_codes",
+                        lambda **kw: [("300390", "天华新能")])
+    monkeypatch.setattr(news_fetcher, "fetch_news",
+                        lambda codes, source="", per_code=10: [_item()])
+    r = client.post("/api/news/ingest", json={"per_code": 5})
+    assert r.status_code == 200 and r.json()["added"] == 1
+    got = client.get("/api/news/latest").json()
+    assert got["count"] == 1 and got["items"][0]["title"]
+
+
+def test_api_news_ingest_validates_per_code(client):
+    assert client.post("/api/news/ingest",
+                       json={"per_code": 0}).status_code == 400
+    assert client.post("/api/news/ingest",
+                       json={"per_code": 99}).status_code == 400
+
+
+def test_api_news_summary_without_key(client, monkeypatch):
+    from src.analyzer import ai_analyzer as mod
+
+    monkeypatch.setattr(mod.AiAnalyzer, "configured", False, raising=False)
+    r = client.post("/api/news/summary", json={})
+    assert r.status_code == 400
+
+
+def test_api_news_digest_none(client):
+    r = client.get("/api/news/digest")
+    assert r.status_code == 200 and r.json()["data"] is None
