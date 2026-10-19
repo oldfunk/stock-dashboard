@@ -4,10 +4,12 @@
 并给一句话解读，再合成一篇当日舆情日报（Markdown）落 news_digest，
 渲染在投资笔记页。
 
-设计要点：
-- 逐条判情绪写回 news_item，滚动条才能显示情绪标签；日报是聚合视图。
-- 条目太多时按相关度取前 N 条（标题命中股票名/代码权重高），省 token。
-- 失败不抛：返回 None，调用方按「无摘要」处理。
+关键设计：两次调用，不把 Markdown 塞进 JSON。
+第一次只回结构化的逐条判定（小 JSON，好解析）；第二次回纯文本 Markdown。
+实测让模型在 JSON 字符串里写正文，它会在正文里打引号导致整段解析失败，
+所以正文单独一次更稳——这与本项目大盘解盘写 Markdown 的既有做法一致。
+
+失败不抛：返回 None，调用方按「无摘要」处理。
 """
 from __future__ import annotations
 
@@ -19,21 +21,22 @@ logger = logging.getLogger(__name__)
 
 SENTIMENTS = ("利好", "中性", "利空")
 NL = chr(10)
+JSON_SYS = "你只输出JSON，不要输出其他任何内容。"
+TEXT_SYS = "你只输出Markdown正文，不要输出其他任何内容。"
 
-PROMPT_HEAD = (
-    "你是市场舆情分析师。下面是某只 A 股相关的新闻条目，请逐条判断对股价的影响倾向。" + NL +
+JUDGE_PROMPT = (
+    "你是市场舆情分析师。下面是若干条 A 股新闻，请逐条判断对股价的影响倾向。" + NL +
     NL +
     "判断标准（严格三选一）：" + NL +
-    "- 利好：业绩超预期、订单/政策利好、机构上调评级、重大资产注入等正向催化" + NL +
-    "- 利空：业绩暴雷、减持/解禁、监管处罚、退市风险、行业政策利空等负向冲击" + NL +
-    "- 中性：常规公告、行业综述、观点性文章、无明确方向" + NL +
+    "- 利好：业绩超预期、大额订单/中标、政策扶持、机构上调评级等正向催化" + NL +
+    "- 利空：业绩暴雷、减持解禁、监管处罚、退市风险、行业政策收紧等负向冲击" + NL +
+    "- 中性：常规公告、行业综述、观点文章、无明确方向" + NL +
     NL +
-    "不确定就判中性，不要硬凑方向。" + NL +
+    "不确定就判中性，不要硬凑方向。brief 用 30 字内说清为什么影响股价。" + NL +
     NL +
-    "【输出 JSON】（不要输出其他任何内容）" + NL +
-    "{" + NL +
-    "  judgments: [{id, sentiment, brief}], overall: 一句话结论, content_md: Markdown正文" + NL +
-    "}"
+    "输出 JSON，格式严格如下（只输出这个对象）：" + NL +
+    '{"judgments": [{"id": 1, "sentiment": "利好", "brief": "订单落地"}],'
+    ' "overall": "当日舆情一句话结论"}'
 )
 
 
@@ -54,70 +57,116 @@ def _rank(items: list, code_name: dict) -> list:
                   reverse=True)
 
 
-def _build_prompt(items: list, code_name: dict, digest_date: str) -> str:
-    parts = [PROMPT_HEAD, "", "【新闻条目】"]
+def _news_block(items: list, code_name: dict) -> str:
+    lines = []
     for it in items:
         label = code_name.get(it.get("code"), "") or it.get("code") or "市场"
-        head = "- id=" + str(it["id"]) + "｜" + label + "｜"
-        head += (it.get("published_at") or "时间未知") + "｜" + str(it.get("title") or "")
-        parts.append(head)
+        lines.append("- id=" + str(it["id"]) + "｜" + label + "｜" +
+                     (it.get("published_at") or "时间未知") + "｜" +
+                     str(it.get("title") or ""))
         if it.get("summary"):
-            parts.append("  摘要：" + str(it["summary"])[:200])
-    parts.append("")
-    parts.append("日期用 " + digest_date + "。content_md 用 Markdown。")
-    return NL.join(parts)
+            lines.append("  摘要：" + str(it["summary"])[:180])
+    return NL.join(lines)
 
 
-def summarize_news(analyzer, items: list, code_name: dict, digest_date: str,
-                   scope: str = "", max_items: int = 30) -> Optional[dict]:
-    """对新闻做逐条情绪判定 + 生成舆情日报。失败返回 None。"""
-    if not analyzer or not getattr(analyzer, "configured", False) or not items:
-        return None
-    picked = _rank(items, code_name)[:max_items]
-    prompt = _build_prompt(picked, code_name, digest_date)
-    try:
-        raw = analyzer.ask_raw(prompt, system="你只输出JSON，不要输出其他任何内容。")
-    except Exception as e:
-        logger.warning("[新闻摘要] LLM 调用失败: %s", e)
-        return None
-    if isinstance(raw, tuple):
-        text = raw[0]
-        model = raw[1] if len(raw) > 1 else ""
-        usage = raw[2] if len(raw) > 2 else {}
-    else:
-        text, model, usage = raw, "", {}
-    data = None
+def _extract_json(text: str) -> Optional[dict]:
+    """从模型回复里抠出 JSON 对象；失败返回 None。"""
     try:
         t = (text or "").strip()
         if "```" in t:
             parts = t.split("```")
             t = parts[1] if len(parts) > 1 else t
-            if t.startswith("json"):
+            if t.lower().startswith("json"):
                 t = t[4:]
         s, e = t.find("{"), t.rfind("}")
-        if s != -1 and e > s:
-            data = json.loads(t[s:e + 1])
+        if s == -1 or e <= s:
+            return None
+        data = json.loads(t[s:e + 1])
+        return data if isinstance(data, dict) else None
     except Exception as ex:
         logger.warning("[新闻摘要] JSON 解析失败: %s", ex)
-    if not isinstance(data, dict):
         return None
 
-    judgments = []
-    valid_ids = {it["id"] for it in picked}
-    for j in (data.get("judgments") or []):
-        if not isinstance(j, dict) or j.get("id") not in valid_ids:
-            continue
-        sent = str(j.get("sentiment") or "").strip()
-        judgments.append({
-            "id": j["id"],
-            "sentiment": sent if sent in SENTIMENTS else "中性",
-            "brief": str(j.get("brief") or "")[:120],
-        })
-    content_md = str(data.get("content_md") or "").strip()
+
+def _ask(analyzer, prompt: str, system: str):
+    """调 LLM，返回 (text, model, usage)；异常抛给上层处理。"""
+    raw = analyzer.ask_raw(prompt, system=system)
+    if isinstance(raw, tuple):
+        return (raw[0], raw[1] if len(raw) > 1 else "",
+                raw[2] if len(raw) > 2 else {})
+    return (raw, "", {})
+
+
+def summarize_news(analyzer, items: list, code_name: dict, digest_date: str,
+                   scope: str = "", max_items: int = 30) -> Optional[dict]:
+    """两次调用：① 逐条情绪判定(JSON) ② 舆情日报正文(Markdown)。
+
+    返回 {overall, content_md, judgments, usage, model, scope}，失败 None。
+    """
+    if not analyzer or not getattr(analyzer, "configured", False) or not items:
+        return None
+    picked = _rank(items, code_name)[:max_items]
+    block = _news_block(picked, code_name)
+
+    # ① 逐条判定
+    judgments: list = []
+    overall = ""
+    model, usage = "", {}
+    try:
+        text, model, usage = _ask(analyzer, JUDGE_PROMPT + NL + NL + block,
+                                  JSON_SYS)
+        data = _extract_json(text)
+        if data:
+            overall = str(data.get("overall") or "")[:200]
+            valid = {it["id"] for it in picked}
+            for j in (data.get("judgments") or []):
+                if not isinstance(j, dict) or j.get("id") not in valid:
+                    continue
+                sent = str(j.get("sentiment") or "").strip()
+                judgments.append({
+                    "id": j["id"],
+                    "sentiment": sent if sent in SENTIMENTS else "中性",
+                    "brief": str(j.get("brief") or "")[:120],
+                })
+    except Exception as e:
+        logger.warning("[新闻摘要] 判定调用失败: %s", e)
+
+    # ② 正文（纯 Markdown，模型自由写）
+    body_prompt = (
+        "下面是某组 A 股标的的舆情判定结果与新闻条目。请写一篇当日舆情日报。" + NL +
+        NL +
+        "【判定汇总】" + NL +
+        (overall or "（无）") + NL +
+        NL + NL.join(["- [" + j["sentiment"] + "] " + j["brief"] for j in judgments])
+        or "- （无）" + NL + NL +
+        "【新闻条目】" + NL + block + NL + NL +
+        "要求（Markdown）：" + NL +
+        "1. 开头一句话给当日市场情绪结论" + NL +
+        "2. 分标的写：舆情倾向 + 对该股意味着什么（结合基本面/持仓视角）" + NL +
+        "3. 最后一段：对持仓与观察池的启示，以及需要警惕的信号" + NL +
+        "4. 不要复述原文标题，用人话；不要写免责套话" + NL +
+        "5. 日期写 " + digest_date
+    )
+    try:
+        text, model2, usage2 = _ask(analyzer, body_prompt, TEXT_SYS)
+        content_md = (text or "").strip()
+        if usage2:
+            usage = {**usage, **usage2}
+        if model2:
+            model = model2
+    except Exception as e:
+        logger.warning("[新闻摘要] 正文调用失败: %s", e)
+        content_md = ""
+
     if not content_md:
         return None
+    if not overall and judgments:
+        pos = sum(1 for j in judgments if j["sentiment"] == "利好")
+        neg = sum(1 for j in judgments if j["sentiment"] == "利空")
+        overall = ("整体偏正面" if pos > neg else
+                   "整体偏负面" if neg > pos else "多空交织，偏中性")
     return {
-        "overall": str(data.get("overall") or "")[:200],
+        "overall": overall,
         "content_md": content_md,
         "judgments": judgments,
         "usage": usage or {},

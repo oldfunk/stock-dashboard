@@ -150,16 +150,17 @@ def test_target_codes_dedupes(client):
 # ── AI 摘要器 ────────────────────────────────────────────────
 
 class _FakeAnalyzer:
+    """按调用次序回放：第一次=判定 JSON，第二次=Markdown 正文。"""
     configured = True
 
-    def __init__(self, text):
-        self.text = text
-        self.prompt = ""
+    def __init__(self, *texts):
+        self.texts = list(texts) if texts else ["{}"]
+        self.prompts = []
 
     def ask_raw(self, prompt, system=None):
-        self.prompt = prompt
-        return (self.text, "fake-model", {"prompt_tokens": 100,
-                                         "completion_tokens": 50})
+        self.prompts.append(prompt)
+        t = self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+        return (t, "fake-model", {"prompt_tokens": 100, "completion_tokens": 50})
 
 
 def _items():
@@ -178,14 +179,20 @@ def test_summarize_news_ok():
         "judgments": [{"id": 1, "sentiment": "利好", "brief": "订单落地"},
                       {"id": 2, "sentiment": "中性", "brief": "综述"}],
         "overall": "整体偏正面",
-        "content_md": "# 舆情日报 2026-10-19" + chr(10) + "正文",
     })
-    res = summarize_news(_FakeAnalyzer(payload), _items(),
+    body = "# 舆情日报 2026-10-19" + chr(10) + "## 逐股" + chr(10) + "天华新能获大单，短线偏正面。"
+    az = _FakeAnalyzer(payload, body)
+    res = summarize_news(az, _items(),
                          {"300390": "天华新能", "000792": "盐湖股份"},
                          "2026-10-19")
     assert res["overall"] == "整体偏正面"
     assert len(res["judgments"]) == 2
     assert res["model"] == "fake-model"
+    assert res["content_md"] == body
+    # 两次调用：第一次判定，第二次正文
+    assert len(az.prompts) == 2
+    assert "judgments" in az.prompts[0]
+    assert "舆情日报" in az.prompts[1]
 
 
 def test_summarize_rejects_unknown_ids_and_bad_sentiment():
@@ -193,19 +200,24 @@ def test_summarize_rejects_unknown_ids_and_bad_sentiment():
     payload = json.dumps({
         "judgments": [{"id": 999, "sentiment": "利好", "brief": "越界"},
                       {"id": 1, "sentiment": "暴涨", "brief": "非法倾向"}],
-        "content_md": "# 正文",
     })
-    res = summarize_news(_FakeAnalyzer(payload), _items(), {}, "2026-10-19")
+    res = summarize_news(_FakeAnalyzer(payload, "# 正文"), _items(), {},
+                         "2026-10-19")
     assert [j["id"] for j in res["judgments"]] == [1]
     assert res["judgments"][0]["sentiment"] == "中性", "非法倾向一律归中性"
 
 
 def test_summarize_handles_code_fence_and_garbage():
     from src.analyzer.news_summarizer import summarize_news
-    fenced = "```json" + chr(10) + json.dumps({"content_md": "# 正文"}) + chr(10) + "```"
-    assert summarize_news(_FakeAnalyzer(fenced), _items(), {}, "2026-10-19")
-    assert summarize_news(_FakeAnalyzer("完全不是JSON"), _items(), {}, "2026-10-19") is None
-    assert summarize_news(_FakeAnalyzer('{"judgments": []}'), _items(), {}, "2026-10-19") is None
+    fenced = "```json" + chr(10) + json.dumps({"overall": "中性"}) + chr(10) + "```"
+    ok = summarize_news(_FakeAnalyzer(fenced, "# 正文"), _items(), {}, "2026-10-19")
+    assert ok and ok["overall"] == "中性"
+    # 判定调用坏掉但正文还在 → 仍要出日报（情绪退回按计数兜底）
+    bad = summarize_news(_FakeAnalyzer("完全不是JSON", "# 正文"), _items(), {},
+                         "2026-10-19")
+    assert bad and bad["judgments"] == [] and bad["content_md"] == "# 正文"
+    # 正文为空 → 视为失败
+    assert summarize_news(_FakeAnalyzer("{}", ""), _items(), {}, "2026-10-19") is None
 
 
 def test_summarize_requires_items_and_analyzer():

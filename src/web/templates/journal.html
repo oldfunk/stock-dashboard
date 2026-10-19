@@ -142,6 +142,22 @@
     </div>
 
     <div class="journal-content">
+        {% if news_digest %}
+        <div class="journal-body" style="margin-bottom: 24px;">
+            <h3 style="font-size: 16px; margin-bottom: 4px;">舆情日报 {{ news_digest.digest_date }}</h3>
+            <p style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 12px;">
+                覆盖 {{ news_digest.scope or '钉选股' }} · {{ news_digest.item_count or 0 }} 条新闻
+                {% if news_digest.model %} · 模型 {{ news_digest.model }}{% endif %}
+            </p>
+            {% if news_digest.overall %}
+            <p style="font-size: 14px; color: var(--text-primary); margin-bottom: 12px;">
+                <b>一句话：</b>{{ news_digest.overall }}
+            </p>
+            {% endif %}
+            {{ news_digest.content_md | markdown_to_html | safe }}
+        </div>
+        {% endif %}
+
         {% if journal %}
         <div class="journal-body">
             {{ journal.content_md | markdown_to_html | safe }}

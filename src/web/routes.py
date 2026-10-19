@@ -1825,10 +1825,15 @@ async def journal_page(request: Request):
     history_list = AiJournalDAO().list_all()
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    from src.models.news import NewsDAO as _NewsDAO
+    _news_dao = _NewsDAO()
     return templates.TemplateResponse(request, "journal.html", {
         "request": request,
         "page_title": page_title,
         "journal": latest,
+        "news_digest": _news_dao.get_digest(now_cn().strftime("%Y-%m-%d"))
+                       or _news_dao.latest_digest(),
+        "news_dates": _news_dao.digest_dates(limit=30),
         "history_list": history_list,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
@@ -1847,6 +1852,8 @@ async def journal_by_date(request: Request, journal_date: str):
         "journal": journal,
         "history_list": history_list,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+        "news_digest": _news_dao.get_digest(journal_date) or _news_dao.latest_digest(),
+        "news_dates": _news_dao.digest_dates(limit=30),
     })
 
 
