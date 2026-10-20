@@ -380,9 +380,10 @@ class MarketScheduler:
                      "include_watchlist_ai": True,
                      "include_pool": bool(cfg.get("include_pool", False))}
             news_fetcher.ingest(
-                source=cfg.get("source", "akshare_em"),
+                sources=news_fetcher.sources_from_config(cfg),
                 per_code=int(cfg.get("per_code", 8)),
                 cooldown_min=int(cfg.get("code_cooldown_min", 60)),
+                market_per_run=int(cfg.get("market_per_run", 20)),
                 **scope)
         except Exception as e:
             logger.warning("[调度器] 新闻抓取异常: %s", e)
@@ -409,6 +410,9 @@ class MarketScheduler:
             items = dao.for_codes([c for c, _ in codes],
                                   limit_per_code=int(news_cfg.get("per_code", 8)),
                                   since=since, unsummarized_only=True)
+            items += dao.latest(
+                limit=int(news_cfg.get("market_items_in_summary", 10)),
+                only_market=True, since=since, unsummarized_only=True)
             if not items:
                 logger.info("[调度器] 无新新闻可摘要，跳过")
                 return
@@ -416,7 +420,7 @@ class MarketScheduler:
             res = summarize_news(analyzer, items,
                                  {c: n for c, n in codes},
                                  now_cn().strftime("%Y-%m-%d"),
-                                 scope="钉选股 + AI观察池",
+                                 scope="钉选股 + AI观察池 + 市场要闻",
                                  max_items=int(news_cfg.get("max_items", 30)))
             if not res:
                 logger.warning("[调度器] 舆情摘要失败")

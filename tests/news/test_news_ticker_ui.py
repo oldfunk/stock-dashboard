@@ -60,3 +60,10 @@ def test_ticker_js_is_wired(client):
         assert w in js
     # 无缝滚动靠内容复制一份（html + html）实现 translateX(-50%) 对齐
     assert "+ html + html +" in js
+
+
+def test_ticker_marks_market_items(client):
+    """市场级要闻（code 为空）在滚动条里用「市场」标记区分。"""
+    js = open("src/web/static/news.js", encoding="utf-8").read()
+    assert "isMarket" in js and "news-code" in js
+    assert ".news-code.market" in client.get("/").text

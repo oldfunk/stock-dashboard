@@ -990,7 +990,7 @@ async def api_news_ingest(req: NewsIngestRequest):
     """手动抓取入库（源可插拔；当前默认东财临时源）。"""
     from src.collector import news_fetcher
     cfg = load_config().get("news", {})
-    source = req.source or cfg.get("source", "akshare_em")
+    sources = [req.source] if req.source else news_fetcher.sources_from_config(cfg)
     if req.per_code < 1 or req.per_code > 30:
         raise HTTPException(status_code=400, detail="per_code 须在 1~30")
     scope = {
@@ -999,7 +999,9 @@ async def api_news_ingest(req: NewsIngestRequest):
         "include_pool": req.include_pool,
         "limit": max(1, min(req.pool_limit, 50)),
     }
-    return news_fetcher.ingest(source=source, per_code=req.per_code, **scope)
+    return news_fetcher.ingest(sources=sources, per_code=req.per_code,
+                               market_per_run=int(cfg.get("market_per_run", 20)),
+                               **scope)
 
 
 @app.get("/api/news/digest")
@@ -1043,17 +1045,22 @@ async def api_news_summary(req: NewsSummaryRequest):
              "include_pool": include_pool}
     codes = news_fetcher.target_codes(**scope)
     if news_dao.unsummarized_count(since=since) == 0:
-        news_fetcher.ingest(source=cfg.get("source", "akshare_em"),
-                            per_code=int(cfg.get("per_code", 8)), **scope)
+        news_fetcher.ingest(sources=news_fetcher.sources_from_config(cfg),
+                            per_code=int(cfg.get("per_code", 8)),
+                            market_per_run=int(cfg.get("market_per_run", 20)),
+                            **scope)
     items = news_dao.for_codes([c for c, _ in codes],
                                limit_per_code=int(cfg.get("per_code", 8)),
                                since=since, unsummarized_only=True)
+    items += news_dao.latest(
+        limit=int(cfg.get("market_items_in_summary", 10)),
+        only_market=True, since=since, unsummarized_only=True)
     if not items:
         return {"ok": False, "message": "近 %d 小时内没有新新闻可摘要" % hours}
 
     code_name = {c: n for c, n in codes}
     res = summarize_news(analyzer, items, code_name, digest_date,
-                         scope="钉选股 + AI观察池",
+                         scope="钉选股 + AI观察池 + 市场要闻",
                          max_items=max(5, min(req.max_items, 60)))
     if not res:
         return {"ok": False, "message": "AI 摘要失败（模型返回无法解析或未返回正文）"}

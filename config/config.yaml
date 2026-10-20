@@ -83,15 +83,17 @@ schedule:
 
 # -------- 新闻舆情（2026-10-19）--------
 news:
-  source: "akshare_em"        # 临时源（东财个股新闻）；换媒体只改这里 + registry
+  sources: ["akshare_em", "caixin_hot"]   # 个股层（东财）+ 市场层（财新头条）
   per_code: 8                   # 每只股票抓几条
+  market_per_run: 20            # 市场级每次入库条数（财新）
+  market_items_in_summary: 10   # AI 日报里市场要闻最多几条
   include_pool: false           # 是否连候选池 Top20 一起抓（太吵，默认只钉选+观察池）
   summary_time: "18:30"         # AI 舆情日报时刻（时机待定，先按收盘后跑）
   lookback_hours: 24            # 摘要回看窗口
   max_items: 30                 # 单次摘要最多喂给模型的条数
   poll_interval_min: 15         # 后台轮询间隔（活跃时段内循环拉取）
   active_hours: [7, 23]         # 活跃时段（点），其余时间不打扰数据源
-  code_cooldown_min: 60         # 同一只票两次抓取的最小间隔（以库内 fetched_at 为准）
+  code_cooldown_min: 60         # 同一只票/市场源两次抓取的最小间隔
 
 # -------- AI 观察池复盘配置 --------
 ai_review:

@@ -20,7 +20,10 @@
         ? '<span class="news-sent ' + cls + '">' + esc(it.sentiment) + "</span>"
         : "";
       const who = it.name || it.code;
-      const tag = who ? '<span class="news-code">' + esc(who) + "</span>" : "";
+      const isMarket = !it.code;
+      const tag = who
+        ? '<span class="news-code' + (isMarket ? " market" : "") + '">' + esc(who) + "</span>"
+        : "";
       const body = esc(it.title);
       const inner = it.url
         ? '<a href="' + esc(it.url) + '" target="_blank" rel="noopener">' + body + "</a>"

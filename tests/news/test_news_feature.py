@@ -253,6 +253,9 @@ def test_api_news_ingest_and_list(client, monkeypatch):
                         lambda **kw: [("300390", "天华新能")])
     monkeypatch.setattr(news_fetcher, "fetch_news",
                         lambda codes, source="", per_code=10: [_item()])
+    # 用例保持 hermetic：只用个股源，不打真实市场源
+    monkeypatch.setattr(news_fetcher, "sources_from_config",
+                        lambda cfg: ["akshare_em"])
     r = client.post("/api/news/ingest", json={"per_code": 5})
     assert r.status_code == 200 and r.json()["added"] == 1
     got = client.get("/api/news/latest").json()
@@ -309,3 +312,81 @@ def test_recently_fetched_uses_db(client):
     assert "300390" in dao.recently_fetched(["300390", "000792"], 60)
     assert dao.recently_fetched(["000792"], 60) == set(), "没抓过的票不算"
     assert dao.recently_fetched(["300390"], 0) == set(), "冷却为 0 则不过滤"
+
+
+
+# ── 多源（个股层 + 市场层） ──────────────────────────────
+
+def test_sources_from_config_prefers_list_and_keeps_legacy_str():
+    from src.collector.news_fetcher import sources_from_config
+    assert sources_from_config({"sources": ["akshare_em", "caixin_hot"]}) == [
+        "akshare_em", "caixin_hot"]
+    assert sources_from_config({"source": "akshare_em"}) == ["akshare_em"]
+    assert sources_from_config({}) == ["akshare_em"], "缺配置时回退东财"
+    assert sources_from_config({"sources": "caixin_hot"}) == ["caixin_hot"]
+
+
+def test_caixin_is_market_level():
+    from src.collector.news_fetcher import get_source
+    src = get_source("caixin_hot")
+    assert src is not None and src.market_level is True
+    assert src.fetch("300390", "天华新能") == [], "市场级源不按股票抓"
+
+
+def test_caixin_fetch_market_parses_headline_and_date(monkeypatch):
+    import pandas as pd
+    import akshare as ak
+    from src.collector.news_fetcher import get_source
+
+    df = pd.DataFrame([
+        {"tag": "市场动态", "summary": "全球股票净卖出。后续正文。",
+         "url": "https://database.caixin.com/2026-10-20/1024.html?cxapp=1"},
+        {"tag": "商圈", "summary": "   ", "url": "https://x/2026-10-19/1.html"},
+    ])
+    monkeypatch.setattr(ak, "stock_news_main_cx", lambda: df)
+    items = get_source("caixin_hot").fetch_market(limit=10)
+    assert len(items) == 1, "空正文应跳过"
+    it = items[0]
+    assert it["code"] == "" and it["name"] == "市场"
+    assert it["title"] == "全球股票净卖出", "标题取正文首句"
+    assert it["published_at"] == "2026-10-20", "时间从 URL 解析"
+    assert it["url"] == "https://database.caixin.com/2026-10-20/1024.html", \
+        "查询参数应去掉"
+
+
+def test_ingest_market_source_writes_market_rows(tmp_db, monkeypatch):
+    from src.collector import news_fetcher
+    from src.models.news import NewsDAO
+
+    class FakeMarket:
+        name = "fake_market"
+        market_level = True
+
+        def fetch(self, *a, **k):
+            return []
+
+        def fetch_market(self, limit=20):
+            return [_item(code="", name="市场", title="财新要闻", url="m1")]
+
+    monkeypatch.setitem(news_fetcher._REGISTRY, "fake_market", FakeMarket)
+    r = news_fetcher.ingest(sources=["fake_market"], market_per_run=5,
+                            cooldown_min=60)
+    assert r["market_added"] == 1
+    rows = NewsDAO().latest(only_market=True)
+    assert len(rows) == 1 and rows[0]["code"] == ""
+    assert rows[0]["name"] == "市场"
+
+    r2 = news_fetcher.ingest(sources=["fake_market"], market_per_run=5,
+                             cooldown_min=60)
+    assert r2["market_skipped"] is True and r2["market_added"] == 0, \
+        "市场源也有冷却"
+
+
+def test_latest_can_filter_unsummarized_market(tmp_db):
+    from src.models.news import NewsDAO
+    dao = NewsDAO()
+    dao.upsert_many([_item(code="", name="市场", title="市场一", url="m1")])
+    assert len(dao.latest(only_market=True, unsummarized_only=True)) == 1
+    row = dao.latest(only_market=True)[0]
+    dao.apply_sentiment([{"id": row["id"], "sentiment": "中性", "brief": "x"}])
+    assert dao.latest(only_market=True, unsummarized_only=True) == []

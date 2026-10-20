@@ -42,7 +42,8 @@ class NewsDAO:
 
     # ── 读取 ──────────────────────────────────────────────
     def latest(self, limit: int = 30, only_market: bool = False,
-               since: Optional[str] = None) -> list[dict]:
+               since: Optional[str] = None,
+               unsummarized_only: bool = False) -> list[dict]:
         """最新条目（滚动条用）：按发布时间倒序，缺发布时间的排在后面。"""
         sql = "SELECT * FROM news_item WHERE 1=1"
         args: list = []
@@ -51,6 +52,8 @@ class NewsDAO:
         if since:
             sql += " AND COALESCE(published_at, fetched_at) >= ?"
             args.append(since)
+        if unsummarized_only:
+            sql += " AND summarized_at IS NULL"
         sql += (" ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC"
                 " LIMIT ?")
         args.append(limit)
