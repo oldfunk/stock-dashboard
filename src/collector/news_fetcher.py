@@ -229,12 +229,14 @@ def fetch_news(codes=None, source: str = 'akshare_em', per_code: int = 10) -> li
 
 
 def ingest(sources=None, per_code: int = 10, cooldown_min: int = 0,
-           market_per_run: int = 0, **scope) -> dict:
+           market_cooldown_min=None, market_per_run: int = 0, **scope) -> dict:
     """抓取 → 落库，返回统计摘要（供 API/定时任务用）。
 
     sources 可传单个源名或列表：个股源按 target_codes 抓，市场级源
     （market_level=True，如财新）抓大盘要闻，落库时 code=''。
     cooldown_min > 0 时跳过最近抓过的对象：个股按票、市场级按 MARKET_CODE。
+    市场源另有 market_cooldown_min（缺省跟 cooldown_min）：财新单轮 ~15s，
+    不该跟个股同一节奏。
     """
     from src.models.news import NewsDAO
     if sources is None:
@@ -262,9 +264,10 @@ def ingest(sources=None, per_code: int = 10, cooldown_min: int = 0,
         # 记录尝试（含空结果）：冷却按尝试算，抓不到内容的票也不会被反复打
         dao.mark_fetched([c for c, _ in codes], ok=bool(items))
 
+    market_cd = cooldown_min if market_cooldown_min is None else market_cooldown_min
     market_added, market_skipped = 0, False
     if market_srcs and market_per_run > 0:
-        if cooldown_min > 0 and dao.recently_fetched([MARKET_CODE], cooldown_min):
+        if market_cd > 0 and dao.recently_fetched([MARKET_CODE], market_cd):
             market_skipped = True
         else:
             mkt = []

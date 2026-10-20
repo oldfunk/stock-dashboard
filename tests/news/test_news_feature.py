@@ -384,6 +384,10 @@ def test_ingest_market_source_writes_market_rows(tmp_db, monkeypatch):
     assert r2["market_skipped"] is True and r2["market_added"] == 0, \
         "市场源也有冷却"
 
+    r3 = news_fetcher.ingest(sources=["fake_market"], market_per_run=5,
+                             cooldown_min=60, market_cooldown_min=0)
+    assert r3["market_skipped"] is False, "市场冷却可独立关掉"
+
 
 def test_latest_can_filter_unsummarized_market(tmp_db):
     from src.models.news import NewsDAO

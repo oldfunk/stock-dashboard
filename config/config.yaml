@@ -93,7 +93,8 @@ news:
   max_items: 30                 # 单次摘要最多喂给模型的条数
   poll_interval_min: 15         # 后台轮询间隔（活跃时段内循环拉取）
   active_hours: [7, 23]         # 活跃时段（点），其余时间不打扰数据源
-  code_cooldown_min: 60         # 同一只票/市场源两次抓取的最小间隔
+  code_cooldown_min: 15         # 个股两次抓取的最小间隔（与轮询同步）
+  market_cooldown_min: 60       # 市场源冷却（财新单轮约 15s，放慢到 1 小时）
 
 # -------- AI 观察池复盘配置 --------
 ai_review:

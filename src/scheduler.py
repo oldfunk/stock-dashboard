@@ -382,7 +382,8 @@ class MarketScheduler:
             news_fetcher.ingest(
                 sources=news_fetcher.sources_from_config(cfg),
                 per_code=int(cfg.get("per_code", 8)),
-                cooldown_min=int(cfg.get("code_cooldown_min", 60)),
+                cooldown_min=int(cfg.get("code_cooldown_min", 15)),
+                market_cooldown_min=int(cfg.get("market_cooldown_min", 60)),
                 market_per_run=int(cfg.get("market_per_run", 20)),
                 **scope)
         except Exception as e:
