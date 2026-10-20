@@ -40,8 +40,17 @@ def _date_from_url(url) -> str:
 
 
 def _headline(text, max_len: int = 60) -> str:
-    """正文首句当标题（财新源没有独立标题字段）。"""
+    """正文首句当标题（财新源没有独立标题字段）。
+
+    先剥掉「【本文系数据通用户提前专享】」这类栏目/付费提示前缀，
+    否则滚动条里全是同一句提示语。
+    """
     s = str(text or '').strip()
+    while s.startswith('【'):
+        end = s.find('】')
+        if end < 0:
+            break
+        s = s[end + 1:].strip()
     if not s:
         return ''
     for sep in ('。', '！', '？', chr(10)):

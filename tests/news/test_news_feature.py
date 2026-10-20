@@ -342,16 +342,19 @@ def test_caixin_fetch_market_parses_headline_and_date(monkeypatch):
         {"tag": "市场动态", "summary": "全球股票净卖出。后续正文。",
          "url": "https://database.caixin.com/2026-10-20/1024.html?cxapp=1"},
         {"tag": "商圈", "summary": "   ", "url": "https://x/2026-10-19/1.html"},
+        {"tag": "数据通", "summary": "【本文系数据通用户提前专享】保险资金持续加仓。正文。",
+         "url": "https://x/2026-10-18/2.html"},
     ])
     monkeypatch.setattr(ak, "stock_news_main_cx", lambda: df)
     items = get_source("caixin_hot").fetch_market(limit=10)
-    assert len(items) == 1, "空正文应跳过"
+    assert len(items) == 2, "空正文应跳过"
     it = items[0]
     assert it["code"] == "" and it["name"] == "市场"
     assert it["title"] == "全球股票净卖出", "标题取正文首句"
     assert it["published_at"] == "2026-10-20", "时间从 URL 解析"
     assert it["url"] == "https://database.caixin.com/2026-10-20/1024.html", \
         "查询参数应去掉"
+    assert items[1]["title"] == "保险资金持续加仓", "「【…】」前缀应剥掉"
 
 
 def test_ingest_market_source_writes_market_rows(tmp_db, monkeypatch):

@@ -40,7 +40,7 @@
 
   async function load() {
     try {
-      const r = await fetch("/api/news/latest?limit=30");
+      const r = await fetch("/api/news/latest?limit=40");
       const d = await r.json();
       render(d.items || []);
     } catch (e) {
