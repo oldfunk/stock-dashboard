@@ -55,8 +55,9 @@ def _as_percent(value: float | None, threshold: float) -> float | None:
 def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
     """单策略阈值检查：返回命中理由，空列表 = 未命中该策略。
 
-    缺失数据的阈值项直接跳过（不否决）：策略层叠加在 7 门基础质量之上，
-    只对可验证项加严，不因上游字段缺失误杀。
+    一般阈值缺失时跳过（避免上游字段缺失误杀）；但红利策略的定义性字段
+    dividend_yield_min / payout_ratio_max 缺失时必须 fail-closed ——
+    没有真实股息数据就不许放进红利池，防止“假红利”策略。
     """
     reasons: list[str] = []
     t = thresholds or {}
@@ -78,8 +79,13 @@ def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
         ('dividend_yield_min', _num('dividend_yield'), 'ge', '股息率'),
         ('roe_volatility_max', _num('roe_volatility'), 'le', 'ROE波动'),
     ]
+    fail_closed = {'dividend_yield_min', 'payout_ratio_max'}
     for key, val, op, label in checks:
-        if key not in t or val is None:
+        if key not in t:
+            continue
+        if val is None:
+            if key in fail_closed:
+                return []
             continue
         bound = _as_percent(val, t[key])
         if op == 'ge' and val < bound:
@@ -97,12 +103,15 @@ def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
                 return []
             reasons.append(f'负债权益比{de:.2f}')
 
-    # 分红率：无上游字段时跳过（只在可验证时加严）
+    # 分红率：红利策略定义性字段，缺数据 fail-closed
     if 'payout_ratio_max' in t:
         payout = _num('payout_ratio')
-        if payout is not None and payout > t['payout_ratio_max'] * (
+        if payout is None:
+            return []
+        if payout > t['payout_ratio_max'] * (
                 100 if abs(t['payout_ratio_max']) < 1 < abs(payout) else 1):
             return []
+        reasons.append(f'分红率{payout:.1f}%')
 
     # FCF 收益率：年均FCF/市值，缺数据跳过
     if 'fcf_yield_min' in t:
@@ -580,6 +589,9 @@ class ValueScreener:
             'profit_growth': c.get('profit_growth'),
             'debt_ratio': c.get('debt_ratio'),
             'market_cap': c.get('market_cap'),
+            'dividend_yield': c.get('dividend_yield'),
+            'payout_ratio': c.get('payout_ratio'),
+            'dividend_year': c.get('dividend_year'),
             'reason': '; '.join(reasons),
         }
 

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} - 信号验证</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-sans: 'Inter', 'Noto Sans SC', sans-serif;
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f1f3;
+            --text-primary: #1a1c1e;
+            --text-secondary: #5f6368;
+            --text-tertiary: #9aa0a6;
+            --accent: #1a73e8;
+            --divider: #e0e3e7;
+            --radius: 8px;
+            --up: #c5221f;
+            --down: #137333;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 0; background: var(--bg-primary);
+            color: var(--text-primary); font-family: var(--font-sans);
+            font-size: 14px; line-height: 1.55;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .wrap { max-width: 1180px; margin: 0 auto; padding: 26px 22px 60px; }
+        .top { display: flex; align-items: baseline; justify-content: space-between;
+               gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+        h1 { font-size: 22px; font-weight: 600; margin: 0; }
+        .sub { color: var(--text-secondary); font-size: 13px; }
+        .nav { display: flex; gap: 14px; font-size: 13px; }
+        .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+                 gap: 12px; margin: 20px 0 8px; }
+        .card { background: var(--bg-secondary); border: 1px solid var(--divider);
+                border-radius: var(--radius); padding: 14px 16px; }
+        .card .label { color: var(--text-secondary); font-size: 12px; }
+        .card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+        .card .note { color: var(--text-tertiary); font-size: 11px; margin-top: 2px; }
+        .toolbar { display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+                   margin: 18px 0 12px; }
+        .group { display: flex; align-items: center; gap: 6px; }
+        .group .tag { color: var(--text-secondary); font-size: 12px; }
+        .pill { padding: 4px 10px; border: 1px solid var(--divider);
+                border-radius: 999px; background: var(--bg-secondary);
+                color: var(--text-secondary); font-size: 12px; }
+        .pill.active { background: var(--accent); border-color: var(--accent);
+                       color: #fff; }
+        .panel { background: var(--bg-secondary); border: 1px solid var(--divider);
+                 border-radius: var(--radius); padding: 16px 18px; margin-bottom: 18px; }
+        .panel h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        th, td { text-align: right; padding: 7px 8px;
+                 border-bottom: 1px solid var(--divider); white-space: nowrap; }
+        th { color: var(--text-secondary); font-weight: 500; background: var(--bg-tertiary); }
+        th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+        tbody tr:hover { background: #fafbfc; }
+        .pos { color: var(--up); }
+        .neg { color: var(--down); }
+        .muted { color: var(--text-tertiary); }
+        .empty { padding: 26px 10px; text-align: center; color: var(--text-secondary); }
+        .caveat { background: #fff8e6; border: 1px solid #f0d9a6; border-radius: var(--radius);
+                  padding: 12px 16px; color: #6b5320; font-size: 12.5px; line-height: 1.7; }
+        .caveat b { color: #4a3a13; }
+        .foot { color: var(--text-tertiary); font-size: 11.5px; margin-top: 18px; }
+        @media (max-width: 760px) {
+            .cards { grid-template-columns: 1fr; }
+            th, td { padding: 6px 5px; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="top">
+        <div>
+            <h1>信号验证</h1>
+            <div class="sub">AI 分析的 T+1 前向收益与基准对比（不是回测）</div>
+        </div>
+        <div class="nav">
+            <a href="/">看板</a>
+            <a href="/journal">投资笔记</a>
+        </div>
+    </div>
+
+    <div class="cards">
+        <div class="card">
+            <div class="label">已落库分析 × 基准</div>
+            <div class="value">{{ total_rows }}</div>
+            <div class="note">去重股票 {{ unique_stocks }} 只</div>
+        </div>
+        <div class="card">
+            <div class="label">已到期（{{ horizon }} 日）</div>
+            <div class="value">{{ matured_count }}</div>
+            <div class="note">未到期/缺行情保持 NULL</div>
+        </div>
+        <div class="card">
+            <div class="label">尚未完整</div>
+            <div class="value">{{ pending }}</div>
+            <div class="note">任一 horizon 未到期即计入</div>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <div class="group">
+            <span class="tag">基准</span>
+            {% for b in benchmarks %}
+            <a class="pill {% if b.code == benchmark %}active{% endif %}"
+               href="/outcomes?benchmark={{ b.code }}&horizon={{ horizon }}">{{ b.name }}</a>
+            {% endfor %}
+        </div>
+        <div class="group">
+            <span class="tag">期限</span>
+            {% for h in horizons %}
+            <a class="pill {% if h == horizon %}active{% endif %}"
+               href="/outcomes?benchmark={{ benchmark }}&horizon={{ h }}">{{ h }} 日</a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>{{ benchmark_name }} · {{ horizon }} 个交易日 · 按 Signal 汇总</h2>
+        {% if selected %}
+        <table>
+            <thead>
+            <tr>
+                <th>Signal</th><th>置信度</th><th>分析数</th><th>股票数</th>
+                <th>个股均值</th><th>基准均值</th><th>超额均值</th><th>命中率</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in selected %}
+            <tr>
+                <td><b>{{ r.signal }}</b></td>
+                <td>{{ r.confidence }}</td>
+                <td>{{ r.n }}</td>
+                <td>{{ r.stocks }}</td>
+                <td class="{% if r.avg_stock is not none and r.avg_stock > 0 %}pos{% elif r.avg_stock is not none and r.avg_stock < 0 %}neg{% endif %}">
+                    {{ "%.2f"|format(r.avg_stock) if r.avg_stock is not none else "-" }}%
+                </td>
+                <td class="{% if r.avg_bench is not none and r.avg_bench > 0 %}pos{% elif r.avg_bench is not none and r.avg_bench < 0 %}neg{% endif %}">
+                    {{ "%.2f"|format(r.avg_bench) if r.avg_bench is not none else "-" }}%
+                </td>
+                <td class="{% if r.avg_excess is not none and r.avg_excess > 0 %}pos{% elif r.avg_excess is not none and r.avg_excess < 0 %}neg{% endif %}">
+                    {{ "%+.2f"|format(r.avg_excess) if r.avg_excess is not none else "-" }}%
+                </td>
+                <td>{% if r.hit_rate is not none %}{{ "%.1f"|format(r.hit_rate) }}%{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">该期限还没有已到期数据。前向收益要等交易日走完，未到期不会填 0。</div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <h2>按 Signal × 置信度拆分</h2>
+        {% if by_confidence %}
+        <table>
+            <thead>
+            <tr>
+                <th>Signal</th><th>置信度</th><th>分析数</th><th>股票数</th>
+                <th>个股均值</th><th>超额均值</th><th>命中率</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in by_confidence %}
+            <tr>
+                <td>{{ r.signal }}</td>
+                <td>{{ r.confidence }}</td>
+                <td>{{ r.n }}</td>
+                <td>{{ r.stocks }}</td>
+                <td>{{ "%.2f"|format(r.avg_stock) if r.avg_stock is not none else "-" }}%</td>
+                <td class="{% if r.avg_excess is not none and r.avg_excess > 0 %}pos{% elif r.avg_excess is not none and r.avg_excess < 0 %}neg{% endif %}">
+                    {{ "%+.2f"|format(r.avg_excess) if r.avg_excess is not none else "-" }}%
+                </td>
+                <td>{% if r.hit_rate is not none %}{{ "%.1f"|format(r.hit_rate) }}%{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">暂无数据。</div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <h2>{{ horizon }} 日明细（最近 50 条）</h2>
+        {% if recent %}
+        <table>
+            <thead>
+            <tr>
+                <th>分析日</th><th>股票</th><th>Signal</th><th>置信度</th>
+                <th>入场日</th><th>个股</th><th>基准</th><th>超额</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in recent %}
+            <tr>
+                <td>{{ r.analysis_date }}</td>
+                <td><a href="/stock/{{ r.stock_code }}">{{ r.stock_name or r.stock_code }}</a>
+                    <span class="muted">{{ r.stock_code }}</span></td>
+                <td>{{ r.signal or "-" }}</td>
+                <td>{{ r.confidence or "-" }}</td>
+                <td>{{ r.entry_date or "-" }}</td>
+                <td class="{% if r.sel_ret is not none and r.sel_ret > 0 %}pos{% elif r.sel_ret is not none and r.sel_ret < 0 %}neg{% endif %}">
+                    {{ "%+.2f"|format(r.sel_ret) if r.sel_ret is not none else "-" }}%
+                </td>
+                <td class="{% if r.sel_bench is not none and r.sel_bench > 0 %}pos{% elif r.sel_bench is not none and r.sel_bench < 0 %}neg{% endif %}">
+                    {{ "%+.2f"|format(r.sel_bench) if r.sel_bench is not none else "-" }}%
+                </td>
+                <td class="{% if r.sel_excess is not none and r.sel_excess > 0 %}pos{% elif r.sel_excess is not none and r.sel_excess < 0 %}neg{% endif %}">
+                    <b>{{ "%+.2f"|format(r.sel_excess) if r.sel_excess is not none else "-" }}%</b>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">该期限还没有已到期记录。</div>
+        {% endif %}
+    </div>
+
+    <div class="caveat">
+        <b>口径说明（必须一起看）：</b><br>
+        1. 入场 = 分析日之后第一个交易日收盘；分析在 15:30 后完成，T+1 收盘是可执行近似。<br>
+        2. 个股收益用前复权收盘价（含现金分红）；基准用价格指数（不含分红），因此超额收益会略偏高，不能当作精确的超额。<br>
+        3. N 是分析条数，stocks 是去重股票数。同一只股票被反复分析、窗口重叠时会重复计数，不能把 N 当独立样本。<br>
+        4. 未到期或基准缺该交易日行情时保持 NULL，不填 0、不插值。首次算出的非空值已冻结，不随后续复权重算。<br>
+        5. 命中率只对方向性信号有意义：BUY 跑赢 = 命中，AVOID 跑输 = 命中；HOLD 不评命中率。
+    </div>
+
+    <div class="foot">数据更新时间：{{ now }} · 每周六 09:00 自动刷新（可在配置中调整）</div>
+</div>
+</body>
+</html>

@@ -1037,7 +1037,21 @@ def run_collect_pipeline(config: dict) -> list[dict]:
     if not candidates:
         return []
 
+    # 年报分红数据：为空/过期时每周最多刷一次；失败只告警，不阻断选股
+    try:
+        from src.collector.dividend_fetcher import ensure_dividend_data
+        ensure_dividend_data(config)
+    except Exception as e:
+        logger.warning(f"[股息] 数据准备失败: {e}")
+
     enrich_financial_data(candidates)
+
+    # 真实股息：DB 读，不联网；缺失保持 None（红利策略 fail-closed）
+    try:
+        from src.collector.dividend_fetcher import attach_dividends
+        attach_dividends(candidates)
+    except Exception as e:
+        logger.warning(f"[股息] 挂载失败（红利策略将 fail-closed）: {e}")
     return candidates
 
 

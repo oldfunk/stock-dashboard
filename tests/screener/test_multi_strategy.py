@@ -39,6 +39,8 @@ def _base_stock(**overrides):
         'profit_growth': 12.0,
         'debt_ratio': 30.0,
         'market_cap': 1000.0,
+        'dividend_yield': 5.0,
+        'payout_ratio': 50.0,
         'intcov_5y_avg': 50.0,
         'fcf_5y_sum': 100_000_000_00,
         'share_dilution_5y': 5.0,
@@ -89,7 +91,8 @@ def _demo_strategies():
         'dividend': {
             'roe_avg_5y_min': 12, 'pe_max': 20, 'gross_margin_min': 15,
             'net_margin_min': 5, 'debt_ratio_max': 50,
-            'dividend_yield_min': 4, 'fcf_yield_min': 0.02,
+            'dividend_yield_min': 4, 'payout_ratio_max': 70,
+            'fcf_yield_min': 0.02,
         },
         'turnaround': {
             'roe_avg_5y_min': 5, 'pe_max': 15, 'gross_margin_min': 10,

@@ -163,6 +163,9 @@ class MarketScheduler:
         # 新闻舆情幂等标记（2026-10-19）：{时刻: 日期} / 摘要日期
         self._last_news_ingest_at = None
         self._last_news_summary = None
+        # 每周数据维护（2026-10-21）：股息 + 信号前向收益
+        self._last_weekly_refresh = None
+        self._weekly_in_progress = False
 
     def _get_last_completed_date(self):
         """从数据库获取最新完成运行的日期，用于避免重启后重复触发当日流水线"""
@@ -239,6 +242,9 @@ class MarketScheduler:
                 # 新闻舆情（2026-10-19）：到点抓取 + 到点 AI 摘要
                 self._check_news_jobs()
 
+                # 每周数据维护（2026-10-21）：真实股息 + 信号前向收益
+                self._check_weekly_data_refresh()
+
             except Exception as e:
                 logger.warning(f"[调度器] 运行异常: {e}")
             # 每 30 秒检查一次停止标志
@@ -305,6 +311,46 @@ class MarketScheduler:
             # self._trigger_ai_analysis_async(config)
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
+
+    def _check_weekly_data_refresh(self):
+        """周六维护：刷新年报分红 + 基准日线 + 分析前向收益。
+
+        价值投资不需要实时：每周一次足够；重复执行幂等（已冻结的收益不重算）。
+        """
+        try:
+            from src.config import load_config
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+        out_cfg = cfg.get('outcomes', {}) or {}
+        try:
+            weekday = int(out_cfg.get('refresh_weekday', 5))
+        except (TypeError, ValueError):
+            weekday = 5
+        at = _parse_hhmm(out_cfg.get('refresh_time', '09:00')) or dtime(9, 0)
+        now = now_cn()
+        if not _review_due(now, {weekday}, at, self._last_weekly_refresh):
+            return
+        if self._weekly_in_progress:
+            return
+
+        self._last_weekly_refresh = now.date()
+        self._weekly_in_progress = True
+        try:
+            try:
+                from src.collector.dividend_fetcher import ensure_dividend_data
+                ensure_dividend_data(cfg)
+            except Exception as e:
+                logger.warning(f"[调度器] 股息刷新失败: {e}")
+            if out_cfg.get('enabled', True):
+                try:
+                    from src.outcome_service import refresh_benchmarks, refresh_outcomes
+                    refresh_benchmarks(cfg)
+                    refresh_outcomes(cfg)
+                except Exception as e:
+                    logger.warning(f"[调度器] 前向收益刷新失败: {e}")
+        finally:
+            self._weekly_in_progress = False
 
     def _fetch_kline_daily(self):
         """每日拉取观察池+候选股的K线数据（增量更新）"""

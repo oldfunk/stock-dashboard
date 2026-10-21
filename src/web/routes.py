@@ -1825,6 +1825,72 @@ async def watchlist_detail(request: Request, code: str):
     })
 
 
+@app.get("/outcomes", response_class=HTMLResponse)
+async def outcomes_page(request: Request, benchmark: str = "sh000300",
+                       horizon: int = 60):
+    """信号前向收益页：AI 判断到底有没有跑赢基准（2026-10-21）。"""
+    from src.analyzer.outcomes import (
+        BENCHMARKS, BENCHMARK_NAMES, HORIZONS, aggregate_outcomes,
+    )
+    from src.models.database import AnalysisOutcomeDAO
+
+    if benchmark not in BENCHMARK_NAMES:
+        benchmark = "sh000300"
+    if horizon not in HORIZONS:
+        horizon = 60
+    rows = AnalysisOutcomeDAO().get_all(benchmark)
+    summaries = {h: aggregate_outcomes(rows, h) for h in HORIZONS}
+    by_confidence = aggregate_outcomes(rows, horizon, by_confidence=True)
+    matured = [r for r in rows if r.get(f"excess_{horizon}") is not None]
+    matured.sort(key=lambda r: (r.get("analysis_date") or "",
+                                r.get("analysis_id") or 0), reverse=True)
+    for r in matured:
+        r["sel_ret"] = r.get(f"ret_{horizon}")
+        r["sel_bench"] = r.get(f"bench_{horizon}")
+        r["sel_excess"] = r.get(f"excess_{horizon}")
+    pending = sum(1 for r in rows
+                  if any(r.get(f"excess_{h}") is None for h in HORIZONS))
+    config = load_config()
+    return templates.TemplateResponse(request, "outcomes.html", {
+        "request": request,
+        "page_title": config.get('web', {}).get('page_title', '价值投资选股看板'),
+        "benchmark": benchmark,
+        "benchmarks": BENCHMARKS,
+        "benchmark_name": BENCHMARK_NAMES[benchmark],
+        "horizon": horizon,
+        "horizons": HORIZONS,
+        "summaries": summaries,
+        "selected": summaries.get(horizon) or [],
+        "by_confidence": by_confidence,
+        "recent": matured[:50],
+        "matured_count": len(matured),
+        "total_rows": len(rows),
+        "unique_stocks": len({r.get("stock_code") for r in rows}),
+        "pending": pending,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/api/outcomes")
+async def api_outcomes(benchmark: str = "sh000300"):
+    """只读 API：各 horizon 的聚合结果（供外部程序/复盘用）。"""
+    from src.analyzer.outcomes import (
+        BENCHMARKS, BENCHMARK_NAMES, HORIZONS, aggregate_outcomes,
+    )
+    from src.models.database import AnalysisOutcomeDAO
+
+    if benchmark not in BENCHMARK_NAMES:
+        benchmark = "sh000300"
+    rows = AnalysisOutcomeDAO().get_all(benchmark)
+    return {
+        "benchmark": benchmark,
+        "benchmark_name": BENCHMARK_NAMES[benchmark],
+        "benchmarks": BENCHMARKS,
+        "rows": len(rows),
+        "summary": {str(h): aggregate_outcomes(rows, h) for h in HORIZONS},
+    }
+
+
 @app.get("/journal", response_class=HTMLResponse)
 async def journal_page(request: Request):
     """投资笔记页（默认显示最新一篇）"""

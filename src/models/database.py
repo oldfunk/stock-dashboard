@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS stock_snapshot (
     profit REAL,                      -- 净利润（亿）
     profit_growth REAL,               -- 净利润增长率 %
     debt_ratio REAL,                  -- 资产负债率 %
-    dividend_yield REAL,              -- 股息率 %
+    dividend_yield REAL,              -- 股息率 %（年报现金分红/现价）
+    payout_ratio REAL,                -- 分红率 %（年报现金分红/EPS）
+    dividend_year TEXT,               -- 股息对应的年报年份（如 2025）
     current_price REAL,               -- 现价
     high_52w REAL,                    -- 52周最高
     low_52w REAL,                     -- 52周最低
@@ -111,6 +113,9 @@ CREATE TABLE IF NOT EXISTS screening_result (
     profit_growth REAL,
     debt_ratio REAL,
     market_cap REAL,
+    dividend_yield REAL,              -- 股息率 %（2026-10-21）
+    payout_ratio REAL,                -- 分红率 %
+    dividend_year TEXT,               -- 年报年份
     reason TEXT,                      -- 符合哪些条件
     ai_analysis TEXT,                 -- AI 选股分析 JSON
     ai_investment_strategy TEXT,      -- AI 投资策略
@@ -345,6 +350,59 @@ CREATE TABLE IF NOT EXISTS news_digest (
     created_at      TEXT NOT NULL
 );
 
+-- 基准指数日线（2026-10-21）：信号前向收益对比用；只存收盘价，价格指数不含分红。
+CREATE TABLE IF NOT EXISTS benchmark_daily (
+    code            TEXT NOT NULL,
+    trade_date      TEXT NOT NULL,
+    close           REAL NOT NULL,
+    PRIMARY KEY (code, trade_date)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmark_daily_code_date
+    ON benchmark_daily(code, trade_date);
+
+-- 年度分红（2026-10-21）：东财 stock_fhps_em 落库，股息率/分红率由本表 + 行情现价计算。
+CREATE TABLE IF NOT EXISTS dividend_annual (
+    stock_code      TEXT NOT NULL,
+    report_date     TEXT NOT NULL,          -- 年报期末 YYYY-MM-DD
+    cash_per_share  REAL,                   -- 每股现金分红（元）
+    eps             REAL,                   -- 年报每股收益（元）
+    reported_yield  REAL,                   -- 东财披露股息率（%），仅对账参考
+    source          TEXT DEFAULT 'eastmoney',
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (stock_code, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dividend_report_date
+    ON dividend_annual(report_date);
+
+-- 分析信号前向收益（2026-10-21）：每条分析 × 每个基准一行；未到期/缺行情一律 NULL。
+CREATE TABLE IF NOT EXISTS analysis_outcome (
+    analysis_id     INTEGER NOT NULL,
+    benchmark_code  TEXT NOT NULL,
+    stock_code      TEXT NOT NULL,
+    stock_name      TEXT,
+    analysis_date   TEXT NOT NULL,
+    signal          TEXT,                   -- BUY / HOLD / AVOID
+    confidence      TEXT,                   -- 高 / 中 / 低
+    verdict         TEXT,                   -- 通过 / 不通过 / 灰色地带
+    entry_date      TEXT,                   -- T+1 交易日（分析日之后第一个交易日）
+    entry_price     REAL,                   -- 前复权收盘价
+    ret_20          REAL,                   -- 个股收益 %（前复权，含分红）
+    ret_60          REAL,
+    ret_120         REAL,
+    bench_20        REAL,                   -- 基准收益 %（价格指数，不含分红）
+    bench_60        REAL,
+    bench_120       REAL,
+    excess_20       REAL,                   -- 个股 - 基准（百分点）
+    excess_60       REAL,
+    excess_120      REAL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (analysis_id, benchmark_code)
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_outcome_date
+    ON analysis_outcome(analysis_date);
+CREATE INDEX IF NOT EXISTS idx_analysis_outcome_signal
+    ON analysis_outcome(signal, confidence);
+
 -- 注：M4a 纸盘五表（paper_account/orders/trades/positions/nav）已随 2026-09-20
 -- 路线调整删除（git 历史可查）。存量库残留表不自动删（只读历史），新库不再建。
 """
@@ -374,6 +432,12 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'strategy_tags', 'TEXT')
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failed', 'INTEGER')
         _add_column_if_not_exists(conn, 'screening_result', 'ai_failure_reason', 'TEXT')
+        # 2026-10-21：真实股息数据（红利策略 fail-closed 的数据底座）
+        _add_column_if_not_exists(conn, 'screening_result', 'dividend_yield', 'REAL')
+        _add_column_if_not_exists(conn, 'screening_result', 'payout_ratio', 'REAL')
+        _add_column_if_not_exists(conn, 'screening_result', 'dividend_year', 'TEXT')
+        _add_column_if_not_exists(conn, 'stock_snapshot', 'payout_ratio', 'REAL')
+        _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_year', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status_reason', 'TEXT')
@@ -503,14 +567,16 @@ class StockSnapshotDAO:
                     INSERT OR REPLACE INTO stock_snapshot
                     (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
                      roe, revenue, revenue_growth, profit, profit_growth, debt_ratio,
-                     dividend_yield, current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     dividend_yield, payout_ratio, dividend_year, current_price,
+                     high_52w, low_52w, is_st, list_date, snapshot_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (r['code'], r['name'], r.get('market', 'A'),
                       sector, r.get('pe'), r.get('pb'), r.get('ps'),
                       r.get('market_cap'), r.get('circulating_cap'),
                       r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
                       r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
-                      r.get('dividend_yield'), r.get('current_price'),
+                      r.get('dividend_yield'), r.get('payout_ratio'),
+                      r.get('dividend_year'), r.get('current_price'),
                       r.get('high_52w'), r.get('low_52w'),
                       1 if r.get('is_st') else 0, r.get('list_date'),
                       r['snapshot_date']))
@@ -595,14 +661,17 @@ class ScreeningResultDAO:
                     INSERT INTO screening_result
                     (run_id, run_date, code, name, score, pe, pb, roe,
                      gross_margin, net_margin, ocf_per_share,
-                     revenue_growth, profit_growth, debt_ratio, market_cap, reason,
+                     revenue_growth, profit_growth, debt_ratio, market_cap,
+                     dividend_yield, payout_ratio, dividend_year, reason,
                      score_detail, strategy_tags)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (r['run_id'], r['run_date'], r['code'], r['name'],
                       r.get('score'), r.get('pe'), r.get('pb'), r.get('roe'),
                       r.get('gross_margin'), r.get('net_margin'), r.get('ocf_per_share'),
                       r.get('revenue_growth'), r.get('profit_growth'),
-                      r.get('debt_ratio'), r.get('market_cap'), r.get('reason'),
+                      r.get('debt_ratio'), r.get('market_cap'),
+                      r.get('dividend_yield'), r.get('payout_ratio'),
+                      r.get('dividend_year'), r.get('reason'),
                       r.get('score_detail'), r.get('strategy_tags')))
 
     def update_ai_analysis(self, run_id: str, code: str, analysis: str, strategy: str, trade_strategy: str):
@@ -865,6 +934,17 @@ class StockAnalysisHistoryDAO:
                     ) latest ON h.id = latest.max_id
                     ORDER BY h.analysis_date DESC, h.stock_code
                 """).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_all(self, limit: Optional[int] = None) -> list[dict]:
+        """按日期升序返回全部分析记录（供信号前向收益批量刷新）。"""
+        sql = "SELECT * FROM stock_analysis_history ORDER BY analysis_date, id"
+        args: list = []
+        if limit:
+            sql += " LIMIT ?"
+            args.append(limit)
+        with db_conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -1152,6 +1232,163 @@ class KlineDAO:
                 (code,)
             ).fetchone()
         return row['max_date'] if row else None
+
+
+class BenchmarkDailyDAO:
+    """基准指数日线（价格指数，不含分红）。"""
+
+    def upsert_many(self, code: str, records: list[dict]) -> int:
+        rows = [(code, r['trade_date'], r['close']) for r in records
+                if r.get('trade_date') and r.get('close') is not None]
+        if not rows:
+            return 0
+        with db_conn() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO benchmark_daily "
+                "(code, trade_date, close) VALUES (?, ?, ?)", rows)
+        return len(rows)
+
+    def get_series(self, code: str) -> list[dict]:
+        """按日期升序返回全部日线；无数据返回 []。"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT trade_date, close FROM benchmark_daily "
+                "WHERE code = ? ORDER BY trade_date", (code,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def latest_date(self, code: str) -> Optional[str]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(trade_date) AS d FROM benchmark_daily WHERE code = ?",
+                (code,)).fetchone()
+        return row['d'] if row else None
+
+
+class DividendDAO:
+    """年度现金分红（东财 stock_fhps_em 落库）。"""
+
+    def upsert_many(self, records: list[dict]) -> int:
+        now = now_cn().isoformat()
+        rows = [(
+            r['stock_code'], r['report_date'], r.get('cash_per_share'),
+            r.get('eps'), r.get('reported_yield'),
+            r.get('source', 'eastmoney'), now,
+        ) for r in records if r.get('stock_code') and r.get('report_date')]
+        if not rows:
+            return 0
+        with db_conn() as conn:
+            conn.executemany("""
+                INSERT OR REPLACE INTO dividend_annual
+                (stock_code, report_date, cash_per_share, eps,
+                 reported_yield, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+        return len(rows)
+
+    def latest_by_codes(self, codes: list[str],
+                        report_date: str | None = None) -> dict[str, dict]:
+        """批量取分红；report_date 为空时取每只股票最新一期。"""
+        if not codes:
+            return {}
+        out: dict[str, dict] = {}
+        uniq = list(dict.fromkeys(codes))
+        for i in range(0, len(uniq), 450):  # SQLite 变量上限 999
+            chunk = uniq[i:i + 450]
+            marks = ','.join('?' * len(chunk))
+            with db_conn() as conn:
+                if report_date:
+                    sql = (f"SELECT * FROM dividend_annual WHERE report_date = ? "
+                           f"AND stock_code IN ({marks})")
+                    rows = conn.execute(sql, [report_date, *chunk]).fetchall()
+                else:
+                    sql = (f"SELECT * FROM dividend_annual WHERE stock_code IN ({marks}) "
+                           f"AND report_date = (SELECT MAX(report_date) FROM dividend_annual x "
+                           f"WHERE x.stock_code = dividend_annual.stock_code)")
+                    rows = conn.execute(sql, chunk).fetchall()
+            for r in rows:
+                out[r['stock_code']] = dict(r)
+        return out
+
+    def get_latest(self, code: str) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM dividend_annual WHERE stock_code = ? "
+                "ORDER BY report_date DESC LIMIT 1", (code,)).fetchone()
+        return dict(row) if row else None
+
+    def count(self, report_date: str | None = None) -> int:
+        with db_conn() as conn:
+            if report_date:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM dividend_annual WHERE report_date = ?",
+                    (report_date,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM dividend_annual").fetchone()
+        return row['c'] if row else 0
+
+    def last_updated(self) -> Optional[str]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(updated_at) AS u FROM dividend_annual").fetchone()
+        return row['u'] if row else None
+
+
+class AnalysisOutcomeDAO:
+    """AI 分析信号的前向收益（每条分析 × 每个基准一行）。"""
+
+    _FIELDS = (
+        'analysis_id', 'benchmark_code', 'stock_code', 'stock_name',
+        'analysis_date', 'signal', 'confidence', 'verdict',
+        'entry_date', 'entry_price',
+        'ret_20', 'ret_60', 'ret_120',
+        'bench_20', 'bench_60', 'bench_120',
+        'excess_20', 'excess_60', 'excess_120',
+    )
+
+    def upsert_many(self, rows: list[dict]) -> int:
+        if not rows:
+            return 0
+        now = now_cn().isoformat()
+        values = [tuple(r.get(k) for k in self._FIELDS) + (now,) for r in rows]
+        marks = ','.join('?' * (len(self._FIELDS) + 1))
+        with db_conn() as conn:
+            conn.executemany(
+                f"INSERT OR REPLACE INTO analysis_outcome "
+                f"({','.join(self._FIELDS)}, updated_at) VALUES ({marks})",
+                values)
+        return len(values)
+
+    def get_all(self, benchmark_code: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM analysis_outcome"
+        args: list = []
+        if benchmark_code:
+            sql += " WHERE benchmark_code = ?"
+            args.append(benchmark_code)
+        sql += " ORDER BY analysis_date, analysis_id"
+        with db_conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def get(self, analysis_id: int, benchmark_code: str) -> Optional[dict]:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM analysis_outcome WHERE analysis_id = ? "
+                "AND benchmark_code = ?", (analysis_id, benchmark_code)).fetchone()
+        return dict(row) if row else None
+
+    def list_recent(self, limit: int = 50,
+                    benchmark_code: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM analysis_outcome"
+        args: list = []
+        if benchmark_code:
+            sql += " WHERE benchmark_code = ?"
+            args.append(benchmark_code)
+        sql += " ORDER BY analysis_date DESC, analysis_id DESC LIMIT ?"
+        args.append(limit)
+        with db_conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
 
 
 class WatchlistThesisDAO:

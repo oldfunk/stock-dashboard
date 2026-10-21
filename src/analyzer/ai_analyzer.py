@@ -46,6 +46,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 - PE：{pe} | PB：{pb} | ROE：{roe}% | 市值：{market_cap}亿
 - 营收增长：{revenue_growth}% | 净利增长：{profit_growth}%
 - 资产负债率：{debt_ratio}% | 毛利率：{gross_margin}% | 每股OCF：{ocf_per_share}
+- {dividend_line}
 - 筛选原因：{reason}
 
 【5年数据】
@@ -198,6 +199,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 11. verdict 是强制结论：不通过 → trade_strategy.signal 必须为 AVOID；灰色地带 → signal 不得为 BUY（最多 HOLD）；signal 为 BUY 时 verdict 必须为通过。灰色地带就是"不买"的纪律，不要在灰色时给买入建议。price_tiers 三档都要填（拿不准就写观望及理由，不许空着）。
 12. 做A级（信息充裕）分析时必须反面检验：共识过强的股票，你的输出会趋同于市场定价。自问三件事——我的确定性来自生意本质还是资料数量？资料量减半结论会变吗？与市场共识雷同处，我的信息优势在哪？findings 里必须写一段"聪明人为什么不买"的反方论据（找不到才允许写"未找到有力反方论据"）。
 13. thesis 是投资论点本体，必须含：论点一句话（200字内）、3-7条可验证假设（每条写明假设内容+验证方式+验证频率）、红线清单（触发后立即重新评估的条件）、买入前写下的卖出条件。论点失效=假设被证伪，假设未被证伪但价格透支=仍可持有。
+14. 股息率/分红率是"最近年报现金分红"口径，不是 TTM。分红率>100%、股息率异常高（如>8%）时，先考虑一次性/特别分红或股价暴跌，不要直接当成可持续红利；数据为 N/A 时不要假设有分红。新闻只作为事件风险提示，不因单条标题改变长期估值。
 """
 
 
@@ -927,6 +929,18 @@ class AiAnalyzer:
             else:
                 roe_roic_gap_line = f'ROE与ROIC差距{gap:.1f}%（合理）'
 
+        # 股息行：只展示真实算出的值；缺数据明说，不写 0
+        div_yield = stock.get('dividend_yield')
+        payout = stock.get('payout_ratio')
+        div_year = stock.get('dividend_year')
+        if div_yield is None and payout is None:
+            dividend_line = '股息率：N/A（年报分红数据未覆盖）'
+        else:
+            dividend_line = (
+                f"股息率：{div_yield if div_yield is not None else 'N/A'}%"
+                f" | 分红率：{payout if payout is not None else 'N/A'}%"
+                f"（{div_year or '最近'}年报）")
+
         prompt = ANALYSIS_PROMPT.format(
             name=stock.get('name', ''),
             code=stock.get('code', ''),
@@ -962,6 +976,7 @@ class AiAnalyzer:
             roe_impr=stock.get('roe_improvement', 'N/A'),
             roe_roic_gap_line=roe_roic_gap_line,
             fcf_yield_10y=fcf_yield_10y,
+            dividend_line=dividend_line,
         )
         # 数据质量与背景标注（分析师 critique #1：先告诉 AI 数字的来源/日期/置信度）
         quality_facts = _data_quality_facts(stock)
@@ -976,6 +991,10 @@ class AiAnalyzer:
                 "\n2. 过去哪次判断被市场验证了、哪次被打脸了？"
                 "\n3. 本次结论相比之前是否有转变？为什么？"
             )
+        # 新闻/事件背景（2026-10-21）：事实层，缺失时明说，不让模型脑补
+        news_context = build_news_context(stock.get('code', ''))
+        if news_context:
+            prompt += "\n\n" + news_context
 
         # 用户自定义附加要求（队列/自定义分析经 extra_instruction 传入）
         if extra_instruction and str(extra_instruction).strip():
@@ -1598,6 +1617,81 @@ def _build_history_summary(stock_code: str, limit: int = 3) -> str:
     if not lines:
         return ""
     return "【过往分析记录】\n" + "\n".join(lines)
+
+
+# 标题关键词只做提示，不做情绪打分/硬否决：中文标题语义太容易误伤。
+_EVENT_KEYWORDS = (
+    '减持', '质押', '处罚', '立案', '诉讼', '冻结', '违规', '问询',
+    '亏损', '预亏', '下修', '商誉', '解禁', '退市', '失信', '造假',
+    '爆雷', '担保', '关联交易', '监管', '警示',
+)
+
+
+def build_news_context(stock_code: str, news_dao=None, now=None,
+                       max_items: int = 5, days: int = 14) -> str:
+    """构造个股新闻 + 市场日报背景段（供 AI 分析 prompt）。
+
+    只读数据库；任何异常返回“未抓取到”的明确说明，不编造新闻。
+    news_dao 可注入（单测用 fake），默认 NewsDAO。
+    """
+    from datetime import timedelta
+
+    if not stock_code:
+        return ""
+    from src.utils import now_cn
+    now = now or now_cn()
+    if news_dao is None:
+        from src.models.news import NewsDAO
+        news_dao = NewsDAO()
+
+    since = (now - timedelta(days=days)).strftime('%Y-%m-%d')
+    try:
+        items = news_dao.by_code(stock_code, limit=max_items, since=since)
+    except Exception:
+        items = []
+    try:
+        digest = news_dao.latest_digest()
+    except Exception:
+        digest = None
+
+    lines = ["【近期新闻与事件（数据库自动抓取，可能不完整）】"]
+    keyword_hits: dict[str, int] = {}
+    if items:
+        for it in items:
+            ts = str(it.get('published_at') or it.get('fetched_at') or '')[:16]
+            src = str(it.get('source') or '').strip()
+            senti = str(it.get('sentiment') or '未判定').strip()
+            title = str(it.get('title') or '').strip()[:130]
+            brief = str(it.get('ai_brief') or '').strip()[:180]
+            lines.append(f"- {ts} | {src} | {senti} | {title}"
+                         + (f" —— {brief}" if brief else ""))
+            for kw in _EVENT_KEYWORDS:
+                if kw in title:
+                    keyword_hits[kw] = keyword_hits.get(kw, 0) + 1
+        if keyword_hits:
+            hits = '、'.join(f"{k}×{v}" for k, v in keyword_hits.items())
+            lines.append(f"- 标题关键词：{hits}（仅提示，需结合公告核实）")
+    else:
+        lines.append("- 近期未抓取到该股新闻（数据可能缺失，不代表没有事件）。")
+
+    # 市场背景：只纳入最近 3 天的日报，避免旧情绪污染
+    if digest and str(digest.get('digest_date') or '') >= (
+            now - timedelta(days=3)).strftime('%Y-%m-%d'):
+        overall = str(digest.get('overall') or '').strip()
+        content = str(digest.get('content_md') or '').strip()
+        lines.append("")
+        lines.append(f"【市场背景（{digest.get('digest_date')} 舆情日报摘录）】")
+        if overall:
+            lines.append(f"- 结论：{overall}")
+        if content:
+            lines.append(content[:1500])
+
+    lines.append("")
+    lines.append("使用规则：新闻只用于识别事件风险（减持/处罚/业绩变脸/商誉/解禁等），"
+                 "不足以单独改变长期估值判断；没有新闻不等于没有事件；"
+                 "若新闻与财务数据冲突，必须在 analysis 中明确指出。"
+                 "禁止编造未提供的事件。")
+    return "\n".join(lines)
 
 
 def _save_analysis(stock: dict, result: dict, run_id: str):

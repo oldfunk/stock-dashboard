@@ -96,6 +96,25 @@ news:
   code_cooldown_min: 15         # 个股两次抓取的最小间隔（与轮询同步）
   market_cooldown_min: 60       # 市场源冷却（财新单轮约 15s，放慢到 1 小时）
 
+# -------- 真实股息（2026-10-21）--------
+dividends:
+  refresh_days: 7               # 年报分红数据最长缓存天数；过期后流水线自动刷新
+  # 数据源固定为东财 stock_fhps_em；缺数据时红利策略 fail-closed
+
+# -------- 信号前向收益验证（2026-10-21）--------
+# 不做完整回测：每条 AI 分析按 T+1 收盘入场，跟踪 20/60/120 交易日
+# 相对基准的真实收益。未到期/缺行情保持 NULL，不填 0。
+outcomes:
+  enabled: true
+  refresh_weekday: 5            # 0=周一 ... 5=周六
+  refresh_time: "09:00"
+  horizons: [20, 60, 120]
+  benchmarks:
+    - code: "sh000300"
+      name: "沪深300"
+    - code: "sh000922"
+      name: "中证红利"
+
 # -------- AI 观察池复盘配置 --------
 ai_review:
   enabled: true                    # 是否启用定时 AI 复盘
