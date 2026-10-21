@@ -16,8 +16,9 @@ flowchart TB
     subgraph PROD[生产服务器 · stock-dashboard.service :9527]
         SCH[MarketScheduler<br/>src/scheduler.py]
         ORCH[run_daily_pipeline<br/>src/orchestrator.py]
-        COL[采集层<br/>src/collector/]
+        COL[采集层<br/>行情/财务/分红]
         SCR[筛选层<br/>src/screener/]
+        OUT[收益维护<br/>src/outcome_service.py]
         WEB[展示层<br/>src/web/ FastAPI]
         DB[(SQLite<br/>data/db/stock_dashboard.db)]
     end
@@ -26,9 +27,12 @@ flowchart TB
     EM --> COL
     TX --> COL
     SCH --> ORCH
+    SCH --> OUT
     ORCH --> COL --> SCR
+    OUT --> COL
     COL <--> DB
     SCR <--> DB
+    OUT <--> DB
     WEB <--> DB
 ```
 
@@ -53,6 +57,8 @@ flowchart LR
 
 AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板只负责展示数据与 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（定时节奏见 `ai_review.days/time`，默认周六 00:00；硬规则 + 监控条件本地执行；LLM 决议走用户 Key → `ai_watchlist` / `ai_journal`）。
 
+2026-10-21 起，采集流水线在财务增强前 `ensure_dividend_data`（7 天缓存），增强后 `attach_dividends` 计算股息率/分红率并随快照/筛选结果落库；周六 09:00 另跑股息 + 基准 + 前向收益维护（`src/outcome_service.py`，默认 `outcomes.refresh_weekday=5` / `refresh_time=09:00`）。
+
 ## 3. 模块边界（跨层调用禁令）
 
 | 模块 | 职责 | 允许调用 | 禁止 |
@@ -62,6 +68,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `analyzer/` | 本地分析（pipeline 已停用触发；手动脚本可用） | `models/` | 不得被 pipeline 调用 LLM |
 | `scheduler.py` | 定时触发 + 并发 guard | `orchestrator` | 不得含业务逻辑（只做触发 + 防重入）；不得触发本地 AI 分析 |
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
+| `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
 | `paper_trading/` | 子项目全量合并树（subtree 机制，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
@@ -70,17 +77,23 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | 表 | 写者 | 读者 | 说明 |
 |---|---|---|---|
 | `market_index` | 采集 | 首页 | 大盘指数，保留 30 天 |
-| `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 |
+| `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据） |
 | `financial_history` | 采集 | 汇总重建/详情页 | 年报明细（摘要+利润+现金流合并） |
 | `financial_summary` | 重建 | 筛选/详情页 | 5y/10y 均值（ROE/毛利/FCF/ROIC…） |
-| `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写列 |
+| `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写 + 策略标签/股息字段 |
 | `stock_analysis_history` | 自带 Key 分析 + 外部写回兼容 | 时间线/复盘 | 每次 AI 分析快照 |
 | `ai_analysis_log` | 自带 Key 分析（用量记账） + 外部写回兼容 | 成本统计 | token 用量 |
 | `ai_watchlist` | 周复盘 | 首页 | 当前 5 只池股 |
 | `ai_watchlist_history` | 周复盘 | 变更追踪 | 每次调仓记录 |
 | `ai_journal` | 周复盘 | 笔记页 | 复盘纪要 |
+| `news_item` | 新闻采集 | 首页滚动条 | 个股/市场新闻，URL+标题幂等 |
+| `news_digest` | 新闻摘要 | 笔记页 | 每日 AI 日报，与复盘分开 |
+| `news_fetch_log` | 新闻采集 | 调度冷却 | 抓取尝试记录（含市场级伪代码 `__market__`） |
 | `watchlist` | 用户钉选 | 钉选 tab | 用户手工池 |
 | `kline_daily` | 调度 | K 线图 | 日 K（池 + Top25） |
+| `benchmark_daily` | 收益维护 | `/outcomes` | 基准指数日线（sh000300/sh000922），价格指数 |
+| `dividend_annual` | 股息维护 | 筛选/快照/AI prompt | 年报现金分红；每股/股息率/分红率，缺数据 NULL |
+| `analysis_outcome` | 收益维护 | `/outcomes` | 每条有 Signal 分析 × 基准 × horizon 的前向收益；非空后冻结 |
 | `run_log` | 编排 | 状态栏 | 每轮运行状态 |
 | `deep_research` | —（已删除） | 无 | 2026-09-23 用户批准删除，5 行已备份，勿重建 |
 
@@ -90,7 +103,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.1 Source Registry（注册表）
 
-`src/collector/akshare_fetcher.py` 内的数据源必须在此登记，缺一不可：
+`src/collector/` 内的数据源必须在此登记，缺一不可：
 
 | # | 数据源 | 函数 | 状态 | 兜底链 |
 |---|---|---|---|---|
@@ -99,9 +112,13 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | S3 | 财务摘要 | `stock_financial_abstract_ths`（并发+7天缓存） | 主用 | 无（失败即缺数，`onboard` 重试） |
 | S4 | 利润表 | `stock_profit_sheet_by_report_em` | **已挂** | C2.5 东财 `_fetch_eastmoney_roic_fcf` |
 | S5 | 现金流表 | `stock_cash_flow_sheet_by_report_em` | **已挂** | C2.5 东财 `_fetch_eastmoney_roic_fcf` |
-| S6 | 指数/个股 K 线 | `stock_zh_index_daily` / `fetch_kline_data` | 主用 | 东财→腾讯回退 |
+| S6 | 个股 K 线 | `fetch_kline_data` | 主用 | 东财→腾讯回退 |
 | S7 | 实时 tick（调度缓存） | `_poll_stocks` → `_realtime_cache` | 主用 | `fetch_stock_realtime` 按需拉 |
 | S8 | 行业分类（新浪 49 板块） | 新浪直连 `newSinaHy` + `getHQNodeData`（`_fetch_sector_map_impl`） | 主用 | 上次成功磁盘缓存 → `{}` 跳过回填（不清旧值） |
+| S9 | 年报分红 | `stock_fhps_em` 经 `dividend_fetcher.refresh_dividends` | 主用 | 无（失败保留旧数据；红利策略 fail-closed） |
+| S10 | 指数日线（基准） | `stock_zh_index_daily_em` 经 `fetch_index_kline_em` | 主用 | 新浪 `stock_zh_index_daily`（sh000922 只到 2019-01-30） |
+
+> S9 在 `src/collector/dividend_fetcher.py`，S10 在 `src/collector/akshare_fetcher.py`；两者同受本节三条铁律约束。
 
 ### 5.2 三条铁律
 
@@ -111,7 +128,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 577 passed，2026-10-20 生产服务器 worktree gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 638 passed，2026-10-21 生产服务器 worktree gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。

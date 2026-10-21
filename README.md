@@ -6,6 +6,7 @@
 
 > 全自动 · 量化筛选 + 数据展示 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
 > AI 分析用用户自带 Key（`/llm` 页配置模型，面板队列执行）；面板本身只展示数据，不再内联 AI 分析
+> 2026-10-21 起：信号前向收益验证（`/outcomes`）、真实年报股息（红利策略 fail-closed）、AI 新闻事件上下文
 > 当前状态：v1.0.0 已公开发布；日常维护 + 按需迭代（AI 分析/定时复盘/纸盘合流已落地，P2 已冻结）
 
 ---
@@ -76,7 +77,8 @@ stock-dashboard/
 │   └── strategies.yaml       # 多策略定义（成长/红利/困境反转阈值）
 ├── src/
 │   ├── collector/            # 数据采集层
-│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S8 注册表）
+│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S10 注册表）
+│   │   ├── dividend_fetcher.py # 年报分红（股息率/分红率，fail-closed）
 │   │   └── onboard.py          # 新股上市检测
 │   ├── screener/
 │   │   └── value_screener.py   # 7 条门规筛选 + 多策略评分
@@ -94,10 +96,12 @@ stock-dashboard/
 │   │   │   ├── watchlist_detail.html # 观察池详情
 │   │   │   ├── journal.html          # 投资日记（AI 笔记展示）
 │   │   │   ├── journal_compare.html  # 日记对比
+│   │   │   ├── outcomes.html         # 信号前向收益验证
 │   │   │   ├── _stock_list.html      # 候选卡 partial（只展示数据，无 AI 内联）
 │   │   │   └── _watchlist_card.html  # 观察池卡 partial（只展示数据，无 AI 内联）
 │   │   └── static/             # CSS/JS 静态资源
 │   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
+│   ├── outcome_service.py      # 基准/前向收益维护（周六 09:00）
 │   ├── scheduler.py            # 内置定时调度（daemon 线程）
 │   ├── config.py               # YAML 配置加载
 │   └── main.py                 # 入口（serve / run）
@@ -110,8 +114,10 @@ stock-dashboard/
 │   ├── verify_valuation.py     # B1 估值验算闸
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
+│   ├── refresh_dividends.py    # 手动刷新年报分红
+│   ├── refresh_outcomes.py     # 手动刷新基准 + 前向收益
 │   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
-├── tests/                      # pytest（基线 577 passed，2026-10-20 生产服务器 gate 全绿）
+├── tests/                      # pytest（基线 638 passed，2026-10-21 生产服务器 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
 │   ├── models/                 # DAO 表单测
@@ -196,12 +202,13 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 ## 数据源架构
 
-8 个数据源 S1–S8 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
+10 个数据源 S1–S10 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
 
 - **行情**：腾讯为主 S1，兜底新浪 → AKShare 自算
 - **财务**：AKShare `stock_yjbb_em` 为主 S2，兜底 C2 东财直连
 - **深度/历史**：AKShare 摘要/利润表/现金流表 S3–S5，S4/S5 已挂由 C2.5 东财直连永久兜底
 - **K 线 / tick**：AKShare S6–S7，东财 → 腾讯回退
+- **股息 / 基准**：东财年报分红 S9 + 东财指数日线 S10；新浪指数为兜底（sh000922 只到 2019）
 
 > 事故教训已固化为三条铁律：删适配函数 = 删注册表行 + 删契约单测，三者同 commit（见 `architecture.md` §5.2）。
 
@@ -249,7 +256,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
 - **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-10-20 生产服务器基线 577 passed）
+- **验证** — `bash scripts/gate.sh`（全仓 pytest，2026-10-21 生产服务器基线 638 passed）
 
 ---
 
@@ -271,7 +278,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 ### 工作流
 
 1. 从 `main` 切出 `nightly/YYYYMMDD` 分支（外部贡献走 Pull Request）
-2. 改动 + 单测 + 全仓 pytest 零失败（基线 577 passed 只升不降，确切数见账本最新 Changelog）
+2. 改动 + 单测 + 全仓 pytest 零失败（基线 638 passed 只升不降，确切数见账本最新 Changelog）
 3. 合并到 `main`（维护者直接合并；外部 PR 由维护者审核合并）
 4. 生产部署由维护者执行（systemd `stock-dashboard.service` :9527；部署目标配置不入库）
 
@@ -287,7 +294,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 | 文档 | 定位 |
 |---|---|
-| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S8 |
+| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S10 |
 | `docs/roadmap.md` | 总路线（P1 面板深化 → P2 体验优化） |
 | `docs/iteration-log.md` | 迭代进程账（含 backlog） |
 | `docs/handoff.md` | 班次交接速览（历史追加不删） |
