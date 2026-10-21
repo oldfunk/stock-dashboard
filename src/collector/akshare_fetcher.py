@@ -1090,6 +1090,39 @@ def fetch_index_kline(index_code: str, limit: int = 250) -> list[dict]:
     return records[-limit:] if len(records) > limit else records
 
 
+def fetch_index_kline_em(index_code: str, limit: int = 6000) -> list[dict]:
+    """拉取指数日线（东方财富），用于需要最新数据的中证红利等指数。
+
+    新浪的 stock_zh_index_daily 对 sh000922 只更新到 2019 年，不能用于
+    当前信号验证；东财接口覆盖到最近交易日。返回格式与 fetch_index_kline 一致。
+    """
+    try:
+        df = ak.stock_zh_index_daily_em(symbol=index_code)
+    except Exception as e:
+        logger.warning(f"[指数K线-EM] 拉取失败 {index_code}: {e}")
+        return []
+    if df is None or df.empty:
+        return []
+    records = []
+    for _, row in df.iterrows():
+        date = str(row.get("date", row.name))[:10]
+        close = safe_float(row.get("close"))
+        if not date or close is None or close <= 0:
+            continue
+        records.append({
+            "trade_date": date,
+            "open": safe_float(row.get("open")),
+            "close": close,
+            "high": safe_float(row.get("high")),
+            "low": safe_float(row.get("low")),
+            "volume": safe_float(row.get("volume")) or 0,
+            "amount": safe_float(row.get("amount")),
+            "turnover": None,
+        })
+    records.sort(key=lambda x: x["trade_date"])
+    return records[-limit:] if len(records) > limit else records
+
+
 def fetch_kline_data(code: str, start_date: str | None = None,
                      adjust: str = "qfq") -> list[dict]:
     """拉取单只股票的日K线数据。

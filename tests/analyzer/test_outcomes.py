@@ -14,6 +14,8 @@ from src.analyzer.outcomes import (
     compute_forward_outcome,
     extract_signal,
     is_hit,
+    normalize_confidence,
+    normalize_signal,
 )
 
 
@@ -101,6 +103,31 @@ class TestExtractSignal:
     def test_missing_fields(self):
         assert extract_signal({}) == ("", "", "")
 
+    def test_normalizes_legacy_aliases(self):
+        row = {
+            "ai_trade_strategy": json.dumps(
+                {"signal": "买入", "confidence": "Medium"}),
+            "ai_analysis": json.dumps({"verdict": "通过"}),
+        }
+        assert extract_signal(row) == ("BUY", "中", "通过")
+
+
+class TestNormalize:
+    def test_signal_aliases(self):
+        assert normalize_signal("buy") == "BUY"
+        assert normalize_signal("买入") == "BUY"
+        assert normalize_signal("持有") == "HOLD"
+        assert normalize_signal("卖出") == "AVOID"
+        assert normalize_signal("") == ""
+        assert normalize_signal(None) == ""
+
+    def test_confidence_aliases(self):
+        assert normalize_confidence("Medium") == "中"
+        assert normalize_confidence("中等") == "中"
+        assert normalize_confidence("HIGH") == "高"
+        assert normalize_confidence("Low") == "低"
+        assert normalize_confidence("") == ""
+
 
 class TestHit:
     def test_buy_hits_on_positive_excess(self):
@@ -153,3 +180,15 @@ class TestAggregate:
         rows = [{"stock_code": "A", "signal": "BUY", "confidence": "高",
                  "excess_20": None}]
         assert aggregate_outcomes(rows, 20) == []
+
+    def test_legacy_confidence_aliases_group_together(self):
+        rows = [
+            {"stock_code": "A", "signal": "BUY", "confidence": "Medium",
+             "ret_20": 3.0, "bench_20": 1.0, "excess_20": 2.0},
+            {"stock_code": "B", "signal": "BUY", "confidence": "中",
+             "ret_20": 5.0, "bench_20": 1.0, "excess_20": 4.0},
+        ]
+        groups = aggregate_outcomes(rows, 20, by_confidence=True)
+        assert len(groups) == 1
+        assert groups[0]["confidence"] == "中"
+        assert groups[0]["n"] == 2

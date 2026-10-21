@@ -39,7 +39,9 @@ def _horizons(config: dict | None) -> tuple[int, ...]:
 def refresh_benchmarks(config: dict | None = None,
                        limit: int = 6000) -> dict:
     """拉取并落库基准指数日线（价格指数）。返回 {code: rows}。"""
-    from src.collector.akshare_fetcher import fetch_index_kline
+    from src.collector.akshare_fetcher import (
+        fetch_index_kline, fetch_index_kline_em,
+    )
     from src.models.database import BenchmarkDailyDAO
 
     stats = {}
@@ -47,7 +49,11 @@ def refresh_benchmarks(config: dict | None = None,
     for b in _benchmarks(config):
         code = b["code"]
         try:
-            records = fetch_index_kline(code, limit=limit)
+            # 东财优先：新浪的 sh000922 只更新到 2019 年，会导致超额全空
+            records = fetch_index_kline_em(code, limit=limit)
+            if not records:
+                logger.warning(f"[收益验证] 东财无 {code} 日线，回退新浪")
+                records = fetch_index_kline(code, limit=limit)
             saved = dao.upsert_many(code, records)
             stats[code] = saved
             logger.info(f"[收益验证] 基准 {code} 日线 {saved} 条")
@@ -74,7 +80,9 @@ def refresh_outcomes(config: dict | None = None,
                      limit: int | None = None,
                      dry_run: bool = False) -> dict:
     """为全部分析记录补算前向收益；已算出的值不重算（冻结）。"""
-    from src.analyzer.outcomes import compute_forward_outcome, extract_signal
+    from src.analyzer.outcomes import (
+        VALID_SIGNALS, compute_forward_outcome, extract_signal,
+    )
     from src.models.database import (
         AnalysisOutcomeDAO, BenchmarkDailyDAO, StockAnalysisHistoryDAO,
         StockSnapshotDAO,
@@ -95,11 +103,23 @@ def refresh_outcomes(config: dict | None = None,
             logger.warning(f"[收益验证] 基准 {b['code']} 无日线，"
                            f"本次只算个股收益，超额留空")
 
-    analyses = hist_dao.list_all()
+    raw = hist_dao.list_all()
     if limit:
-        analyses = analyses[-limit:]
+        raw = raw[-limit:]
+    # 老分析的 ai_trade_strategy 可能是空 JSON；没有 Signal 就没有可验证的方向
+    analyses = []
+    no_signal = 0
+    for a in raw:
+        signal, _, _ = extract_signal(a)
+        if signal not in VALID_SIGNALS:
+            no_signal += 1
+            continue
+        analyses.append(a)
     if not analyses:
-        return {"analyses": 0, "rows": 0, "skipped": 0, "complete": 0}
+        deleted = 0 if dry_run else out_dao.delete_without_signal()
+        return {"analyses": 0, "stocks": 0, "rows": 0, "skipped": 0,
+                "complete": 0, "fetched": 0, "no_signal": no_signal,
+                "deleted": deleted}
 
     by_code: dict[str, list[dict]] = {}
     for a in analyses:
@@ -176,12 +196,16 @@ def refresh_outcomes(config: dict | None = None,
                     continue
                 rows_to_save.append(merged)
 
-    if not dry_run and rows_to_save:
-        out_dao.upsert_many(rows_to_save)
+    deleted = 0
+    if not dry_run:
+        if rows_to_save:
+            out_dao.upsert_many(rows_to_save)
+        deleted = out_dao.delete_without_signal()
 
-    logger.info(f"[收益验证] 分析 {len(analyses)} 条，股票 {len(by_code)} 只，"
-                f"拉K线 {fetched} 只，写 {len(rows_to_save)} 行，"
-                f"跳过 {skipped}，已完整 {complete}")
+    logger.info(f"[收益验证] 分析 {len(analyses)} 条（无Signal {no_signal}），"
+                f"股票 {len(by_code)} 只，拉K线 {fetched} 只，"
+                f"写 {len(rows_to_save)} 行，跳过 {skipped}，"
+                f"已完整 {complete}，清理占位 {deleted}")
     return {
         "analyses": len(analyses),
         "stocks": len(by_code),
@@ -189,4 +213,6 @@ def refresh_outcomes(config: dict | None = None,
         "skipped": skipped,
         "complete": complete,
         "fetched": fetched,
+        "no_signal": no_signal,
+        "deleted": deleted,
     }

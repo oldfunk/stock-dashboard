@@ -46,8 +46,9 @@ def main() -> int:
         print("基准日线: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
 
     result = refresh_outcomes(cfg, limit=args.limit, dry_run=args.dry_run)
-    print("分析: {analyses} 条 | 股票: {stocks} 只 | 拉K线: {fetched} 只 | "
-          "写入: {rows} 行 | 跳过: {skipped} | 已完整: {complete}".format(**result))
+    print("分析: {analyses} 条 | 无Signal: {no_signal} | 股票: {stocks} 只 | "
+          "拉K线: {fetched} 只 | 写入: {rows} 行 | 跳过: {skipped} | "
+          "已完整: {complete} | 清理占位: {deleted}".format(**result))
     if args.dry_run:
         print("dry-run：未写入数据库")
     return 0

@@ -97,6 +97,17 @@ class TestOutcomeDAO:
         assert len(dao.get_all("sh000300")) == 1
         assert dao.get(1, "sh000300")["ret_20"] == 8.0
 
+    def test_delete_without_signal(self, db):
+        dao = db.AnalysisOutcomeDAO()
+        dao.upsert_many([
+            self._row(1),
+            self._row(2, signal=""),
+            self._row(3, signal=None),
+        ])
+        assert len(dao.get_all()) == 3
+        assert dao.delete_without_signal() == 2
+        assert [r["analysis_id"] for r in dao.get_all()] == [1]
+
 
 def _stock_bars(n, base=10.0, step=0.1):
     start = datetime(2026, 9, 2)
@@ -184,6 +195,60 @@ class TestRefreshOutcomes:
         # 第二次全完整，不应再拉 K 线
         svc.refresh_outcomes(cfg)
         assert len(calls) == 1
+
+    def test_no_signal_is_skipped_and_placeholder_cleaned(self, db, monkeypatch):
+        import src.outcome_service as svc
+        import src.collector.akshare_fetcher as fetcher
+        from src.utils import now_cn
+
+        self._insert_analysis(db)  # 有效 BUY
+        with db.db_conn() as conn:
+            conn.execute("""
+                INSERT INTO stock_analysis_history
+                (stock_code, run_id, analysis_date, score, ai_analysis,
+                 ai_trade_strategy, model, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("600000", "r1", "2026-09-01", 50.0, "{}", "{}",
+                  "test", now_cn().isoformat()))
+        # 旧的空 Signal 占位行应被清理
+        db.AnalysisOutcomeDAO().upsert_many([{
+            "analysis_id": 999, "benchmark_code": "sh000300",
+            "stock_code": "600000", "stock_name": "", "analysis_date": "2026-09-01",
+            "signal": "", "confidence": "", "verdict": "",
+        }])
+        db.BenchmarkDailyDAO().upsert_many("sh000300", _bench_bars(80))
+        cfg = {"outcomes": {
+            "benchmarks": [{"code": "sh000300", "name": "沪深300"}],
+            "horizons": [20, 60],
+        }}
+        monkeypatch.setattr(svc.time, "sleep", lambda *_: None)
+        monkeypatch.setattr(fetcher, "fetch_kline_data",
+                            lambda *a, **k: _stock_bars(80))
+
+        stats = svc.refresh_outcomes(cfg)
+        assert stats["analyses"] == 1
+        assert stats["no_signal"] == 1
+        assert stats["deleted"] == 1
+        rows = db.AnalysisOutcomeDAO().get_all("sh000300")
+        assert len(rows) == 1
+        assert rows[0]["signal"] == "BUY"
+
+
+class TestRefreshBenchmarks:
+    def test_em_empty_falls_back_to_sina(self, db, monkeypatch):
+        import src.outcome_service as svc
+        import src.collector.akshare_fetcher as fetcher
+
+        monkeypatch.setattr(fetcher, "fetch_index_kline_em",
+                            lambda *a, **k: [])
+        monkeypatch.setattr(fetcher, "fetch_index_kline",
+                            lambda *a, **k: [{"trade_date": "2026-10-21",
+                                              "close": 100.0}])
+        cfg = {"outcomes": {"benchmarks": [
+            {"code": "sh000922", "name": "中证红利"}]}}
+        stats = svc.refresh_benchmarks(cfg)
+        assert stats == {"sh000922": 1}
+        assert db.BenchmarkDailyDAO().get_series("sh000922")[0]["close"] == 100.0
 
 
 class TestIsComplete:

@@ -26,6 +26,29 @@ BENCHMARK_NAMES = {b["code"]: b["name"] for b in DEFAULT_BENCHMARKS}
 _SIGNAL_ORDER = {"BUY": 0, "HOLD": 1, "AVOID": 2}
 _CONF_ORDER = {"高": 0, "中": 1, "低": 2}
 
+_SIGNAL_ALIASES = {
+    "BUY": "BUY", "买入": "BUY", "买": "BUY",
+    "HOLD": "HOLD", "持有": "HOLD", "观望": "HOLD",
+    "AVOID": "AVOID", "回避": "AVOID", "卖出": "AVOID", "SELL": "AVOID",
+}
+_CONF_ALIASES = {
+    "高": "高", "HIGH": "高",
+    "中": "中", "MEDIUM": "中", "MED": "中", "中等": "中",
+    "低": "低", "LOW": "低",
+}
+VALID_SIGNALS = ("BUY", "HOLD", "AVOID")
+
+
+def normalize_signal(raw) -> str:
+    key = str(raw or "").strip().upper()
+    # 中文别名大写后不变，再查一次原串
+    return _SIGNAL_ALIASES.get(key) or _SIGNAL_ALIASES.get(str(raw or "").strip(), "")
+
+
+def normalize_confidence(raw) -> str:
+    key = str(raw or "").strip().upper()
+    return _CONF_ALIASES.get(key) or _CONF_ALIASES.get(str(raw or "").strip(), "")
+
 
 def _loads(value) -> dict:
     if isinstance(value, dict):
@@ -45,8 +68,8 @@ def extract_signal(analysis_row: dict) -> tuple[str, str, str]:
     JSON 坏掉/老数据缺字段时返回空串，不猜测、不默认 BUY。
     """
     trade = _loads(analysis_row.get("ai_trade_strategy"))
-    signal = str(trade.get("signal") or "").strip().upper()
-    confidence = str(trade.get("confidence") or "").strip()
+    signal = normalize_signal(trade.get("signal"))
+    confidence = normalize_confidence(trade.get("confidence"))
     parsed = _loads(analysis_row.get("ai_analysis"))
     verdict = str(parsed.get("verdict") or "").strip()
     return signal, confidence, verdict
@@ -123,7 +146,7 @@ def is_hit(signal: str, excess: Optional[float]) -> Optional[bool]:
     """方向性命中：BUY 跑赢=命中，AVOID 跑输=命中，HOLD 不评命中率。"""
     if excess is None:
         return None
-    s = str(signal or "").upper()
+    s = normalize_signal(signal)
     if s == "BUY":
         return excess > 0
     if s == "AVOID":
@@ -143,8 +166,8 @@ def aggregate_outcomes(rows: Iterable[dict], horizon: int,
         excess = r.get(f"excess_{horizon}")
         if excess is None:
             continue
-        key_signal = str(r.get("signal") or "未标注").upper()
-        key_conf = str(r.get("confidence") or "未标注")
+        key_signal = normalize_signal(r.get("signal")) or "未标注"
+        key_conf = normalize_confidence(r.get("confidence")) or "未标注"
         key = (key_signal, key_conf if by_confidence else "全部")
         g = groups.setdefault(key, {
             "signal": key_signal,

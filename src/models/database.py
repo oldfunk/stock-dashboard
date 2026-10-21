@@ -1390,6 +1390,14 @@ class AnalysisOutcomeDAO:
             rows = conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
+    def delete_without_signal(self) -> int:
+        """清理无 Signal 的占位行（老分析落库为空 JSON，无法验证方向）。"""
+        with db_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM analysis_outcome "
+                "WHERE signal IS NULL OR TRIM(signal) = ''")
+            return cur.rowcount
+
 
 class WatchlistThesisDAO:
     """论文（论点+假设+红线+卖出条件）：每股一行，复盘更新假设状态。"""
