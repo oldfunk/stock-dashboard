@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="light" data-color-scheme="cn">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -21,6 +21,11 @@
             --radius: 8px;
             --up: #c5221f;
             --down: #137333;
+        }
+        /* Color scheme: 绿涨红跌 (Western)；与首页红绿开关共用 localStorage 偏好 */
+        [data-color-scheme="us"] {
+            --up: #137333;
+            --down: #c5221f;
         }
         * { box-sizing: border-box; }
         body {
@@ -238,5 +243,14 @@
 
     <div class="foot">数据更新时间：{{ now }} · 每周六 09:00 自动刷新（可在配置中调整）</div>
 </div>
+<script>
+    // 涨跌配色方案跟随全局开关（首页 toggleColorScheme 写入的偏好）
+    (function() {
+        var cs = localStorage.getItem('stock-dashboard-color');
+        if (cs === 'us' || cs === 'cn') {
+            document.documentElement.setAttribute('data-color-scheme', cs);
+        }
+    })();
+</script>
 </body>
 </html>

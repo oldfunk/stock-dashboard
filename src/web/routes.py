@@ -1919,6 +1919,8 @@ async def journal_by_date(request: Request, journal_date: str):
     history_list = AiJournalDAO().list_all()
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    from src.models.news import NewsDAO as _NewsDAO
+    _news_dao = _NewsDAO()
     return templates.TemplateResponse(request, "journal.html", {
         "request": request,
         "page_title": page_title,

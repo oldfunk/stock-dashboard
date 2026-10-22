@@ -40,6 +40,14 @@
             --radius-sm: 4px;
         }
 
+        /* Color scheme: 绿涨红跌 (Western)；与 index.html 同款，localStorage 驱动 */
+        [data-color-scheme="us"] {
+            --color-up: var(--green);
+            --color-up-bg: var(--green-bg);
+            --color-down: var(--red);
+            --color-down-bg: var(--red-bg);
+        }
+
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: var(--font-sans);
@@ -370,5 +378,14 @@
     </section>
 </div>
 <script src="/static/ai.js"></script>
+<script>
+    // 涨跌配色方案跟随全局开关（首页 toggleColorScheme 写入的偏好）
+    (function() {
+        var cs = localStorage.getItem('stock-dashboard-color');
+        if (cs === 'us' || cs === 'cn') {
+            document.documentElement.setAttribute('data-color-scheme', cs);
+        }
+    })();
+</script>
 </body>
 </html>

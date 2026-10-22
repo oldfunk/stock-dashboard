@@ -1298,6 +1298,11 @@
         colorToggle.title = scheme === 'cn'
             ? '当前：红涨绿跌（A股），点击切换为绿涨红跌'
             : '当前：绿涨红跌（美股），点击切换为红涨绿跌';
+        // 已打开的 K 线弹窗立即跟随切换
+        if (typeof applyHollowCandleStyle === 'function'
+            && typeof indexChart !== 'undefined' && indexChart) {
+            applyHollowCandleStyle(indexChart);
+        }
     }
 
     function toggleColorScheme() {
@@ -1648,21 +1653,28 @@ var currentIndexCode = '';
 
 // 空心K线样式（中国习惯：阳线空心红，阴线实心绿）
 // candle_up_stroke = 仅上涨K线空心，下跌K线保持实心
+// 涨跌色跟随全局红绿开关（cn 红涨 / us 绿涨）
+function klineSchemeColors() {
+    var us = document.documentElement.getAttribute('data-color-scheme') === 'us';
+    return { up: us ? '#26a69a' : '#ef5350', down: us ? '#ef5350' : '#26a69a' };
+}
+
 function applyHollowCandleStyle(chart) {
     if (!chart) return;
     try {
+        var kc = klineSchemeColors();
         chart.setStyles({
             candle: {
                 type: 'candle_up_stroke',
                 bar: {
-                    upColor: '#ef5350',        // 阳线边框（涨，空心）
-                    downColor: '#26a69a',      // 阴线填充（跌，实心）
+                    upColor: kc.up,          // 阳线边框（涨，空心）
+                    downColor: kc.down,      // 阴线填充（跌，实心）
                     noChangeColor: '#888888',
-                    upBorderColor: '#ef5350',
-                    downBorderColor: '#26a69a',
+                    upBorderColor: kc.up,
+                    downBorderColor: kc.down,
                     noChangeBorderColor: '#888888',
-                    upWickColor: '#ef5350',
-                    downWickColor: '#26a69a',
+                    upWickColor: kc.up,
+                    downWickColor: kc.down,
                     noChangeWickColor: '#888888'
                 }
             }

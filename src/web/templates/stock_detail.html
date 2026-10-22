@@ -40,6 +40,14 @@
             --radius-sm: 4px;
         }
 
+        /* Color scheme: 绿涨红跌 (Western)；与 index.html 同款，localStorage 驱动 */
+        [data-color-scheme="us"] {
+            --color-up: var(--green);
+            --color-up-bg: var(--green-bg);
+            --color-down: var(--red);
+            --color-down-bg: var(--red-bg);
+        }
+
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: var(--font-sans);
@@ -1066,6 +1074,11 @@
 </div>
     <script>
     (function() {
+        // 涨跌配色方案跟随全局开关（首页 toggleColorScheme 写入的偏好）
+        var _cs = localStorage.getItem('stock-dashboard-color');
+        if (_cs === 'us' || _cs === 'cn') {
+            document.documentElement.setAttribute('data-color-scheme', _cs);
+        }
         var code = "{{ code }}";
         var lastAskAnswer = '';
         window.askStock = async function() {
@@ -1125,6 +1138,12 @@
         };
         var currentPeriod = 'daily';
 
+        // K线涨跌色跟随全局红绿开关（cn 红涨 / us 绿涨）
+        function klineSchemeColors() {
+            var us = document.documentElement.getAttribute('data-color-scheme') === 'us';
+            return { up: us ? '#26a69a' : '#ef5350', down: us ? '#ef5350' : '#26a69a' };
+        }
+
         function initChart() {
             if (typeof klinecharts === 'undefined') {
                 document.getElementById('kline-loading').textContent = 'K线库加载失败，请刷新重试';
@@ -1134,18 +1153,19 @@
             // 空心K线样式（中国习惯：阳线空心红，阴线实心绿）
             // candle_up_stroke = 仅上涨K线空心，下跌K线保持实心
             try {
+                var _kc = klineSchemeColors();
                 chart.setStyles({
                     candle: {
                         type: 'candle_up_stroke',
                         bar: {
-                            upColor: '#ef5350',
-                            downColor: '#26a69a',
+                            upColor: _kc.up,
+                            downColor: _kc.down,
                             noChangeColor: '#888888',
-                            upBorderColor: '#ef5350',
-                            downBorderColor: '#26a69a',
+                            upBorderColor: _kc.up,
+                            downBorderColor: _kc.down,
                             noChangeBorderColor: '#888888',
-                            upWickColor: '#ef5350',
-                            downWickColor: '#26a69a',
+                            upWickColor: _kc.up,
+                            downWickColor: _kc.down,
                             noChangeWickColor: '#888888'
                         }
                     }

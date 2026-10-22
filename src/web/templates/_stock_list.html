@@ -118,7 +118,7 @@
 
             {% if stock.score_detail_parsed %}
             <div class="score-detail">
-                <button class="score-detail-toggle" type="button" onclick="toggleScoreDetail('{{ stock.code }}')">
+                <button class="score-detail-toggle" type="button" onclick="event.stopPropagation(); toggleScoreDetail('{{ stock.code }}')">
                     评分拆解 {{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}
                     <span class="caret" id="caret-{{ stock.code }}">↓</span>
                 </button>
