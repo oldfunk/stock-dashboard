@@ -165,6 +165,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-22（审计二轮落地：P1 一键部署 + P2 基线自动强制 + P3 死脚本清理；Issue #1 关 + 协议补规则）
+- **背景**：三方审计二轮 4 条反馈逐条研判——#1/#2/#4 采纳执行；#3（缓做项重启时机）经用户拍板"本会话现在做"。
+- **P1 `scripts/deploy.sh`**（`6156ed1` + `91fdf94` 环境注）：推 nightly 留痕 → 生产 worktree 门禁（**绿了才 ff 合 main，失败即中止：main 不动、服务不重启**）→ 生产 pull → 按改动自动重启（`src/` `config/`→主服务；`paper_trading/`→纸盘面板；`--restart`/`--no-restart` 覆盖）→ 健康检查（active + 200，重试 6 轮）。部署目标读 `deploy.local.md` KEY=VALUE 块（本地文件重写，实测 ssh 别名 `pi`）。**首跑实弹全链路成功**。坑：PowerShell 裸敲 bash 进的是 WSL（Linux git 无 GitHub 凭据，push 卡死 10 分钟超时）——须用 Git for Windows bash 执行，已注脚本头。
+- **P2**（`4d4a712`）：gate.sh 解析 passed 计数比对 `scripts/gate-baseline.txt`（首值 768）——全绿但低于下限同样判失败；AGENTS/architecture/iteration-log 基线改引用该文件（单一事实源，不再五处手抄）。实测输出 `=== Gate passed: 768 passed (基线下限 768) ===`。
+- **P3**（`ce219e0`）：删 `daily_cron.sh`/`ai_analysis_cron.sh`/`daily_update.sh`（误装即闯祸：本地 AI 全量触发已停用、cron 邀请与"不加定时任务"硬约束冲突、含 emoji）；README 结构树同步；生产 crontab 与 src/tests 零引用双核实。
+- **审计二轮 #1/#2**（`6727a53`）：Issue #1 关闭（v0.5.x 通知被 v0.6.5 vendor 超越，关闭评论写明落地版本 `a5140ad`）+ 协议 §4 补规则"vendor 验收合入即关对应 Issue（commit 带 `Closes #<n>`）"；CI 能力表述改实际——PR 触发属**休眠能力**（单人 ff 直推 main 流程不产生 PR），"合并前"的机器验证=生产 worktree gate，CI=每次合并的机器记录（audit P4 + `gate.yml` 注释两处修正）。
+- **验证**：deploy.sh 实弹（Git Bash）：生产 worktree gate **768 passed / 150.49s**（新 gate.sh 含下限检查）→ 合 main `93b7346..91fdf94` → prod pull → 无 src 改动正确判定不重启 → 双服务 active、:9527/:8081 均 200；CI main push 绿（run 39784179188，768 passed/41.70s，输出同样含下限行）。
+
 ### 2026-10-22（流程自动化审计 + CI 落地：主项目首个机器门禁记录；范围收窄后本轮唯一实施项）
 - **审计**：新增 `docs/automation-audit.md`——15 项人工步骤逐项盘点（现在怎么做/出错后果/该不该自动化/理由）+ 收益/成本排序清单 + 明确不自动化项。核查修正两处实况：部署目标实为 ssh 别名 `pi`（`deploy.local.md` 记的 pi1/192.168.50.210 已失效，本地文件已修）；生产侧纸盘 tick/日历同步本就在 crontab，真正全手工的是合并-部署链路。
 - **CI（三方审计补救目标一，用户拍板采纳并收窄范围）**：新增 `.github/workflows/gate.yml`——`pull_request` + `push`（main）双触发，ubuntu / Python 3.13 / `TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调用 `scripts/gate.sh`（未改它；无矩阵/发布/打包）。2026-09-29 "母不上 CI" 决策同日翻转；权威门禁仍为生产 gate，开发/测试分离规则不变。

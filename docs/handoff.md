@@ -3,27 +3,28 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-22 流程自动化审计 + CI 落地；基线 768）
-- **审计**：`docs/automation-audit.md`——15 项人工步骤盘点 + 收益/成本排序清单 + 明确不自动化项；核查修正：`deploy.local.md` 目标漂移已修（记的 pi1/192.168.50.210 已失效，实为 ssh 别名 `pi`/192.168.50.60；本地文件不入库）
-- **CI（本轮唯一实施项，三方审计补救目标一 + 用户拍板收窄范围）**：新增 `.github/workflows/gate.yml`——`pull_request` + `push`（main）双触发，ubuntu/Python 3.13/`TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调 `scripts/gate.sh`（未改它；无矩阵/发布/打包）。09-29 "母不上 CI" 决策同日翻转；权威门禁仍为生产 gate，开发/测试分离规则不变
-- **红验证（方案 A）**：一次性分支故意失败测试 → PR #2 → CI 红 **1 failed, 768 passed**（唯一失败即探针；768 与生产基线一致，旁证 CI 环境对齐）→ 关 PR 删分支 main 零污染（证据 Actions run 39773737114）
-- **验证**：合并前生产 worktree（detached @ `6c09978`）`gate.sh` **768 passed / 129.40s / Gate passed**；本批（审计文档 + workflow + 收尾文档）零运行时改动无需重启，:9527 200；合并后 main push 触发首条 CI 绿记录（Actions）
-- **缓做（范围收窄不实施）**：P1 `deploy.sh` 一键部署（收益最高）/ P2 gate 基线下限 / P3 legacy 死脚本清理——理由与风险见 audit §3，重启时机由用户定
+## 最后状态（2026-10-22 审计二轮落地：P1 一键部署 + P2 基线强制 + P3 死脚本清理；基线 768）
+- **P1**：`scripts/deploy.sh` 一键收尾（推 nightly 留痕 → 生产 worktree 门禁，绿了才 ff 合 main → 生产 pull → 按改动自动重启 → 健康检查）；部署目标读 `deploy.local.md` KEY=VALUE 块。首跑实弹全链路成功：生产 gate 768/150.49s → 合 main → 双服务 200
+- **P2**：gate.sh 自动强制基线下限（`scripts/gate-baseline.txt` 首值 768）——"只升不降"从人脑记忆变机器强制；AGENTS/architecture/iteration-log 基线改引用该文件，不再写死数字
+- **P3**：删三个死脚本 `daily_cron.sh`/`ai_analysis_cron.sh`/`daily_update.sh`（误装即闯祸；生产 crontab 与 src/tests 零引用双核实）；README 结构树同步
+- **审计二轮修正**：CI 表述改实际（PR 触发属休眠能力，"合并前"机器验证=生产 worktree gate，CI=每次合并的机器记录）；协议 §4 补"vendor 落地即关对应 Issue"；Issue #1 过期已关（被 v0.6.5 vendor 超越）
+- **坑**：PowerShell 裸敲 bash 进的是 WSL——WSL 的 Linux git 无 GitHub 凭据，push 卡死 10 分钟；deploy.sh 须用 Git for Windows bash 执行（脚本头已注）
+- **验证**：生产 worktree gate **768 passed（新 gate.sh 含下限检查实测输出 "Gate passed: 768 passed (基线下限 768)"）**；CI main push 绿（run 39784179188）；双服务 active，:9527/:8081 200；本批无 src/config/paper_trading 改动，deploy.sh 正确判定不重启
 
 ## 下一步方向
-1. 观察 CI 在真实合并上的表现：main 首条绿跑是否稳定；若 CI 与生产 gate 计数出现差异，以生产为准并回填环境差异（不夸大 CI 覆盖范围）
-2. 缓做三项（`deploy.sh` 一键部署收益最高 / gate 基线下限 / 死脚本清理）何时重启由用户定，方案已在 `docs/automation-audit.md` §3 备好
-3. （继承）观察 v0.6.5 固定交易时段 runtime 明日 16:30-18:30 plan window 的 tick 日志；用户确认 UI 净化观感；红绿开关 `--color-up` 兼作强调色是否拆 token 待拍板
+1. 观察 `deploy.sh` 后续日常使用（下一批含 `src/` 改动时验证自动重启分支；CI main 绿跑跟踪是否稳定）
+2. （继承）观察 v0.6.5 固定交易时段 runtime 的 tick 日志；用户确认 UI 净化观感；红绿开关 `--color-up` 兼作强调色是否拆 token 待拍板
+3. 审计清单状态：P1/P2/P3 全部落地，无缓做项；`docs/automation-audit.md` 为现行状态
 
 ## 已知隐患
-- **CI 环境非生产等同**：ubuntu runner / py3.13.16 与生产 Pi / py3.13.5 / HKT 不完全等同——CI 定位是"每次合并的机器记录与信号"，权威门禁仍是生产 gate；main 首条绿跑出来前不宣称 CI 稳定
-- **CI 依赖链**：每次跑 `pip install -e . pytest`（akshare 全链约 1 分钟）；上游依赖发坏版本会让 CI 红——以生产 gate 判断是否真故障，CI 红不等于生产坏
-- （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断，精度下降
+- **deploy.sh 凭据链**：Windows 上须用 Git for Windows bash 执行（PowerShell 裸 bash = WSL，Linux git 无 GitHub 凭据会卡 push）；健康检查依赖 pi 的 sudo 免密（当前成立）；`/home/pi/sd-verify` 为持久复用的验证 worktree，`/home/pi/sd-nightly` 是上一班残留（无害可清）
+- **CI 环境非生产等同**：ubuntu runner 与生产 Pi 不完全等同——CI 是记录与信号，权威门禁仍是生产 gate，CI 红不等于生产坏
+- （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断
 - （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）；`scripts/backtest_topk.py` 仍坏（`no such column: code`）
 - （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
-- 生产残留 `/home/pi/sd-nightly` worktree（@a5140ad，上一班验证用；无害，下次顺手清）
 
 ## 历史交接区（追加，不删）
+- 2026-10-22 审计二轮落地：P1 deploy.sh 一键部署 + P2 基线自动强制 + P3 死脚本清理（CI 表述修正 / 协议补关 Issue 规则 / Issue #1 关闭）
 - 2026-10-22 流程自动化审计 + CI 落地（主项目首个机器门禁记录；PR 红验证闭环；P1-P3 缓做）
 - 2026-10-22 UI 净化 + vendor v0.6.5（评分拆解去深色线框；子项目跨两个大版本合流；基线 646→768）
 - 2026-10-22 修三个 UI bug（评分拆解跳转/历史笔记 500/红绿开关不跟随；基线 638→646；股息流水线闭环 18/20）
