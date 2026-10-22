@@ -1,0 +1,34 @@
+# 主项目 CI：为每次合并进 main 留下机器产生的全仓测试通过/失败记录。
+# 定位：记录与信号。权威门禁仍是生产服务器 bash scripts/gate.sh（开发/测试分离规则不变，本文件不改 gate.sh）。
+# pull_request 触发给出"合并前"记录；push 触发给出"合并后"记录。无矩阵、无发布流水线、无打包。
+name: gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # 对齐生产时区（HKT=UTC+8），防时间敏感测试在 UTC 机器上漂移
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与生产 venv 同为 editable 安装）
+        run: pip install -e . pytest
+
+      - name: 全仓门禁
+        run: bash scripts/gate.sh
