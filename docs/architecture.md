@@ -70,7 +70,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored v0.6.5，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
 
@@ -128,7 +128,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败（当前基线 646 passed，2026-10-22 生产服务器 worktree gate 实测；基线只升不降）。
+- 全仓 `pytest` 零失败（当前基线 768 passed，2026-10-22 生产服务器 worktree gate 实测；基线只升不降）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。

@@ -18,7 +18,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
 - 2026-10-21 专业化三件套：信号前向收益验证（`/outcomes`）、真实年报股息 + fail-closed 红利池、AI prompt 新闻事件上下文；周六 09:00 自动维护。
 - 2026-10-22 UI 三修：候选卡评分拆解点击跳转（缺 stopPropagation）、历史笔记页 500（`journal_by_date` 未定义 `_news_dao`，数据未丢）、红绿开关详情页/信号页/K线不跟随（补 us CSS 覆盖 + localStorage 恢复 + K线取色随开关）。
-- gate 基线：646 passed（2026-10-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- 2026-10-22 UI 净化 + vendor：评分拆解去深色线框（浅灰底区块 + 行线/总分线用浅灰变量）；子项目 vendored v0.4.0→v0.6.5（条件单/回测修正/AI 实时执行层/固定交易时段 runtime）。
+- gate 基线：768 passed（2026-10-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -75,7 +76,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 646 passed，只升不降）
+- 全仓 pytest 零失败（基线 768 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S10 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -163,6 +164,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-10-22（UI 净化 + vendor v0.6.5：评分拆解去深色线框 / 子项目跨两个大版本合流；基线 646→768）
+- **UI 线框净化**（用户反馈"候选股线框不美观、少用线框、线框色要浅灰"）：候选卡评分拆解原先套 `border: 1px solid var(--border-color, #2a2f3a)`，而 `--border-color` 全仓从未定义 → 深灰蓝 fallback 一直生效（`#2a2f3a`/`#20242e`，dark theme 时代的遗留）。修法：外框整体去除，改浅灰底色区块（`--bg-tertiary`）+ hover 反馈；行分隔线 `#20242e`→`--divider-thin`(#e8eaed)；总分线 `#2a2f3a`→`--divider`(#e0e3e7)；进度条轨道 `--bg-primary`→`--bg-secondary`（在浅灰底上保对比）。详情页 `.sd-cl-item` 的 `#333` 同类问题一并改 `--divider`；watchlist 详情页总分线 2px→1px 统一。顺带修 `.sd-sub`（评分拆解的分数列）误用 `--color-up` 的涨跌色混用（切红绿开关时分数会跟着翻色），改中性灰。
+- **vendor v0.6.5**：`git subtree pull --prefix=paper_trading paper-upstream v0.6.5 --squash`（58 文件 +8924/-603，v0.4.0→v0.6.5 跨 v0.5/v0.6 两个大版本）。核心：条件单+参数网格+日内规则（v0.5.0）、回测账目/市值口径修正+分钟线换源（v0.5.1）、回测提速+JSON 严格化（v0.5.2）、walk-forward 样本外检验+`engine.enabled` 全入口生效的安全加固（v0.5.3）、LLM 免令牌/条件单 500 修复（v0.5.4/5）、M1 正确性与回测-实盘口径统一（v0.6.0）、持仓同步并集+计划执行 fail-closed（v0.6.1）、AI 条件单与事件驱动复盘（v0.6.2）、条件单拒单审计+手续费地板（v0.6.3/4）、固定交易时段 runtime + 弃用旧 schedule gate（v0.6.5）。**全是新增表**（conditional_orders/engine_state/engine_triggers/minute_bars/quote_log），无既有表冲突。
+- **契约门禁核对**（协议 §6）：`integration/` 对母库零写操作（grep INSERT/UPDATE/DELETE 零命中）；只读表全在契约内（screening_result/stock_snapshot/stock_analysis_history/watchlist_notes/watchlist_thesis/market_index），`mode=ro` 保留；`engine.enabled: false` 确认，不接管母方交易；CLI 参数 `--scheme/--pool-limit/--pool-from` 全保留，生产 cron 第 1 行兼容；新增运行时产物 `var/trading_calendar.json` 已被 `var/` gitignore 覆盖。
+- **新接缝点处置**：v0.6.5 引入交易日历缓存（`utils/trading_calendar.py`），母合并树的 tick 依赖它判断交易日，但缓存不会自更新。已首同步（8797 交易日，覆盖至 2026-12-31），并在生产 cron 补 `0 9 * * 1` 母合并树 `calendar sync`（只读日历不下单；备份 `/tmp/crontab.bak.20261022_174633`）。
+- **验证**：生产 worktree gate **768 passed**（+122 子项目单测）；部署 `a5140ad` + 重启双服务 active；母面板 6 路 200、子面板 :8081 200、`agent run --dry-run` error:null（净值 96587.79）；UI 实测外框 0px/浅灰底/行线 #e8eaed，截图目检通过；深色线框残留 0。
 
 ### 2026-10-22（修三个线上 UI bug：评分拆解跳转 / 历史笔记 500 / 红绿开关不跟随；基线 638→646）
 - **bug①评分拆解点击跳转**：候选卡 `.score-detail-toggle` 的 onclick 缺 `event.stopPropagation()`，点击冒泡到卡片级 `location.href` 跳转详情页（观察池卡本来就有，只有候选卡漏了）。补一行。生产实测：点击只展开（↑↓ 正常），URL 不变。
