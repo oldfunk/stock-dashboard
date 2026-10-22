@@ -484,24 +484,26 @@
         }
 
         .score-detail {
-            margin-top: 8px;
-            border: 1px solid var(--border-color, #2a2f3a);
+            margin-top: 10px;
+            background: var(--bg-tertiary);
             border-radius: var(--radius-sm);
             overflow: hidden;
         }
         .score-detail-toggle {
             width: 100%;
             text-align: left;
-            background: var(--bg-tertiary, var(--bg-primary));
+            background: transparent;
             color: var(--text-secondary);
             border: none;
-            padding: 6px 10px;
+            padding: 7px 12px;
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
+            transition: background 0.15s;
         }
+        .score-detail-toggle:hover { background: var(--bg-hover); }
         .score-detail-toggle .caret { float: right; }
-        .score-detail-body { padding: 8px 10px; }
+        .score-detail-body { padding: 6px 12px 9px; }
         .sd-row.sd-sector { grid-template-columns: auto 1fr; }
         .sd-sector .sd-name { font-weight: 400; opacity: .75; }
         .sd-sector .sd-detail { text-align: right; opacity: .75; font-variant-numeric: tabular-nums; }
@@ -511,15 +513,15 @@
             align-items: center;
             gap: 8px;
             font-size: 11px;
-            padding: 3px 0;
-            border-bottom: 1px solid var(--border-color, #20242e);
+            padding: 4px 0;
+            border-bottom: 1px solid var(--divider-thin);
         }
         .sd-row:last-child { border-bottom: none; }
         .sd-name { color: var(--text-secondary); }
         .sd-raw { color: var(--text-tertiary); text-align: right; }
         .sd-bar {
             height: 8px;
-            background: var(--bg-primary);
+            background: var(--bg-secondary);
             border-radius: 4px;
             overflow: hidden;
         }
@@ -528,14 +530,14 @@
             height: 100%;
             background: linear-gradient(90deg, var(--green), #34a853);
         }
-        .sd-sub { color: var(--color-up); text-align: right; }
+        .sd-sub { color: var(--text-secondary); text-align: right; }
         .sd-w { color: var(--text-tertiary); text-align: right; }
         .sd-contrib { color: var(--accent); text-align: right; font-weight: 600; }
         .sd-consistency .sd-name { color: var(--gold, #d4a843); }
         .sd-total {
             margin-top: 2px;
             font-weight: 600;
-            border-top: 1px solid var(--border-color, #2a2f3a);
+            border-top: 1px solid var(--divider);
         }
         .sd-total .sd-name { color: var(--text-primary); }
 
