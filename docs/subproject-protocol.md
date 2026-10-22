@@ -33,6 +33,7 @@
 1. 域内 bug 母方不修，只写 Issue：标题 `[bug]` + 复现步骤 + 期望行为 + 母方版本号。
 2. 只提**接口级需求**（要什么、验收标准），不写实现。
 3. 等子方 tag，母方 vendor 驗收。不催、不代写。
+4. vendor 验收合入即关对应 Issue：合并 commit message 写 `Closes #<n>`（GitHub 自动关），或手动关并在关闭评论写明落地版本与验证结果。被新 tag 超越的旧 Issue 不得挂着（2026-10-22 Issue #1 过期实证：v0.5.x 通知被 v0.6.5 vendor 超越后仍开着）。
 
 ## 5. Hotfix 例外（救生产线 only）
 
