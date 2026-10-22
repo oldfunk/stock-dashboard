@@ -17,7 +17,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 量化路线已砍：`src/paper/`、`/paper` 路由、策略 Tab、`/candidates` 独立页均已删除（git 历史可查）。
 - `deep_research` 表：已删除（2026-09-23 用户批准；5 行已备份生产 `data/backup/deep_research_backup_20260923.json`；全仓零代码引用）。
 - 2026-10-21 专业化三件套：信号前向收益验证（`/outcomes`）、真实年报股息 + fail-closed 红利池、AI prompt 新闻事件上下文；周六 09:00 自动维护。
-- gate 基线：638 passed（2026-10-21 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- 2026-10-22 UI 三修：候选卡评分拆解点击跳转（缺 stopPropagation）、历史笔记页 500（`journal_by_date` 未定义 `_news_dao`，数据未丢）、红绿开关详情页/信号页/K线不跟随（补 us CSS 覆盖 + localStorage 恢复 + K线取色随开关）。
+- gate 基线：646 passed（2026-10-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -74,7 +75,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 638 passed，只升不降）
+- 全仓 pytest 零失败（基线 646 passed，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S10 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）
@@ -162,6 +163,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-10-22（修三个线上 UI bug：评分拆解跳转 / 历史笔记 500 / 红绿开关不跟随；基线 638→646）
+- **bug①评分拆解点击跳转**：候选卡 `.score-detail-toggle` 的 onclick 缺 `event.stopPropagation()`，点击冒泡到卡片级 `location.href` 跳转详情页（观察池卡本来就有，只有候选卡漏了）。补一行。生产实测：点击只展开（↑↓ 正常），URL 不变。
+- **bug②历史笔记"丢失"**：`ai_journal` 11 篇全在库、侧栏 11 项全渲染，但 `/journal/{date}` 返回 500——`journal_by_date` 路由引用了只在 `journal_page` 函数内局部定义的 `_news_dao`（10-20 新闻改动引入，NameError）。补 `from src.models.news import NewsDAO` + 实例化。生产实测 2026-10-03/10-17/07-21 三个日期均 200 且含正文。
+- **bug③红绿开关不跟随**：开关与偏好（localStorage `stock-dashboard-color`）只在首页实现。`stock_detail`/`watchlist_detail` 硬编码 `data-color-scheme="cn"` 不读偏好；`outcomes` 连该属性都没有；K线（首页弹窗 + 详情页）硬编码 `#ef5350`/`#26a69a`。修法：三页补 `[data-color-scheme="us"]` CSS 覆盖 + 页面加载读回偏好；K线取色抽 `klineSchemeColors()`（cn 红涨 / us 绿涨）；首页 `setColorScheme` 时对已打开的指数 K线弹窗立即重刷。生产浏览器实测：偏好 us → 详情页 applied=us，-3.82% 跌显示红、涨显示绿。
+- **顺带闭环 10-21 遗留**：股息首个完整流水线确认——今日 `20261022_153021` 候选 18/20 有真实股息三列（如海澜之家 7.244%/91.11%/2025），快照 777/810 有股息率；仍无一只过 yield≥4 且 payout≤70，红利池为空属 fail-closed 正常。
+- **验证**：生产 worktree gate **646 passed**（+8 回归用例 `tests/web/test_ui_bugfixes_20261022.py`：stopPropagation×2、journal by date×2、三页 us 覆盖+恢复×3、K线取色×1）。部署 `a60bee3` + 重启，`/journal/{date}` 三日期 200、首页 25 处 stopPropagation、详情/观察池/信号页均含 us 覆盖与恢复脚本。
+- **教训**：bug② 带着全绿 gate 上线——当时只测了 `/api/journal/{date}` 没测 HTML 路由；已补回归用例，新增路由引用共享变量时必须确认作用域。
 
 ### 2026-10-21（信号前向收益 + 真实股息 + 新闻事件上下文；基线 577→638）
 - **信号前向收益**：新增 `analysis_outcome` / `benchmark_daily` 两表与 `/outcomes` 页 / `/api/outcomes`。口径：分析日之后第一个交易日收盘入场（T+1），个股用前复权收盘价，对比沪深300（sh000300）/中证红利（sh000922）价格指数；20/60/120 交易日，未到期或缺行情保持 NULL，首次非空后冻结。无 Signal 的 AI 分析不验证（`ai_trade_strategy={}` / `ai_analysis={}`），历史置信度 Medium/中等/Low/High 归一为中/低/高。
