@@ -40,13 +40,13 @@
 
 ## 3. 实施清单（按收益/成本排序）
 
-### P1 一键部署脚本 `scripts/deploy.sh`（缓做：2026-10-22 三方审计收窄范围，本轮不实施）
+### P1 一键部署脚本 `scripts/deploy.sh`（已落地，2026-10-22 当日经用户拍板重启并实施）
 
 - **预期收益**：拦住四类真实故障——(1) 漏重启导致新代码不生效（09-22 已发生）；(2) 合并前忘跑 gate 带病上线；(3) 基于过期 main 合并/漏推 nightly 无留痕；(4) 部署后不做健康确认。同时把"合并前门禁"从可选动作变成强制前置：gate 在生产 worktree 上先跑、绿了才允许合并 main，main 永远不含未验证代码。
 - **实施成本**：新增 `scripts/deploy.sh`；`deploy.local.md`（本地配置，不入库）改 KEY=VALUE 块供脚本读取；AGENTS.md 收尾流程段补一行指针。不改任何 `src/`，不动 CI（`gate-baseline.txt` 属 P2，不在本项）。
 - **风险**：不触碰硬约束——本机仍不跑 pytest（gate 在生产 worktree 执行）；不新增定时任务（脚本只由人触发）；不碰 collector/screener/analyzer/S1–S8/`paper_trading/`。生产侧新增一个持久化验证 worktree（`VERIFY_DIR`，detached HEAD，可复用），失败时 main 与生产服务均未动，可安全重跑。
 
-### P2 基线下限自动强制 `gate.sh` + 单一事实源（缓做：2026-10-22 三方审计收窄范围"不动 gate.sh"，本轮不实施）
+### P2 基线下限自动强制 `gate.sh` + 单一事实源（已落地，2026-10-22 当日经用户拍板重启并实施）
 
 - **预期收益**：把"基线只升不降"从人脑记忆变成机器强制——删除/跳过测试导致通过数低于记录下限时，gate 直接失败，部署被 P1 脚本拦下。基线数字只在 `scripts/gate-baseline.txt` 一处维护，AGENTS/architecture/iteration-log 改为引用该文件，消除五处人工抄写。
 - **实施成本**：改 `scripts/gate.sh`（约 15 行：捕获 pytest 输出、解析 passed 计数、比对下限文件）；新增 `scripts/gate-baseline.txt`（首值 768）；AGENTS.md / architecture.md §5.3 / iteration-log 顶部各改一行指向该文件。经 P1 脚本在生产 worktree 实测。
