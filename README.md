@@ -115,8 +115,7 @@ stock-dashboard/
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
 │   ├── refresh_dividends.py    # 手动刷新年报分红
-│   ├── refresh_outcomes.py     # 手动刷新基准 + 前向收益
-│   └── daily_cron.sh           # OS cron 兜底（Web 未运行时）
+│   └── refresh_outcomes.py     # 手动刷新基准 + 前向收益
 ├── tests/                      # pytest（基线 768 passed，2026-10-22 生产服务器 gate 全绿）
 │   ├── screener/               # 筛选器单测
 │   ├── analyzer/               # AI 分析单测
