@@ -3,32 +3,28 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-22 UI 净化 + vendor v0.6.5；基线 768）
-- **UI 线框净化**：候选卡评分拆解的深色框根因是 `--border-color` 变量从未定义、dark theme 遗留的 `#2a2f3a`/`#20242e` fallback 一直生效。现改为浅灰底色区块（无边框，hover 反馈）、行线 `#e8eaed`、总分线 `#e0e3e7`；详情页 checklist `#333`→`--divider`；两页总分线统一 1px。顺带修 `.sd-sub` 分数列误用涨跌色（红绿开关会翻转分数颜色）。截图目检通过。
-- **子项目 vendor v0.6.5**：v0.4.0→v0.6.5 跨两个大版本（58 文件 +8924/-603）——条件单/参数网格/日内规则（v0.5.0）、回测账目与市值口径修正+分钟线换源（v0.5.1）、回测提速（v0.5.2）、walk-forward 检验 + `engine.enabled` 全入口安全加固（v0.5.3）、LLM 免令牌（v0.5.4/5）、M1 正确性（v0.6.0）、持仓并集+fail-closed（v0.6.1）、AI 条件单+事件复盘（v0.6.2）、拒单审计+手续费地板（v0.6.3/4）、固定交易时段 runtime（v0.6.5）。新增表全部为新表，无既有表冲突。
-- **契约核对通过**：integration 对母库零写、只读表全在契约内、`mode=ro` 保留、`engine.enabled: false`、CLI 参数兼容生产 cron 第 1 行、运行时产物 `var/` 已 gitignore。
-- **新接缝点**：v0.6.5 交易日历缓存母树不会自更新——已首同步（覆盖至 2026-12-31）+ 生产 cron 补每周一 09:00 `calendar sync`（备份 `/tmp/crontab.bak.20261022_174633`）。
-- **验证**：gate **768 passed**（+122 子项目单测）；双服务重启 active；母面板 6 路 200、:8081 200、`agent run --dry-run` error:null。
+## 最后状态（2026-10-22 流程自动化审计 + CI 落地；基线 768）
+- **审计**：`docs/automation-audit.md`——15 项人工步骤盘点 + 收益/成本排序清单 + 明确不自动化项；核查修正：`deploy.local.md` 目标漂移已修（记的 pi1/192.168.50.210 已失效，实为 ssh 别名 `pi`/192.168.50.60；本地文件不入库）
+- **CI（本轮唯一实施项，三方审计补救目标一 + 用户拍板收窄范围）**：新增 `.github/workflows/gate.yml`——`pull_request` + `push`（main）双触发，ubuntu/Python 3.13/`TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调 `scripts/gate.sh`（未改它；无矩阵/发布/打包）。09-29 "母不上 CI" 决策同日翻转；权威门禁仍为生产 gate，开发/测试分离规则不变
+- **红验证（方案 A）**：一次性分支故意失败测试 → PR #2 → CI 红 **1 failed, 768 passed**（唯一失败即探针；768 与生产基线一致，旁证 CI 环境对齐）→ 关 PR 删分支 main 零污染（证据 Actions run 39773737114）
+- **验证**：合并前生产 worktree（detached @ `6c09978`）`gate.sh` **768 passed / 129.40s / Gate passed**；本批（审计文档 + workflow + 收尾文档）零运行时改动无需重启，:9527 200；合并后 main push 触发首条 CI 绿记录（Actions）
+- **缓做（范围收窄不实施）**：P1 `deploy.sh` 一键部署（收益最高）/ P2 gate 基线下限 / P3 legacy 死脚本清理——理由与风险见 audit §3，重启时机由用户定
 
 ## 下一步方向
-1. 观察 v0.6.5 固定交易时段 runtime 在生产的表现（明日 16:30-18:30 plan window 的 tick 日志）；旧 schedule gate 已被上游移除，若 tick 静默属正常（v0.6.5 设计为仅开盘执行 plan、收盘后 plan）
-2. 用户真实浏览器确认 UI 净化观感（尤其 dark mode 下浅灰区块是否协调）
-3. 红绿开关语义收口：`--color-up` 仍被复用为通用强调色（评分总分/笔记边框/镜子测试 pass），切 us 后这些非涨跌元素会连带翻色——首页与详情页行为一致但语义不纯，是否拆分 token 待拍板
-4. 复盘 2026-10-20 18:30 市场日报，决定是否加 08:40 盘前日报；候选池 Top20 是否纳入新闻抓取 scope
-5. 120 日收益窗口约 2027-01 起有数据，每周任务增量补齐
+1. 观察 CI 在真实合并上的表现：main 首条绿跑是否稳定；若 CI 与生产 gate 计数出现差异，以生产为准并回填环境差异（不夸大 CI 覆盖范围）
+2. 缓做三项（`deploy.sh` 一键部署收益最高 / gate 基线下限 / 死脚本清理）何时重启由用户定，方案已在 `docs/automation-audit.md` §3 备好
+3. （继承）观察 v0.6.5 固定交易时段 runtime 明日 16:30-18:30 plan window 的 tick 日志；用户确认 UI 净化观感；红绿开关 `--color-up` 兼作强调色是否拆 token 待拍板
 
 ## 已知隐患
-- **交易日历缓存是新接缝**：母合并树 `paper_trading/var/trading_calendar.json` 现由 cron 每周一刷新；若 cron 失效，缓存过期后 runtime 回退"周末+硬编码"判断，精度下降（缺节假日）。独立克隆 `/home/pi/paper-trading` 的日历缓存与母树是两份，互不影响
-- **v0.6.5 弃用旧 schedule gate**：`agent run` 的 `--schedule` 类旧入口部分返回 410；生产 cron 用的是 `agent tick`，已验证兼容，但若以后改 cron 命令需注意不再有 schedule 门
-- 详情页 `--color-up` 兼作强调色：切 us 后评分总分/笔记边框/镜子测试 pass 等非涨跌元素也翻色（首页同样如此），属既有语义混用，未在本轮拆分
-- `engine.enabled: false` 是安全线——v0.5.3 起该开关对所有入口生效（cron 单轮原本会绕过它），这是上游修的真漏洞，合并后继续保持关闭
-- 独立克隆 `/home/pi/paper-trading` 跑的是子项目自己的版本，与母树 vendored 版本可能不同步；两套 cron 并存（单交易员原则：同账户同一天只跑一边），改任一侧前先确认对侧
-- journal bug 教训（10-20 NameError 带全绿 gate 上线）：新增路由引用共享变量时必须确认作用域，已补 `/journal/{date}` 回归用例
-- 股息/收益口径沿用 10-21 三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日全 NULL 未到期
-- 红利池当前为空：高股息候选（海澜之家 7.244%/91.11%、承德露露 6.135%/83.33%）都被分红率上限排除，fail-closed 设计使然
-- `scripts/backtest_topk.py` 仍坏（`no such column: code`）；`financial_history` 无披露日，回测有前视风险
+- **CI 环境非生产等同**：ubuntu runner / py3.13.16 与生产 Pi / py3.13.5 / HKT 不完全等同——CI 定位是"每次合并的机器记录与信号"，权威门禁仍是生产 gate；main 首条绿跑出来前不宣称 CI 稳定
+- **CI 依赖链**：每次跑 `pip install -e . pytest`（akshare 全链约 1 分钟）；上游依赖发坏版本会让 CI 红——以生产 gate 判断是否真故障，CI 红不等于生产坏
+- （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断，精度下降
+- （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）；`scripts/backtest_topk.py` 仍坏（`no such column: code`）
+- （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
+- 生产残留 `/home/pi/sd-nightly` worktree（@a5140ad，上一班验证用；无害，下次顺手清）
 
 ## 历史交接区（追加，不删）
+- 2026-10-22 流程自动化审计 + CI 落地（主项目首个机器门禁记录；PR 红验证闭环；P1-P3 缓做）
 - 2026-10-22 UI 净化 + vendor v0.6.5（评分拆解去深色线框；子项目跨两个大版本合流；基线 646→768）
 - 2026-10-22 修三个 UI bug（评分拆解跳转/历史笔记 500/红绿开关不跟随；基线 638→646；股息流水线闭环 18/20）
 - 2026-10-21 收益验证 + 真实股息 + 新闻事件上下文（基线 577→638；生产 780 行收益、3620 只分红，冒烟全 200）

@@ -19,7 +19,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 2026-10-21 专业化三件套：信号前向收益验证（`/outcomes`）、真实年报股息 + fail-closed 红利池、AI prompt 新闻事件上下文；周六 09:00 自动维护。
 - 2026-10-22 UI 三修：候选卡评分拆解点击跳转（缺 stopPropagation）、历史笔记页 500（`journal_by_date` 未定义 `_news_dao`，数据未丢）、红绿开关详情页/信号页/K线不跟随（补 us CSS 覆盖 + localStorage 恢复 + K线取色随开关）。
 - 2026-10-22 UI 净化 + vendor：评分拆解去深色线框（浅灰底区块 + 行线/总分线用浅灰变量）；子项目 vendored v0.4.0→v0.6.5（条件单/回测修正/AI 实时执行层/固定交易时段 runtime）。
-- gate 基线：768 passed（2026-10-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。
+- gate 基线：768 passed（2026-10-22 生产服务器 worktree `gate.sh` 实测全绿；按测试规则本机不跑 pytest）。CI（GitHub Actions `gate.yml`）自 2026-10-22 起对每次 main push / PR 留机器测试记录，权威门禁仍是生产 gate。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -164,6 +164,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - [x] ~~上游跟踪常设项~~（2026-09-22 取消：上游镜像/对照工具/月检脚本已全部移除，解绑上游，不再跟踪）。
 
 ## 变更记录（Changelog）
+
+### 2026-10-22（流程自动化审计 + CI 落地：主项目首个机器门禁记录；范围收窄后本轮唯一实施项）
+- **审计**：新增 `docs/automation-audit.md`——15 项人工步骤逐项盘点（现在怎么做/出错后果/该不该自动化/理由）+ 收益/成本排序清单 + 明确不自动化项。核查修正两处实况：部署目标实为 ssh 别名 `pi`（`deploy.local.md` 记的 pi1/192.168.50.210 已失效，本地文件已修）；生产侧纸盘 tick/日历同步本就在 crontab，真正全手工的是合并-部署链路。
+- **CI（三方审计补救目标一，用户拍板采纳并收窄范围）**：新增 `.github/workflows/gate.yml`——`pull_request` + `push`（main）双触发，ubuntu / Python 3.13 / `TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调用 `scripts/gate.sh`（未改它；无矩阵/发布/打包）。2026-09-29 "母不上 CI" 决策同日翻转；权威门禁仍为生产 gate，开发/测试分离规则不变。
+- **红验证（方案 A，用户选定）**：一次性分支 `ci-verify-red` 加故意失败测试 → PR #2 → CI 红 **1 failed, 768 passed**（唯一失败即探针测试；768 与生产基线一致，旁证 CI 环境与生产对齐）→ 关 PR 删分支，main 零污染。证据：Actions run 39773737114。
+- **合并前门禁**：生产 worktree（detached @ `6c09978`）`gate.sh` **768 passed / Gate passed / 129.40s**（本批 = 审计文档 + workflow + 收尾文档，零运行时改动，无需重启）。
+- **缓做（范围收窄，不实施）**：P1 `deploy.sh` 一键部署（收益最高）/ P2 gate 基线下限 / P3 legacy 死脚本清理——理由与风险评估全文见 `docs/automation-audit.md` §3，重启时机由用户定。
 
 ### 2026-10-22（UI 净化 + vendor v0.6.5：评分拆解去深色线框 / 子项目跨两个大版本合流；基线 646→768）
 - **UI 线框净化**（用户反馈"候选股线框不美观、少用线框、线框色要浅灰"）：候选卡评分拆解原先套 `border: 1px solid var(--border-color, #2a2f3a)`，而 `--border-color` 全仓从未定义 → 深灰蓝 fallback 一直生效（`#2a2f3a`/`#20242e`，dark theme 时代的遗留）。修法：外框整体去除，改浅灰底色区块（`--bg-tertiary`）+ hover 反馈；行分隔线 `#20242e`→`--divider-thin`(#e8eaed)；总分线 `#2a2f3a`→`--divider`(#e0e3e7)；进度条轨道 `--bg-primary`→`--bg-secondary`（在浅灰底上保对比）。详情页 `.sd-cl-item` 的 `#333` 同类问题一并改 `--divider`；watchlist 详情页总分线 2px→1px 统一。顺带修 `.sd-sub`（评分拆解的分数列）误用 `--color-up` 的涨跌色混用（切红绿开关时分数会跟着翻色），改中性灰。

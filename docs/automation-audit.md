@@ -40,27 +40,30 @@
 
 ## 3. 实施清单（按收益/成本排序）
 
-### P1 一键部署脚本 `scripts/deploy.sh`（本次推进）
+### P1 一键部署脚本 `scripts/deploy.sh`（缓做：2026-10-22 三方审计收窄范围，本轮不实施）
 
 - **预期收益**：拦住四类真实故障——(1) 漏重启导致新代码不生效（09-22 已发生）；(2) 合并前忘跑 gate 带病上线；(3) 基于过期 main 合并/漏推 nightly 无留痕；(4) 部署后不做健康确认。同时把"合并前门禁"从可选动作变成强制前置：gate 在生产 worktree 上先跑、绿了才允许合并 main，main 永远不含未验证代码。
 - **实施成本**：新增 `scripts/deploy.sh`；`deploy.local.md`（本地配置，不入库）改 KEY=VALUE 块供脚本读取；AGENTS.md 收尾流程段补一行指针。不改任何 `src/`，不动 CI（`gate-baseline.txt` 属 P2，不在本项）。
 - **风险**：不触碰硬约束——本机仍不跑 pytest（gate 在生产 worktree 执行）；不新增定时任务（脚本只由人触发）；不碰 collector/screener/analyzer/S1–S8/`paper_trading/`。生产侧新增一个持久化验证 worktree（`VERIFY_DIR`，detached HEAD，可复用），失败时 main 与生产服务均未动，可安全重跑。
 
-### P2 基线下限自动强制 `gate.sh` + 单一事实源（本次推进）
+### P2 基线下限自动强制 `gate.sh` + 单一事实源（缓做：2026-10-22 三方审计收窄范围"不动 gate.sh"，本轮不实施）
 
 - **预期收益**：把"基线只升不降"从人脑记忆变成机器强制——删除/跳过测试导致通过数低于记录下限时，gate 直接失败，部署被 P1 脚本拦下。基线数字只在 `scripts/gate-baseline.txt` 一处维护，AGENTS/architecture/iteration-log 改为引用该文件，消除五处人工抄写。
 - **实施成本**：改 `scripts/gate.sh`（约 15 行：捕获 pytest 输出、解析 passed 计数、比对下限文件）；新增 `scripts/gate-baseline.txt`（首值 768）；AGENTS.md / architecture.md §5.3 / iteration-log 顶部各改一行指向该文件。经 P1 脚本在生产 worktree 实测。
 - **风险**：gate.sh 是全仓唯一门禁，改坏则全链路阻塞——因此必须先经 P1 的"生产 worktree 先行验证"跑绿才合并；不触碰其他硬约束。
 
-### P3 legacy 死脚本清理（本次推进）
+### P3 legacy 死脚本清理（缓做：2026-10-22 三方审计收窄范围，本轮不实施）
 
 - **预期收益**：消除三个"误触发即闯祸"的陷阱——`ai_analysis_cron.sh` 若被安装会触发已停用的本地 AI 全量分析；`daily_cron.sh` 头注释主动邀请装 crontab（与硬约束冲突）；`daily_update.sh` 含 emoji 违反硬规则。同时让 README 脚本表与现实一致。
 - **实施成本**：删 3 个文件 + README 结构树与脚本表各删对应行。保留仍可手动使用的 `stock-ai-slow-feed.sh` / `run_pipeline.py` / `run_ai_analysis.py` / `retry_ai.py`（README 手动操作表在用）。
 - **风险**：无——已核实生产 crontab 无任何引用；纯删除，不动运行时代码。
 
-### P4 GitHub Actions CI（已拍板不做，2026-10-22）
+### P4 GitHub Actions CI（已落地，2026-10-22）
 
-- 维持 2026-09-29 决策"母不上 CI，生产 gate 为唯一门禁"。理由：P1 已把生产 gate 变成每次合并的强制前置；单人维护、外部 PR 现策直接关，CI 边际价值低。若未来外部贡献常态化可重新评估（PR-only + 徽章是最低形态）。
+- 决策反转记录：本文件初稿维持 09-29 "母不上 CI"；同日三方审计补救提出"每次合并 main 前要有机器产生的测试记录"，用户拍板采纳（范围收窄为本轮唯一实施项）。
+- 落地形态：`.github/workflows/gate.yml` 一个文件——`pull_request` + `push`（main）双触发，ubuntu / Python 3.13 / `TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调用 `scripts/gate.sh`（未改它）。无矩阵、无发布流水线、无打包。
+- 能力边界如实声明：PR 触发出"合并前"记录；push 触发出"合并后"记录（push 触发无法拦截已发生的合并）。权威门禁仍是生产 gate，开发/测试分离规则不变。
+- 自证（红验证，方案 A）：一次性分支 `ci-verify-red` 加故意失败测试 → PR #2 → CI 红 **1 failed, 768 passed**（唯一失败即探针；768 与生产基线一致，旁证 CI 环境与生产对齐）→ 关 PR 删分支，main 零污染。证据：Actions run 39773737114。
 
 ## 4. 明确不自动化的项及理由（汇总）
 
@@ -75,4 +78,6 @@
 ## 5. 决策记录
 
 - 2026-10-22：CI 问题经用户拍板——**不上 CI**，维持 09-29 决策；合并前门禁由 `deploy.sh` 强制前置承担。
+- 2026-10-22（晚，同日反转）：三方审计补救并收窄范围——本轮只做"每次合并 main 有机器测试记录"这一件，原"按清单逐项实现"作废；**CI 改为落地**（用户拍板采纳），P1–P3 全部转缓做（P1 收益最高，何时重启由用户定）。
+- 2026-10-22（晚）：CI 落地 + 红验证闭环（PR #2 探针红 1 failed/768 passed，关 PR 删分支 main 零污染）；09-29 "母不上 CI" 决策正式翻转，权威门禁仍为生产 gate。
 - 2026-10-22：部署目标实为 ssh 别名 `pi`（192.168.50.60），`deploy.local.md` 已修正（本地文件，不入库）。
