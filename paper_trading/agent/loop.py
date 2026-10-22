@@ -1,11 +1,17 @@
-"""AI 交易员（P2：日内一次决策，定时主动跑）。
+"""AI 交易员（固定运行时刻 + 收盘计划 + 开盘执行 + 事件复盘）。
 
 与 TradingBridge.run_daily（MA 规则）互斥：同一账户同一天只跑其一，
 由 cron 二选一。本循环自带“今日已决策”幂等闸。
+
+运行节奏由 `agent.runtime` 决定，不读 `strategy.local.yaml` 的旧队列：
+- 09:30–10:00 开盘执行：只消费当天已存计划，不临时问模型；
+- 16:30–18:30 收盘计划：行情定稿到今天才问模型，成功后按计划日幂等；
+- 其他时间 tick 静默跳过，不写无到点动作的 `ai:decide` 噪音流水。
 """
 from __future__ import annotations
 
 import json as _json
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
@@ -14,6 +20,9 @@ if TYPE_CHECKING:
     from paper_trading.cli import TradingBridge
 
 from paper_trading.agent.prompts import TRADER_SYSTEM, USER_TMPL
+from paper_trading.agent.runtime import due_action
+from paper_trading.utils.market_time import in_open_exec_window
+from paper_trading.utils.trading_calendar import is_trading_day, next_trading_day
 
 
 @dataclass
@@ -28,6 +37,18 @@ class AgentConfig:
     llm_thinking: str = "disabled"  # 格式受限决策默认关 thinking，又快又省又稳
     picks_enabled: bool = True   # AI 自主提名池外标的（候选之外也允许它选股）
     picks_max: int = 5           # 单轮最多提名多少只（1-10）
+    # AI 条件单：LLM 只出触发条件，引擎盘中每分钟执行（实时层）
+    conditions_enabled: bool = True
+    max_conditions: int = 5
+    condition_max_days: int = 3
+    # 事件驱动复盘：只有异动才叫 LLM，避免按分钟空跑
+    event_enabled: bool = True
+    event_price_move_pct: float = 3.0
+    event_drawdown_pct: float = 5.0
+    event_cooldown_min: int = 30
+    event_min_interval_min: int = 15
+    event_max_calls_per_day: int = 6
+    event_max_conditions: int = 3
 
 
 def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
@@ -37,23 +58,42 @@ def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
     thinking="disabled" 时透传厂商开关，关掉 chain-of-thought：
     格式受限的 JSON 决策不需要思考过程，开着只会烧掉输出预算
     （曾实测 3220 thinking tokens 挤掉答案导致空返回）。
+
+    但有些模型**始终思考**（GLM 5.3 系列，HTTP 400 / 1210 "不支持关闭思考"），
+    这时降到 low 档（思考预算最小）再试一次——不能因为一个透传参数把整条链路打死。
     """
+    from paper_trading.llm.provider import LLMError
     from paper_trading.llm.provider import chat as _chat
 
     cfg.timeout = timeout
     cfg.max_tokens = max_tokens
-    cfg.extra_body = {"thinking": {"type": "disabled"}} if thinking == "disabled" else {}
-    last: Exception | None = None
-    for attempt in range(retries + 1):
-        try:
-            return _chat(cfg, [{"role": "user", "content": prompt}], system=system)
-        except Exception as e:  # noqa: BLE001 - 仅超时重试，其余直接抛
-            last = e
-            if "timed out" not in str(e).lower() and "timeout" not in str(e).lower():
-                raise
-            if attempt >= retries:
-                raise
-    raise last or RuntimeError("LLM unreachable")
+
+    def _attempt(extra: dict) -> str:
+        cfg.extra_body = extra
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                return _chat(cfg, [{"role": "user", "content": prompt}],
+                             system=system)
+            except Exception as e:  # noqa: BLE001 - 仅超时重试，其余直接抛
+                last = e
+                if "timed out" not in str(e).lower() \
+                        and "timeout" not in str(e).lower():
+                    raise
+                if attempt >= retries:
+                    raise
+        raise last or RuntimeError("LLM unreachable")
+
+    extra = {"thinking": {"type": "disabled"}} if thinking == "disabled" else {}
+    try:
+        return _attempt(extra)
+    except LLMError as e:
+        if thinking == "disabled" and "1210" in str(e):
+            # 始终思考的模型：思考也占输出预算，给足（至少 4096），
+            # 否则"只剩思考、没有答案"（真机在 2048 上撞过）
+            cfg.max_tokens = max(int(max_tokens or 0), 4096)
+            return _attempt({"thinking": {"type": "enabled", "level": "low"}})
+        raise
 
 
 def today_str() -> str:
@@ -128,47 +168,6 @@ class AgentTrader:
                 continue
             out.append(str(o["timestamp"])[11:16])
         return sorted(out)
-
-    def _fired_entries_today(self, entries: list[dict]) -> set[str]:
-        """今日已消费时刻：凭各动作流水里的 slot 标记（与时钟无关）。
-
-        - trade/analyze：ai:decide 实质流水的 slot（dry 照样消费自己的那条）
-        - plan：ai:plan 成功流水的 slot；sync：sync 成功流水的 slot
-        - 无标记的手动跑/老流水不消费队列；升级前的无标记实盘用时间回退推断
-        """
-        from paper_trading.agent import schedule as _sched
-
-        today = datetime.now().date().isoformat()
-        done: set[str] = set()
-        legacy_times: list[str] = []
-        for o in self._today_ops():
-            if not o["ok"]:
-                continue
-            if str(o["timestamp"])[:10] != today:
-                continue
-            try:
-                import json as _json
-
-                res = _json.loads(o["result"] or "{}")
-                prm = _json.loads(o["params"] or "{}")
-            except Exception:
-                res, prm = {}, {}
-            act = o["action"]
-            if act == "ai:decide":
-                if "skipped" in res:
-                    continue
-                mk = str(prm.get("slot") or "")
-                if mk:
-                    done.add(mk)
-                elif prm.get("mode", "live") != "dry":
-                    legacy_times.append(str(o["timestamp"])[11:16])
-            elif act in ("ai:plan", "sync"):
-                if res.get("plan_id") is not None or act == "sync":
-                    mk = str(prm.get("slot") or "")
-                    if mk:
-                        done.add(mk)
-        times = [e["time"] for e in entries]
-        return {t for t in done if t in times} | _sched.consumed_slots(times, legacy_times)
 
     def _decided_today(self) -> bool:
         """今日是否已有实质决策（跳过类流水不算，避免早盘空跑锁死午后真跑）。"""
@@ -275,16 +274,179 @@ class AgentTrader:
             pass   # 补数据失败：决策阶段若无 K 线会被新鲜守卫拦下，安全
         return merged, picks
 
+    def _decision_symbols(self, symbols: list[str]) -> list[str]:
+        """本轮决策范围 = 传入池 ∪ 全部持仓（持仓即使退出筛选池也必须可见）。
+
+        只把持仓写进上下文是不够的：旧实现执行时用 `symbols` 做白名单，
+        池外持仓的卖出会被“不在股票池”拒绝。这里从入口统一并入，
+        后续 prompt / 价格 / 白名单才与真实账户一致。
+        """
+        held = [p.symbol for p in self.bridge.broker.get_all_positions()]
+        return list(dict.fromkeys([*(symbols or []), *held]))
+
+    def _engine_min_ticket(self) -> float:
+        """条件单/引擎共用的手续费地板（读 config，缺省 0 仅测试兜底）。"""
+        try:
+            from paper_trading.engine.config import load_engine_config
+
+            cfg = load_engine_config(getattr(self.bridge, "config_path", "config.yaml"))
+            return float(cfg.get("min_ticket_cny") or 0.0)
+        except Exception:                      # noqa: BLE001 - 配置缺失不阻断决策
+            return 0.0
+
+    def _conditions_from_raw(self, raw: Optional[str],
+                             pool: list[str]) -> tuple[list[dict], list[dict]]:
+        """从决策 JSON 里取 conditions，返回 (合法条目, 被拒原因)。
+
+        坏输出/池外/金额越界不能静默消失；原因要进 ai:decide / ai:plan 流水。
+        """
+        if not self.cfg.conditions_enabled:
+            return [], []
+        from paper_trading.engine.ai_conditions import parse_conditions_verbose
+
+        try:
+            return parse_conditions_verbose(
+                raw, pool,
+                max_conds=int(self.cfg.max_conditions),
+                max_value=float(self.cfg.max_order_value),
+                min_ticket=self._engine_min_ticket(),
+                max_days=int(self.cfg.condition_max_days))
+        except Exception as e:                # noqa: BLE001 - 条件单失败不阻断主决策
+            return [], [{"why": f"解析异常：{type(e).__name__}: {e}"}]
+
+    def _arm_conditions(self, conditions: list, *, actions: Optional[list] = None,
+                        dry_run: bool = False) -> dict:
+        """校验并挂条件单；与直接动作/已有条件重复的条目跳过。
+
+        这里不负责成交。真正的盘中触发由 ConditionRunner 每分钟完成，
+        与规则引擎共用风控、费用和日内预算。
+        """
+        empty = {"created": [], "rejected": [], "skipped": []}
+        if dry_run or not conditions:
+            return empty
+        try:
+            from paper_trading.engine.conditional import ConditionalOrders
+
+            orders = ConditionalOrders(
+                getattr(self.bridge, "account_db_path", "paper_account.db"))
+            direct = {
+                (str(a.get("symbol") or ""), str(a.get("action") or "").lower())
+                for a in (actions or []) if isinstance(a, dict)
+            }
+            # 同一标的同方向只要已有 pending（不论触发价/人工或 AI），就不再叠一条：
+            # 两条都触发会变成双倍下单，宁可少挂也不重复。
+            seen = {
+                (str(d.get("symbol") or ""), str(d.get("side") or ""))
+                for d in orders.pending()
+            }
+            filtered: list[dict] = []
+            skipped: list[dict] = []
+            for c in conditions:
+                if not isinstance(c, dict):
+                    continue
+                sym = str(c.get("symbol") or "")
+                side = str(c.get("side") or "")
+                if (sym, side) in direct:
+                    skipped.append({"symbol": sym, "side": side,
+                                    "why": "与直接动作重复，避免双重下单"})
+                    continue
+                if (sym, side) in seen:
+                    skipped.append({"symbol": sym, "side": side,
+                                    "why": "同方向条件单已存在，避免双重下单"})
+                    continue
+                seen.add((sym, side))
+                filtered.append(c)
+            res = orders.create_many(filtered, min_ticket=self._engine_min_ticket())
+            res["skipped"] = skipped
+            return res
+        except Exception as e:                # noqa: BLE001 - 条件单故障不能回滚已成交动作
+            return {**empty, "error": f"{type(e).__name__}: {e}"}
+
+    def review_conditions(self, symbols: list[str], *, event_txt: str = "",
+                          dry_run: bool = False,
+                          max_conds: Optional[int] = None) -> dict:
+        """事件驱动复盘：只让 AI 产出/更新条件单，不直接下单。
+
+        与每日决策共用同一套 prompt 校验和条件单仓库；盘中触发仍由引擎完成。
+        这样异动时 AI 可以介入，但不会变成逐笔 LLM 调用。
+        """
+        from paper_trading.data import realtime as rt
+        from paper_trading.engine.ai_conditions import (build_prompt,
+                                                         parse_conditions_verbose)
+
+        b = self.bridge
+        pool = self._decision_symbols(symbols)[:20]
+        if not pool:
+            return {"ok": False, "error": "无股票池/持仓，无法复盘"}
+        try:
+            quotes = rt.get_quotes(pool, force=True) or {}
+        except Exception:                      # noqa: BLE001 - 无实时价时仍可用收盘上下文
+            quotes = {}
+        ctx = b.llm_context(max_ops=3, max_nav=2, closes_n=3, symbols=pool)
+        min_ticket = self._engine_min_ticket()
+        max_value = float(self.cfg.max_order_value)
+        sys_p, user_p = build_prompt(
+            pool, quotes, ctx.get("positions", []), self._scheme_txt(),
+            str(ctx.get("account", {}).get("data_asof") or ""),
+            max_conds=int(max_conds or self.cfg.event_max_conditions),
+            max_days=int(self.cfg.condition_max_days), event_txt=event_txt,
+            min_ticket=min_ticket, max_value=max_value)
+        from paper_trading.llm import LLMError
+
+        try:
+            raw = _ask_llm(b._llm_config(), user_p, sys_p,
+                           self.cfg.llm_timeout, self.cfg.llm_retries,
+                           self.cfg.llm_max_tokens, self.cfg.llm_thinking)
+        except LLMError as e:
+            b.broker.log_operation("ai:review", {"pool": pool, "event": event_txt[:300]},
+                                   False, {"error": str(e)}, None, None)
+            return {"ok": False, "error": str(e), "pool": pool}
+        conds, parse_rejected = parse_conditions_verbose(
+            raw, pool, max_conds=int(max_conds or self.cfg.event_max_conditions),
+            max_value=max_value, min_ticket=min_ticket,
+            max_days=int(self.cfg.condition_max_days))
+        res = self._arm_conditions(conds, dry_run=dry_run)
+        b.broker.log_operation(
+            "ai:review", {"pool": pool, "event": event_txt[:300],
+                          "dry_run": bool(dry_run)}, True,
+            {"parsed": len(conds), "parse_rejected": parse_rejected,
+             **res, "raw": str(raw or "")[:800]}, None, None)
+        return {"ok": True, "pool": pool, "parsed": len(conds),
+                "parse_rejected": parse_rejected, **res,
+                "raw": str(raw or "")[:600]}
+
     def _plan(self, symbols: list[str], candidates: Optional[list] = None,
               pool_source: str = "config",
-              slot: Optional[str] = None) -> dict:
-        """休盘做计划：基于最新已收盘定稿数据问 LLM，存待执行，不碰账本。"""
+              slot: Optional[str] = None, *,
+              require_today: bool = False, force: bool = False,
+              now_dt: Optional[datetime] = None) -> dict:
+        """休盘做计划：基于最新已收盘定稿数据问 LLM，存待执行，不碰账本。
+
+        `require_today=True` 是运行时专用：行情未更新到今天就不问模型，
+        下个 tick 重试；`force=True` 允许人工覆盖已有计划/定稿检查。
+        """
         from paper_trading.utils import get_logger
 
         logger = get_logger(__name__)
         b = self.bridge
-        now = datetime.now().isoformat()
+        base_now = now_dt or datetime.now()
+        now = base_now.isoformat()
 
+        try:
+            _holidays = b.broker._holidays()
+        except Exception:                      # noqa: BLE001 - 日历不可用按周末跳过
+            _holidays = set()
+        plan_date = next_trading_day(base_now, _holidays).isoformat()
+        if not force:
+            existing = b.broker.get_pending_plan(plan_date)
+            if existing:
+                logger.info(f"AI plan already exists for {plan_date}, skip")
+                return {"ok": True, "skipped": "plan-exists",
+                        "plan_id": existing.get("id"), "plan_date": plan_date,
+                        "timestamp": now, "symbols": symbols}
+
+        # 持仓即使不在本轮筛选池，也必须在 AI 决策范围内（否则无法卖）。
+        symbols = self._decision_symbols(symbols)
         b.sync_data(symbols)
         symbols, picks = self._enrich(symbols, candidates)
         all_bars: dict[str, list] = {}
@@ -295,6 +457,9 @@ class AgentTrader:
         if not all_bars:
             return {"ok": False, "error": "无历史数据，无法做计划", "timestamp": now}
         asof = max(bars[-1].timestamp.date().isoformat() for bars in all_bars.values())
+        if require_today and not force and asof != base_now.date().isoformat():
+            return {"ok": True, "skipped": "no-fresh-data", "asof": asof,
+                    "plan_date": plan_date, "timestamp": now, "symbols": symbols}
 
         ref = b.strategy.generate_signals(all_bars)
         ref_txt = "无" if not ref else "、".join(
@@ -312,7 +477,10 @@ class AgentTrader:
             context=_json.dumps(ctx, ensure_ascii=False))
         system = (TRADER_SYSTEM.format(
             max_order_value=int(self.cfg.max_order_value),
-            max_orders=self.cfg.max_orders_per_run)
+            max_orders=self.cfg.max_orders_per_run,
+            max_conditions=int(self.cfg.max_conditions),
+            condition_max_days=int(self.cfg.condition_max_days),
+            min_ticket=int(self._engine_min_ticket()))
             + f"\n注意：当前为休盘，最新定稿数据截至 {asof}。"
               "你的决策将在下一个开盘执行。")
         from paper_trading.llm import LLMError
@@ -332,84 +500,92 @@ class AgentTrader:
             return {"ok": False, "error": "LLM 输出非 JSON 计划，已作废",
                     "timestamp": now, "symbols": symbols}
         summary = str((plan or {}).get("summary", ""))[:200]
-        pid = b.broker.save_plan(today_str(), symbols,
+        conditions, conditions_rejected = self._conditions_from_raw(raw, symbols)
+        # 计划基准价：买/卖动作一律回填定稿收盘价（prompt 约定 null=最新收盘）。
+        # 不采信 LLM 自报价格；带 price_source 的基准价才允许在执行缺价时兜底。
+        for a in actions:
+            if not isinstance(a, dict):
+                continue
+            if str(a.get("action", "")).lower() not in ("buy", "sell"):
+                continue
+            bars = all_bars.get(str(a.get("symbol", ""))) or []
+            if not bars:
+                continue
+            try:
+                a["price"] = round(float(bars[-1].close), 2)
+                a["price_source"] = "last_close"
+            except (TypeError, ValueError):
+                continue
+        # 计划是给“下一个交易日开盘”用的；plan_date 已在问模型前算好。
+        pid = b.broker.save_plan(plan_date, symbols,
                                  {"actions": actions, "summary": summary, "asof": asof,
+                                  "conditions": conditions,
+                                  "conditions_rejected": conditions_rejected,
                                   "pool_source": pool_source,
                                   "picks": [{k: p.get(k) for k in ("symbol", "name", "reason")}
                                             for p in picks]})
         b.broker.log_operation("ai:plan", {"symbols": symbols, "asof": asof,
+                                           "plan_date": plan_date,
                                            "pool_source": pool_source,
                                            "n_picks": len(picks),
+                                           "n_conditions": len(conditions),
+                                           "n_conditions_rejected": len(conditions_rejected),
                                            **({"slot": slot} if slot else {})}, True,
                                {"plan_id": pid, "summary": summary,
                                 "n_actions": len(actions),
+                                "n_conditions": len(conditions),
+                                "n_conditions_rejected": len(conditions_rejected),
+                                "conditions_rejected": conditions_rejected,
                                 "picks": [{"symbol": p["symbol"],
                                            "name": p.get("name", "")} for p in picks],
                                 "raw": str(raw or "")[:1500]}, None, None)
-        logger.info(f"AI plan saved id={pid} asof={asof}")
-        return {"ok": True, "mode": "plan", "plan_id": pid, "asof": asof,
-                "timestamp": now, "symbols": symbols, "pool_source": pool_source,
-                "actions": actions, "summary": summary}
+        logger.info(f"AI plan saved id={pid} for={plan_date} asof={asof}")
+        return {"ok": True, "mode": "plan", "plan_id": pid, "plan_date": plan_date,
+                "asof": asof, "timestamp": now, "symbols": symbols,
+                "pool_source": pool_source, "actions": actions,
+                "conditions": conditions,
+                "conditions_rejected": conditions_rejected,
+                "summary": summary}
 
     def tick(self, symbols: list[str], candidates: Optional[list] = None,
              pool_source: str = "config", force: bool = False,
-             sched_root=None) -> dict:
-        """队列 tick（供 cron 高频调用）：消费最早已到未跑的条目并按动作执行。
+             sched_root=None, now: Optional[datetime] = None) -> dict:
+        """权威运行时 tick（cron 调这个，不再读 strategy.local.yaml 队列）。
 
-        - sync：只同步行情+名称，记 sync 流水（含 slot 标记）
-        - analyze：完整决策链试运行，不下单（ai:decide mode=dry，含 slot 标记）
-        - plan：休盘做计划存着（ai:plan 成功流水含 slot 标记）
-        - trade：实盘决策（走 run，含 slot 标记）
-        无事可做记 not-in-schedule 跳过。手动跑（无 slot 标记）不消费队列。
+        - 09:30–10:00：有当天计划就执行；没有就空跑，不临时问模型。
+        - 16:30–18:30：行情已定稿到今天才做下一交易日计划；未定稿下个 tick 重试。
+        - 其他时间/休市：静默跳过，不写 `ai:decide` 噪音流水。
+        - `force` 仅供人工排障：可越过窗口，但仍拒绝休市日。
         """
-        from paper_trading.agent import schedule as _sched
         from paper_trading.utils import get_logger
 
         logger = get_logger(__name__)
         b = self.bridge
-        now = datetime.now().isoformat()
-        root = sched_root if sched_root is not None else "."
-        sc = _sched.load_schedule(root)
-        entries = sc["entries"]
-        fired = self._fired_entries_today(entries)
-        entry = None
-        if force:
-            due = _sched.due_entries(entries)
-            entry = due[0] if due else None
-        else:
-            _ok, entry, _reason = _sched.check(entries, fired)
-        if entry is None:
-            logger.warning("Schedule queue empty, tick skips")
-            b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": "live"},
-                                   True, {"skipped": "not-in-schedule",
-                                          "queue": [(e["time"], e["action"])
-                                                    for e in entries]}, None, None)
-            return {"ok": True, "skipped": "not-in-schedule",
-                    "queue": entries, "timestamp": now, "symbols": symbols}
-        tm, act = entry["time"], entry["action"]
-        logger.info(f"Schedule tick fires {tm}={act}")
-        if act == "sync":
-            res = b.sync_data(symbols)
-            b.broker.log_operation("sync", {"symbols": symbols, "slot": tm},
-                                   res.get("ok", False),
-                                   {"updated": res.get("updated")}, None, None)
-            res["slot"] = tm
+        t = now or datetime.now()
+        today = t.date().isoformat()
+        if not is_trading_day(t):
+            return {"ok": True, "skipped": "not-trading-day",
+                    "timestamp": t.isoformat(), "symbols": symbols}
+        pending = b.broker.get_pending_plan(today)
+        action = due_action(t, pending_plan=bool(pending), force=force)
+        if action == "execute_plan":
+            logger.info(f"Runtime open execution: plan {pending['id']}")
+            res = self.run(symbols, candidates=candidates,
+                           pool_source=pool_source, execute_only=True)
+            res["runtime_action"] = "open_exec"
             return res
-        if act == "plan":
+        if action == "plan":
+            logger.info("Runtime after-close planning window")
             res = self._plan(symbols, candidates=candidates,
-                             pool_source=pool_source, slot=tm)
-            res["slot"] = tm
+                             pool_source=pool_source, require_today=True,
+                             force=force, now_dt=t)
+            res["runtime_action"] = "plan"
             return res
-        if act == "analyze":
-            res = self.run(symbols, dry_run=True, candidates=candidates,
-                           pool_source=pool_source, ignore_schedule=True,
-                           sched_root=root, slot=tm)
-            res["slot"] = tm
-            return res
-        res = self.run(symbols, candidates=candidates, pool_source=pool_source,
-                       ignore_schedule=True, sched_root=root, slot=tm)
-        res["slot"] = tm
-        return res
+        if (force or in_open_exec_window(t)) and not pending:
+            return {"ok": True, "skipped": "no-pending-plan",
+                    "timestamp": t.isoformat(), "symbols": symbols}
+        return {"ok": True, "skipped": "outside-runtime-window",
+                "timestamp": t.isoformat(), "symbols": symbols}
 
     def run(self, symbols: list[str], dry_run: bool = False,
             force: bool = False, plan_only: bool = False,
@@ -417,11 +593,13 @@ class AgentTrader:
             pool_source: str = "config",
             ignore_schedule: bool = False,
             sched_root=None,
-            slot: Optional[str] = None) -> dict:
-        """三态：plan_only 只做计划存着；默认先执行今日待执行计划，无则现决现执。
+            slot: Optional[str] = None,
+            execute_only: bool = False) -> dict:
+        """三态：plan_only 只做计划；execute_only 只执行待执行计划；默认现决现执。
 
-        直接调用 = 跑一次 trade，按 trade 队列过闸；tick() 按动作分发，
-        传入 slot 表示已过闸。dry-run 与 plan_only 不受定时闸限制。
+        旧 `ignore_schedule/sched_root` 参数保留只为 CLI 兼容，已不参与任何闸门。
+        手动 run 不再被 strategy.local.yaml 的旧队列拦住；`execute_only` 给开盘
+        tick 使用，没有当天计划时静默返回，不会临时问模型。
         """
         from paper_trading.utils import get_logger
 
@@ -429,43 +607,31 @@ class AgentTrader:
         b = self.bridge
         now = datetime.now().isoformat()
         mode = "dry" if dry_run else "live"
+        today_iso = datetime.now().date().isoformat()
 
         if plan_only:
-            return self._plan(symbols, candidates=candidates, pool_source=pool_source)
+            return self._plan(symbols, candidates=candidates,
+                              pool_source=pool_source, force=force)
 
-        # 0. 定时闸（直接 run = 跑一次 trade：只看 trade 条目队列）。
-        #    单 trade 条目沿用历史 already-decided 语义。
-        #    放行后记住本次消费时刻，落子时写入流水（消费凭标记，不凭时间推断）。
-        #    tick() 传入 slot 表示已过闸，不重复判定。
+        # 0. 待执行计划优先；手动 run 也可执行（不再看旧队列）。
+        pending = None
+        if not dry_run:
+            pending = b.broker.get_executable_plan(today_iso)
+        if execute_only and not pending:
+            return {"ok": True, "skipped": "no-pending-plan",
+                    "timestamp": now, "symbols": symbols}
+        # 现决现执的每日幂等：有计划可执行时不拦（计划本身是当天的决定）。
+        if (not execute_only and not dry_run and not force and not pending
+                and self._live_runs_today()):
+            logger.warning("AI already decided today, skip (idempotency)")
+            b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
+                                   True, {"skipped": "already-decided"}, None, None)
+            return {"ok": True, "skipped": "already-decided", "timestamp": now,
+                    "symbols": symbols}
         _slot_s: Optional[str] = slot
-        if _slot_s is None and not dry_run and not force and not plan_only:
-            from paper_trading.agent import schedule as _sched
 
-            _sc = _sched.load_schedule(sched_root if sched_root is not None else ".")
-            _trades = [e for e in _sc["entries"] if e["action"] == "trade"]
-            _live = self._live_runs_today()
-            _fired = self._fired_entries_today(_sc["entries"])
-            if _live and len(_trades) <= 1:
-                logger.warning("AI already decided today, skip (idempotency)")
-                b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
-                                       True, {"skipped": "already-decided"}, None, None)
-                return {"ok": True, "skipped": "already-decided", "timestamp": now,
-                        "symbols": symbols}
-            if not ignore_schedule:
-                _ok_s, _entry_s, _reason_s = _sched.check(_trades, _fired)
-                if not _ok_s:
-                    logger.warning(f"Schedule gate ({_reason_s}), AI skips")
-                    b.broker.log_operation(
-                        "ai:decide", {"symbols": symbols, "mode": mode},
-                        True, {"skipped": _reason_s,
-                               "queue": _sc["entries"]},
-                        None, None)
-                    return {"ok": True, "skipped": _reason_s,
-                            "queue": _sc["entries"],
-                            "timestamp": now, "symbols": symbols}
-                _slot_s = _entry_s["time"]
-
-        # 1. 同步行情（与 run 同一口径）
+        # 1. 同步行情（与 run 同一口径）；持仓并入决策范围，池外持仓才卖得掉。
+        symbols = self._decision_symbols(symbols)
         b.sync_data(symbols)
 
         # 2. 取数（执行计划不需要新鲜 K 线：计划本就是基于定稿数据做的）
@@ -493,21 +659,24 @@ class AgentTrader:
                                    False, {"skipped": "drawdown-halt",
                                            "drawdown": round(dd, 4)}, None, None)
             return {"ok": False, "error": f"回撤熔断 {dd:.2%}", "timestamp": now}
-        if nav.pnl_pct <= -self.cfg.daily_loss_halt_pct:
-            logger.error(f"Daily loss halt {nav.pnl_pct:.2%}, AI skips")
+        dl_halt, dl = b.risk.check_daily_loss(nav.total_value, today_str(),
+                                              halt_pct=self.cfg.daily_loss_halt_pct)
+        if dl_halt:
+            logger.error(f"Daily loss halt {dl:.2%}, AI skips")
             b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
                                    False, {"skipped": "daily-loss-halt",
-                                           "pnl_pct": round(nav.pnl_pct, 4)},
+                                           "daily_loss": round(dl, 4)},
                                    None, None)
-            return {"ok": False, "error": f"日亏熔断 {nav.pnl_pct:.2%}", "timestamp": now}
+            return {"ok": False, "error": f"日亏熔断 {dl:.2%}", "timestamp": now}
 
-        # 4.5 待执行计划优先（休盘计划开盘执行；dry-run 不消费计划；
-        #     计划基于定稿数据，不受新鲜守卫限制）
-        if not dry_run:
-            pending = b.broker.get_pending_plan(today_str())
-            if pending:
-                logger.info(f"Executing pending AI plan {pending['id']}")
-                return self._execute_plan(pending, all_bars, latest, slot=_slot_s)
+        # 4.5 待执行计划优先（计划基于定稿数据，不受新鲜守卫限制）。
+        #     pending 在第 0 步已经取好；dry-run 不消费计划。
+        if not dry_run and pending:
+            logger.info(f"Executing pending AI plan {pending['id']}")
+            return self._execute_plan(pending, all_bars, latest, slot=_slot_s)
+        if execute_only:
+            return {"ok": True, "skipped": "no-pending-plan",
+                    "timestamp": now, "symbols": symbols}
 
         # 4.6 无新鲜数据守卫（只拦现决现执：节假日/源未更新时不问 LLM）
         today = datetime.now().date()
@@ -529,7 +698,7 @@ class AgentTrader:
         #     放在新鲜守卫之后——没新行情就不必白花一次 LLM 与补数。
         #     有待执行计划时不提名（按计划原样执行，不临时扩池）。
         picks: list[dict] = []
-        if not plan_only and not b.broker.get_pending_plan(today_str()):
+        if not plan_only:
             symbols, picks = self._enrich(symbols, candidates)
             if picks:
                 for sym in (p["symbol"] for p in picks):
@@ -555,7 +724,10 @@ class AgentTrader:
             context=_json.dumps(ctx, ensure_ascii=False))
         system = TRADER_SYSTEM.format(
             max_order_value=int(self.cfg.max_order_value),
-            max_orders=self.cfg.max_orders_per_run)
+            max_orders=self.cfg.max_orders_per_run,
+            max_conditions=int(self.cfg.max_conditions),
+            condition_max_days=int(self.cfg.condition_max_days),
+            min_ticket=int(self._engine_min_ticket()))
         if picks:
             # AI 提名的股票已由程序校验并补齐数据，可直接决策（仍在风控钳制内）
             system += ("\n本轮额外纳入以下 AI 自主提名标的（程序已校验为合法 A 股并补齐数据）："
@@ -580,6 +752,7 @@ class AgentTrader:
         if not isinstance(actions, list):
             actions = []
         summary = str((plan or {}).get("summary", ""))[:200] if plan else ""
+        conditions, conditions_rejected = self._conditions_from_raw(raw, symbols)
 
         # 7. 逐条钳制执行（现决与计划执行共用实现）
         return self._execute_actions(
@@ -589,11 +762,12 @@ class AgentTrader:
             dry_run=dry_run, mode=mode, now=now, from_plan=False,
             pool_source=pool_source, slot=_slot_s,
             picks=[{"symbol": p["symbol"], "name": p.get("name", "")}
-                   for p in picks])
+                   for p in picks], conditions=conditions,
+            conditions_rejected=conditions_rejected)
 
     def _execute_plan(self, pending: dict, all_bars: dict,
                       latest: dict, slot: Optional[str] = None) -> dict:
-        """执行今日待执行计划（开盘执行休盘计划；价格沿用计划基准防盘中污染）。"""
+        """执行今日待执行计划（休盘计划开盘执行；计划标的自动补数，缺价 fail-closed）。"""
         from paper_trading.utils import get_logger
 
         logger = get_logger(__name__)
@@ -602,10 +776,29 @@ class AgentTrader:
         actions = plan.get("actions", [])
         if not isinstance(actions, list):
             actions = []
+        conditions = plan.get("conditions", [])
+        if not isinstance(conditions, list):
+            conditions = []
+        conditions_rejected = plan.get("conditions_rejected", [])
+        if not isinstance(conditions_rejected, list):
+            conditions_rejected = []
         summary = str(plan.get("summary", ""))[:200]
         syms = [s for s in str(pending.get("symbols", "")).split(",") if s]
-        cash = b.broker.get_cash()
+        # 计划可能包含本轮运行股票池之外的新增标的（AI 提名等）。
+        # 执行上下文必须覆盖计划自身标的，否则 latest 缺价会按 0 参与风控，
+        # 单笔金额上限被绕过，最终只得到一句误导性的“无价格”拒单。
+        all_bars = dict(all_bars)
+        latest = dict(latest)
         positions = {p.symbol: p for p in b.broker.get_all_positions()}
+        for sym in set(syms) | set(positions):
+            bars = all_bars.get(sym)
+            if not bars:
+                bars = b.data_db.get_bars(sym, limit=30)
+                if bars:
+                    all_bars[sym] = bars
+            if not latest.get(sym) and bars:
+                latest[sym] = float(bars[-1].close)
+        cash = b.broker.get_cash()
         nav = b.broker.get_nav(latest)
         res = self._execute_actions(
             actions=actions, summary=summary, symbols=syms,
@@ -613,7 +806,8 @@ class AgentTrader:
             positions=positions, nav_total=nav.total_value,
             dry_run=False, mode="live", now=datetime.now().isoformat(),
             from_plan=True, pool_source=str(plan.get("pool_source", "config")),
-            slot=slot)
+            slot=slot, conditions=conditions,
+            conditions_rejected=conditions_rejected)
         b.broker.mark_plan_done(int(pending["id"]))
         logger.info(f"AI plan {pending['id']} executed")
         return res
@@ -624,7 +818,9 @@ class AgentTrader:
                          mode: str, now: str, from_plan: bool,
                          pool_source: str = "config",
                          slot: Optional[str] = None,
-                         picks: Optional[list] = None) -> dict:
+                         picks: Optional[list] = None,
+                         conditions: Optional[list] = None,
+                         conditions_rejected: Optional[list] = None) -> dict:
         """逐条钳制执行（dry_run 不碰账本；from_plan 仅标记来源）。"""
         from paper_trading.models import Order, OrderType, Signal, SignalType
         from paper_trading.utils import get_logger
@@ -632,7 +828,8 @@ class AgentTrader:
         logger = get_logger(__name__)
         b = self.bridge
         latest = latest_prices
-        allow = set(symbols)
+        allow_buy = set(symbols)
+        allow_sell = set(positions)
         decided: list[dict] = []
         n_orders = 0
         for a in actions[: self.cfg.max_orders_per_run + 5]:  # 多出的只记拒绝
@@ -653,11 +850,29 @@ class AgentTrader:
                 vol = int(vraw or 0)
             except (TypeError, ValueError):
                 vol = 0
-            px = latest.get(sym, 0.0)
-            if sym not in allow:
+            px = 0.0
+            try:
+                px = float(latest.get(sym) or 0.0)
+            except (TypeError, ValueError):
+                px = 0.0
+            # 计划价只允许作为“定稿收盘价”来源的缺价兜底；
+            # 来源不明的价格不采信，防止低价绕过金额上限。
+            if (not math.isfinite(px) or px <= 0) and from_plan \
+                    and a.get("price_source") == "last_close":
+                try:
+                    px = float(a.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    px = 0.0
+            if act not in ("buy", "sell"):
+                rec["status"] = "拒绝：未知动作"
+            elif act == "buy" and sym not in allow_buy:
                 rec["status"] = "拒绝：不在股票池"
+            elif act == "sell" and sym not in allow_sell:
+                rec["status"] = "拒绝：无可卖持仓"
             elif vol <= 0 or vol % 100 != 0:
                 rec["status"] = "拒绝：数量须为100倍数"
+            elif not math.isfinite(px) or px <= 0:
+                rec["status"] = "拒绝：无有效价格"
             elif vol * px > self.cfg.max_order_value:
                 rec["status"] = f"拒绝：超单笔上限{int(self.cfg.max_order_value)}元"
             elif n_orders >= self.cfg.max_orders_per_run:
@@ -666,36 +881,37 @@ class AgentTrader:
                 sig = Signal(symbol=sym,
                              direction=(SignalType.BUY if act == "buy" else SignalType.SELL),
                              volume=vol, price=px, reason="ai:" + reason)
-                if act not in ("buy", "sell"):
-                    rec["status"] = "拒绝：未知动作"
+                ok, why = b.risk.check_signal(sig, px, cash, positions,
+                                             nav_total, prices=latest)
+                if not ok:
+                    rec["status"] = f"风控拒绝：{why}"
+                elif dry_run:
+                    rec["status"] = "试运行通过（未下单）"
+                    n_orders += 1
                 else:
-                    ok, why = b.risk.check_signal(sig, px, cash, positions,
-                                                 nav_total, prices=latest)
-                    if not ok:
-                        rec["status"] = f"风控拒绝：{why}"
-                    elif dry_run:
-                        rec["status"] = "试运行通过（未下单）"
-                        n_orders += 1
-                    else:
-                        bars = all_bars.get(sym, [])
-                        prev = bars[-2].close if len(bars) >= 2 else None
-                        order = Order(symbol=sym,
-                                      direction=sig.direction.value, volume=vol,
-                                      order_type=OrderType.LIMIT, limit_price=px,
-                                      prev_close=prev,
-                                      ref_high=bars[-1].high if bars else None,
-                                      ref_low=bars[-1].low if bars else None)
-                        res = b.broker.submit_order(order)
-                        rec["status"] = ("已成交 @%.2f" % res.filled_price
-                                         if res.status.value == "filled"
-                                         else f"撮合拒绝：{res.status.value}")
-                        rec["filled_price"] = res.filled_price
-                        n_orders += 1
-                        # 刷新资金/持仓快照，供下一单校验
-                        cash = b.broker.get_cash()
-                        positions = {p.symbol: p for p in b.broker.get_all_positions()}
+                    bars = all_bars.get(sym, [])
+                    prev = bars[-2].close if len(bars) >= 2 else None
+                    order = Order(symbol=sym,
+                                  direction=sig.direction.value, volume=vol,
+                                  order_type=OrderType.LIMIT, limit_price=px,
+                                  prev_close=prev,
+                                  ref_high=bars[-1].high if bars else None,
+                                  ref_low=bars[-1].low if bars else None)
+                    res = b.broker.submit_order(order)
+                    rec["status"] = ("已成交 @%.2f" % res.filled_price
+                                     if res.status.value == "filled"
+                                     else f"撮合拒绝：{res.status.value}")
+                    rec["filled_price"] = res.filled_price
+                    n_orders += 1
+                    # 刷新资金/持仓快照，供下一单校验
+                    cash = b.broker.get_cash()
+                    positions = {p.symbol: p for p in b.broker.get_all_positions()}
             decided.append(rec)
 
+        # AI 条件单：现在不成交，交给引擎盘中每分钟盯价；与直接动作重复的跳过。
+        cond_res = self._arm_conditions(conditions or [], actions=actions,
+                                        dry_run=dry_run)
+        cond_res["parse_rejected"] = conditions_rejected or []
         if not dry_run:
             b.portfolio.record_nav(latest)
         nav2 = b.broker.get_nav(latest)
@@ -703,12 +919,14 @@ class AgentTrader:
             "ai:decide", {"symbols": symbols, "mode": mode, "from_plan": from_plan,
                           "pool_source": pool_source, "summary": summary,
                           "n_picks": len(picks or []),
+                          "n_conditions": len(conditions or []),
+                          "n_conditions_rejected": len(conditions_rejected or []),
                           **({"slot": slot} if slot else {})}, True,
-            {"decisions": decided, "picks": picks or []},
+            {"decisions": decided, "picks": picks or [], "conditions": cond_res},
             nav2.cash, nav2.total_value)
         logger.info(f"AI decide done: {len(decided)} actions, mode={mode}, from_plan={from_plan}")
         return {"ok": True, "timestamp": now, "symbols": symbols, "mode": mode,
                 "from_plan": from_plan, "pool_source": pool_source,
                 "summary": summary, "decisions": decided,
-                "picks": picks or [],
+                "picks": picks or [], "conditions": cond_res,
                 "nav": nav2.__dict__}

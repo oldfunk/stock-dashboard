@@ -59,6 +59,37 @@ class DataDBManager:
                     added_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS minute_bars (
+                    symbol TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    open REAL NOT NULL,
+                    high REAL NOT NULL,
+                    low REAL NOT NULL,
+                    close REAL NOT NULL,
+                    volume REAL DEFAULT 0,
+                    amount REAL DEFAULT 0,
+                    PRIMARY KEY (symbol, ts)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_minute_symbol_ts
+                ON minute_bars(symbol, ts)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS quote_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    price REAL,
+                    prev_close REAL,
+                    volume REAL DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_quote_symbol_ts
+                ON quote_log(symbol, ts)
+            """)
 
     def upsert_bars(self, bars: list[Bar]) -> int:
         """批量插入或更新K线数据。"""
@@ -166,6 +197,64 @@ class DataDBManager:
         with self._connect() as conn:
             rows = conn.execute("SELECT symbol FROM stock_pool").fetchall()
         return [r["symbol"] for r in rows]
+
+    # ---------- 分钟线与实时快照（盘中量化用） ----------
+
+    def upsert_minute_bars(self, symbol: str, rows: list[dict]) -> int:
+        """写入 1 分钟 K 线（rows: [{ts, open, high, low, close, volume, amount}]）。"""
+        if not rows:
+            return 0
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT INTO minute_bars
+                   (symbol, ts, open, high, low, close, volume, amount)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol, ts) DO UPDATE SET
+                     open=excluded.open, high=excluded.high, low=excluded.low,
+                     close=excluded.close, volume=excluded.volume,
+                     amount=excluded.amount""",
+                [(symbol, r["ts"], float(r["open"]), float(r["high"]),
+                  float(r["low"]), float(r["close"]),
+                  float(r.get("volume") or 0), float(r.get("amount") or 0))
+                 for r in rows])
+        return len(rows)
+
+    def get_minute_bars(self, symbol: str, limit: int = 240) -> list[dict]:
+        """最近 N 根分钟线（按时间升序返回）。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM (SELECT ts, open, high, low, close, volume, amount"
+                " FROM minute_bars WHERE symbol = ? ORDER BY ts DESC LIMIT ?)"
+                " ORDER BY ts ASC", (symbol, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+    def minute_count(self, symbol: str) -> int:
+        with self._connect() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM minute_bars WHERE symbol = ?",
+                (symbol,)).fetchone()[0])
+
+    def log_quote(self, ts: str, quotes: dict) -> int:
+        """落盘实时快照（盘中盯市/复盘用）。ts 为 ISO 字符串。"""
+        if not quotes:
+            return 0
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT INTO quote_log (ts, symbol, price, prev_close, volume)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [(ts, sym, float(q.get("price") or 0), float(q.get("prev_close") or 0),
+                  float(q.get("volume") or 0))
+                 for sym, q in quotes.items() if isinstance(q, dict)])
+        return len(quotes)
+
+    def get_quote_history(self, symbol: str, day: str,
+                          limit: int = 5000) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT ts, price, prev_close, volume FROM quote_log"
+                " WHERE symbol = ? AND substr(ts, 1, 10) = ? ORDER BY ts",
+                (symbol, day)).fetchall()
+        return [dict(r) for r in rows]
 
     def get_data_asof(self) -> Optional[str]:
         """全库最新 K 线日期（YYYY-MM-DD），无数据返回 None。"""

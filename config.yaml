@@ -21,6 +21,9 @@ trading:
   slippage_fixed: 0.01
   slippage_pct: 0.001
   use_slippage_pct: false
+  # 交易时段固定为 09:30-11:30 / 13:00-15:00（代码写死，不在这里配置）。
+  # 节假日优先用 `calendar sync` 同步的本地缓存（var/trading_calendar.json）；
+  # 这里只作 T+1 解冻/计划目标日的手填兜底；行情另有“必须当天”的报价过滤。
   holidays: []
 
 strategy:
@@ -35,6 +38,7 @@ risk:
   max_position_pct: 0.3
   max_total_position_pct: 0.95
   max_drawdown_pct: 0.20
+  daily_loss_halt_pct: 0.05   # 账户级：当日亏损（自日初基线）达到 5% 熔断
 
 agent:
   enabled: true
@@ -47,3 +51,43 @@ agent:
   llm_thinking: disabled
   picks_enabled: true     # AI 自主提名：候选之外允许它点名全市场任意 A 股
   picks_max: 5            # 单轮最多提名几只（1-10）
+  # AI 条件单（实时执行层）：LLM 出触发条件，引擎每分钟盯盘执行
+  conditions_enabled: true
+  max_conditions: 5
+  condition_max_days: 3
+  # 事件驱动复盘：异动才调 LLM（低频轮询发现事件，不是逐笔调用）
+  event_enabled: true
+  event_price_move_pct: 3.0   # 日内涨跌幅绝对值
+  event_drawdown_pct: 5.0     # 持仓自峰值回撤
+  event_cooldown_min: 30      # 同标的复盘冷却
+  event_min_interval_min: 15  # 任意两次复盘最小间隔
+  event_max_calls_per_day: 6  # 每日模型调用预算
+  event_max_conditions: 3     # 单次复盘最多挂几条条件单
+
+# 规则引擎（盘中量化执行层；与 LLM 分工：引擎负责择时执行，LLM 负责选股与策略）
+engine:
+  enabled: false          # 总开关：false 时守护进程拒绝启动（显式开启才盘中自动交易）
+  interval_sec: 60        # 盘中轮询间隔（秒）
+  universe: auto          # auto=规则未点名标的时取本地股票池；list=必须逐条点名
+  universe_max: 50        # auto 模式最多订阅多少只
+  min_ticket_cny: 5000    # 低于此金额不下单（手续费地板：2千以下单子费率>50bp）
+  max_orders_per_day: 6   # 日内报单笔数上限
+  max_turnover_per_day: 60000   # 日内成交金额上限（元）
+  per_symbol_cooldown_sec: 900  # 同标的两次报单最小间隔
+  # 规则集（9 种类型：日线 6 种 + 日内 3 种；示例见 AGENTS.md）
+  # 本机覆盖写 engine.local.yaml（gitignored，不进仓库）
+  rules: []
+  #   - id: trail-002192
+  #     type: trailing_stop          # 日线：移动止损
+  #     symbol: "002192"
+  #     params: {pct: 5}
+  #     action: {side: sell, all: true}
+  #   - id: vwap-000001               # 日内：偏离当日均价（需先 minute pull）
+  #     type: vwap_dev
+  #     symbol: "000001"
+  #     params: {pct: 1.5, min_bars: 15}
+  #     action: {side: buy, value: 10000}
+  #
+  # 条件单（AI 或人工挂"触发条件"，盘中到价自动下单）不写在这里，走
+  #   python -m paper_trading.cli cond add|design|list|cancel
+  # 或面板「条件单」区，状态存在 paper_account.db 的 conditional_orders 表。

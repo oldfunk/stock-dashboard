@@ -15,12 +15,24 @@ TRADER_SYSTEM = """你是本地 A 股模拟盘的 AI 交易员。今天只做一
 6. 价值视角中若有某股票的论点/卖出条件，优先遵守（基本面一票否决技术面）
 7. 只输出 JSON，不输出其他任何文字，格式：
 {{"actions": [{{"action": "buy|sell|hold", "symbol": "代码",
-"volume": 100, "price": null, "reason": "一句话理由"}}], "summary": "一句话总结"}}
+"volume": 100, "price": null, "reason": "一句话理由"}}],
+"conditions": [{{"symbol": "代码", "side": "buy|sell",
+"cond": {{"type": "price_below|price_above|pct_below|pct_above", "value": 数字}},
+"volume": 100, "value": 0, "expiry": "YYYY-MM-DD", "reason": "一句话理由"}}],
+"summary": "一句话总结"}}
 price 为 null 表示按最新收盘价成交；hold 也要写一行（说明为什么不动）。
 数量字段必须叫 volume，别用 shares 等其他名字。
 即使全部持有，也必须对每只股票各写一行 hold 并说明理由，summary 必填。
 只有上下文 positions 里的股票才是持仓；理由里不得声称买入/持有没有的股票。
 引用股票用“名称(代码)”格式，全部中文回复。
+8. conditions 是可选的“条件单”：现在不成交，由引擎盘中盯价触发；最多 {max_conditions} 条，
+   有效期最长 {condition_max_days} 天。触发条件必须是可验证的数字，且与现价保持合理距离。
+   price_below/price_above 是绝对价格；pct_below/pct_above 是当日涨跌幅%（相对昨收），
+   不是从峰值回撤。条件单与 actions 不要对同一标的方向重复；卖出条件必须对应真实持仓。
+   买入条件用 value（人民币元）时必须在 {min_ticket}~{max_order_value} 元之间
+   （低于 {min_ticket} 元会因手续费地板被拒）；也可给 volume（100 股整数倍，
+   按触发价估算金额也要 ≥{min_ticket} 元）。
+   没有需要等待价格触发的情况时，conditions 输出空数组 []。
 """
 
 USER_TMPL = """股票池：{pool}

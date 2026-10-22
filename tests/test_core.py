@@ -156,6 +156,40 @@ def test_sync_data_with_fake_fetcher(monkeypatch, tmp_path):
     assert b.get_status()["data_asof"] == "2024-01-05"
 
 
+def test_sync_data_includes_holdings_outside_pool(monkeypatch, tmp_path):
+    """持仓退出筛选池后仍必须同步日线，否则 NAV/风控静默使用旧价。"""
+    import paper_trading.cli as hb
+
+    calls: list[str] = []
+
+    class FakeFetcher:
+        @staticmethod
+        def fetch_daily(symbol, start_date=None, **kw):
+            calls.append(symbol)
+            return [Bar(symbol=symbol,
+                        timestamp=datetime(2024, 1, 1) + timedelta(days=i),
+                        open=10.0, high=11.0, low=9.0, close=10.0, volume=100)
+                    for i in range(3)]
+
+        @staticmethod
+        def fetch_stock_names(symbols):
+            return {}
+
+    monkeypatch.setattr(hb, "_get_fetcher", lambda: FakeFetcher)
+    f1 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
+    f2 = tempfile.mktemp(suffix=".db", dir=str(tmp_path))
+    b = hb.TradingBridge(data_db=f1, account_db=f2,
+                         config_path="/nonexistent.yaml")
+    # 000001 是持仓，但本轮同步只点名 600519
+    assert b.broker.submit_order(Order(symbol="000001", direction=1, volume=100,
+                                       order_type=OrderType.LIMIT,
+                                       limit_price=10.0)).status.value == "filled"
+    res = b.sync_data(["600519"])
+    assert "000001" in calls
+    assert res["updated"]["000001"] == 3
+    assert len(b.data_db.get_bars("000001")) == 3
+
+
 def test_run_daily_skips_without_fresh_bars(monkeypatch, tmp_path):
     b = _fake_bridge(monkeypatch, str(tmp_path), [])  # 源端无新数据
     b.data_db.upsert_bars([mkbar("600519", i, 10 + i) for i in range(30)])  # 旧数据

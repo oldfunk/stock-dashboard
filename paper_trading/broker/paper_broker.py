@@ -153,6 +153,36 @@ class PaperBroker:
                     executed_at TEXT
                 )
             """)
+            self._migrate_positions(conn)
+
+    def _migrate_positions(self, conn) -> None:
+        """旧库加列 + 回填持仓元数据（M1-A：time_stop/trailing_stop 可信）。
+
+        - entry_day：取该标的最早买入成交日；查不到成交就按今天（保守：宁可晚报
+          时间止损，不可凭空早卖）。
+        - peak_price：至少不低于成本价；建仓以来真实高点由引擎盘中用日线补齐。
+        迁移幂等，可重复执行。
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)")}
+        if "entry_day" not in cols:
+            conn.execute("ALTER TABLE positions ADD COLUMN entry_day TEXT")
+        if "peak_price" not in cols:
+            conn.execute("ALTER TABLE positions ADD COLUMN peak_price REAL DEFAULT 0")
+        rows = conn.execute(
+            "SELECT symbol FROM positions WHERE entry_day IS NULL OR entry_day = ''"
+        ).fetchall()
+        today = datetime.now().date().isoformat()
+        for r in rows:
+            row = conn.execute(
+                "SELECT MIN(substr(timestamp, 1, 10)) AS d FROM fills"
+                " WHERE symbol = ? AND direction = 1", (r["symbol"],),
+            ).fetchone()
+            conn.execute("UPDATE positions SET entry_day = ? WHERE symbol = ?",
+                         ((row["d"] if row and row["d"] else today), r["symbol"]))
+        conn.execute(
+            "UPDATE positions SET peak_price = MAX(COALESCE(peak_price, 0), avg_cost)"
+            " WHERE peak_price IS NULL OR peak_price < avg_cost"
+        )
 
     def _ensure_account(self) -> None:
         with self._connect() as conn:
@@ -177,27 +207,35 @@ class PaperBroker:
             ).fetchone()
         if not row:
             return None
+        return self._row_to_position(row)
+
+    @staticmethod
+    def _row_to_position(row) -> Position:
         return Position(
             symbol=row["symbol"],
             total_volume=row["total_volume"],
             available_volume=row["available_volume"],
             avg_cost=row["avg_cost"],
             last_update=datetime.fromisoformat(row["last_update"]),
+            entry_day=str(row["entry_day"] or ""),
+            peak_price=float(row["peak_price"] or 0.0),
         )
 
     def get_all_positions(self) -> list[Position]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM positions").fetchall()
-        return [
-            Position(
-                symbol=r["symbol"],
-                total_volume=r["total_volume"],
-                available_volume=r["available_volume"],
-                avg_cost=r["avg_cost"],
-                last_update=datetime.fromisoformat(r["last_update"]),
+        return [self._row_to_position(r) for r in rows]
+
+    def update_peak_price(self, symbol: str, price: float) -> None:
+        """更新持仓期最高价（trailing_stop 用；落库，重启不丢）。"""
+        if price <= 0:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE positions SET peak_price = MAX(COALESCE(peak_price, 0), ?),"
+                " last_update = ? WHERE symbol = ?",
+                (float(price), datetime.now().isoformat(), symbol),
             )
-            for r in rows
-        ]
 
     def _calc_buy_cost(self, amount: float) -> tuple[float, float]:
         """计算买入成本: (佣金, 过户费)。"""
@@ -251,6 +289,9 @@ class PaperBroker:
         # A股基础校验：100股整数倍
         if order.volume <= 0 or order.volume % 100 != 0:
             return self._reject(order, f"volume must be positive multiple of 100, got {order.volume}")
+        # 科创板（688）买入最低 200 股（简化：按 100 股整数倍且 ≥200，与真实"200 股起、1 股递增"有差异，文档标注）
+        if order.direction == 1 and order.symbol.startswith("688") and order.volume < 200:
+            return self._reject(order, f"科创板买入最低 200 股，got {order.volume}")
         # 涨跌停检查（有 prev_close 才做）
         if order.prev_close and order.limit_price:
             pct = self.limit_pct_for(order.symbol)
@@ -344,20 +385,26 @@ class PaperBroker:
             # 更新持仓（avg_cost 含买入费用，与券商交割单口径一致）
             pos = self.get_position(order.symbol)
             full_cost = amount + commission + transfer_fee
+            today = datetime.now().date().isoformat()
             if pos:
                 new_total = pos.total_volume + order.volume
                 new_avg = (pos.avg_cost * pos.total_volume + full_cost) / new_total
                 conn.execute(
                     """UPDATE positions SET total_volume=?, available_volume=?,
-                       avg_cost=?, last_update=? WHERE symbol=?""",
+                       avg_cost=?, last_update=?,
+                       entry_day=COALESCE(NULLIF(entry_day, ''), ?),
+                       peak_price=MAX(COALESCE(peak_price, 0), ?)
+                       WHERE symbol=?""",
                     (new_total, pos.available_volume, new_avg,
-                     datetime.now().isoformat(), order.symbol),
+                     datetime.now().isoformat(), today, price, order.symbol),
                 )
             else:
                 conn.execute(
-                    """INSERT INTO positions (symbol, total_volume, available_volume, avg_cost, last_update)
-                       VALUES (?, ?, 0, ?, ?)""",
-                    (order.symbol, order.volume, full_cost / order.volume, datetime.now().isoformat()),
+                    """INSERT INTO positions (symbol, total_volume, available_volume,
+                       avg_cost, last_update, entry_day, peak_price)
+                       VALUES (?, ?, 0, ?, ?, ?, ?)""",
+                    (order.symbol, order.volume, full_cost / order.volume,
+                     datetime.now().isoformat(), today, price),
                 )
             # T+1 冻结：解冻日为下一交易日（跳周末/节假日）
             today = datetime.now().date()
@@ -449,6 +496,60 @@ class PaperBroker:
             if count > 0:
                 logger.info(f"Unfroze {count} T+1 positions for {target_date}")
             return count
+
+    def apply_corporate_action(
+        self,
+        symbol: str,
+        ex_date: str,
+        cash_per_share: float = 0.0,
+        share_ratio: float = 0.0,
+    ) -> dict:
+        """人工确认后的除权除息调整（M1 降级保护：不自动，必须有调用才动账）。
+
+        口径（M1 简化，文档标注）：
+        - 现金分红：税前金额入账（`cash += 总股数 × 每股红利`），分红税 M1.5 细化。
+        - 送转股：`share_ratio` 为每股比例（10 送 3 → 0.3）；新增股数向下取整，
+          只加到总股数、不加可用量（送股上市日晚于除权日，保守不可卖）。
+        - 成本：总成本先扣现金分红，再摊到新股数；移动止盈峰值同步除权
+          （`(peak - 每股红利) / (1 + 送转比例)`），避免除权日机械触发假止损。
+
+        全程写 op_log，可审计。
+        """
+        cash_per_share = float(cash_per_share or 0.0)
+        share_ratio = float(share_ratio or 0.0)
+        if cash_per_share < 0 or share_ratio < 0 or share_ratio > 10:
+            return {"ok": False, "why": "分红/送转参数越界"}
+        pos = self.get_position(symbol)
+        if not pos or pos.total_volume <= 0:
+            return {"ok": False, "why": f"无 {symbol} 持仓，无需调整"}
+        bonus = int(pos.total_volume * share_ratio)
+        dividend = round(pos.total_volume * cash_per_share, 2)
+        new_total = pos.total_volume + bonus
+        adj = 1.0 + share_ratio
+        old_basis = pos.avg_cost * pos.total_volume
+        new_avg = (max(0.0, old_basis - dividend) / new_total) if new_total else 0.0
+        new_peak = max(0.0, (max(pos.peak_price, pos.avg_cost) - cash_per_share) / adj)
+        with self._connect() as conn:
+            if dividend:
+                conn.execute("UPDATE account SET cash = cash + ? WHERE id = 1",
+                             (dividend,))
+            conn.execute(
+                "UPDATE positions SET total_volume=?, avg_cost=?, peak_price=?,"
+                " last_update=? WHERE symbol=?",
+                (new_total, round(new_avg, 6), round(new_peak, 4),
+                 datetime.now().isoformat(), symbol),
+            )
+        summary = {"ok": True, "symbol": symbol, "ex_date": str(ex_date),
+                   "cash_dividend": dividend, "bonus_shares": bonus,
+                   "total_volume": new_total, "avg_cost": round(new_avg, 4),
+                   "peak_price": round(new_peak, 4)}
+        self.log_operation("corporate:apply",
+                           {"symbol": symbol, "ex_date": str(ex_date),
+                            "cash_per_share": cash_per_share,
+                            "share_ratio": share_ratio},
+                           True, summary)
+        logger.info(f"Corporate action applied: {summary}")
+        return summary
 
     def get_nav(self, current_prices: dict[str, float]) -> AccountSnapshot:
         """计算当前 NAV。"""
@@ -544,7 +645,7 @@ class PaperBroker:
             return int(cur.lastrowid)
 
     def get_pending_plan(self, plan_date: str) -> Optional[dict]:
-        """取某日待执行的计划（无则 None）。"""
+        """取某日待执行的计划（无则 None；保留给面板/测试按日查询）。"""
         import json as _json
 
         with self._connect() as conn:
@@ -552,6 +653,35 @@ class PaperBroker:
                 """SELECT * FROM agent_plans WHERE plan_date = ? AND status = 'pending'
                    ORDER BY id DESC LIMIT 1""",
                 (plan_date,),
+            ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["plan"] = _json.loads(d["plan_json"])
+        except Exception:
+            d["plan"] = {}
+        return d
+
+    def get_executable_plan(self, day: str,
+                            max_age_days: int = 7) -> Optional[dict]:
+        """取“今天及更早、最近一条”待执行计划。
+
+        计划在收盘后生成，目标交易日是下一个交易日；所以开盘执行时
+        plan_date 可能早于今天。只接受最近 N 天，避免长时间停机后
+        把过期计划当成今天的机会。旧 pending 不删除，保留审计痕迹。
+        """
+        import json as _json
+        from datetime import date, timedelta
+
+        earliest = (date.fromisoformat(day[:10])
+                    - timedelta(days=max(1, int(max_age_days)))).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM agent_plans
+                   WHERE plan_date <= ? AND plan_date >= ? AND status = 'pending'
+                   ORDER BY plan_date DESC, id DESC LIMIT 1""",
+                (day, earliest),
             ).fetchone()
         if not row:
             return None

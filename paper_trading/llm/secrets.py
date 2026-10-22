@@ -33,7 +33,9 @@ def load_secrets(path: Optional[str] = None) -> dict[str, Any]:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8")) or {}
+        # utf-8-sig：Windows 记事本保存会带 BOM，按 utf-8 读会解析失败，
+        # 而这里失败只能静默返回空（看起来就像"配置丢了"）。容错掉。
+        return json.loads(p.read_text(encoding="utf-8-sig")) or {}
     except Exception:
         return {}
 
@@ -82,4 +84,6 @@ def public_provider_view(path: Optional[str] = None) -> dict[str, Any]:
         "model": p.get("model", ""),
         "key_masked": masked_key(p.get("api_key", "")),
         "has_key": bool(p.get("api_key")),
+        # 本地/局域网接口（Ollama、LM Studio、自建网关）不需要令牌
+        "tokenless": bool(p.get("base_url")) and not bool(p.get("api_key")),
     }

@@ -108,7 +108,7 @@ def test_secrets_roundtrip_masked_and_mode(tmp_path):
 
 
 def test_llm_save_merge_keeps_key(tmp_path):
-    """换模型不重填 Key：空 Key=沿用；首次无 Key 拒绝；换 Key 生效。"""
+    """换模型不重填 Key：空 Key=沿用；没 Key 也能先存（带提示）；换 Key 生效。"""
     import paper_trading.cli as hb
 
     sec = str(tmp_path / "s.json")
@@ -116,8 +116,9 @@ def test_llm_save_merge_keeps_key(tmp_path):
     db2 = str(tmp_path / "a.db")
     b = hb.TradingBridge(data_db=db1, account_db=db2, config_path="/nonexistent.yaml",
                         secrets_path=sec)
+    # 云端没 Key 也能先存（本地接口本来就免令牌），但要给提示
     r = b.llm_save("deepseek", "", "", "")
-    assert not r["ok"] and "API Key" in r["error"]  # 首次必须给 Key
+    assert r["ok"] and not r["has_key"] and "API Key" in r.get("warning", "")
     r = b.llm_save("deepseek", "", "m-a", "sk-keep-1")
     assert r["ok"] and r["key_masked"] == "****ep-1"
     assert b.llm_status()["model"] == "m-a"
@@ -131,7 +132,7 @@ def test_llm_save_merge_keeps_key(tmp_path):
 
 
 def test_llm_models_open_and_explains(tmp_path):
-    """拉模型不被门禁拦，且失败必须给可执行原因（不配置/缺Key/Key被拒）。"""
+    """拉模型不被门禁拦，且失败必须给可执行原因（没配地址/网络不通/Key被拒）。"""
     import paper_trading.cli as hb
     from paper_trading.llm import load_secrets, save_secrets
 
@@ -141,28 +142,65 @@ def test_llm_models_open_and_explains(tmp_path):
                          config_path="/nonexistent.yaml", secrets_path=sec)
     # 1) 完全没配：给"去保存"的提示，不是"你没权限"
     r = b.llm_models()
-    assert not r["ok"] and r["hint"] == "save" and "API Key" in r["error"]
-    # 2) 有地址没 Key：提示补 Key
-    save_secrets({"provider": {"preset": "custom", "base_url": "http://x/v1",
-                               "model": "m", "api_key": ""}}, sec)
-    r = b.llm_models()
-    assert not r["ok"] and r["hint"] == "save" and "缺 API Key" in r["error"]
-    # 3) 配全但 Key 被远端拒：回真实原因（HTTP 401），无 hint
+    assert not r["ok"] and r["hint"] == "save" and "接口地址" in r["error"]
+    # 2) 只填了地址没 Key（本地/局域网场景）：**放行**去拉，而不是拦在"缺 Key"
     srv = _srv()
     try:
-        save_secrets({"provider": {"preset": "custom",
+        save_secrets({"provider": {"preset": "ollama",
                                    "base_url": f"http://127.0.0.1:{srv.server_port}/v1",
-                                   "model": "m", "api_key": "wrong-key"}}, sec)
-        r = b.llm_models()
+                                   "model": "m", "api_key": ""}}, sec)
+        r = b.llm_models()  # 桩服务要 Bearer good-key：无令牌被拒 = 真实原因
         assert not r["ok"] and "401" in r["error"] and "hint" not in r
-        # 4) 配全且 Key 正确：拉到列表
+    finally:
+        srv.shutdown()
+    # 3) 地址不可达：回网络层真实原因
+    save_secrets({"provider": {"preset": "custom", "base_url": "http://127.0.0.1:1/v1",
+                               "model": "m", "api_key": ""}}, sec)
+    r = b.llm_models()
+    assert not r["ok"] and "hint" not in r
+    # 4) 配全且 Key 正确：拉到列表
+    srv = _srv()
+    try:
         save_secrets({"provider": {"preset": "custom",
                                    "base_url": f"http://127.0.0.1:{srv.server_port}/v1",
                                    "model": "m", "api_key": "good-key"}}, sec)
         r = b.llm_models()
         assert r["ok"] and r["models"] == ["m-a", "m-b"]
+        assert load_secrets(sec)["provider"]["api_key"] == "good-key"
     finally:
         srv.shutdown()
+
+
+def test_secrets_file_with_bom_is_readable(tmp_path):
+    """Windows 记事本保存会带 BOM：不能因此把配置读成"没配"（静默失败最难查）。"""
+    from paper_trading.llm import load_secrets
+
+    p = tmp_path / "s.json"
+    p.write_bytes(b"\xef\xbb\xbf" + json.dumps(
+        {"provider": {"preset": "glm", "base_url": "https://x/v1",
+                      "model": "m", "api_key": "sk-bom"}},
+        ensure_ascii=False).encode("utf-8"))
+    data = load_secrets(str(p))
+    assert data["provider"]["api_key"] == "sk-bom"
+
+
+def test_llm_save_keeps_model_when_blank(tmp_path):
+    """模型留空 = 沿用已存模型（不许被"只改 Key/地址"顺手洗成空串）。"""
+    import paper_trading.cli as hb
+    from paper_trading.llm import load_secrets
+
+    sec = str(tmp_path / "s.json")
+    b = hb.TradingBridge(data_db=str(tmp_path / "d.db"),
+                         account_db=str(tmp_path / "a.db"),
+                         config_path="/nonexistent.yaml", secrets_path=sec)
+    assert b.llm_save("glm", "", "glm-4.5-flash", "sk-x")["ok"]
+    # 只改地址，不给模型
+    r = b.llm_save("glm", "https://open.bigmodel.cn/api/paas/v4", "", "")
+    assert r["ok"] and r["model"] == "glm-4.5-flash"
+    # 只换 Key，不给模型
+    r = b.llm_save("glm", "", "", "sk-y")
+    assert r["ok"] and r["model"] == "glm-4.5-flash"
+    assert load_secrets(sec)["provider"]["model"] == "glm-4.5-flash"
 
 
 def test_llm_save_survives_restart(tmp_path, monkeypatch):

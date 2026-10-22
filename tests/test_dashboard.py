@@ -13,8 +13,9 @@ def test_dashboard_imports():
 
     assert hasattr(d, "Handler") and hasattr(d, "main")
     assert "market-row" in d.PAGE and "/api/quotes" in d.PAGE
-    assert "AI 定时" in d.PAGE and "/api/agent/schedule" in d.PAGE
-    assert "srun" in d.PAGE and "/api/agent/fire" in d.PAGE
+    assert "运行时刻" in d.PAGE and "/api/agent/runtime" in d.PAGE
+    assert "/api/agent/schedule" not in d.PAGE  # 旧可编辑队列已从界面移除
+    assert "写死" in d.PAGE and "16:30" in d.PAGE
 
 
 def test_entry_modules_import():
