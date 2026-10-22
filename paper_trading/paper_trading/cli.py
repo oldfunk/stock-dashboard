@@ -163,8 +163,14 @@ class TradingBridge:
                         pass
         self.data_db = DataDBManager(data_db)
         self.broker = PaperBroker(account_db, config)
+        self.account_db_path = str(getattr(self.broker, "db_path", account_db))
+        self.data_db_path = str(self.data_db.db_path)
+        self.config_path = str(config_path or "config.yaml")
         self.portfolio = Portfolio(self.broker)
-        self.risk = RiskManager(**risk_kwargs) if risk_kwargs else RiskManager()
+        # 峰值/日亏基线落库（与账本同库），引擎/条件单/CLI/AI 共用同一份熔断状态
+        self.risk = RiskManager(
+            db_path=self.account_db_path,
+            **(risk_kwargs or {}))
         self.strategy = MACrossStrategy(
             short_window=int(strat_kwargs.get("short_window", 5)),
             long_window=int(strat_kwargs.get("long_window", 20)),
@@ -187,10 +193,24 @@ class TradingBridge:
             llm_thinking=str(agent_kwargs.get("llm_thinking", "disabled")),
             picks_enabled=bool(agent_kwargs.get("picks_enabled", True)),
             picks_max=max(1, min(10, int(agent_kwargs.get("picks_max", 5)))),
+            conditions_enabled=bool(agent_kwargs.get("conditions_enabled", True)),
+            max_conditions=max(1, min(10, int(agent_kwargs.get("max_conditions", 5)))),
+            condition_max_days=max(1, min(30, int(agent_kwargs.get("condition_max_days", 3)))),
+            event_enabled=bool(agent_kwargs.get("event_enabled", True)),
+            event_price_move_pct=float(agent_kwargs.get("event_price_move_pct", 3.0)),
+            event_drawdown_pct=float(agent_kwargs.get("event_drawdown_pct", 5.0)),
+            event_cooldown_min=max(0, int(agent_kwargs.get("event_cooldown_min", 30))),
+            event_min_interval_min=max(0, int(agent_kwargs.get("event_min_interval_min", 15))),
+            event_max_calls_per_day=max(0, int(agent_kwargs.get("event_max_calls_per_day", 6))),
+            event_max_conditions=max(1, min(10, int(agent_kwargs.get("event_max_conditions", 3)))),
         )
 
     def sync_data(self, symbols: list[str]) -> dict:
-        """只同步行情+名称，不发信号、不下单、不记 NAV（供日内补数/定时任务用）。"""
+        """同步行情+名称（本轮标的 ∪ 全部持仓），不发信号、不下单、不记 NAV。"""
+        # 持仓可能已退出本轮筛选池。若只同步传入标的，持仓日线会长期停滞，
+        # 收盘 NAV、日亏/回撤检查和 AI 上下文都会静默使用旧价（2026-10-22 巡检）。
+        held = sorted({p.symbol for p in self.broker.get_all_positions()})
+        symbols = list(dict.fromkeys([*(symbols or []), *held]))
         try:
             Fetcher = _get_fetcher()
         except Exception as e:
@@ -198,14 +218,28 @@ class TradingBridge:
             return {"ok": False, "symbols": symbols, "updated": {},
                     "error": "akshare unavailable"}
         updated: dict[str, int] = {}
+        revisions: list[dict] = []
         for sym in symbols:
             try:
                 latest = self.data_db.get_latest_timestamp(sym)
                 start = latest[:10].replace("-", "") if latest else None
                 bars = Fetcher.fetch_daily(sym, start_date=start)
                 if bars:
+                    # 除权除息检测：前复权会在除权后重算历史收盘（M1 至少做到不静默）
+                    rev = self._detect_revisions(sym, bars)
                     self.data_db.upsert_bars(bars)
                     self.data_db.add_stock_to_pool(sym)
+                    if rev:
+                        revisions.append({"symbol": sym, "changes": rev[:5]})
+                        logger.warning(
+                            f"{sym}: 历史收盘被回溯调整（疑似除权除息）"
+                            f"：{rev[:3]}；持仓/NAV 需人工核对，"
+                            f"可用 `corporate apply` 调整")
+                        self.broker.log_operation(
+                            "data:revision", {"symbol": sym, "changes": rev[:10]},
+                            True, {"why": "历史收盘被回溯调整（疑似除权除息）",
+                                   "action": "人工核对后用 corporate apply 调整；"
+                                             "M1.5 自动处理"})
                 updated[sym] = len(bars) if bars else 0
             except Exception as e:
                 logger.error(f"Failed to sync {sym}: {e}")
@@ -220,7 +254,33 @@ class TradingBridge:
         except Exception as e:
             logger.warning(f"Stock name refresh skipped: {e}")
         ok = all(v >= 0 for v in updated.values())
-        return {"ok": ok, "symbols": symbols, "updated": updated}
+        return {"ok": ok, "symbols": symbols, "updated": updated,
+                "revisions": revisions}
+
+    def _detect_revisions(self, sym: str, bars: list) -> list[dict]:
+        """检测前复权回溯调整：同一历史交易日的收盘在两次同步间发生变化。
+
+        前复权数据在除权除息后会整体重算历史价格——这是除权除息的可靠信号
+        （比"今日跌幅超限"更可靠）。只比较**今天之前**的日期：今天的数据本来
+        就会变，不当作除权信号。检测到只告警+记流水，绝不自动改账本。
+        """
+        today = datetime.now().date()
+        old = {b.timestamp.date().isoformat(): b.close
+               for b in self.data_db.get_bars(sym, limit=90)
+               if b.timestamp.date() < today}
+        out = []
+        for b in bars:
+            d = b.timestamp.date()
+            if d >= today:
+                continue
+            prev = old.get(d.isoformat())
+            if prev and prev > 0 and b.close > 0:
+                delta = b.close - prev
+                if abs(delta) / prev > 0.001:
+                    out.append({"day": d.isoformat(), "old": round(prev, 4),
+                                "new": round(b.close, 4),
+                                "pct": round(delta / prev * 100, 3)})
+        return out
 
     def price_map(self, symbols: list[str]) -> dict[str, float]:
         """最新价表：run 标的 ∪ 全部持仓（持仓不在池中时也必须计价，
@@ -304,6 +364,13 @@ class TradingBridge:
         if halted:
             logger.error(f"Drawdown halt: {dd:.2%}, skip trading")
             signals = {}
+        else:
+            # 账户级当日亏损熔断（与引擎/条件单/AI 共用同一份落库基线）
+            dl_halt, dl = self.risk.check_daily_loss(
+                nav.total_value, datetime.now().date().isoformat())
+            if dl_halt:
+                logger.error(f"Daily loss halt: {dl:.2%}, skip trading")
+                signals = {}
 
         executed_orders = []
         for symbol, signal in signals.items():
@@ -541,58 +608,90 @@ class TradingBridge:
 
     def llm_save(self, preset: str = "custom", base_url: str = "",
                  model: str = "", api_key: str = "") -> dict:
-        """保存厂商配置（合并语义：Key/地址留空=沿用已存值，不会被洗掉）。"""
+        """保存厂商配置（合并语义：Key/地址留空=沿用已存值，不会被洗掉）。
+
+        本地/局域网接口（Ollama、LM Studio、vLLM、自建网关）不需要令牌：
+        这类预设允许空 Key，并且会清掉之前保存的云端 Key（不把旧 Key 发到别的机器）。
+        """
+        from urllib.parse import urlparse
+
         from paper_trading.llm import (
-            load_secrets as _load, preset_base_url, public_provider_view, save_provider,
+            TOKENLESS_PRESETS, load_secrets as _load, preset_base_url,
+            public_provider_view, save_provider,
         )
 
+        preset = (preset or "custom").strip()
         existing = (_load(self.secrets_path).get("provider") or {})
         base_url = base_url.strip() or preset_base_url(preset) \
             or str(existing.get("base_url", ""))
         if not base_url:
             return {"ok": False, "error": "未知厂商且未填写接口地址（base_url）"}
-        api_key = api_key.strip() or str(existing.get("api_key", ""))
+        # 模型留空 = 沿用已存模型：面板/CLI 只想改地址或 Key 时不能把模型洗掉
+        # （洗成空串后所有调用都会报"未指定模型"，看起来像 API 失效）
+        model = model.strip() or str(existing.get("model", ""))
+        tokenless = preset in TOKENLESS_PRESETS
+        api_key = "" if tokenless else (api_key.strip()
+                                        or str(existing.get("api_key", "")))
+        local_host = (urlparse(base_url).hostname or "").lower() in (
+            "localhost", "127.0.0.1", "::1", "0.0.0.0")
+        warning = ""
         if not api_key:
-            return {"ok": False, "error": "请填写 API Key（首次配置必填；之后换模型不用重填）"}
+            if not tokenless and not local_host:
+                warning = ("接口地址不在本机：云端服务通常需要 API Key。"
+                           "已保存，但拉模型/对话可能返回 401；如果这是局域网内"
+                           "不需要令牌的网关，忽略此提示即可")
+            # 本地/局域网接口本就无需令牌，只记一条中性说明
+            elif not tokenless:
+                warning = "未填 Key：本机接口通常不需要令牌，若拉取失败请确认服务已启动"
         save_provider({"preset": preset, "base_url": base_url,
-                       "model": model.strip(), "api_key": api_key},
+                       "model": model, "api_key": api_key},
                       self.secrets_path)
         view = public_provider_view(self.secrets_path)
         self.broker.log_operation("llm:config", {"preset": preset, "model": view["model"]},
                                   True, {"base_url": base_url}, None, None)
         # 口令仅在此处返回一次（落盘+本次回显），日志与常规回显均不含它
-        return {"ok": True, "admin_token": _load(self.secrets_path).get("admin_token", ""),
-                **view}
+        out = {"ok": True,
+               "admin_token": _load(self.secrets_path).get("admin_token", ""),
+               **view}
+        if warning:
+            out["warning"] = warning
+        return out
 
     def _llm_config(self):
         from paper_trading.llm import LLMConfig, LLMError, load_secrets
 
         data = load_secrets(self.secrets_path)
         p = data.get("provider") or {}
-        if not p.get("base_url") or not p.get("api_key"):
-            raise LLMError("LLM 未配置（先在面板或 llm-config 填写接口地址与 Key）")
-        return LLMConfig(base_url=p["base_url"], api_key=p["api_key"],
+        if not p.get("base_url"):
+            raise LLMError("LLM 未配置（先在面板或 llm-config 填写接口地址；"
+                           "本地接口不用 Key）")
+        # 本地/局域网接口允许无 Key：provider 在 Key 为空时不发 Authorization 头
+        return LLMConfig(base_url=p["base_url"], api_key=p.get("api_key", ""),
                          model=p.get("model", ""))
 
     def llm_models(self) -> dict:
         """拉取远端模型列表（Key 不出本机，只返回 id）。
 
         不设口令门禁（面板只读、局域网使用）：拉不到就如实回失败原因，
-        让用户看到是"没配 Key/地址"还是"Key 被拒/超时/地址非法"。
+        让用户看到是"没配地址"还是"Key 被拒/超时/地址非法"。
+        本地接口（Ollama / LM Studio / 自建网关）不需要 Key 也能拉。
         """
         from paper_trading.llm import LLMError, list_models, load_secrets
 
         p = load_secrets(self.secrets_path).get("provider") or {}
         if not p.get("base_url"):
             return {"ok": False, "hint": "save",
-                    "error": "尚未保存接口地址与 API Key：在面板「模型设置」填一次并"
-                             "保存即可长期有效（换模型不用再填 Key，重启也不丢）"}
-        if not p.get("api_key"):
-            return {"ok": False, "hint": "save",
-                    "error": "已保存接口地址但缺 API Key：补填 Key 保存一次，之后长期有效"}
+                    "error": "尚未保存接口地址：在面板「模型设置」填一次并保存"
+                             "即可长期有效（本地接口不需要 Key）"}
         try:
             models = list_models(self._llm_config())
-            return {"ok": True, "models": models}
+            out = {"ok": True, "models": models}
+            saved = str(p.get("model") or "")
+            if saved and saved not in models:
+                out["warning"] = (f"当前保存的模型 {saved} 不在厂商列表里"
+                                  f"（可能已下线）；系统不会自动更换，"
+                                  f"调用失败时会如实报错")
+            return out
         except LLMError as e:
             return {"ok": False, "error": str(e)}
 
@@ -715,6 +814,78 @@ class TradingBridge:
         return {"ok": True, "model": cfg.model, "answer": answer}
 
 
+def engine_min_ticket(config_path: str = "config.yaml") -> float:
+    from paper_trading.engine.config import load_engine_config
+    return float(load_engine_config(config_path).get("min_ticket_cny") or 0.0)
+
+
+def design_conditions(bridge, orders, *, pool_from: str = "auto",
+                      pool_tag: str = "", pool_limit: int = 15,
+                      max_conds: int = 5, max_days: int = 3,
+                      dry_run: bool = False,
+                      config_path: str = "config.yaml") -> tuple[bool, dict, str]:
+    """让 LLM 出条件单（校验后挂上；dry_run=True 只看不挂）。返回 (ok, data, error)。
+
+    CLI 与面板共用同一入口，避免两套逻辑漂移。
+    """
+    from paper_trading.agent.loop import AgentTrader, _ask_llm
+    from paper_trading.data import realtime as rt
+    from paper_trading.engine.ai_conditions import (build_prompt,
+                                                     parse_conditions_verbose)
+    from paper_trading.integration import resolve_pool
+
+    try:
+        syms, note, _c = resolve_pool(None, bridge.stock_pool, pool_from or "auto",
+                                      int(pool_limit or 15), None, pool_tag or "")
+    except Exception:                      # noqa: BLE001 - 母库缺席时退回本地池
+        syms, note = list(bridge.stock_pool), "本地股票池"
+    if not syms:
+        return False, {}, "股票池为空：先跑一次 sync 或让 AI 选股"
+    syms = list(syms)[:int(pool_limit or 15)]
+    try:
+        quotes = rt.get_quotes(syms, force=True) or {}
+    except Exception as e:                 # noqa: BLE001 - 拿不到实时价也能设计
+        quotes = {}
+        note = f"{note}；实时价获取失败（{type(e).__name__}）"
+    ctx = bridge.llm_context(max_ops=3, max_nav=2, closes_n=3, symbols=syms)
+    trader = AgentTrader(bridge, bridge.agent_cfg)
+    min_ticket = engine_min_ticket(config_path)
+    max_value = float(bridge.agent_cfg.max_order_value)
+    sys_p, user_p = build_prompt(syms, quotes, ctx.get("positions", []),
+                                 trader._scheme_txt(),
+                                 str(ctx.get("account", {}).get("data_asof") or ""),
+                                 max_conds=int(max_conds), max_days=int(max_days),
+                                 min_ticket=min_ticket, max_value=max_value)
+    try:
+        raw = _ask_llm(bridge._llm_config(), user_p, sys_p,
+                       bridge.agent_cfg.llm_timeout, 1,
+                       bridge.agent_cfg.llm_max_tokens,
+                       bridge.agent_cfg.llm_thinking)
+    except Exception as e:                 # noqa: BLE001
+        return False, {}, f"模型调用失败：{type(e).__name__}: {e}"
+    conds, parse_rejected = parse_conditions_verbose(
+        raw, syms, max_conds=int(max_conds),
+        max_value=max_value, min_ticket=min_ticket,
+        max_days=int(max_days))
+    if dry_run:
+        return True, {"dry_run": True, "parsed": conds,
+                      "parse_rejected": parse_rejected,
+                      "pool": syms, "pool_source": note,
+                      "raw": str(raw)[:600]}, ""
+    res = orders.create_many(conds, min_ticket=min_ticket)
+    bridge.broker.log_operation("cond:design", {"pool": syms, "n": res["n_created"]},
+                                True, {"created": res["created"],
+                                       "rejected": res["rejected"],
+                                       "parse_rejected": parse_rejected}, None, None)
+    data = {**res, "parse_rejected": parse_rejected,
+            "pool": syms, "pool_source": note, "raw": str(raw)[:400]}
+    if not res["n_created"]:
+        why = ("模型没给出符合条件的条件单" if not conds
+               else "模型给的条件全部未通过校验（见 rejected）")
+        return False, data, why
+    return True, data, ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Paper Trading Framework - CLI"
@@ -800,7 +971,8 @@ def main() -> None:
 
     llm_cfg = llm_sub.add_parser("config", help="保存厂商配置（Key 只落本地文件）")
     llm_cfg.add_argument("--preset", default="custom",
-                         help="deepseek/qwen/moonshot/glm/doubao/openai/custom")
+                         help="deepseek/qwen/moonshot/glm/doubao/openai/ollama/lmstudio/vllm/lan/custom"
+                              "（本地接口可不填 --api-key）")
     llm_cfg.add_argument("--base-url", default="")
     llm_cfg.add_argument("--model", default="")
     llm_cfg.add_argument("--api-key", default="")
@@ -814,11 +986,27 @@ def main() -> None:
     llm_ask.add_argument("--system", default="")
     llm_ask.add_argument("--json", action="store_true")
 
+    # calendar（交易日历：akshare 同步 + 本地缓存）
+    calendar_parser = subparsers.add_parser(
+        "calendar", help="交易日历（可靠源同步/本地缓存状态）")
+    calendar_sub = calendar_parser.add_subparsers(dest="calendar_command")
+    calendar_sync_p = calendar_sub.add_parser(
+        "sync", help="从 akshare 同步交易日历到本地缓存")
+    calendar_sync_p.add_argument("--path", default=None,
+                                 help="缓存文件路径（缺省 var/trading_calendar.json）")
+    calendar_sync_p.add_argument("--json", action="store_true")
+    calendar_status_p = calendar_sub.add_parser(
+        "status", help="查看缓存覆盖范围与新鲜度")
+    calendar_status_p.add_argument("--path", default=None)
+    calendar_status_p.add_argument("--json", action="store_true")
+
     # agent
-    agent_parser = subparsers.add_parser("agent", help="AI 交易员（按定时触发决策，可自动下单）")
+    agent_parser = subparsers.add_parser(
+        "agent", help="AI 交易员（固定运行时刻 + 事件驱动；旧定时队列仅兼容）")
     agent_parser.add_argument("--json", action="store_true")
     agent_sub = agent_parser.add_subparsers(dest="agent_command")
-    agent_run = agent_sub.add_parser("run", help="执行一次 AI 决策（默认走配置池）")
+    agent_run = agent_sub.add_parser(
+        "run", help="手动执行一次 AI 决策（不再受旧定时队列限制）")
     agent_run.add_argument("--symbols", nargs="*", default=None)
     agent_run.add_argument("--pool-from", default="auto",
                            choices=["auto", "config", "watchlist", "screening", "all"],
@@ -832,10 +1020,11 @@ def main() -> None:
     agent_run.add_argument("--no-picks", action="store_true",
                            help="关闭 AI 自主提名（只用程序候选池决策）")
     agent_run.add_argument("--ignore-schedule", action="store_true",
-                           help="忽略定时闸（时段/次数限制），立即执行")
+                           help="兼容旧参数；旧队列已停用，默认就不受队列限制")
     agent_run.add_argument("--plan-only", action="store_true",
                            help="休盘做计划存着，开盘执行（不碰账本）")
-    agent_tick = agent_sub.add_parser("tick", help="队列 tick：消费最早已到未跑的条目并执行")
+    agent_tick = agent_sub.add_parser(
+        "tick", help="运行时 tick：开盘执行计划 / 收盘后做计划（不读旧队列）")
     agent_tick.add_argument("--symbols", nargs="*", default=None)
     agent_tick.add_argument("--pool-from", default="auto",
                             choices=["auto", "config", "watchlist", "screening", "all"])
@@ -845,8 +1034,21 @@ def main() -> None:
     agent_tick.add_argument("--no-picks", action="store_true",
                             help="关闭 AI 自主提名（只用程序候选池决策）")
     agent_tick.add_argument("--force", action="store_true",
-                            help="忽略已消费标记，执行最早已到条目")
-    agent_sched = agent_sub.add_parser("schedule", help="AI 定时队列查看与设置")
+                            help="人工排障：越过时间窗口（仍拒绝休市日）")
+    agent_event = agent_sub.add_parser(
+        "event", help="事件驱动复盘：盘中异动才调 LLM 产出条件单")
+    agent_event.add_argument("--symbols", nargs="*", default=None)
+    agent_event.add_argument("--pool-from", default="auto",
+                             choices=["auto", "config", "watchlist", "screening", "all"])
+    agent_event.add_argument("--pool-tag", default="")
+    agent_event.add_argument("--pool-limit", type=int, default=20)
+    agent_event.add_argument("--json", action="store_true")
+    agent_event.add_argument("--dry-run", action="store_true",
+                             help="只让 AI 出条件，不挂单（仍会调用模型）")
+    agent_event.add_argument("--force", action="store_true",
+                             help="忽略交易时段/冷却/预算（人工排查用）")
+    agent_sched = agent_sub.add_parser(
+        "schedule", help="旧版 AI 定时队列（已停用，仅兼容查看）")
     agent_sched_sub = agent_sched.add_subparsers(dest="agent_sched_command")
     agent_sched_list = agent_sched_sub.add_parser("list", help="查看当前定时队列与今日执行情况")
     agent_sched_list.add_argument("--json", action="store_true")
@@ -854,6 +1056,119 @@ def main() -> None:
     agent_sched_set.add_argument("--entry", action="append", default=None,
                                  help="队列条目，可重复：TIME=ACTION，如 --entry 09:00=sync --entry 16:45=trade；动作仅 sync/analyze/plan/trade")
     agent_sched_set.add_argument("--json", action="store_true")
+
+    # engine（规则引擎：回测 + 盘中守护）
+    engine_parser = subparsers.add_parser("engine", help="规则引擎（量化执行层）")
+    engine_sub = engine_parser.add_subparsers(dest="engine_command")
+    engine_bt = engine_sub.add_parser("backtest", help="用已存日线回测规则集")
+    engine_bt.add_argument("--days", type=int, default=120, help="回测最近多少个交易日")
+    engine_bt.add_argument("--symbols", nargs="*", default=None,
+                           help="缺省取规则集里的标的")
+    engine_bt.add_argument("--cash", type=float, default=100000.0)
+    engine_bt.add_argument("--slippage-pct", type=float, default=0.0)
+    engine_bt.add_argument("--curve", action="store_true", help="打印 ASCII 净值曲线")
+    engine_bt.add_argument("--trades", action="store_true", help="打印逐笔成交")
+    engine_bt.add_argument("--json", action="store_true")
+    engine_cfg = engine_sub.add_parser("config", help="查看/校验引擎配置")
+    engine_cfg.add_argument("--json", action="store_true")
+    engine_run = engine_sub.add_parser("run", help="跑一轮（守护进程入口在 python -m paper_trading.engine）")
+    engine_run.add_argument("--dry-run", action="store_true", help="只判定不下单")
+    engine_run.add_argument("--json", action="store_true")
+
+    # minute（分钟线采集）
+    minute_parser = subparsers.add_parser("minute", help="1 分钟 K 线采集/查询")
+    minute_sub = minute_parser.add_subparsers(dest="minute_command")
+    minute_pull = minute_sub.add_parser("pull", help="拉取分钟线入库（默认 5 分钟 K 线）")
+    minute_pull.add_argument("--symbols", nargs="*", default=None)
+    minute_pull.add_argument("--pool-limit", type=int, default=10)
+    minute_pull.add_argument("--days", type=int, default=30,
+                             help="保留最近多少天的分钟线（新浪可取数月历史）")
+    minute_pull.add_argument("--period", default="5",
+                             choices=["1", "5", "15", "30", "60"],
+                             help="K 线粒度（分钟）；1 只有当日有数据")
+    minute_pull.add_argument("--json", action="store_true")
+    minute_stat = minute_sub.add_parser("stat", help="查看本地分钟线存量")
+    minute_stat.add_argument("--symbols", nargs="*", default=None)
+    minute_stat.add_argument("--json", action="store_true")
+
+    engine_opt = engine_sub.add_parser("optimize", help="参数网格搜索（按超额收益排序）")
+    engine_opt.add_argument("--grid", default="ma_cross",
+                            choices=["ma_cross", "rsi_zone", "trailing_stop",
+                                     "vwap_dev", "minute_ma"])
+    engine_opt.add_argument("--symbols", nargs="*", default=None)
+    engine_opt.add_argument("--days", type=int, default=250)
+    engine_opt.add_argument("--cash", type=float, default=100000.0)
+    engine_opt.add_argument("--value", type=float, default=10000.0,
+                            help="每次买入金额")
+    engine_opt.add_argument("--top", type=int, default=10)
+    engine_opt.add_argument("--json", action="store_true")
+    # walk-forward：样本内选参数 → 样本外检验（过拟合体检）
+    engine_wf = engine_sub.add_parser(
+        "walkforward", help="样本内选参数、样本外检验（过拟合体检）")
+    engine_wf.add_argument("--grid", default="ma_cross",
+                           choices=["ma_cross", "rsi_zone", "trailing_stop",
+                                    "vwap_dev", "minute_ma"])
+    engine_wf.add_argument("--symbols", nargs="*", default=None)
+    engine_wf.add_argument("--days", type=int, default=250)
+    engine_wf.add_argument("--cash", type=float, default=100000.0)
+    engine_wf.add_argument("--value", type=float, default=10000.0)
+    engine_wf.add_argument("--split", type=float, default=0.6,
+                           help="样本内占比（其余为样本外）")
+    engine_wf.add_argument("--top", type=int, default=5)
+    engine_wf.add_argument("--json", action="store_true")
+
+    # cond（条件单：AI/人工下达，引擎盯盘触发）
+    cond_parser = subparsers.add_parser("cond", help="条件单（触发式委托）")
+    cond_sub = cond_parser.add_subparsers(dest="cond_command")
+    cond_list = cond_sub.add_parser("list", help="列出条件单")
+    cond_list.add_argument("--status", default=None,
+                           choices=["armed", "filled", "cancelled", "expired",
+                                    "rejected"])
+    cond_list.add_argument("--limit", type=int, default=50)
+    cond_list.add_argument("--json", action="store_true")
+    cond_add = cond_sub.add_parser("add", help="人工挂条件单")
+    cond_add.add_argument("--symbol", required=True)
+    cond_add.add_argument("--side", required=True, choices=["buy", "sell"])
+    cond_add.add_argument("--cond", required=True,
+                          choices=["price_below", "price_above", "pct_below",
+                                   "pct_above"])
+    cond_add.add_argument("--value-trigger", type=float, required=True,
+                          dest="cond_value", help="触发价或涨跌幅%%")
+    cond_add.add_argument("--volume", type=int, default=0, help="股数（sell 可给 0=全部）")
+    cond_add.add_argument("--value", type=float, default=0.0, help="买入金额")
+    cond_add.add_argument("--expiry", default="", help="有效期 YYYY-MM-DD（缺省 +2 天）")
+    cond_add.add_argument("--note", default="")
+    cond_add.add_argument("--json", action="store_true")
+    cond_cancel = cond_sub.add_parser("cancel", help="撤销条件单")
+    cond_cancel.add_argument("--id", type=int, required=True)
+    cond_cancel.add_argument("--json", action="store_true")
+    cond_tick = cond_sub.add_parser("tick", help="跑一轮条件单检查（守护进程自动调用）")
+    cond_tick.add_argument("--dry-run", action="store_true")
+    cond_tick.add_argument("--json", action="store_true")
+    cond_design = cond_sub.add_parser("design", help="让 AI 设计条件单（挂上不立即成交）")
+    cond_design.add_argument("--pool-limit", type=int, default=15)
+    cond_design.add_argument("--pool-from", default="auto",
+                             choices=["auto", "config", "watchlist", "screening",
+                                      "all"])
+    cond_design.add_argument("--pool-tag", default="")
+    cond_design.add_argument("--max", type=int, default=5)
+    cond_design.add_argument("--max-days", type=int, default=3)
+    cond_design.add_argument("--dry-run", action="store_true", help="只看不挂")
+    cond_design.add_argument("--json", action="store_true")
+
+    # corporate（除权除息人工调整；M1 降级保护：检测+审计+手动入口）
+    corp_parser = subparsers.add_parser(
+        "corporate", help="除权除息调整（人工确认；自动检测 M1.5）")
+    corp_sub = corp_parser.add_subparsers(dest="corporate_command")
+    corp_apply = corp_sub.add_parser("apply", help="按人工确认的分红/送转调整持仓与成本")
+    corp_apply.add_argument("--symbol", required=True)
+    corp_apply.add_argument("--ex-date", required=True, dest="ex_date",
+                            help="除权除息日 YYYY-MM-DD")
+    corp_apply.add_argument("--cash-per-share", type=float, default=0.0,
+                            dest="cash_per_share", help="每股税前现金红利（元）")
+    corp_apply.add_argument("--share-ratio", type=float, default=0.0,
+                            dest="share_ratio", help="每股送转比例（10送3→0.3）")
+    corp_apply.add_argument("--json", action="store_true")
 
     # nav
     nav_parser = subparsers.add_parser("nav", help="查看 NAV 历史")
@@ -874,8 +1189,11 @@ def main() -> None:
     args = parser.parse_args()
 
     def emit(data, ok: bool = True, error: str | None = None):
-        print(json.dumps({"ok": ok, "data": data, "error": error},
-                         indent=2, ensure_ascii=False, default=str))
+        from paper_trading.utils.jsonx import safe
+
+        print(json.dumps(safe({"ok": ok, "data": data, "error": error}),
+                         indent=2, ensure_ascii=False, default=str,
+                         allow_nan=False))
 
     def _resolve_syms(b, a):
         """解析股票池：CLI > pool-from > config；返回 (symbols, source_note, candidates)。"""
@@ -1059,6 +1377,23 @@ def main() -> None:
             else:
                 emit(bridge.llm_status())
 
+        elif args.command == "calendar":
+            from paper_trading.utils.trading_calendar import (
+                calendar_status, sync_calendar,
+            )
+
+            cmd = getattr(args, "calendar_command", None)
+            if cmd == "sync":
+                res = sync_calendar(path=args.path)
+                emit(res, ok=res.get("ok", False), error=res.get("error"))
+                if not res.get("ok"):
+                    sys.exit(3)
+            elif cmd == "status":
+                emit(calendar_status(path=args.path))
+            else:
+                parser.print_help()
+                sys.exit(2)
+
         elif args.command == "agent":
             from paper_trading.agent import AgentTrader
 
@@ -1095,6 +1430,18 @@ def main() -> None:
                 if not res.get("ok"):
                     sys.exit(3)
                 return
+            if args.agent_command == "event":
+                from paper_trading.agent.events import run_event_review
+
+                syms, note, _cands, _picks_on = _resolve_syms(bridge, args)
+                with run_lock(args.lock_file):
+                    res = run_event_review(bridge, syms, dry_run=args.dry_run,
+                                           force=args.force)
+                res["pool_source"] = note
+                emit(res, ok=res.get("ok", False), error=res.get("error"))
+                if not res.get("ok"):
+                    sys.exit(3)
+                return
             if args.agent_command != "run":
                 parser.print_help()
                 sys.exit(2)
@@ -1113,6 +1460,239 @@ def main() -> None:
             emit(res, ok=res.get("ok", False), error=res.get("error"))
             if not res.get("ok"):
                 sys.exit(3)
+
+        elif args.command == "engine":
+            from paper_trading.engine.backtest import (Backtester, FeeModel,
+                                                      buy_and_hold, load_minutes,
+                                                      metrics)
+            from paper_trading.engine.config import load_engine_config, validate
+            from paper_trading.engine.optimize import (INTRADAY_GRIDS, grid_search,
+                                                       walk_forward)
+            from paper_trading.engine.rules import INTRADAY_TYPES
+            from paper_trading.utils.config import load_config
+
+            cfg = load_engine_config(args.config)
+            ok, msg = validate(cfg)
+            if args.engine_command == "config" or not args.engine_command:
+                emit({"enabled": bool(cfg.get("enabled")),
+                      "interval_sec": cfg.get("interval_sec"),
+                      "min_ticket_cny": cfg.get("min_ticket_cny"),
+                      "max_orders_per_day": cfg.get("max_orders_per_day"),
+                      "rules": cfg.get("rules"), "valid": ok, "message": msg})
+                return
+            if args.engine_command == "run":
+                from paper_trading.engine.runner import EngineRunner
+                from paper_trading.engine.state import EngineState
+
+                r = EngineRunner(bridge, cfg=cfg,
+                                 state=EngineState(bridge.account_db_path),
+                                 dry_run=args.dry_run).tick()
+                emit(r, ok=not r.get("error"), error=r.get("error"))
+                return
+            if args.engine_command in ("optimize", "walkforward"):
+                days_n = int(args.days)
+                syms = list(args.symbols or [])
+                for r0 in (cfg.get("rules") or []):
+                    syms.extend(r0.get("symbols") or
+                                ([r0["symbol"]] if r0.get("symbol") else []))
+                syms = sorted({str(s) for s in syms if s})
+                if not syms:
+                    emit(None, ok=False, error="请用 --symbols 指定标的")
+                    sys.exit(2)
+                bars_by_sym, all_days = {}, set()
+                for s in syms:
+                    bars = bridge.data_db.get_bars(s, limit=days_n + 10)
+                    if bars:
+                        bars_by_sym[s] = bars
+                        all_days.update(b.timestamp.date().isoformat() for b in bars)
+                if not bars_by_sym:
+                    emit(None, ok=False, error="本地无日线数据，先跑 sync")
+                    sys.exit(3)
+                full_cfg = load_config(args.config)
+                trading = full_cfg.get("trading") or {}
+                # 与实盘同一套口径：滑点/风控参数从 config 读，网格结论才可比
+                slip_fixed = float(trading.get("slippage_fixed", 0.01))
+                risk_cfg = full_cfg.get("risk")
+                fee = FeeModel(
+                    commission_rate=float(trading.get("commission_rate", 0.00025)),
+                    commission_min=float(trading.get("commission_min", 5.0)),
+                    stamp_duty_rate=float(trading.get("stamp_duty_rate", 0.0005)),
+                    transfer_fee_rate=float(trading.get("transfer_fee_rate",
+                                                         0.00001)))
+                grid_days = sorted(all_days)[-days_n:]
+                grid_minutes = {}
+                if args.grid in INTRADAY_GRIDS:
+                    grid_minutes = load_minutes(bridge.data_db, syms, grid_days)
+                if args.engine_command == "walkforward":
+                    out = walk_forward(cfg, bars_by_sym, grid_days, args.grid,
+                                       syms, value=args.value, fee=fee,
+                                       initial_cash=args.cash, top=args.top,
+                                       split=args.split,
+                                       slippage_fixed=slip_fixed, risk=risk_cfg,
+                                       minutes_by_day=grid_minutes)
+                else:
+                    out = grid_search(cfg, bars_by_sym, grid_days,
+                                      args.grid, syms, value=args.value, fee=fee,
+                                      initial_cash=args.cash, top=args.top,
+                                      slippage_fixed=slip_fixed, risk=risk_cfg,
+                                      minutes_by_day=grid_minutes)
+                emit(out, ok=not out.get("error"), error=out.get("error"))
+                return
+            # backtest
+            if not ok:
+                emit(None, ok=False, error=f"规则配置非法：{msg}")
+                sys.exit(2)
+            rules = cfg.get("rules") or []
+            syms = list(args.symbols or [])
+            for r0 in rules:
+                syms.extend(r0.get("symbols") or ([r0["symbol"]] if r0.get("symbol") else []))
+            syms = sorted({str(s) for s in syms if s})
+            if not syms:
+                emit(None, ok=False, error="规则集为空或未指定 --symbols")
+                sys.exit(2)
+            bars_by_sym, all_days = {}, set()
+            for s in syms:
+                bars = bridge.data_db.get_bars(s, limit=max(args.days, 30) + 5)
+                if bars:
+                    bars_by_sym[s] = bars
+                    all_days.update(b.timestamp.date().isoformat() for b in bars)
+            if not bars_by_sym:
+                emit(None, ok=False, error="本地无日线数据，先跑 sync")
+                sys.exit(3)
+            days = sorted(all_days)[-args.days:]
+            full_cfg = load_config(args.config)
+            trading_cfg = full_cfg.get("trading") or {}
+            risk_cfg = full_cfg.get("risk")
+            fee = FeeModel(
+                commission_rate=float(trading_cfg.get("commission_rate", 0.00025)),
+                commission_min=float(trading_cfg.get("commission_min", 5.0)),
+                stamp_duty_rate=float(trading_cfg.get("stamp_duty_rate", 0.0005)),
+                transfer_fee_rate=float(trading_cfg.get("transfer_fee_rate", 0.00001)),
+            )
+            # 日内规则需要分钟线；没有就如实少跑，不假装跑过（回测器会写进 skipped）
+            minutes_by_day = {}
+            if any(str(r.get("type") or "") in INTRADAY_TYPES
+                   for r in (cfg.get("rules") or [])):
+                minutes_by_day = load_minutes(bridge.data_db, syms, days)
+            # 回测默认口径 = 实盘：固定滑点 + 同一组仓位上限（config.yaml）
+            res = Backtester(cfg, fee=fee,
+                             slippage_pct=args.slippage_pct,
+                             slippage_fixed=float(trading_cfg.get(
+                                 "slippage_fixed", 0.01)),
+                             risk=risk_cfg).run(
+                                 bars_by_sym, days, initial_cash=args.cash,
+                                 minutes_by_day=minutes_by_day)
+            m = metrics(res, len(days))
+            m["trades_detail"] = res.trades[-50:]
+            m["per_rule"] = res.per_rule
+            m["skipped_sample"] = res.skipped[:20]
+            m["intraday_days"] = res.intraday_days
+            bench = buy_and_hold(bars_by_sym, days, args.cash, fee)
+            if bench:
+                m["benchmark_buy_hold"] = bench
+                m["excess_pct"] = round(m["total_return_pct"] -
+                                        bench["total_return_pct"], 2)
+            if args.curve and res.equity_curve:
+                eq = [c["equity"] for c in res.equity_curve]
+                lo, hi = min(eq), max(eq)
+                blocks = "▁▂▃▄▅▆▇█"
+                span = (hi - lo) or 1.0
+                m["ascii_curve"] = "".join(
+                    blocks[min(len(blocks) - 1, int((v - lo) / span * (len(blocks) - 1)))]
+                    for v in eq)
+            emit(m, ok=True)
+
+        elif args.command == "cond":
+            from paper_trading.engine.conditional import ConditionalOrders
+            from paper_trading.engine.runner import ConditionRunner
+
+            orders = ConditionalOrders(bridge.account_db_path)
+            cmd = args.cond_command
+            if cmd == "list":
+                emit({"orders": orders.list_all(args.limit, args.status)})
+                return
+            if cmd == "add":
+                ok, msg, oid = orders.create({
+                    "symbol": args.symbol, "side": args.side,
+                    "cond_type": args.cond, "cond_value": args.cond_value,
+                    "volume": args.volume, "value": args.value,
+                    "expiry": args.expiry, "note": args.note,
+                    "source": "manual"}, min_ticket=engine_min_ticket(args.config))
+                emit({"id": oid, "message": msg} if ok else None, ok=ok,
+                     error=None if ok else msg)
+                if not ok:
+                    sys.exit(3)
+                return
+            if cmd == "cancel":
+                ok = orders.cancel(args.id)
+                emit({"cancelled": ok, "id": args.id}, ok=ok,
+                     error=None if ok else "条件单不存在或已成交")
+                if not ok:
+                    sys.exit(3)
+                return
+            if cmd == "tick":
+                from paper_trading.engine.config import load_engine_config
+                from paper_trading.engine.state import EngineState
+
+                eng = load_engine_config(args.config)
+                r = ConditionRunner(bridge, orders, dry_run=args.dry_run,
+                                    enabled=bool(eng.get("enabled")),
+                                    min_ticket_cny=engine_min_ticket(args.config),
+                                    max_per_day=int(eng.get("max_orders_per_day") or 8),
+                                    state=EngineState(bridge.account_db_path)).tick()
+                emit(r, ok=True)
+                return
+            if cmd == "design":
+                ok, data, err = design_conditions(
+                    bridge, orders, pool_from=args.pool_from,
+                    pool_tag=args.pool_tag, pool_limit=args.pool_limit,
+                    max_conds=args.max, max_days=args.max_days,
+                    dry_run=args.dry_run, config_path=args.config)
+                emit(data, ok=ok, error=err or None)
+                if not ok:
+                    sys.exit(3)
+                return
+            parser.print_help()
+            sys.exit(2)
+
+        elif args.command == "minute":
+            from paper_trading.data import minute as _min
+
+            if args.minute_command == "pull":
+                syms = list(args.symbols or [])
+                if not syms:
+                    syms = _resolve_syms(bridge, args)[0][:args.pool_limit]
+                got = {}
+                days_seen: set[str] = set()
+                for s in syms:
+                    rows = _min.fetch_minute(s, period=args.period, days=args.days)
+                    if rows:
+                        bridge.data_db.upsert_minute_bars(s, rows)
+                        days_seen.update(str(r["ts"])[:10] for r in rows)
+                    got[s] = len(rows)
+                emit({"symbols": len(syms), "rows": got,
+                      "period": args.period,
+                      "trading_days": len(days_seen),
+                      "total_rows": sum(got.values())})
+                return
+            # stat
+            syms = list(args.symbols or bridge.data_db.get_pool_symbols()[:20])
+            emit({s: bridge.data_db.minute_count(s) for s in syms})
+            return
+
+        elif args.command == "corporate":
+            if getattr(args, "corporate_command", None) == "apply":
+                out = bridge.broker.apply_corporate_action(
+                    args.symbol, args.ex_date,
+                    cash_per_share=args.cash_per_share,
+                    share_ratio=args.share_ratio)
+                emit(out, ok=bool(out.get("ok")),
+                     error=None if out.get("ok") else out.get("why"))
+                if not out.get("ok"):
+                    sys.exit(3)
+                return
+            parser.print_help()
+            sys.exit(2)
 
         elif args.command == "nav":
             emit(bridge.get_nav_history())

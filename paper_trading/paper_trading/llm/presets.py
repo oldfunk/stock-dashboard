@@ -37,7 +37,32 @@ PRESETS: dict[str, dict[str, str]] = {
         "base_url": "",
         "default_model": "",
     },
+    # 本地推理服务：标准 OpenAI 兼容接口，默认不需要令牌
+    "ollama": {
+        "label": "本机 Ollama（无需 Key）",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "default_model": "",
+    },
+    "lmstudio": {
+        "label": "本机 LM Studio（无需 Key）",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "default_model": "",
+    },
+    "vllm": {
+        "label": "本机 vLLM（无需 Key）",
+        "base_url": "http://127.0.0.1:8000/v1",
+        "default_model": "",
+    },
+    "lan": {
+        "label": "局域网网关（无需 Key）",
+        "base_url": "",
+        "default_model": "",
+    },
 }
+
+
+# 这些预设是本地/局域网服务：不填 API Key 也能直接用
+TOKENLESS_PRESETS = {"ollama", "lmstudio", "vllm", "lan"}
 
 
 def preset_base_url(preset: str) -> str:

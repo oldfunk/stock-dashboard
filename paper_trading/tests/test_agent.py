@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from paper_trading.agent import AgentConfig, AgentTrader  # noqa: E402
 from paper_trading.llm.provider import LLMConfig  # noqa: E402
-from paper_trading.models import Bar  # noqa: E402
+from paper_trading.models import Bar, Order, OrderType  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +88,96 @@ def test_agent_rejects_bad_actions(monkeypatch, tmp_path):
     assert all("拒绝" in d["status"] for d in res["decisions"])
     assert b.broker.get_order_history(10) == [] or all(
         o["status"] == "rejected" for o in b.broker.get_order_history(10))
+
+
+def test_agent_sells_holding_outside_pool(monkeypatch, tmp_path):
+    """持仓退出筛选池后仍能卖：卖出白名单来自真实持仓，不是本轮池。"""
+    from paper_trading.llm import provider as prov
+
+    bars = _fresh_bars() + [mkbar("000001", 10_000 + i, 10.0) for i in range(30)]
+    b = _bridge(str(tmp_path), bars)
+    b.broker.submit_order(Order(
+        symbol="600519", direction=1, volume=100, order_type=OrderType.LIMIT,
+        limit_price=12.9, prev_close=12.9, ref_high=13.5, ref_low=12.5))
+    b.broker.unfreeze_t1(datetime.now() + timedelta(days=10))
+    assert b.broker.get_position("600519").available_volume == 100
+    plan = {"actions": [{"action": "sell", "symbol": "600519", "volume": 100,
+                         "reason": "池外持仓离场"}], "summary": "卖池外持仓"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    res = AgentTrader(b, AgentConfig(picks_enabled=False)).run(["000001"])
+    assert res["ok"]
+    assert res["decisions"][0]["status"].startswith("已成交")
+    assert b.broker.get_position("600519") is None
+
+
+def test_agent_arms_ai_conditions(monkeypatch, tmp_path):
+    """决策 JSON 里的 conditions 现在挂到条件单仓库，由引擎盘中触发。"""
+    from paper_trading.engine.conditional import ConditionalOrders
+    from paper_trading.llm import provider as prov
+
+    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
+    plan = {"actions": [], "conditions": [{
+        "symbol": "600519", "side": "buy",
+        "cond": {"type": "price_below", "value": 10.5},
+        "value": 8000, "expiry": exp, "reason": "回踩支撑"}],
+        "summary": "挂条件"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    res = AgentTrader(b, AgentConfig(picks_enabled=False)).run(["600519"])
+    assert res["ok"] and res["conditions"]["n_created"] == 1
+    o = ConditionalOrders(b.account_db_path).list_all(5)[0]
+    assert o["status"] == "armed" and o["source"] == "ai"
+    assert o["cond_type"] == "price_below" and o["cond_value"] == 10.5
+
+
+def test_ai_condition_fills_through_engine(monkeypatch, tmp_path):
+    """端到端：AI 挂条件 → ConditionRunner 盘中触发 → 成交（不是二次下单）。"""
+    from paper_trading.engine.conditional import ConditionalOrders
+    from paper_trading.engine.runner import ConditionRunner
+    from paper_trading.llm import provider as prov
+
+    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
+    plan = {"actions": [], "conditions": [{
+        "symbol": "600519", "side": "buy",
+        "cond": {"type": "price_below", "value": 10.5},
+        "value": 8000, "expiry": exp, "reason": "回踩买入"}],
+        "summary": "条件单"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    assert t.run(["600519"])["conditions"]["n_created"] == 1
+    quotes = {"600519": {"code": "600519", "price": 10.4, "prev_close": 10.5,
+                         "high": 10.6, "low": 10.3, "volume": 1e6,
+                         "change_pct": -1.0}}
+    r = ConditionRunner(b, ConditionalOrders(b.account_db_path),
+                        min_ticket_cny=0).tick(quotes)
+    assert r["filled"], r
+    assert b.broker.get_position("600519").total_volume > 0
+
+
+def test_agent_plan_conditions_arm_on_execute(monkeypatch, tmp_path):
+    """计划阶段只保存条件；到目标交易日执行计划时才挂单。"""
+    from paper_trading.engine.conditional import ConditionalOrders
+    from paper_trading.llm import provider as prov
+
+    exp = (datetime.now() + timedelta(days=3)).date().isoformat()
+    plan = {"actions": [], "conditions": [{
+        "symbol": "600519", "side": "buy",
+        "cond": {"type": "price_above", "value": 13.5},
+        "value": 8000, "expiry": exp, "reason": "突破"}],
+        "summary": "计划条件"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    r = t.run(["600519"], plan_only=True)
+    co = ConditionalOrders(b.account_db_path)
+    assert co.list_all(5) == []          # 计划不提前挂单
+    pend = b.broker.get_pending_plan(r["plan_date"])
+    assert pend["plan"]["conditions"]
+    res = t._execute_plan(pend, {"600519": b.data_db.get_bars("600519", limit=30)},
+                          b.price_map(["600519"]))
+    assert res["conditions"]["n_created"] == 1
+    assert co.list_all(5)[0]["status"] == "armed"
 
 
 def test_agent_garbage_output_safe(monkeypatch, tmp_path):
@@ -191,15 +281,19 @@ def test_agent_plan_then_execute(monkeypatch, tmp_path):
     assert r1["ok"] and r1["mode"] == "plan" and r1["plan_id"] > 0
     assert b.broker.get_position("600519") is None  # 做计划不碰账本
     assert b.broker.get_order_history(10) == []
-    pend = b.broker.get_pending_plan(
-        __import__("datetime").date.today().isoformat())
+    # 计划写的是下一个交易日，不是今晚；17:15 的 trade 不能提前消费。
+    assert r1["plan_date"] > datetime.now().date().isoformat()
+    pend = b.broker.get_pending_plan(r1["plan_date"])
     assert pend and pend["status"] == "pending"
-    r2 = t.run(["600519"])  # 开盘执行（消费计划，不再问 LLM）
+    assert b.broker.get_executable_plan(datetime.now().date().isoformat()) is None
+    # 模拟目标交易日开盘：执行计划（不再问 LLM）
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+    latest = b.price_map(["600519"])
+    r2 = t._execute_plan(pend, bars, latest)
     assert r2["ok"] and r2.get("from_plan") is True
     assert r2["decisions"][0]["status"].startswith("已成交")
     assert b.broker.get_position("600519").total_volume == 100
-    assert b.broker.get_pending_plan(
-        __import__("datetime").date.today().isoformat()) is None  # 已消费
+    assert b.broker.get_pending_plan(r1["plan_date"]) is None  # 已消费
     # 同日再存计划，旧 pending 自动作废，只剩最新
     b.broker.save_plan(__import__("datetime").date.today().isoformat(),
                        ["600519"], {"actions": [], "summary": "新计划"})
@@ -227,6 +321,92 @@ def test_agent_executes_plan_on_stale_bars(monkeypatch, tmp_path):
     res = t.run(["600519"])
     assert res["ok"] and res.get("from_plan") is True
     assert res["decisions"][0]["status"].startswith("已成交")
+
+
+def test_agent_executes_previous_day_plan(tmp_path):
+    """早盘 trade 消费前一交易日计划（plan_date 可以是昨天）。"""
+    from datetime import date, timedelta
+
+    b = _bridge(str(tmp_path), _fresh_bars())
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    pid = b.broker.save_plan(yesterday, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": 12.9, "price_source": "last_close",
+                     "reason": "昨日计划"}],
+        "summary": "昨日计划", "asof": yesterday})
+    assert pid > 0
+    r = AgentTrader(b, AgentConfig(picks_enabled=False)).run(["600519"])
+    assert r["ok"] and r.get("from_plan") is True
+    assert r["decisions"][0]["status"].startswith("已成交")
+    assert b.broker.get_position("600519").total_volume == 100
+    assert b.broker.get_pending_plan(yesterday) is None
+
+
+def test_agent_plan_backfills_price_from_last_close(monkeypatch, tmp_path):
+    """计划里的 buy/sell 必须落定稿收盘价，不能把 null 留给执行链。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "计划买"}],
+            "summary": "计划"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    r = t.run(["600519"], plan_only=True)
+    assert r["ok"] and r["mode"] == "plan"
+    pend = b.broker.get_pending_plan(r["plan_date"])
+    act = pend["plan"]["actions"][0]
+    assert act["price"] == 12.9
+    assert act["price_source"] == "last_close"
+
+
+def test_execute_plan_covers_plan_only_symbol_and_applies_cap(monkeypatch, tmp_path):
+    """计划新增标的必须在执行上下文补价；否则 0 价会绕过单笔金额上限。"""
+    b = _bridge(str(tmp_path),
+                [mkbar("600519", 10_000 + i, 1309.69) for i in range(30)])
+    today = datetime.now().date().isoformat()
+    b.broker.save_plan(today, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": None, "reason": "计划新增"}],
+        "summary": "计划新增"})
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3,
+                                   max_order_value=20000.0,
+                                   picks_enabled=False))
+    res = t.run(["000001"])  # 本轮运行池不含 600519
+    assert res["ok"] and res.get("from_plan") is True
+    assert "超单笔上限" in res["decisions"][0]["status"]
+    assert b.broker.get_order_history(10) == []
+
+
+def test_execute_plan_rejects_missing_price(monkeypatch, tmp_path):
+    """无最新价、无可信计划价时必须显式拒单，不能把 0 传给撮合。"""
+    b = _bridge(str(tmp_path),
+                [mkbar("000001", i, 10.0) for i in range(5)])
+    today = datetime.now().date().isoformat()
+    b.broker.save_plan(today, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": None, "reason": "无价"}],
+        "summary": "无价"})
+    t = AgentTrader(b, AgentConfig(max_order_value=20000.0))
+    res = t.run(["000001"])
+    assert res["decisions"][0]["status"] == "拒绝：无有效价格"
+    assert b.broker.get_order_history(10) == []
+
+
+def test_execute_plan_uses_verified_basis_when_latest_missing(monkeypatch, tmp_path):
+    """只有 price_source=last_close 的计划价允许在缺最新价时兜底。"""
+    b = _bridge(str(tmp_path),
+                [mkbar("000001", i, 10.0) for i in range(5)])
+    today = datetime.now().date().isoformat()
+    b.broker.save_plan(today, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": 10.0, "price_source": "last_close",
+                     "reason": "定稿基准价"}],
+        "summary": "基准价"})
+    t = AgentTrader(b, AgentConfig(max_order_value=20000.0))
+    res = t.run(["000001"])
+    assert res["decisions"][0]["status"].startswith("已成交")
+    assert b.broker.get_position("600519").total_volume == 100
 
 
 def test_stock_pool_yaml_octal_guard(tmp_path):

@@ -85,6 +85,8 @@ class Position:
     available_volume: int  # T+1: 当天买入当天不可用
     avg_cost: float
     last_update: datetime
+    entry_day: str = ""     # 建仓日 YYYY-MM-DD（time_stop 用；旧库迁移时回填）
+    peak_price: float = 0.0  # 持仓期间最高价（trailing_stop 用；盘中落库）
 
 
 @dataclass

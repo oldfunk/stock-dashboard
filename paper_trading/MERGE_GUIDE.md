@@ -15,15 +15,18 @@
 
 | 方向 | 表 | 说明 |
 |---|---|---|
-| 拥有（读写自家文件） | `paper_account.db`: account/positions/orders/fills/nav_history/t1_freeze/op_log/agent_plans；`data.db`: daily_bars/stock_pool | 与母库 `paper_*` 旧表**同名不同库**，互不干扰；母库旧 M4a 表一个不动 |
+| 拥有（读写自家文件） | `paper_account.db`: account/positions/orders/fills/nav_history/t1_freeze/op_log/agent_plans/**conditional_orders/engine_state/engine_triggers**；`data.db`: daily_bars/stock_pool/**minute_bars/quote_log** | 与母库 `paper_*` 旧表**同名不同库**，互不干扰；母库旧 M4a 表一个不动。粗体为 v0.5.0 起新增，**全部是新增表**，不改动既有表结构、无字段冲突；`engine:` 段与这些表都不在母库命名空间下，合并即用 |
 | 只读母库 | `screening_result`（最新 active 候选）、`ai_watchlist`+`watchlist`、`stock_analysis_history`、`watchlist_notes`、`watchlist_thesis`、`stock_snapshot`、`market_index` | 一律 SQLite URI `mode=ro`；任一缺失/异常→回退空结果，永不抛错阻断交易链（`paper_trading/integration/` 全覆盖单测） |
 | 永不碰 | 母库其他所有表 | 写操作一律禁止；审计时 `grep -rn "INSERT\|UPDATE\|DELETE" paper_trading/integration/` 必须零命中母库路径 |
 
 ## 3. 配置合并
 
-本 `config.yaml` 的 `trading/account/strategy/risk/agent` 五段整体并入母 `config/config.yaml` 的
+本 `config.yaml` 的 `trading/account/strategy/risk/agent/engine` 六段整体并入母 `config/config.yaml` 的
 `paper_trading:` 命名空间下；`load_config` 加一个 `namespace="paper_trading"` 参数即可
-（改动点唯一，约 10 行）。`stock_pool` 保留手填；新增 `--pool-from` 已支持
+（改动点唯一，约 10 行）。`engine:` 段是 v0.5.0 新增（规则引擎配置：轮询间隔/日内上限/单笔下限/规则集），
+仓库内 `rules` 是空列表 + 注释示例，**默认 `enabled: false`（不接管母方任何交易）**；
+本机规则集写 `engine.local.yaml`（gitignored，不进仓库）。
+`stock_pool` 保留手填；新增 `--pool-from` 已支持
 `watchlist/screening/all`（只读母库，见 `integration/pool.py`）。
 
 ## 4. 密钥
@@ -41,10 +44,23 @@
 
 1. 母仓库开 `nightly/paper-trading-merge` 分支（遵守母 AGENTS.md 工作流）。
 2. 本仓库整体迁入顶层 `paper_trading/`（`git subtree` 或文件拷贝，保留 `.gitignore` 的 `secrets.local.json` 豁免）。
-3. `config.yaml` 五段并入命名空间；`--pool-from` 默认仍 `config`（行为零变化）。
-4. 生产跑母方 `scripts/gate.sh`（母仓库脚本）：本 44 单测必须全绿（hermetic：假路径+monkeypatch，不读 ambient）。
+3. `config.yaml` 六段并入命名空间；`--pool-from` 默认仍 `config`（行为零变化）。
+4. 生产跑母方 `scripts/gate.sh`（母仓库脚本）：本仓库单测必须全绿（hermetic：假路径+monkeypatch，不读 ambient）。
+   当前 **129 个单测**（`python -m pytest tests/ -q`）。
 5. 冒烟：`agent run --dry-run` + 面板三路 200 + `llm ask` 一次。
 6. 合 main + handoff 入账（按母规矩）。
+
+### 版本对照
+
+| tag | 内容 | 对母方的影响 |
+|---|---|---|
+| v0.4.0 | 定时队列/面板问答/全市场选股 | 无 schema 变更 |
+| v0.5.0 | 条件单 + 参数网格 + 日内规则 + 面板引擎区 | `config.yaml` 新增 `engine:` 段（默认关）；`data.db` 新增 `minute_bars`/`quote_log`；`paper_account.db` 新增 `conditional_orders`/`engine_state`/`engine_triggers`——**全是新增，无冲突** |
+| v0.5.1 | 回测账目修正（卖出回款进现金 / 缺日线按最近收盘计价）+ 分钟线换源 | 无 schema 变更（回测结果数字会变，以新为准） |
+| v0.5.2 | 回测提速 + JSON 严格化 | 无 schema 变更 |
+
+母方拉取命令不变：
+`git subtree pull --prefix paper_trading git@github-paper:oldfunk/paper-trading.git <tag> --squash`
 
 ## 7. 回滚
 

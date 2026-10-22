@@ -1,4 +1,4 @@
-"""AI 定时队列单测（纯函数 + 本地文件往返 + 分发集成，全离线）。"""
+"""旧 AI 定时队列兼容单测（生产路径已由运行时接管）。"""
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,8 +14,8 @@ from paper_trading.agent import schedule as sch  # noqa: E402
 def test_parse_entry():
     assert sch.parse_entry("16:45") == {"time": "16:45", "action": "trade"}
     assert sch.parse_entry("9:5=sync") == {"time": "09:05", "action": "sync"}
-    assert sch.parse_entry({"time": "13:00", "action": "PLAN"}) == {"time": "13:00",
-                                                                    "action": "plan"}
+    assert sch.parse_entry({"time": "13:00", "action": "PLAN"}) == {
+        "time": "13:00", "action": "plan"}
     for bad in ["", "25:00", "16:60", "16:45=bomb", "16-45", 123, None]:
         with pytest.raises(ValueError):
             sch.parse_entry(bad)
@@ -55,8 +55,8 @@ def test_save_rejects_bad_and_keeps_old(tmp_path):
     assert sch.save_schedule(tmp_path, ["16:45=trade"])[0]
     assert not sch.save_schedule(tmp_path, ["99:99=trade"])[0]
     assert not sch.save_schedule(tmp_path, ["16:45=bomb"])[0]
-    assert sch.load_schedule(tmp_path)["entries"] == [{"time": "16:45",
-                                                       "action": "trade"}]
+    assert sch.load_schedule(tmp_path)["entries"] == [
+        {"time": "16:45", "action": "trade"}]
 
 
 def test_check_queue_order():
@@ -74,104 +74,8 @@ def test_check_queue_order():
     assert (ok, reason) == (False, "not-in-schedule")
 
 
-def _bridge(tmp, bars):
-    import tempfile
-
-    import paper_trading.cli as hb
-
-    f1 = tempfile.mktemp(suffix=".db", dir=tmp)
-    f2 = tempfile.mktemp(suffix=".db", dir=tmp)
-    b = hb.TradingBridge(data_db=f1, account_db=f2, config_path="/nonexistent.yaml",
-                         secrets_path=str(Path(tmp) / "s.json"))
-    b.data_db.upsert_bars(bars)
-    b.llm_save("custom", "https://x/v1", "m", "k")  # fake 源，chat 由单测替换
-    return b
-
-
-def _fresh():
-    from datetime import timedelta
-
-    from paper_trading.models import Bar
-    return [Bar(symbol="600519",
-                timestamp=datetime(2026, 9, 29) + timedelta(days=10000 + i),
-                open=10.0, high=11.0, low=9.0, close=10.0, volume=100)
-            for i in range(30)]
-
-
-def _mock_net(monkeypatch):
-    from paper_trading.cli import TradingBridge
-    monkeypatch.setattr(TradingBridge, "sync_data",
-                        lambda self, symbols: {"ok": True, "symbols": symbols,
-                                               "updated": {s: 1 for s in symbols}})
-
-
-def test_tick_dispatches_each_action(monkeypatch, tmp_path):
-    """tick 按动作分发：sync/plan/analyze/trade 各跑各的，都记 slot 标记。"""
-    import json
-
-    from paper_trading.agent import AgentTrader
-    from paper_trading.llm import provider as prov
-
-    _mock_net(monkeypatch)
-    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(
-        {"actions": [], "summary": "不动"}))
-    assert sch.save_schedule(tmp_path, ["09:00=sync", "13:00=plan",
-                                        "16:00=analyze", "16:45=trade"])[0]
-    b = _bridge(str(tmp_path), _fresh())
-    t = AgentTrader(b)
-    fired = []
-    for hm in ["09:30", "13:30", "16:30", "17:30"]:
-        monkeypatch.setattr(sch, "_now", lambda hm=hm: datetime(2026, 9, 29,
-                                                              int(hm[:2]),
-                                                              int(hm[3:])))
-        r = t.tick(["600519"], sched_root=str(tmp_path))
-        assert r.get("slot"), r
-        fired.append(r["slot"])
-    assert fired == ["09:00", "13:00", "16:00", "16:45"]
-    assert t._fired_entries_today(sch.load_schedule(str(tmp_path))["entries"]) == set(fired)
-    # 队列跑完再 tick 即跳过（与真实时钟无关——消费凭标记）
-    r = t.tick(["600519"], sched_root=str(tmp_path))
-    assert r.get("skipped") == "not-in-schedule"
-    # analyze 没下单（持仓仍空），plan 不碰账本 tested by mode
-    assert b.broker.get_position("600519") is None
-
-
-def test_tick_skips_before_first_slot(monkeypatch, tmp_path):
-    """时刻未到：tick 直接跳过，不碰 LLM/同步。"""
-    from paper_trading.agent import AgentTrader
-    from paper_trading.llm import provider as prov
-
-    _mock_net(monkeypatch)
-    monkeypatch.setattr(sch, "_now", lambda: datetime(2026, 9, 29, 9, 0))
-    monkeypatch.setattr(prov, "chat", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("时段外不应问 LLM")))
-    b = _bridge(str(tmp_path), _fresh())
-    r = AgentTrader(b).tick(["600519"], sched_root=str(tmp_path))
-    assert r.get("skipped") == "not-in-schedule"
-
-
-def test_legacy_run_means_trade(monkeypatch, tmp_path):
-    """直接 run() = 跑一次 trade：时刻未到跳过，到点跑并标记，其次再跑已决策。"""
-    import json
-
-    from paper_trading.agent import AgentTrader
-    from paper_trading.llm import provider as prov
-
-    _mock_net(monkeypatch)
-    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(
-        {"actions": [], "summary": "不动"}))
-    b = _bridge(str(tmp_path), _fresh())
-    t = AgentTrader(b)
-    monkeypatch.setattr(sch, "_now", lambda: datetime(2026, 9, 29, 9, 0))
-    assert t.run(["600519"], sched_root=str(tmp_path))["skipped"] == "not-in-schedule"
-    monkeypatch.setattr(sch, "_now", lambda: datetime(2026, 9, 29, 17, 0))
-    assert t.run(["600519"], sched_root=str(tmp_path))["ok"]
-    assert t._fired_entries_today([{"time": "16:45", "action": "trade"}]) == {"16:45"}
-    assert t.run(["600519"], sched_root=str(tmp_path))["skipped"] == "already-decided"
-
-
 def test_cli_schedule_list_set(tmp_path, monkeypatch):
-    """CLI 定时管理：list 读默认/set 落盘/非法输入拒绝（cwd 隔离防污染仓库）。"""
+    """旧队列仍可查看/写入（兼容），但生产 tick/run 不再读取它。"""
     import json
     import subprocess
 
@@ -192,31 +96,9 @@ def test_cli_schedule_list_set(tmp_path, monkeypatch):
     assert r.returncode == 0, r.stderr
     r, d = _run("list", "--json")
     assert [e["time"] for e in d["data"]["entries"]] == ["09:00", "16:45"]
-    r = subprocess.run(base + ["set", "--entry", "99:99=trade"], capture_output=True,
-                       text=True, cwd=str(tmp_path), env=env)
+    r = subprocess.run(base + ["set", "--entry", "99:99=trade"],
+                       capture_output=True, text=True, cwd=str(tmp_path), env=env)
     assert r.returncode != 0
-    r = subprocess.run(base + ["set", "--entry", "16:45=bomb"], capture_output=True,
-                       text=True, cwd=str(tmp_path), env=env)
+    r = subprocess.run(base + ["set", "--entry", "16:45=bomb"],
+                       capture_output=True, text=True, cwd=str(tmp_path), env=env)
     assert r.returncode != 0
-
-
-def test_fired_survives_noisy_log(monkeypatch, tmp_path):
-    """回归：面板高频问答把决策挤出最近 N 条窗口时，定时闸不能失忆重跑。"""
-    import json
-
-    from paper_trading.agent import AgentTrader
-    from paper_trading.llm import provider as prov
-
-    _mock_net(monkeypatch)
-    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(
-        {"actions": [], "summary": "不动"}))
-    assert sch.save_schedule(tmp_path, ["16:45=trade"])[0]
-    b = _bridge(str(tmp_path), _fresh())
-    t = AgentTrader(b)
-    monkeypatch.setattr(sch, "_now", lambda: datetime(2026, 9, 29, 17, 0))
-    assert t.run(["600519"], sched_root=str(tmp_path))["ok"]
-    for i in range(300):  # 300 轮问答噪音，埋掉决策记录
-        b.broker.log_operation("llm:ask", {"prompt": f"q{i}"}, True,
-                               {"answer": "a"}, None, None)
-    assert t._fired_entries_today([{"time": "16:45", "action": "trade"}]) == {"16:45"}
-    assert t.run(["600519"], sched_root=str(tmp_path))["skipped"] == "already-decided"

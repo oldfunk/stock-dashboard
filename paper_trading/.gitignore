@@ -61,3 +61,6 @@ strategy.local.yaml
 # Secrets (LLM keys, NEVER commit)
 secrets.local.json
 *.lock
+
+# 规则引擎本机配置（规则集/阈值）
+engine.local.yaml
