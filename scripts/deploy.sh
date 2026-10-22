@@ -6,6 +6,8 @@
 #   bash scripts/deploy.sh --restart    # 强制重启两个服务
 #   bash scripts/deploy.sh --no-restart # 跳过重启（仍做健康检查）
 # 部署目标从 deploy.local.md 的 KEY=VALUE 块读取（该文件不入库）。
+# 执行环境：Windows 上须用 Git for Windows 的 bash（如 "C:\Program Files\Git\bin\bash.exe" scripts/deploy.sh）。
+# 注意：PowerShell 里裸敲 bash 进的是 WSL——WSL 的 Linux git 无 GitHub 凭据，push 会卡死在隐形密码提示。
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
