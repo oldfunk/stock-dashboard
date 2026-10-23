@@ -1,230 +1,207 @@
-"""M4b TopK 离线回测脚本
+"""TopK 离线回测（2026-10-23 P0-8，look-ahead-safe）。
 
-从 SQLite 读取历史数据，模拟 TopK 等权组合回测。
-不依赖 QLib，纯 Python 实现，只回流结论不回流代码。
+- 基本面源：``financial_history``（年报，含 ``notice_date``）；每个再平衡日只取
+  ``notice_date <= 当日`` 的最新年报，**杜绝前视**（P0-10 数据）。
+- 价格源：``kline_daily``（前复权）。
+- 评分：简化五维（ROE / PE / PB / 净利率 / 负债率），与主筛选器口径方向一致。
+- 费用：佣金 0.025%（买卖双扣）、印花税 0.05%（卖出）。
+- 对照：等权买入持有全部合格标的（基准）。
 
 用法：
-    python scripts/backtest_topk.py --start 2024-01-01 --end 2024-12-31 --topk 20
+    python scripts/backtest_topk.py --start 2016-01-01 --end 2026-10-23 --topk 20 --freq M
 """
 
 import argparse
 import json
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-# 添加项目根目录到 path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models.database import get_db_path
 
+COMMISSION = 0.00025
+STAMP_DUTY = 0.0005
+INITIAL_CASH = 1_000_000.0
+
 
 def get_db():
-    """获取数据库连接"""
-    db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def fetch_daily_data(conn, start_date: str, end_date: str):
-    """获取日 K 线数据"""
-    cursor = conn.execute("""
-        SELECT code, trade_date, open, close, high, low, volume, amount
-        FROM kline_daily
-        WHERE trade_date BETWEEN ? AND ?
-        ORDER BY code, trade_date
-    """, (start_date, end_date))
-    return cursor.fetchall()
+def load_fundamentals(conn) -> dict:
+    """{code: [年报(notice_date, report_date, roe, eps, gm, nm, debt, fcf), ...]}（notice_date 倒序）。"""
+    rows = conn.execute(
+        "SELECT stock_code, report_date, notice_date, roe, eps, gross_margin, "
+        "net_margin, debt_ratio, fcf FROM financial_history "
+        "WHERE report_type='A' ORDER BY stock_code, notice_date DESC"
+    ).fetchall()
+    out: dict[str, list] = {}
+    for r in rows:
+        out.setdefault(r["stock_code"], []).append({
+            "notice_date": r["notice_date"], "report_date": r["report_date"],
+            "roe": r["roe"], "eps": r["eps"], "gross_margin": r["gross_margin"],
+            "net_margin": r["net_margin"], "debt_ratio": r["debt_ratio"],
+            "fcf": r["fcf"],
+        })
+    return out
 
 
-def fetch_financial_data(conn, date: str):
-    """获取财务数据（最近报告期）"""
-    cursor = conn.execute("""
-        SELECT code, roe_5y_avg, pe, pb, gross_margin, net_margin,
-               debt_ratio, revenue_growth, profit_growth, fcf_5y_sum,
-               market_cap, score
-        FROM financial_summary
-        WHERE report_date <= ?
-        ORDER BY report_date DESC
-    """, (date,))
-    # 每只股票取最新一条
-    seen = set()
-    results = []
-    for row in cursor.fetchall():
-        if row['code'] not in seen:
-            seen.add(row['code'])
-            results.append(row)
-    return results
+def fundamentals_at(fund: dict, code: str, date: str) -> dict | None:
+    """notice_date <= date 的最新年报；无则 None（防前视）。"""
+    for rec in fund.get(code, []):
+        nd = rec["notice_date"] or rec["report_date"]
+        if nd and nd <= date:
+            return rec
+    return None
 
 
-def calculate_score(stock: dict) -> float:
-    """简化评分：基于 ROE、PE、PB、毛利率、净利率、负债率"""
+def load_prices(conn) -> dict:
+    """{code: {trade_date: close}}（前复权）。"""
+    rows = conn.execute(
+        "SELECT code, trade_date, close FROM kline_daily WHERE close IS NOT NULL"
+    ).fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out.setdefault(r["code"], {})[r["trade_date"]] = r["close"]
+    return out
+
+
+def score_stock(rec: dict, price: float) -> float:
+    """简化五维评分（0-100）：ROE / PE / PB / 净利率 / 负债率。"""
+    if price <= 0:
+        return 0.0
     score = 0.0
-    # ROE 5年均（0-30分）
-    roe = stock.get('roe_5y_avg') or 0
-    score += min(roe / 30 * 30, 30)
-    # PE（0-20分，越低越好）
-    pe = stock.get('pe')
-    if pe and pe > 0:
+    roe = rec.get("roe")
+    if roe is not None:
+        score += min(max(roe, 0) / 30 * 30, 30)
+    eps = rec.get("eps")
+    pe = price / eps if eps and eps > 0 else None
+    if pe:
         score += max(0, 20 - pe / 2)
-    # PB（0-15分，越低越好）
-    pb = stock.get('pb')
-    if pb and pb > 0:
-        score += max(0, 15 - pb * 3)
-    # 毛利率（0-15分）
-    gm = stock.get('gross_margin') or 0
-    score += min(gm / 100 * 15, 15)
-    # 净利率（0-10分）
-    nm = stock.get('net_margin') or 0
-    score += min(nm / 100 * 10, 10)
-    # 负债率（0-10分，越低越好）
-    dr = stock.get('debt_ratio') or 0
-    score += max(0, 10 - dr / 10)
+    nm = rec.get("net_margin")
+    if nm is not None:
+        score += min(max(nm, 0) / 100 * 20, 20)
+    gm = rec.get("gross_margin")
+    if gm is not None:
+        score += min(max(gm, 0) / 100 * 15, 15)
+    dr = rec.get("debt_ratio")
+    if dr is not None:
+        score += max(0, 15 - dr / 10)
     return score
 
 
+def _close(prices: dict, code: str, date: str):
+    return prices.get(code, {}).get(date)
+
+
+def _rebalance_dates(trading_dates: list, freq: str) -> list:
+    out, last = [], None
+    for d in trading_dates:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+        key = d if freq == "D" else (dt.strftime("%Y-%W") if freq == "W" else dt.strftime("%Y-%m"))
+        if key != last:
+            out.append(d)
+            last = key
+    return out
+
+
 def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
-                 rebalance_freq: str = 'W'):
-    """运行 TopK 回测
+                 rebalance_freq: str = "M") -> dict:
+    fund = load_fundamentals(conn)
+    prices = load_prices(conn)
 
-    rebalance_freq: 'D' 日, 'W' 周, 'M' 月
-    """
-    # 获取所有交易日
-    cursor = conn.execute("""
-        SELECT DISTINCT trade_date FROM kline_daily
-        WHERE trade_date BETWEEN ? AND ?
-        ORDER BY trade_date
-    """, (start_date, end_date))
-    trading_dates = [row['trade_date'] for row in cursor.fetchall()]
-
+    rows = conn.execute(
+        "SELECT DISTINCT trade_date FROM kline_daily "
+        "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
+        (start_date, end_date),
+    ).fetchall()
+    trading_dates = [r["trade_date"] for r in rows]
     if not trading_dates:
-        print("无交易日数据")
-        return None
+        return {"error": "无交易日数据"}
 
-    # 按再平衡频率分组
-    rebalance_dates = []
-    last_rebalance = None
+    rebalance = set(_rebalance_dates(trading_dates, rebalance_freq))
+
+    cash = INITIAL_CASH
+    positions: dict[str, dict] = {}
+
+    def mark_to_market(date):
+        v = cash
+        for code, pos in positions.items():
+            c = _close(prices, code, date)
+            if c:
+                v += c * pos["volume"]
+        return v
+
     for date in trading_dates:
-        dt = datetime.strptime(date, '%Y-%m-%d')
-        if rebalance_freq == 'D':
-            key = date
-        elif rebalance_freq == 'W':
-            key = dt.strftime('%Y-%W')
-        elif rebalance_freq == 'M':
-            key = dt.strftime('%Y-%m')
-        else:
-            key = date
-        if key != last_rebalance:
-            rebalance_dates.append(date)
-            last_rebalance = key
+        if date in rebalance:
+            # 合格标的：有 notice_date <= date 的年报
+            eligible = []
+            for code in prices:
+                rec = fundamentals_at(fund, code, date)
+                price = _close(prices, code, date)
+                if rec is None or not price or price <= 0:
+                    continue
+                eligible.append((score_stock(rec, price), code))
+            eligible.sort(reverse=True)
+            top = {code for _, code in eligible[:topk]}
 
-    # 初始资金
-    initial_cash = 1_000_000.0
-    cash = initial_cash
-    positions = {}  # code -> {volume, avg_price}
-    portfolio_value = initial_cash
+            # 卖出不在 TopK 的持仓
+            for code in list(positions):
+                if code not in top:
+                    c = _close(prices, code, date)
+                    if c:
+                        vol = positions[code]["volume"]
+                        cash += c * vol * (1 - COMMISSION - STAMP_DUTY)
+                    del positions[code]
 
-    # 回测循环
-    for i, date in enumerate(trading_dates):
-        # 再平衡日：调仓
-        if date in rebalance_dates:
-            # 获取当日财务数据
-            financials = fetch_financial_data(conn, date)
-            # 计算评分并排序
-            scored = []
-            for f in financials:
-                score = calculate_score(f)
-                scored.append((score, f['code'], f))
-            scored.sort(reverse=True)
-            top_stocks = scored[:topk]
-
-            # 卖出不在 TopK 中的持仓
-            for code in list(positions.keys()):
-                if code not in [s[1] for s in top_stocks]:
-                    # 以当日收盘价卖出
-                    cursor = conn.execute("""
-                        SELECT close FROM kline_daily
-                        WHERE code = ? AND trade_date = ?
-                    """, (code, date))
-                    row = cursor.fetchone()
-                    if row:
-                        sell_price = row['close']
-                        vol = positions[code]['volume']
-                        cash += sell_price * vol * (1 - 0.00025 - 0.005)  # 佣金+印花税
-                        del positions[code]
-
-            # 买入 TopK 中的股票
-            target_value = portfolio_value / topk
-            for score, code, f in top_stocks:
+            # 买入 TopK
+            pv = mark_to_market(date)
+            target = pv / topk if topk else 0.0
+            for _, code in eligible[:topk]:
                 if code in positions:
                     continue
-                # 以当日收盘价买入
-                cursor = conn.execute("""
-                    SELECT close FROM kline_daily
-                    WHERE code = ? AND trade_date = ?
-                """, (code, date))
-                row = cursor.fetchone()
-                if not row:
+                c = _close(prices, code, date)
+                if not c or c <= 0:
                     continue
-                buy_price = row['close']
-                if buy_price <= 0:
-                    continue
-                # 计算可买数量（100股整数倍）
-                max_vol = int(target_value / buy_price / 100) * 100
+                budget = min(target, cash)
+                max_vol = int(budget / (c * (1 + COMMISSION)) / 100) * 100
                 if max_vol <= 0:
                     continue
-                cost = buy_price * max_vol * (1 + 0.00025)  # 佣金
-                if cost > cash:
-                    max_vol = int(cash / buy_price / 100) * 100
-                    if max_vol <= 0:
-                        continue
-                    cost = buy_price * max_vol * (1 + 0.00025)
+                cost = c * max_vol * (1 + COMMISSION)
                 cash -= cost
-                positions[code] = {'volume': max_vol, 'avg_price': buy_price}
+                positions[code] = {"volume": max_vol}
 
-        # 计算当日组合价值
-        portfolio_value = cash
-        for code, pos in positions.items():
-            cursor = conn.execute("""
-                SELECT close FROM kline_daily
-                WHERE code = ? AND trade_date = ?
-            """, (code, date))
-            row = cursor.fetchone()
-            if row:
-                portfolio_value += row['close'] * pos['volume']
-
-    # 最终收益
-    total_return = (portfolio_value - initial_cash) / initial_cash * 100
+    final_value = mark_to_market(trading_dates[-1])
     return {
-        'start_date': start_date,
-        'end_date': end_date,
-        'topk': topk,
-        'rebalance_freq': rebalance_freq,
-        'initial_cash': initial_cash,
-        'final_value': portfolio_value,
-        'total_return_pct': total_return,
-        'positions': len(positions),
+        "start_date": start_date,
+        "end_date": end_date,
+        "topk": topk,
+        "rebalance_freq": rebalance_freq,
+        "initial_cash": INITIAL_CASH,
+        "final_value": round(final_value, 2),
+        "total_return_pct": round((final_value - INITIAL_CASH) / INITIAL_CASH * 100, 2),
+        "positions": len(positions),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description='TopK 离线回测')
-    parser.add_argument('--start', default='2024-01-01', help='开始日期')
-    parser.add_argument('--end', default='2024-12-31', help='结束日期')
-    parser.add_argument('--topk', type=int, default=20, help='TopK 数量')
-    parser.add_argument('--freq', default='W', choices=['D', 'W', 'M'],
-                        help='再平衡频率')
+    parser = argparse.ArgumentParser(description="TopK 离线回测（防前视）")
+    parser.add_argument("--start", default="2016-01-01")
+    parser.add_argument("--end", default="2026-10-23")
+    parser.add_argument("--topk", type=int, default=20)
+    parser.add_argument("--freq", default="M", choices=["D", "W", "M"])
     args = parser.parse_args()
 
     conn = get_db()
     result = run_backtest(conn, args.start, args.end, args.topk, args.freq)
     conn.close()
-
-    if result:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
