@@ -165,6 +165,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（对齐上轮审计 + deploy.sh SSH 限流修复；基线 768）
+- **对齐**：合并 PR #3（`architecture.md` 术语表）到 main，rebase 后为 `3240cec`（CI run 39906328994 success）——GitHub 中该"Issue"即 PR #3 本身，随合并关闭。术语表口径修正：`三表契约`的「三」指**三类归属**（拥有/只读/永不碰），不是三张具体表，实例指向 `paper_trading/MERGE_GUIDE.md` §2。
+- **基线单一事实源补齐**（`6978163`）：README 结构树/验证行/工作流行、roadmap §防回归门禁、iteration-log 迭代约束去写死 768，统一改为引用 `scripts/gate-baseline.txt`；architecture.md §5.3 去掉"当前 768 passed"。上轮审计只改了 AGENTS/architecture/iteration-log，README/roadmap 漏网，本次补齐。
+- **deploy.sh SSH 限流误报复现与修复**（`e91277d`）：首跑实弹发现健康检查每轮 4 条 SSH 连续建连触发 sshd 限流，症状 `kex_exchange_identification: read: Connection reset by peer`——部署在「=== 部署完成 ===」后误报失败；此时 main 实际已合入、生产已 fast-forward 同步（HTTP 双 200，`git log` 为 `6978163`），仅健康检查阶段被拒。修复：新增 `ssh_do() { sleep 1; ssh "$@"; }` 统一 1s 间隔；健康检查每轮改为**单条连接**聚合取回 4 个探测值（服务态 × 2 + HTTP × 2）。
+- **验证**：首轮 CI run 39906706790 **768 passed**（基线下限 768），确认 main 合入前的生产 worktree gate 亦为绿；90s 后 SSH 自愈，生产状态复核 `6978163` 双服务 active/200。修复后复跑 deploy.sh 全链路成功：生产 worktree gate **768 passed / 137.33s**（输出 `=== Gate passed: 768 passed (基线下限 768) ===`）→ 合 main `6978163..e91277d` → 生产 fast-forward 同步 → 健康检查第 1 轮 `active http:200 / active http:200`；纯脚本/文档改动，未触发重启（判定正确）。
+- **已知残留**：生产 `/home/pi/sd-nightly` 为旧班次 worktree（`nightly/20261021`，无害可清）；本地 `main` 已快进。
+
 ### 2026-10-22（审计二轮落地：P1 一键部署 + P2 基线自动强制 + P3 死脚本清理；Issue #1 关 + 协议补规则）
 - **背景**：三方审计二轮 4 条反馈逐条研判——#1/#2/#4 采纳执行；#3（缓做项重启时机）经用户拍板"本会话现在做"。
 - **P1 `scripts/deploy.sh`**（`6156ed1` + `91fdf94` 环境注）：推 nightly 留痕 → 生产 worktree 门禁（**绿了才 ff 合 main，失败即中止：main 不动、服务不重启**）→ 生产 pull → 按改动自动重启（`src/` `config/`→主服务；`paper_trading/`→纸盘面板；`--restart`/`--no-restart` 覆盖）→ 健康检查（active + 200，重试 6 轮）。部署目标读 `deploy.local.md` KEY=VALUE 块（本地文件重写，实测 ssh 别名 `pi`）。**首跑实弹全链路成功**。坑：PowerShell 裸敲 bash 进的是 WSL（Linux git 无 GitHub 凭据，push 卡死 10 分钟超时）——须用 Git for Windows bash 执行，已注脚本头。

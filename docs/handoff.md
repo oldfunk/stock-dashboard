@@ -3,27 +3,27 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-22 审计二轮落地：P1 一键部署 + P2 基线强制 + P3 死脚本清理；基线 768）
-- **P1**：`scripts/deploy.sh` 一键收尾（推 nightly 留痕 → 生产 worktree 门禁，绿了才 ff 合 main → 生产 pull → 按改动自动重启 → 健康检查）；部署目标读 `deploy.local.md` KEY=VALUE 块。首跑实弹全链路成功：生产 gate 768/150.49s → 合 main → 双服务 200
-- **P2**：gate.sh 自动强制基线下限（`scripts/gate-baseline.txt` 首值 768）——"只升不降"从人脑记忆变机器强制；AGENTS/architecture/iteration-log 基线改引用该文件，不再写死数字
-- **P3**：删三个死脚本 `daily_cron.sh`/`ai_analysis_cron.sh`/`daily_update.sh`（误装即闯祸；生产 crontab 与 src/tests 零引用双核实）；README 结构树同步
-- **审计二轮修正**：CI 表述改实际（PR 触发属休眠能力，"合并前"机器验证=生产 worktree gate，CI=每次合并的机器记录）；协议 §4 补"vendor 落地即关对应 Issue"；Issue #1 过期已关（被 v0.6.5 vendor 超越）
-- **坑**：PowerShell 裸敲 bash 进的是 WSL——WSL 的 Linux git 无 GitHub 凭据，push 卡死 10 分钟；deploy.sh 须用 Git for Windows bash 执行（脚本头已注）
-- **验证**：生产 worktree gate **768 passed（新 gate.sh 含下限检查实测输出 "Gate passed: 768 passed (基线下限 768)"）**；CI main push 绿（run 39784179188）；双服务 active，:9527/:8081 200；本批无 src/config/paper_trading 改动，deploy.sh 正确判定不重启
+## 最后状态（2026-10-23 对齐上轮审计 + deploy.sh SSH 限流修复；基线 768）
+- **对齐上轮审计**：PR #3（architecture 术语表）已 rebase 合入 main（`3240cec`；CI run 39906328994 success）——该「issue」即 PR #3 本身，随合并关闭；术语表口径修正（「三表契约」的「三」指**三类归属**拥有/只读/永不碰，非三张具体表，实例指向 `paper_trading/MERGE_GUIDE.md` §2）；基线**单一事实源**补齐（README / roadmap / iteration-log 去写死数字，统一引用 `scripts/gate-baseline.txt`）。
+- **主工作区对齐**：`deploy.local.md` 所在的 `G:/opencode/stock-dashboard` 为当前工作树；分支 `nightly/20261023`；本地 main 已快进。
+- **deploy.sh 修复**：首跑实弹暴露健康检查每轮 4 条 SSH 连续建连触发 sshd 限流（`kex_exchange_identification: read: Connection reset by peer`），在「部署完成」后误报失败（main 实际已合、生产已同步）。修：`ssh_do` 统一间隔 1s；健康检查改为单连接聚合探测。
+- **验证**：修复后复跑全链路成功——生产 worktree gate **768 passed / 137.33s**，合 main `e91277d`，生产 fast-forward 同步，健康检查第 1 轮即 `active http:200 / active http:200`（纯脚本/文档改动，正确判定不重启）；生产 `scripts/gate-baseline.txt` = 768。
 
 ## 下一步方向
-1. 观察 `deploy.sh` 后续日常使用（下一批含 `src/` 改动时验证自动重启分支；CI main 绿跑跟踪是否稳定）
-2. （继承）观察 v0.6.5 固定交易时段 runtime 的 tick 日志；用户确认 UI 净化观感；红绿开关 `--color-up` 兼作强调色是否拆 token 待拍板
-3. 审计清单状态：P1/P2/P3 全部落地，无缓做项；`docs/automation-audit.md` 为现行状态
+1. 下一批含 `src/` 改动时，验证 deploy.sh 自动重启分支（首轮实弹即由它拦下"健康检查"假故障）
+2. 观察 v0.6.5 固定交易时段 runtime 的 tick 日志（今日 16:30-18:30 plan window 属正常执行窗口）
+3. 用户确认 UI 净化观感（尤其 dark mode 浅灰区块）；红绿开关 `--color-up` 兼作强调色是否拆 token 待拍板
+4. 可选清理：`/home/pi/sd-nightly` 旧班次 worktree（`nightly/20261021`，无害）
 
 ## 已知隐患
-- **deploy.sh 凭据链**：Windows 上须用 Git for Windows bash 执行（PowerShell 裸 bash = WSL，Linux git 无 GitHub 凭据会卡 push）；健康检查依赖 pi 的 sudo 免密（当前成立）；`/home/pi/sd-verify` 为持久复用的验证 worktree，`/home/pi/sd-nightly` 是上一班残留（无害可清）
+- **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报
 - **CI 环境非生产等同**：ubuntu runner 与生产 Pi 不完全等同——CI 是记录与信号，权威门禁仍是生产 gate，CI 红不等于生产坏
 - （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断
 - （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）；`scripts/backtest_topk.py` 仍坏（`no such column: code`）
 - （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
 
 ## 历史交接区（追加，不删）
+- 2026-10-23 对齐上轮审计（PR #3 术语表合入 `3240cec`；术语表口径修正；基线单一事实源补齐）+ deploy.sh SSH 限流修复并实弹复验（gate 768 / 137.33s；健康检查单连接）
 - 2026-10-22 审计二轮落地：P1 deploy.sh 一键部署 + P2 基线自动强制 + P3 死脚本清理（CI 表述修正 / 协议补关 Issue 规则 / Issue #1 关闭）
 - 2026-10-22 流程自动化审计 + CI 落地（主项目首个机器门禁记录；PR 红验证闭环；P1-P3 缓做）
 - 2026-10-22 UI 净化 + vendor v0.6.5（评分拆解去深色线框；子项目跨两个大版本合流；基线 646→768）

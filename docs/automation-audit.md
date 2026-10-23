@@ -45,6 +45,7 @@
 - **预期收益**：拦住四类真实故障——(1) 漏重启导致新代码不生效（09-22 已发生）；(2) 合并前忘跑 gate 带病上线；(3) 基于过期 main 合并/漏推 nightly 无留痕；(4) 部署后不做健康确认。同时把"合并前门禁"从可选动作变成强制前置：gate 在生产 worktree 上先跑、绿了才允许合并 main，main 永远不含未验证代码。
 - **实施成本**：新增 `scripts/deploy.sh`；`deploy.local.md`（本地配置，不入库）改 KEY=VALUE 块供脚本读取；AGENTS.md 收尾流程段补一行指针。不改任何 `src/`，不动 CI（`gate-baseline.txt` 属 P2，不在本项）。
 - **风险**：不触碰硬约束——本机仍不跑 pytest（gate 在生产 worktree 执行）；不新增定时任务（脚本只由人触发）；不碰 collector/screener/analyzer/S1–S8/`paper_trading/`。生产侧新增一个持久化验证 worktree（`VERIFY_DIR`，detached HEAD，可复用），失败时 main 与生产服务均未动，可安全重跑。
+- **首跑实弹修正（2026-10-23，`e91277d`）**：健康检查每轮 4 条 SSH 连续建连触发 sshd 限流（`kex_exchange_identification: read: Connection reset by peer`），造成"部署完成"后误报失败；改为 `ssh_do` 统一 1s 间隔 + 健康检查单连接聚合探测，复跑全链路通过（生产 gate 768 / 137.33s，健康检查第 1 轮即过）。
 
 ### P2 基线下限自动强制 `gate.sh` + 单一事实源（已落地，2026-10-22 当日经用户拍板重启并实施）
 
