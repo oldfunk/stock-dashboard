@@ -869,6 +869,27 @@ def collect_historical_financial_data(all_stocks: list[dict],
                     except Exception as e:
                         logger.debug(f"[C2.5] {code} 东财兜底失败: {e}")
 
+            # P0-3: 东财 F10 资产负债表（现金/有息负债/商誉/总资产/净资产）
+            try:
+                from src.collector.balance_sheet_fetcher import fetch_balance_sheet_annual
+                bs = fetch_balance_sheet_annual(code)
+                if bs:
+                    filled = 0
+                    for rec in records:
+                        rpt = rec['report_date']
+                        b = bs.get(rpt)
+                        if not b:
+                            continue
+                        for k in ('cash', 'interest_bearing_debt', 'goodwill',
+                                  'total_assets', 'total_equity'):
+                            if rec.get(k) is None and b.get(k) is not None:
+                                rec[k] = b[k]
+                                filled += 1
+                    if filled:
+                        logger.info(f"[P0-3] {code}: 资产负债表补 {filled} 项")
+            except Exception as e:
+                logger.debug(f"[P0-3] {code} 资产负债表失败: {e}")
+
             if records:
                 # 简化：去重（同一个报告期只留一个）
                 seen_dates = set()

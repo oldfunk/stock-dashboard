@@ -452,6 +452,11 @@ def init_database():
         _add_column_if_not_exists(conn, 'ai_watchlist', 'monitor_condition', 'TEXT')
         _add_column_if_not_exists(conn, 'watchlist_notes', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'financial_history', 'interest_coverage', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'cash', 'REAL')  # 2026-10-23 P0-3 货币资金
+        _add_column_if_not_exists(conn, 'financial_history', 'interest_bearing_debt', 'REAL')  # 有息负债
+        _add_column_if_not_exists(conn, 'financial_history', 'goodwill', 'REAL')  # 商誉
+        _add_column_if_not_exists(conn, 'financial_history', 'total_assets', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'total_equity', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'roic', 'REAL')
@@ -968,8 +973,9 @@ class FinancialHistoryDAO:
                     (stock_code, report_date, report_type, roe, gross_margin, net_margin,
                      ocf_per_share, debt_ratio, revenue_growth, profit_growth,
                      net_profit, interest_coverage, fcf, total_shares, roic, eps,
+                     cash, interest_bearing_debt, goodwill, total_assets, total_equity,
                      data_source, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     r['stock_code'], r['report_date'],
                     'A' if r['report_date'].endswith('12-31') else 'Q',
@@ -978,6 +984,8 @@ class FinancialHistoryDAO:
                     r.get('revenue_growth'), r.get('profit_growth'),
                     r.get('net_profit'), r.get('interest_coverage'),
                     r.get('fcf'), r.get('total_shares'), r.get('roic'), r.get('eps'),
+                    r.get('cash'), r.get('interest_bearing_debt'), r.get('goodwill'),
+                    r.get('total_assets'), r.get('total_equity'),
                     'eastmoney', now
                 ))
 
