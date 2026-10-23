@@ -189,7 +189,7 @@ ANALYSIS_PROMPT = """你是一位有十年A股经验的价值投资人，正在�
 1. analysis 字段写完整的投资笔记，用口语、有观点、有犹豫。不要套模板、不要分点编号、不要写"视角一/二/三"、不要提巴菲特/段永平/芒格名字。
 2. moat_evaluation 中每项护城河必须给出明确的 score 和 trend。如果判断力不够，score 就打中等（3），不要勉强高分。
 3. management_score 基于你能看到的数字（稀释率、ROIC趋势、资产负债率）。如果你没有确切数据下判断，就如实写"数据不足以判断"并打中等分。
-4. intrinsic_value 估值方法自选（禁用固定倍数）：先看商业模式再选方法——稳定现金牛用 Owner Earnings 折现；周期/困境用重置成本或清算视角并明说局限；高研发科技若 FCF 失真，改用 PE/PB 相对估值或直接写"不适用精确估值"；股息稳定可用股息折现。三档（保守/基准/乐观）是"假设不同"不是"倍数不同"：每档必须写清核心假设（增长率/折现率/利润率）。method 栏写真实方法名 + 一句话局限。如果 FCF 为负或不稳定、或关键字段缺失，如实写"数据不足，估值参考性有限"，不得硬算。
+4. intrinsic_value 估值方法自选（禁用固定倍数）：**若下方提供"系统模型估值"段（可复现 FCFF 两阶段折现），必须以它为准校验你的判断，偏离需在 method/理由中说明；不要再另给一套主观估值。** 先看商业模式再选方法——稳定现金牛用 Owner Earnings 折现；周期/困境用重置成本或清算视角并明说局限；高研发科技若 FCF 失真，改用 PE/PB 相对估值或直接写"不适用精确估值"；股息稳定可用股息折现。三档（保守/基准/乐观）是"假设不同"不是"倍数不同"：每档必须写清核心假设（增长率/折现率/利润率）。method 栏写真实方法名 + 一句话局限。如果 FCF 为负或不稳定、或关键字段缺失，如实写"数据不足，估值参考性有限"，不得硬算。
 5. reverse_thinking 必须基于真实的行业/财务风险——如果是垄断国企，风险就不是"被竞争对手干掉"，而是政策风险。
 6. 所有 score 字段从 1（最差）到 5 或 10（最好）。
 7. info_richness 是本次分析的信息丰富度评级：A级=数据充分 长期财务齐全；B级=数据有限 部分指标需推算；C级=数据不足或上市不足3年。C级时：intrinsic_value 必须标注"数据不足，估值参考性有限"，trade_strategy.confidence 不得超过"低"。
@@ -995,6 +995,11 @@ class AiAnalyzer:
         news_context = build_news_context(stock.get('code', ''))
         if news_context:
             prompt += "\n\n" + news_context
+        # 系统模型估值（2026-10-23 P0-6）：可复现估值 + 程序化安全边际，供 LLM 校验
+        model_line = _model_valuation_line(stock.get('code', ''),
+                                           stock.get('current_price'))
+        if model_line:
+            prompt += "\n\n" + model_line
 
         # 用户自定义附加要求（队列/自定义分析经 extra_instruction 传入）
         if extra_instruction and str(extra_instruction).strip():
@@ -1625,6 +1630,51 @@ _EVENT_KEYWORDS = (
     '亏损', '预亏', '下修', '商誉', '解禁', '退市', '失信', '造假',
     '爆雷', '担保', '关联交易', '监管', '警示',
 )
+
+
+def _model_valuation_line(code: str, price: float | None = None) -> str:
+    """系统模型估值（P0-6）：把可复现估值接入 AI 分析 prompt。
+
+    从最新年报 financial_history 取 fcf/total_shares/cash/interest_bearing_debt，
+    用两阶段 FCFF 折现算三档估值 + 安全边际。数据不足返回空串（不阻断）。
+    """
+    if not code:
+        return ""
+    from src.analyzer.valuation import intrinsic_value
+    from src.models.database import FinancialHistoryDAO, StockSnapshotDAO
+    try:
+        rows = FinancialHistoryDAO().get_annual_reports(code)
+    except Exception:
+        rows = []
+    if not rows:
+        return ""
+    r = rows[0]
+    if price is None:
+        try:
+            snap = StockSnapshotDAO().get_by_code(code)
+            price = snap.get("current_price") if snap else None
+        except Exception:
+            price = None
+    fin = {
+        "fcf": r.get("fcf"),
+        "total_shares": r.get("total_shares"),
+        "cash": r.get("cash"),
+        "interest_bearing_debt": r.get("interest_bearing_debt"),
+    }
+    val = intrinsic_value(fin, price)
+    if not val.get("sufficient") or val.get("margin_of_safety") is None:
+        return ""
+    iv = val["intrinsic_value"]
+
+    def f(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"
+
+    return (
+        f"系统模型估值（可复现，FCFF 两阶段折现）：保守 {f(iv['conservative'])} / "
+        f"基准 {f(iv['base_case'])} / 乐观 {f(iv['optimistic'])} 元/股；"
+        f"当前价 {price:.2f} → 安全边际 {val['margin_of_safety']:.1f}%。"
+        f"请以此为准校验你的估值，偏离需说明理由；不要另给一套主观估值。"
+    )
 
 
 def build_news_context(stock_code: str, news_dao=None, now=None,

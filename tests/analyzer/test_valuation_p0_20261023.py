@@ -48,3 +48,21 @@ def test_intrinsic_insufficient_data():
     assert out["intrinsic_value"]["base_case"] is None
     assert out["margin_of_safety"] is None
     assert out["sufficient"] is False
+
+
+def test_model_valuation_line_injected(tmp_path, monkeypatch):
+    """系统模型估值行：有数据时给 LLM 校验锚，无数据时空串（不阻断）。"""
+    from src.models import database as db_mod
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: str(tmp_path / "m.db"))
+    db_mod.init_database()
+    from src.models.database import FinancialHistoryDAO
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "600519", "report_date": "2025-12-31",
+        "fcf": 100.0, "total_shares": 10.0, "cash": 20.0,
+        "interest_bearing_debt": 50.0,
+    }])
+    from src.analyzer.ai_analyzer import _model_valuation_line
+    line = _model_valuation_line("600519", price=12.0)
+    assert "系统模型估值" in line
+    assert "安全边际" in line
+    assert _model_valuation_line("999999", price=12.0) == ""
