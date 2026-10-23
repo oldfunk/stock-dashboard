@@ -20,7 +20,7 @@
 
 ## Phase 2 — 估值模型（核心）
 
-- [ ] P0-6 可复现估值模型 `src/analyzer/valuation.py`（Owner Earnings / FCF 折现 + 安全边际）
+- [x] P0-6 可复现估值模型（`src/analyzer/valuation.py` FCFF 两阶段折现 + 程序化安全边际）+ P0-6b 接入 AI prompt（LLM 改为校验/解释偏离）→ **生产实测茅台 保守 650/基准 968/乐观 1524，安全边际 -29.6%**；gate 837
 - [ ] P0-6b AI 分工调整：LLM 从"给估值"改为"校验 + 解释偏离"
 - [ ] P0-7 同业 / 行业估值分位
 

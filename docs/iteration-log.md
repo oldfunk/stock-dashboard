@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-6 可复现估值模型 + AI 分工调整；基线 831→837）
+- **核心缺口**：内在价值由 LLM 主观三档，不可复现/审计/回测；安全边际是 LLM 填的。
+- **实现**（`5c4fcf2` + `5b82a83` + `71c7a22`）：`src/analyzer/valuation.py`——**FCFF 两阶段折现**（5 年高增长 + 5 年过渡 + Gordon 终值），三档 = 假设不同（保守 g1=0/g2=0/gt=0/r=10%；基准 3%/2%/2%/9%；乐观 6%/4%/3%/8%）；`net_debt = 有息负债 − 现金`；`MOS = 1 − price / base`；数据不足返回 None。`_model_valuation_line` 从最新年报取 fcf/shares/cash/ibd 接入 AI prompt，LLM 改为校验/解释偏离（prompt 规则 4 同步）。
+- **修复**：F10 抓取处理 gzip（`Accept-Encoding: identity` + 兜底解压）；C2.5 补 `TOTAL_SHARE` 且 notice_date/股本缺失时也触发兜底。
+- **验证**：生产 worktree gate **837 passed**（831 +6）；**生产 Pi 实测**：茅台 保守 650.39 / 基准 967.80 / 乐观 1523.60 元/股，当前价 1253.80 → 安全边际 -29.6%；`_model_valuation_line` 正确注入。
+
 ### 2026-10-23（P0-5 历史价格 + 估值分位；基线 828→831）
 - **缺口**：K 线只有近期数据（13209 行），无历史估值分位；只有绝对门槛（PE 3–20 一刀切）。
 - **实现**（`0da72af` + `44ee328`）：`scripts/backfill_price_history.py`（`fetch_kline_data` 起点 2016-01-01，前复权，候选+观察池+钉选，幂等 upsert）+ `src/analyzer/valuation_percentile.py`（PE = price/EPS、PB = price/BVPS、股息率 = 每股分红/price；每交易日取 `notice_date <= 当日` 的最新年报防前视；分位 = 当前值在窗口中的百分位）。+3 单测。
