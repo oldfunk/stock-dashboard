@@ -81,11 +81,24 @@ def _enrich_stocks(stocks: list[dict]) -> None:
     hist_dao = StockAnalysisHistoryDAO()
     fs_dao = FinancialSummaryDAO()
     watched_set = WatchlistDAO().get_watched_codes()
+    from src.models.database import StockSnapshotDAO
     import re
 
     for s in stocks:
         code = s['code']
         s['watched'] = code in watched_set
+        # 股息字段：screening_result 只有 dividend_yield；dividend_years 在 stock_snapshot
+        s.setdefault('dividend_yield', None)
+        s.setdefault('dividend_years', None)
+        try:
+            snap = StockSnapshotDAO().get_by_code(code)
+        except Exception:
+            snap = None
+        if snap:
+            if s.get('dividend_yield') is None:
+                s['dividend_yield'] = snap.get('dividend_yield')
+            if s.get('dividend_years') is None:
+                s['dividend_years'] = snap.get('dividend_years')
 
         # 2. 历史分析摘要（先查，最新一条用于回退填空）
         history = hist_dao.get_history(code, limit=5)
