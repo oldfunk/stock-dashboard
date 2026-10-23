@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-7 同业估值分位；基线 837→840）
+- **缺口**：只有行业均值（AVG），无中位数、无个股行业内分位 → 跨行业绝对 PE 误判。
+- **实现**（`4c1df09` + `798364a`）：`StockSnapshotDAO.get_sector_averages` 扩展为均值+中位数（pe/pb/roe，pe/pb 仅正值样本）；新增 `get_sector_percentile(sector, value, metric)`（个股在行业内的分位 = <= value 的比例）；详情页/候选卡展示"本股 PE 分位"。+3 单测。
+- **验证**：生产 worktree gate **840 passed**（837 +3）；**生产 Pi 实测**：行业均值+中位数（电子信息 n=221, median_pe 80.4）；个股分位（电子信息 PE=20 → 10.3% / PE=200 → 79.3%）。
+
 ### 2026-10-23（P0-6 可复现估值模型 + AI 分工调整；基线 831→837）
 - **核心缺口**：内在价值由 LLM 主观三档，不可复现/审计/回测；安全边际是 LLM 填的。
 - **实现**（`5c4fcf2` + `5b82a83` + `71c7a22`）：`src/analyzer/valuation.py`——**FCFF 两阶段折现**（5 年高增长 + 5 年过渡 + Gordon 终值），三档 = 假设不同（保守 g1=0/g2=0/gt=0/r=10%；基准 3%/2%/2%/9%；乐观 6%/4%/3%/8%）；`net_debt = 有息负债 − 现金`；`MOS = 1 − price / base`；数据不足返回 None。`_model_valuation_line` 从最新年报取 fcf/shares/cash/ibd 接入 AI prompt，LLM 改为校验/解释偏离（prompt 规则 4 同步）。
