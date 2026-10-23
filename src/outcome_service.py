@@ -78,6 +78,7 @@ def _mos_at_entry(fin_dao, code: str, analysis_date: str,
             break
     if rec is None or entry_price is None:
         return None
+    from src.analyzer.valuation import intrinsic_value
     val = intrinsic_value({
         "fcf": rec.get("fcf"),
         "total_shares": rec.get("total_shares"),
