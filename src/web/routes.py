@@ -569,6 +569,9 @@ async def stock_detail(request: Request, code: str):
         _row = StockSnapshotDAO.get_sector_averages().get(_sector)
         if _row:
             sector_avg = {"sector": _sector, **_row}
+            if snapshot.get("pe") is not None:
+                sector_avg["pe_pct"] = StockSnapshotDAO.get_sector_percentile(
+                    _sector, snapshot["pe"], "pe")
 
     config = load_config()
     page_title = config.get("web", {}).get("page_title", "价值投资选股看板")
@@ -1818,6 +1821,9 @@ async def watchlist_detail(request: Request, code: str):
         _row = StockSnapshotDAO.get_sector_averages().get(_sector)
         if _row:
             sector_avg = {"sector": _sector, **_row}
+            if snapshot.get("pe") is not None:
+                sector_avg["pe_pct"] = StockSnapshotDAO.get_sector_percentile(
+                    _sector, snapshot["pe"], "pe")
 
     page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
 

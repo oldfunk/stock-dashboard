@@ -566,6 +566,24 @@ class MarketIndexDAO:
         return deleted
 
 
+def _avg(vals: list) -> float | None:
+    vals = [v for v in vals if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _median(vals: list) -> float | None:
+    vals = sorted(v for v in vals if v is not None)
+    if not vals:
+        return None
+    n = len(vals)
+    mid = n // 2
+    return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2
+
+
+def _round(v, nd: int):
+    return round(v, nd) if isinstance(v, (int, float)) else None
+
+
 class StockSnapshotDAO:
     def save_batch(self, records: list[dict]):
         with db_conn() as conn:
@@ -634,28 +652,52 @@ class StockSnapshotDAO:
 
     @classmethod
     def get_sector_averages(cls) -> dict:
-        """行业均值参照（P1② 评分透明化）：{sector: {'avg_pe', 'avg_roe', 'n'}}。
+        """行业参照（P0-7）：{sector: {avg_pe, median_pe, avg_roe, median_roe,
+        avg_pb, median_pb, n}}。
 
-        pe 仅取正值样本（亏损股不拉低均值），roe 全样本；仅 A 股且板块非空。
+        pe/pb 仅取正值样本（亏损股不拉低），roe 全样本；仅 A 股且板块非空。
         只读展示，不参与评分。
         """
         with db_conn() as conn:
             rows = conn.execute(
-                "SELECT sector, "
-                "AVG(CASE WHEN pe IS NOT NULL AND pe > 0 THEN pe END) AS avg_pe, "
-                "AVG(roe) AS avg_roe, COUNT(*) AS n "
-                "FROM stock_snapshot "
+                "SELECT sector, pe, roe, pb FROM stock_snapshot "
                 "WHERE market = 'A' AND sector IS NOT NULL AND TRIM(sector) <> '' "
-                "GROUP BY sector"
             ).fetchall()
-        out = {}
+        groups: dict[str, dict] = {}
         for r in rows:
-            out[r["sector"]] = {
-                "avg_pe": round(r["avg_pe"], 1) if r["avg_pe"] is not None else None,
-                "avg_roe": round(r["avg_roe"], 2) if r["avg_roe"] is not None else None,
-                "n": r["n"],
+            g = groups.setdefault(r["sector"], {"pe": [], "roe": [], "pb": [], "n": 0})
+            g["n"] += 1
+            if r["pe"] is not None and r["pe"] > 0:
+                g["pe"].append(r["pe"])
+            if r["roe"] is not None:
+                g["roe"].append(r["roe"])
+            if r["pb"] is not None and r["pb"] > 0:
+                g["pb"].append(r["pb"])
+        out = {}
+        for sector, g in groups.items():
+            out[sector] = {
+                "avg_pe": _round(_avg(g["pe"]), 1), "median_pe": _round(_median(g["pe"]), 1),
+                "avg_roe": _round(_avg(g["roe"]), 2), "median_roe": _round(_median(g["roe"]), 2),
+                "avg_pb": _round(_avg(g["pb"]), 2), "median_pb": _round(_median(g["pb"]), 2),
+                "n": g["n"],
             }
         return out
+
+    @classmethod
+    def get_sector_percentile(cls, sector: str, value, metric: str = "pe"):
+        """个股在某行业内的分位（<= value 的比例，越低越便宜）。缺值返回 None。"""
+        if value is None or sector is None or metric not in ("pe", "pb", "roe"):
+            return None
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"SELECT {metric} AS v FROM stock_snapshot "
+                f"WHERE market='A' AND sector=? AND {metric} IS NOT NULL AND {metric} > 0",
+                (sector,),
+            ).fetchall()
+        vals = [r["v"] for r in rows]
+        if not vals:
+            return None
+        return round(100.0 * sum(1 for v in vals if v <= value) / len(vals), 1)
 
     @classmethod
     def get_sector_map(cls) -> dict:
