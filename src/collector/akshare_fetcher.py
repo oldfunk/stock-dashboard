@@ -460,8 +460,9 @@ def _fetch_eastmoney_roic_fcf(code: str) -> dict:
                 continue
             roic = safe_float(r.get("ROIC"))
             fcf = safe_float(r.get("FCFF_BACK"))
-            if roic is not None or fcf is not None:
-                result[date_str] = {"roic": roic, "fcf": fcf}
+            notice = str(r.get("NOTICE_DATE", ""))[:10] or None
+            if roic is not None or fcf is not None or notice:
+                result[date_str] = {"roic": roic, "fcf": fcf, "notice_date": notice}
         return result
     except Exception as e:
         logger.debug(f"[C2.5] {code} 东财 roic/fcf 解析失败: {e}")
@@ -864,6 +865,9 @@ def collect_historical_financial_data(all_stocks: list[dict],
                                     if rec.get('roic') is None and em.get('roic') is not None:
                                         rec['roic'] = em['roic']
                                         filled += 1
+                                    if rec.get('notice_date') is None and em.get('notice_date'):
+                                        rec['notice_date'] = em['notice_date']
+                                        filled += 1
                             if filled:
                                 logger.info(f"[C2.5] {code}: 东财补 roic/fcf {filled} 项")
                     except Exception as e:
@@ -889,6 +893,25 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         logger.info(f"[P0-3] {code}: 资产负债表补 {filled} 项")
             except Exception as e:
                 logger.debug(f"[P0-3] {code} 资产负债表失败: {e}")
+
+            # P0-4: 东财 F10 现金流量表（capex / 经营现金流净额）
+            try:
+                from src.collector.cashflow_fetcher import fetch_cash_flow_annual
+                cf = fetch_cash_flow_annual(code)
+                if cf:
+                    filled = 0
+                    for rec in records:
+                        c = cf.get(rec['report_date'])
+                        if not c:
+                            continue
+                        for k in ('capex', 'net_operate_cashflow'):
+                            if rec.get(k) is None and c.get(k) is not None:
+                                rec[k] = c[k]
+                                filled += 1
+                    if filled:
+                        logger.info(f"[P0-4] {code}: 现金流补 {filled} 项")
+            except Exception as e:
+                logger.debug(f"[P0-4] {code} 现金流失败: {e}")
 
             if records:
                 # 简化：去重（同一个报告期只留一个）

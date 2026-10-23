@@ -457,6 +457,9 @@ def init_database():
         _add_column_if_not_exists(conn, 'financial_history', 'goodwill', 'REAL')  # 商誉
         _add_column_if_not_exists(conn, 'financial_history', 'total_assets', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_equity', 'REAL')
+        _add_column_if_not_exists(conn, 'financial_history', 'capex', 'REAL')  # 2026-10-23 P0-4 购建固定资产等支付现金
+        _add_column_if_not_exists(conn, 'financial_history', 'net_operate_cashflow', 'REAL')  # 经营现金流净额
+        _add_column_if_not_exists(conn, 'financial_history', 'notice_date', 'TEXT')  # 2026-10-23 P0-10 披露日期
         _add_column_if_not_exists(conn, 'financial_history', 'fcf', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'total_shares', 'REAL')
         _add_column_if_not_exists(conn, 'financial_history', 'roic', 'REAL')
@@ -974,8 +977,9 @@ class FinancialHistoryDAO:
                      ocf_per_share, debt_ratio, revenue_growth, profit_growth,
                      net_profit, interest_coverage, fcf, total_shares, roic, eps,
                      cash, interest_bearing_debt, goodwill, total_assets, total_equity,
+                     capex, net_operate_cashflow, notice_date,
                      data_source, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     r['stock_code'], r['report_date'],
                     'A' if r['report_date'].endswith('12-31') else 'Q',
@@ -986,6 +990,7 @@ class FinancialHistoryDAO:
                     r.get('fcf'), r.get('total_shares'), r.get('roic'), r.get('eps'),
                     r.get('cash'), r.get('interest_bearing_debt'), r.get('goodwill'),
                     r.get('total_assets'), r.get('total_equity'),
+                    r.get('capex'), r.get('net_operate_cashflow'), r.get('notice_date'),
                     'eastmoney', now
                 ))
 
