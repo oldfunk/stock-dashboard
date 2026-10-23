@@ -394,7 +394,7 @@
         table.ai-queue button { font-size: 11px; padding: 2px 8px; }
         .signal-buy { color: var(--color-up); font-weight: 600; }
         .signal-hold { color: #ffc107; font-weight: 600; }
-        .signal-avoid { color: var(--red); font-weight: 600; }
+        .signal-avoid { color: var(--color-down); font-weight: 600; }
 
         .section-header {
             display: flex;
@@ -528,11 +528,12 @@
         .sd-bar i {
             display: block;
             height: 100%;
-            background: linear-gradient(90deg, var(--green), #34a853);
+            /* 2026-10-23：候选股颜色表达统一走红绿开关（原 --green 渐变不随开关翻转） */
+            background: var(--color-up);
         }
         .sd-sub { color: var(--text-secondary); text-align: right; }
         .sd-w { color: var(--text-tertiary); text-align: right; }
-        .sd-contrib { color: var(--accent); text-align: right; font-weight: 600; }
+        .sd-contrib { color: var(--color-up); text-align: right; font-weight: 600; }
         .sd-consistency .sd-name { color: var(--gold, #d4a843); }
         .sd-total {
             margin-top: 2px;
@@ -573,9 +574,9 @@
             margin-top: 1px;
         }
 
-        .metric-cell .value.good { color: var(--green); }
+        .metric-cell .value.good { color: var(--color-up); }
         .metric-cell .value.warn { color: var(--gold); }
-        .metric-cell .value.bad { color: var(--red); }
+        .metric-cell .value.bad { color: var(--color-down); }
         .hist-badge {
             display: inline-block;
             font-size: 9px;

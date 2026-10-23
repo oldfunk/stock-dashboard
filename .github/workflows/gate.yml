@@ -22,9 +22,9 @@ jobs:
       # 对齐生产时区（HKT=UTC+8），防时间敏感测试在 UTC 机器上漂移
       TZ: Asia/Shanghai
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip

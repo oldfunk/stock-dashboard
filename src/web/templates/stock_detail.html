@@ -124,7 +124,7 @@
         .sd-sd-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
         .sd-sd-bar > i { display: block; height: 100%; background: var(--color-up); border-radius: 4px; }
         .sd-sd-sub { text-align: right; font-variant-numeric: tabular-nums; }
-        .sd-sd-contrib { text-align: right; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+        .sd-sd-contrib { text-align: right; font-weight: 600; color: var(--color-up); font-variant-numeric: tabular-nums; }
         .sd-sd-row.sd-sd-consistency .sd-sd-name { color: var(--gold); }
         .sd-sd-row.sd-sd-total-row { border-bottom: none; border-top: 1px solid var(--divider); margin-top: 4px; padding-top: 10px; }
         .sd-sd-row.sd-sd-total-row .sd-sd-name { font-weight: 700; }
@@ -157,8 +157,8 @@
         .sd-mirror-list { padding-left: 20px; line-height: 1.8; color: var(--text-secondary); }
         .sd-mirror-missing { color: var(--color-down); font-weight: 600; }
         .sd-mirror-verdict { margin-top: 12px; font-weight: 600; padding: 8px 14px; border-radius: 4px; display: inline-block; }
-        .sd-mirror-pass { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
-        .sd-mirror-fail { background: rgba(220, 60, 60, 0.15); color: var(--color-down); }
+        .sd-mirror-pass { background: var(--color-up-bg); color: var(--color-up); }
+        .sd-mirror-fail { background: var(--color-down-bg); color: var(--color-down); }
         .sd-mirror-missing-note { margin-top: 8px; color: var(--color-down); font-size: 13px; }
 
         .sd-veto-count { font-weight: 600; margin-bottom: 10px; color: var(--text-secondary); }
@@ -169,9 +169,9 @@
         .sd-veto-hit { color: var(--color-down); font-weight: 600; }
         .sd-veto-hit .sd-veto-mark { color: var(--color-down); }
         .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
-        .sd-info-badge.grade-a { background: rgba(30, 160, 90, 0.15); color: var(--color-up); }
+        .sd-info-badge.grade-a { background: var(--color-up-bg); color: var(--color-up); }
         .sd-info-badge.grade-b { background: rgba(220, 170, 40, 0.18); color: #b8860b; }
-        .sd-info-badge.grade-c { background: rgba(220, 60, 60, 0.15); color: var(--color-down); }
+        .sd-info-badge.grade-c { background: var(--color-down-bg); color: var(--color-down); }
         .sd-info-basis { color: var(--text-secondary); font-size: 13px; }
 
         .sd-moat-list { display: flex; flex-direction: column; gap: 0; }
@@ -212,7 +212,7 @@
             font-weight: 600;
             font-size: 16px;
         }
-        .signal-buy { background: var(--red-bg); color: var(--red); }
+        .signal-buy { background: var(--color-up-bg); color: var(--color-up); }
         .signal-hold { background: var(--gold-bg); color: var(--gold); }
         .signal-avoid { background: var(--bg-tertiary); color: var(--text-secondary); }
         .sd-trade .confidence { color: var(--text-secondary); font-size: 13px; }
@@ -336,9 +336,9 @@
             font-weight: 600;
             text-align: center;
         }
-        .sd-signal-buy { background: rgba(76,175,80,0.2); color: var(--color-up); }
+        .sd-signal-buy { background: var(--color-up-bg); color: var(--color-up); }
         .sd-signal-hold { background: rgba(255,193,7,0.2); color: #ffc107; }
-        .sd-signal-avoid { background: rgba(244,67,54,0.2); color: var(--color-down); }
+        .sd-signal-avoid { background: var(--color-down-bg); color: var(--color-down); }
         .sd-signal-none { background: var(--divider-thin); color: var(--text-tertiary); }
         .sd-timeline-note {
             color: var(--text-secondary); font-size: 13px; line-height: 1.6;
