@@ -461,8 +461,10 @@ def _fetch_eastmoney_roic_fcf(code: str) -> dict:
             roic = safe_float(r.get("ROIC"))
             fcf = safe_float(r.get("FCFF_BACK"))
             notice = str(r.get("NOTICE_DATE", ""))[:10] or None
-            if roic is not None or fcf is not None or notice:
-                result[date_str] = {"roic": roic, "fcf": fcf, "notice_date": notice}
+            shares = safe_float(r.get("TOTAL_SHARE"))
+            if roic is not None or fcf is not None or notice or shares is not None:
+                result[date_str] = {"roic": roic, "fcf": fcf,
+                                    "notice_date": notice, "total_share": shares}
         return result
     except Exception as e:
         logger.debug(f"[C2.5] {code} 东财 roic/fcf 解析失败: {e}")
@@ -849,7 +851,10 @@ def collect_historical_financial_data(all_stocks: list[dict],
 
             # C2.5: AKShare 利润表/现金流 API 挂掉时，用东财 datacenter 补 roic/fcf
             if records:
-                has_gap = any(r.get('fcf') is None or r.get('roic') is None for r in records)
+                has_gap = any(
+                    r.get('fcf') is None or r.get('roic') is None
+                    or r.get('notice_date') is None or r.get('total_shares') is None
+                    for r in records)
                 if has_gap:
                     try:
                         em_data = _fetch_eastmoney_roic_fcf(code)
@@ -867,6 +872,9 @@ def collect_historical_financial_data(all_stocks: list[dict],
                                         filled += 1
                                     if rec.get('notice_date') is None and em.get('notice_date'):
                                         rec['notice_date'] = em['notice_date']
+                                        filled += 1
+                                    if rec.get('total_shares') is None and em.get('total_share') is not None:
+                                        rec['total_shares'] = em['total_share']
                                         filled += 1
                             if filled:
                                 logger.info(f"[C2.5] {code}: 东财补 roic/fcf {filled} 项")

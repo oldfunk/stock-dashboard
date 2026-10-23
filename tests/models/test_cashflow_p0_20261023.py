@@ -44,13 +44,14 @@ def test_roic_fcf_includes_notice_date(monkeypatch):
     raw = json.dumps({"result": {"data": [{
         "REPORT_TYPE": "年报", "REPORT_DATE": "2025-12-31 00:00:00",
         "NOTICE_DATE": "2026-04-17 00:00:00", "ROIC": 31.4,
-        "FCFF_BACK": 76139290546.69,
+        "FCFF_BACK": 76139290546.69, "TOTAL_SHARE": 1256197800.0,
     }]}})
     monkeypatch.setattr(akf, "curl_get", lambda url, timeout=10: raw)
     out = akf._fetch_eastmoney_roic_fcf("600519")
     assert out["2025-12-31"]["notice_date"] == "2026-04-17"
     assert out["2025-12-31"]["roic"] == 31.4
     assert out["2025-12-31"]["fcf"] == 76139290546.69
+    assert out["2025-12-31"]["total_share"] == 1256197800.0
 
 
 def test_dao_persists_cashflow_and_notice(tmp_path, monkeypatch):
