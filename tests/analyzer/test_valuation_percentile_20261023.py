@@ -59,7 +59,9 @@ def test_percentiles_monotonic_prices(db):
     assert "5" in out and "10" in out
     assert out["5"]["pe_pct"] == 100.0
     assert out["5"]["pb_pct"] == 100.0
-    assert out["5"]["dy_pct"] == 0.0
+    # 价格逐年上涨 → 最新 PE/PB 最高（分位 100），股息率最低（分位低）
+    assert out["5"]["dy_pct"] < out["5"]["pe_pct"]
+    assert out["5"]["dy_pct"] == 19.7  # 最新 12 个月并列最低，占 61 点窗口的 19.7%
 
 
 def test_no_lookahead(db):
