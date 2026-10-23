@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（手动钉选卡指标按好/中/差上红/金/绿；基线 774→777）
+- **需求**：手动钉选卡（钉选股票视图）的指标值此前全黑，与候选卡/AI 观察池卡不可比；要求按好/中/差上红/金/绿（随涨跌开关），"和其他自选股一样，具备辨识性"。
+- **实现**（`03c995c`）：`watchlist.js` 渲染指标时按候选卡同口径加 `good/warn/bad` 类（PE good<15/warn<20；PB good<2/warn<3.5；ROE good≥15 否则 warn；负债率 good<40 否则 warn；营收/利润增 good≥10 否则 warn；毛利率 good≥30/warn≥15/否则 bad；净利率 good≥15/warn≥5/否则 bad；OCF/股 good>0 否则 bad）。`/api/watchlist` 从 `ScreeningResultDAO.get_latest_for_code` 补全 `gross_margin/net_margin/ocf_per_share`（这三列只在 `screening_result`，不在 `stock_snapshot`；缺失时保留快照值），卡片补这三列让"差"档绿色出现。升 `watchlist.js` 缓存戳 `20261023b`。
+- **验证**：+3 回归用例（API 补全 / 快照降级 / JS 类断言）；生产 worktree gate **777 passed**；routes/JS/模板改动正确触发主服务重启；浏览器实测 7 张卡指标均带 good/warn 并随开关翻色（CN good=红、US good=绿；合成 bad 档 CN=绿/US=红），新增三列在 5 张卡出现（另 2 张无筛选结果故无）。
+- **环境插曲**：部署中途 Pi 重启（`uptime` 9 分钟）导致一次 deploy.sh 超时；重跑后 gate 777 全绿、部署完成，无残留。
+
 ### 2026-10-23（修手动钉选卡信号文字恒黑；基线 773→774）
 - **根因**：手动钉选卡由 `watchlist.js` 渲染，信号值形如 `<div class="value signal-buy">买入</div>`；`.metric-cell .value`（优先级 0,2,0）压过 `.signal-buy/hold/avoid`（0,1,0），所以无论信号是买入/回避/持有/无，文字永远 `--text-primary`（近黑）。
 - **修复**（`bf82acc`）：`.signal-*` 规则提到 `.metric-cell .value.signal-*`（0,3,0）；无信号不再借用金色 HOLD，新增 `.metric-cell .value.signal-none`（中性灰 `--text-tertiary`），JS 对无信号改判 `signal-none`。
