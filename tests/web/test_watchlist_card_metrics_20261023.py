@@ -80,8 +80,8 @@ def test_api_watchlist_falls_back_to_snapshot(client):
 def test_watchlist_js_renders_metric_color_classes():
     """watchlist.js 指标值必须带 good/warn/bad 类（与候选卡同口径）"""
     js = (TPL_DIR / "static" / "watchlist.js").read_text(encoding="utf-8")
-    assert "'good' : (s.gross_margin >= 15 ? 'warn' : 'bad')" in js
-    assert "'good' : (s.net_margin >= 5 ? 'warn' : 'bad')" in js
+    assert "s.gross_margin >= 30 ? 'good' : (s.gross_margin >= 15 ? 'warn' : 'bad')" in js
+    assert "s.net_margin >= 15 ? 'good' : (s.net_margin >= 5 ? 'warn' : 'bad')" in js
     assert "s.ocf_per_share > 0 ? 'good' : 'bad'" in js
-    assert "'good' : (s.roe >= 15 ? 'good' : 'warn')" in js
-    assert "'good' : (s.pe < 20 ? 'warn' : '')" in js
+    assert "s.roe >= 15 ? 'good' : 'warn'" in js
+    assert "s.pe < 15 ? 'good' : (s.pe < 20 ? 'warn' : '')" in js
