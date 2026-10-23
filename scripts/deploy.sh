@@ -12,6 +12,10 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+# 所有 SSH 统一间隔 1 秒：连续建连会触发新版 OpenSSH 的 per-source penalty
+#（2026-10-23 实弹症状：kex_exchange_identification: read: Connection reset by peer）。
+ssh_do() { sleep 1; ssh "$@"; }
+
 # ---- 读取部署目标 ----
 if [ ! -f deploy.local.md ]; then
     echo "错误：缺少 deploy.local.md（部署目标本地配置，KEY=VALUE 块）"; exit 1
@@ -76,19 +80,19 @@ fi
 # ---- 2. 生产 worktree 门禁（失败即中止：main 未动、服务未重启）----
 if [ "$AHEAD" -gt 0 ]; then
     echo "--- 生产 worktree 门禁（detached @ $TIP）---"
-    if ! ssh "$DEPLOY_SSH" "cd $DEPLOY_DIR && git fetch origin && git worktree prune"; then
+    if ! ssh_do "$DEPLOY_SSH" "cd $DEPLOY_DIR && git fetch origin && git worktree prune"; then
         echo "错误：生产 fetch 失败"; exit 1
     fi
-    if ssh "$DEPLOY_SSH" "test -e $VERIFY_DIR/.git" 2>/dev/null; then
-        if ! ssh "$DEPLOY_SSH" "cd $VERIFY_DIR && git reset --hard -q && git clean -fdx -q && git checkout -q --detach origin/$BRANCH"; then
+    if ssh_do "$DEPLOY_SSH" "test -e $VERIFY_DIR/.git" 2>/dev/null; then
+        if ! ssh_do "$DEPLOY_SSH" "cd $VERIFY_DIR && git reset --hard -q && git clean -fdx -q && git checkout -q --detach origin/$BRANCH"; then
             echo "错误：更新验证 worktree 失败"; exit 1
         fi
     else
-        if ! ssh "$DEPLOY_SSH" "cd $DEPLOY_DIR && git worktree remove --force $VERIFY_DIR 2>/dev/null; rm -rf $VERIFY_DIR && git worktree add --detach $VERIFY_DIR origin/$BRANCH"; then
+        if ! ssh_do "$DEPLOY_SSH" "cd $DEPLOY_DIR && git worktree remove --force $VERIFY_DIR 2>/dev/null; rm -rf $VERIFY_DIR && git worktree add --detach $VERIFY_DIR origin/$BRANCH"; then
             echo "错误：创建验证 worktree 失败"; exit 1
         fi
     fi
-    GATE_OUT=$(ssh "$DEPLOY_SSH" "cd $VERIFY_DIR && PYTHON=$DEPLOY_DIR/.venv/bin/python bash scripts/gate.sh" 2>&1)
+    GATE_OUT=$(ssh_do "$DEPLOY_SSH" "cd $VERIFY_DIR && PYTHON=$DEPLOY_DIR/.venv/bin/python bash scripts/gate.sh" 2>&1)
     GATE_RC=$?
     PASSED=$(printf '%s\n' "$GATE_OUT" | grep -oE '[0-9]+ passed' | head -1 | awk '{print $1}')
     if [ $GATE_RC -ne 0 ]; then
@@ -111,35 +115,43 @@ fi
 
 # ---- 4. 生产同步 ----
 echo "--- 生产同步 ---"
-PROD_BRANCH=$(ssh "$DEPLOY_SSH" "cd $DEPLOY_DIR && git rev-parse --abbrev-ref HEAD")
+PROD_BRANCH=$(ssh_do "$DEPLOY_SSH" "cd $DEPLOY_DIR && git rev-parse --abbrev-ref HEAD")
 if [ "$PROD_BRANCH" != "main" ]; then echo "错误：生产当前不在 main（$PROD_BRANCH），人工检查"; exit 1; fi
-if ! ssh "$DEPLOY_SSH" "cd $DEPLOY_DIR && git pull --ff-only origin main && git log --oneline -1"; then
+if ! ssh_do "$DEPLOY_SSH" "cd $DEPLOY_DIR && git pull --ff-only origin main && git log --oneline -1"; then
     echo "错误：生产 pull 失败"; exit 1
 fi
 
 # ---- 5. 按需重启 ----
 if [ "$NEED_MAIN" -eq 1 ]; then
     echo "--- 重启 $SERVICE ---"
-    if ! ssh "$DEPLOY_SSH" "sudo systemctl restart $SERVICE"; then echo "错误：重启 $SERVICE 失败"; exit 1; fi
+    if ! ssh_do "$DEPLOY_SSH" "sudo systemctl restart $SERVICE"; then echo "错误：重启 $SERVICE 失败"; exit 1; fi
 fi
 if [ "$NEED_PARENT" -eq 1 ] && [ -n "$PARENT_SERVICE" ]; then
     echo "--- 重启 $PARENT_SERVICE ---"
-    if ! ssh "$DEPLOY_SSH" "sudo systemctl restart $PARENT_SERVICE"; then echo "错误：重启 $PARENT_SERVICE 失败"; exit 1; fi
+    if ! ssh_do "$DEPLOY_SSH" "sudo systemctl restart $PARENT_SERVICE"; then echo "错误：重启 $PARENT_SERVICE 失败"; exit 1; fi
 fi
 if [ "$NEED_MAIN" -eq 1 ] || [ "$NEED_PARENT" -eq 1 ]; then
     echo "重启后等 12s 再验（重启验证 >=10s 的历史教训）"; sleep 12
 fi
 
-# ---- 6. 健康检查 ----
+# ---- 6. 健康检查（单次 SSH 聚合探测）----
+# 2026-10-23 实弹教训：每轮 4 条 SSH 连续建连会触发 sshd 限流（表现为
+# kex_exchange_identification: read: Connection reset by peer），健康检查误报失败。
+# 改为每轮只开一条连接，所有 SSH 间隔 1 秒（ssh_do）。
 echo "--- 健康检查 ---"
 ok=0
 for i in 1 2 3 4 5 6; do
-    main_state=$(ssh "$DEPLOY_SSH" "systemctl is-active $SERVICE")
-    main_http=$(ssh "$DEPLOY_SSH" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/")
-    parent_state=skip; parent_http=skip
     if [ -n "$PARENT_SERVICE" ] && [ -n "$PARENT_PORT" ]; then
-        parent_state=$(ssh "$DEPLOY_SSH" "systemctl is-active $PARENT_SERVICE")
-        parent_http=$(ssh "$DEPLOY_SSH" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PARENT_PORT/")
+        probe=$(ssh_do "$DEPLOY_SSH" "systemctl is-active $SERVICE; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:$PORT/; systemctl is-active $PARENT_SERVICE; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:$PARENT_PORT/") || probe=""
+        main_state=$(printf '%s\n' "$probe" | sed -n '1p')
+        main_http=$(printf '%s\n' "$probe" | sed -n '2p')
+        parent_state=$(printf '%s\n' "$probe" | sed -n '3p')
+        parent_http=$(printf '%s\n' "$probe" | sed -n '4p')
+    else
+        probe=$(ssh_do "$DEPLOY_SSH" "systemctl is-active $SERVICE; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:$PORT/") || probe=""
+        main_state=$(printf '%s\n' "$probe" | sed -n '1p')
+        main_http=$(printf '%s\n' "$probe" | sed -n '2p')
+        parent_state=skip; parent_http=skip
     fi
     echo "[$i] $SERVICE=$main_state http:$main_http / $PARENT_SERVICE=$parent_state http:$parent_http"
     if [ "$main_state" = active ] && [ "$main_http" = 200 ] && { [ "$parent_state" = skip ] || { [ "$parent_state" = active ] && [ "$parent_http" = 200 ]; }; }; then
