@@ -583,6 +583,26 @@ class PaperBroker:
                  snapshot.total_value, snapshot.available_cash, snapshot.pnl, snapshot.pnl_pct),
             )
 
+    def has_sell_fill_on(self, symbol: str, day: str) -> bool:
+        """当日该标的是否已有卖出成交（条件单买入的「离场优先」闸）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM fills WHERE symbol = ? AND direction = -1 "
+                "AND substr(timestamp, 1, 10) = ? LIMIT 1",
+                (symbol, day),
+            ).fetchone()
+        return bool(row)
+
+    def has_operation(self, action: str, day: str) -> bool:
+        """当日是否已记录某类操作（每日一次快照的幂等标记）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM op_log WHERE action = ? "
+                "AND substr(timestamp, 1, 10) = ? LIMIT 1",
+                (action, day),
+            ).fetchone()
+        return bool(row)
+
     def log_operation(
         self,
         action: str,
