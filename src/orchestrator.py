@@ -131,6 +131,19 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
     except Exception as e:
         logger.warning(f"[股息] snapshot 回填失败（不影响主流程）: {e}")
 
+    # ── 分红历史：周六刷新多年分红，随后计算连续分红年数并回填 ──
+    try:
+        from datetime import datetime as _dt
+        from src.collector.dividend_fetcher import (
+            refresh_dividend_history, backfill_dividend_years,
+        )
+        if _dt.now().weekday() == 5:
+            refresh_dividend_history()
+        stats = backfill_dividend_years()
+        logger.info(f"[股息] 连续分红年数回填 {stats['stocks']} 只")
+    except Exception as e:
+        logger.warning(f"[股息] 历史/连续年数失败（不影响主流程）: {e}")
+
     if not candidates:
         logger.warning("No candidates from pipeline")
         RunLogDAO().complete_run(run_id, total_stocks, 0, 0, "no candidates")

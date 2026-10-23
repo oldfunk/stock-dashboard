@@ -444,6 +444,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'screening_result', 'dividend_year', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'payout_ratio', 'REAL')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_year', 'TEXT')
+        _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_years', 'INTEGER')  # 2026-10-23 连续分红年数
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status_reason', 'TEXT')

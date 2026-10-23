@@ -119,6 +119,87 @@ def ensure_dividend_data(config: dict | None = None) -> dict:
         return {"error": str(e), "report_date": report_date, "records": count}
 
 
+def _annual_report_dates(years: int = 10) -> list[str]:
+    """最近 N 个年报期末（含最新应披露年），按旧->新。"""
+    year = int(latest_annual_report_date()[:4])
+    return [f"{y}-12-31" for y in range(year - years + 1, year + 1)]
+
+
+def refresh_dividend_history(years: int = 10, save: bool = True) -> dict:
+    """拉取最近 N 年的年报分红（补历史，供"连续分红年数"）。
+
+    单年失败只告警，不阻断其余年份。
+    """
+    import akshare as ak
+    from src.models.database import DividendDAO
+
+    dates = _annual_report_dates(years)
+    fetched = ok = 0
+    for d in dates:
+        try:
+            df = ak.stock_fhps_em(date=d.replace("-", ""))
+            rows = df.to_dict("records") if df is not None else []
+            records = normalize_fhps_rows(rows, d)
+            if save:
+                DividendDAO().upsert_many(records)
+            fetched += len(records)
+            ok += 1
+        except Exception as e:
+            logger.warning(f"[股息] 历史 {d} 拉取失败: {e}")
+    logger.info(f"[股息] 历史 {ok}/{len(dates)} 年成功，共 {fetched} 条")
+    return {"dates": dates, "ok_years": ok, "records": fetched}
+
+
+def compute_dividend_years() -> dict:
+    """每只股票截至最新年报的连续分红年数（中断即停）。
+
+    从最新年报年倒推：必须有当年的现金分红记录且 >0，且年份连续，才累加；
+    任一年缺失/无分红 → 停。返回 {code: years}。
+    """
+    from src.models.database import db_conn
+
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT stock_code, report_date, cash_per_share FROM dividend_annual "
+            "ORDER BY stock_code, report_date DESC"
+        ).fetchall()
+    by_code: dict[str, list] = {}
+    for r in rows:
+        by_code.setdefault(r["stock_code"], []).append(r)
+    latest_year = int(latest_annual_report_date()[:4])
+    out: dict[str, int] = {}
+    for code, recs in by_code.items():
+        years = 0
+        expected = latest_year
+        for r in recs:  # 已按日期倒序
+            y = int(r["report_date"][:4])
+            cash = _num(r["cash_per_share"])
+            if y != expected or cash is None or cash <= 0:
+                break
+            years += 1
+            expected -= 1
+        if years:
+            out[code] = years
+    return out
+
+
+def backfill_dividend_years() -> dict:
+    """把连续分红年数回填 stock_snapshot（无则置 NULL）。"""
+    from src.models.database import db_conn
+
+    years_map = compute_dividend_years()
+    with db_conn() as conn:
+        conn.execute("UPDATE stock_snapshot SET dividend_years=NULL")
+        updated = 0
+        for code, y in years_map.items():
+            conn.execute(
+                "UPDATE stock_snapshot SET dividend_years=? WHERE code=?", (y, code)
+            )
+            updated += 1
+    logger.info(f"[股息] 连续分红年数回填 {updated} 只")
+    return {"stocks": len(years_map), "updated": updated}
+
+
 def backfill_snapshot_dividends(report_date: str | None = None) -> dict:
     """用最新年报分红回填 stock_snapshot 的股息率/分红率/年份（2026-10-23 P0-1）。
 

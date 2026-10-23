@@ -214,6 +214,7 @@
         <div class="wd-metric"><span class="label">市值</span><span class="value">{{ ("%.0f亿"|format(snapshot.market_cap)) if snapshot.market_cap is not none else '--' }}</span></div>
         <div class="wd-metric"><span class="label">负债率</span><span class="value {{ 'good' if snapshot.debt_ratio is not none and snapshot.debt_ratio < 40 else ('warn' if snapshot.debt_ratio is not none else '') }}">{{ ("%.1f%%"|format(snapshot.debt_ratio)) if snapshot.debt_ratio is not none else '--' }}</span></div>
         <div class="wd-metric"><span class="label">股息率</span><span class="value">{{ ("%.2f%%"|format(snapshot.dividend_yield)) if snapshot.dividend_yield is not none else '--' }}</span></div>
+        <div class="wd-metric"><span class="label">连分年数</span><span class="value">{{ snapshot.dividend_years if snapshot.dividend_years is not none else '--' }}</span></div>
     </section>
 
     <!-- 3. 在池状态卡片（钉选股视图核心差异点） -->
