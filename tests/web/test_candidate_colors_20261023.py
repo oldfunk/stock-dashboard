@@ -105,6 +105,7 @@ def test_candidate_card_price_change_is_inline_scheme(client):
         "pe": 12.0, "pb": 2.1, "roe": 18.3, "gross_margin": 40.0, "net_margin": 20.0,
         "ocf_per_share": 1.5, "revenue_growth": 15.0, "profit_growth": 20.0,
         "debt_ratio": 35.0, "market_cap": 980.0, "reason": "测试",
+        "dividend_yield": 2.1, "payout_ratio": 30.0,
         "score_detail": None, "strategy_tags": None,
     }])
 
@@ -112,3 +113,31 @@ def test_candidate_card_price_change_is_inline_scheme(client):
     assert resp.status_code == 200
     assert "color:var(--color-up)" in resp.text or "color: var(--color-up)" in resp.text
     assert "color:var(--color-down)" in resp.text or "color: var(--color-down)" in resp.text
+
+
+def test_candidate_card_shows_dividend_metrics(client):
+    """候选卡展示股息率 / 连分年数（数据来自 screening_result + snapshot）"""
+    from src.models.database import StockSnapshotDAO, ScreeningResultDAO
+    StockSnapshotDAO().save_batch([{
+        "code": "600398", "name": "海澜之家", "market": "A", "sector": "纺织服装",
+        "pe": 12.0, "pb": 2.0, "ps": 1.5, "market_cap": 300.0, "circulating_cap": 280.0,
+        "roe": 15.0, "revenue": 100.0, "revenue_growth": 10.0, "profit": 20.0,
+        "profit_growth": 10.0, "debt_ratio": 35.0, "dividend_yield": 7.155,
+        "dividend_years": 10, "current_price": 8.0,
+        "high_52w": 10.0, "low_52w": 7.0, "is_st": False,
+        "list_date": "2000-01-01", "snapshot_date": "2026-10-21",
+    }])
+    ScreeningResultDAO().save_batch([{
+        "run_id": "20261021_153010", "run_date": "2026-10-21",
+        "code": "600398", "name": "海澜之家", "score": 80.0,
+        "pe": 12.0, "pb": 2.0, "roe": 15.0, "gross_margin": 40.0, "net_margin": 20.0,
+        "ocf_per_share": 1.5, "revenue_growth": 10.0, "profit_growth": 10.0,
+        "debt_ratio": 35.0, "market_cap": 300.0, "reason": "测试",
+        "dividend_yield": 7.155, "payout_ratio": 40.0,
+        "score_detail": None, "strategy_tags": None,
+    }])
+    html = client.get("/").text
+    assert "股息率" in html
+    assert "连分年数" in html
+    assert "7.16%" in html      # 7.155 → 7.16%
+    assert ">10<" in html        # 连分年数 10

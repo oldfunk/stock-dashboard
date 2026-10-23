@@ -406,6 +406,7 @@ async def index(request: Request):
             item['gross_margin'] = sr.get('gross_margin')
             item['net_margin'] = sr.get('net_margin')
             item['ocf_per_share'] = sr.get('ocf_per_share')
+            item['dividend_yield'] = sr.get('dividend_yield')
             item['score'] = sr.get('score')
             item['reason'] = sr.get('reason')
             # 评分拆解
@@ -419,6 +420,7 @@ async def index(request: Request):
         else:
             for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
                        'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
+                       'dividend_yield', 'payout_ratio',
                        'score', 'reason', 'score_detail_parsed'):
                 item[k] = None
 
@@ -439,6 +441,12 @@ async def index(request: Request):
                 item['revenue_growth'] = snap.get('revenue_growth')
             if item.get('profit_growth') is None:
                 item['profit_growth'] = snap.get('profit_growth')
+            if item.get('dividend_yield') is None:
+                item['dividend_yield'] = snap.get('dividend_yield')
+            if item.get('dividend_years') is None:
+                item['dividend_years'] = snap.get('dividend_years')
+            if item.get('payout_ratio') is None:
+                item['payout_ratio'] = snap.get('payout_ratio')
 
         # 注：AI 分析字段（signal/ai_parsed/trade_parsed/分析历史/摘要前置）已于 2026-09-21
         # 从观察池 enrichment 移除——外部 AI 通过 /api/watchlist/{code}/full 等接口自取，

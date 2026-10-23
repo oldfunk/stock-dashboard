@@ -1190,7 +1190,7 @@ class WatchlistDAO:
         with db_conn() as conn:
             rows = conn.execute(
                 "SELECT w.*, s.pe, s.pb, s.roe, s.revenue_growth, "
-                "s.profit_growth, s.debt_ratio, s.dividend_yield, "
+                "s.profit_growth, s.debt_ratio, s.dividend_yield, s.dividend_years, "
                 "s.market_cap, s.current_price as snapshot_price "
                 "FROM watchlist w "
                 "LEFT JOIN stock_snapshot s ON w.code = s.code "
