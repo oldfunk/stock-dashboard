@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-4 现金流 + P0-10 披露日期；基线 824→828）
+- **P0-4**：新增 `src/collector/cashflow_fetcher.py`——直连东财 F10 `xjllbDateAjaxNew`（报告期）/ `xjllbAjaxNew`（现金流量表），取 `capex = CONSTRUCT_LONG_ASSET`、`net_operate_cashflow = NETCASH_OPERATE`；落 `financial_history` 新列并合并进 `collect_historical_financial_data`。
+- **P0-10**：`_fetch_eastmoney_roic_fcf`（东财主财务兜底）扩展返回 `notice_date`（`NOTICE_DATE`），落 `financial_history.notice_date`，供 look-ahead-safe 回测过滤未来数据。
+- **验证**：生产 worktree gate **828 passed**（824 +4）；**生产 Pi 实跑**：茅台 capex 31.3 亿 / 经营现金流 615.2 亿 / 披露 2026-04-17；平安银行披露 2026-03-21；银行/保险 FCFF 缺失（不回填）。
+
 ### 2026-10-23（P0-3 资产负债表关键字段；基线 819→824）
 - **缺口**：缺货币资金/有息负债/商誉/总资产/净资产 → 无净负债、无 EV、无清算价值；估值分母失真。
 - **实现**（`46689b4` + `9dfc1ec`）：新增 `src/collector/balance_sheet_fetcher.py`——akshare 的 `stock_balance_sheet_by_report_em` 依赖 HTML 抓 `company_type`（Pi 上失败），改为**直连东财 F10** `zcfzbDateAjaxNew`（报告期列表）/ `zcfzbAjaxNew`（资产负债表），代码格式 `SH600519`/`SZ000001`，company_type 缺省 4（一般）且空则回退 1/2/3（银行/保险/证券）；有息负债 = 短借 + 一年内到期非流动负债 + 长借 + 应付债券 + 短期应付债券。落 `financial_history` 新列 `cash/interest_bearing_debt/goodwill/total_assets/total_equity`，并合并进 `collect_historical_financial_data`（C2.5 之后）。+5 单测。

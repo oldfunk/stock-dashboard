@@ -14,9 +14,9 @@
 - [x] P0-1 股息率/分红率回填（`scripts/backfill_dividend_yield.py` + `backfill_snapshot_dividends` + 挂进每日流水线）→ **生产实测 783 → 3384（61%）**，分红率 3520，yield≥4 有 187 只；gate 814
 - [x] P0-2 分红历史（`refresh_dividend_history` + `compute_dividend_years` + `backfill_dividend_years` + 详情页"连分年数"）→ **生产实测 10 年 31513 条，3620 只有连续分红年数**（10 年 1003 只 / ≥5 年 2217 只）；gate 819
 - [x] P0-3 资产负债表关键字段（`src/collector/balance_sheet_fetcher.py` 直连东财 F10 + `financial_history` 新列 cash/interest_bearing_debt/goodwill/total_assets/total_equity + 采集合并）→ **生产实测茅台现金 516.9 亿 / 平安总资产 59257.8 亿等正确**；gate 824
-- [ ] P0-4 现金流关键字段（折旧摊销/资本开支/营运资本 → owner earnings）
+- [x] P0-4 现金流关键字段（`src/collector/cashflow_fetcher.py` 直连东财 F10 现金流量表 + `capex`/`net_operate_cashflow` 列 + 采集合并）→ 生产实测茅台 capex 31.3 亿 / 经营现金流 615.2 亿；gate 828
 - [ ] P0-5 历史价格序列 + 历史 PE/PB/股息率分位
-- [ ] P0-10 `financial_history` 披露日期（前视风险收口）
+- [x] P0-10 `financial_history` 披露日期（东财主财务兜底返回 `notice_date`）→ 生产实测茅台 2026-04-17 / 平安银行 2026-03-21
 
 ## Phase 2 — 估值模型（核心）
 
