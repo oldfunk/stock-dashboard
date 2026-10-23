@@ -16,7 +16,7 @@
 - **验证（详情页）**：生产 worktree gate **783 passed**（777 +6）；模板改动正确触发主服务重启；浏览器实测四项全部生效；`scripts/gate-baseline.txt` 已更新为 783。
 - **vendor v0.6.7 暂缓**：已尝试 `subtree pull v0.6.7`，但 v0.6.7 的 `run()` 类用例不隔离新闻抓取（`llm_context` → `fetch_market_news` 打真实 akshare），在 Pi 上网络 stall 无超时 → 母门禁挂死。已回退 vendor 到 v0.6.5，并提 Issue [#1](https://github.com/oldfunk/paper-trading/issues/1)（域内 bug，母方不修）；等子方 tag 修复后再 vendor 验收。
 - **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`；消除 `/api/indices` 轮询撞调度器写库时的 `database is locked`（近 2h 出现 2 次）。
-- **验证（本批）**：生产 worktree gate <待填> passed；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`。
+- **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 
 ## 下一步方向
 1. （P1）观察 v0.6.5 固定交易时段 runtime 首观察：今日 16:30–18:30 plan window 的 `agent-tick.log`，非时段静默属正常
