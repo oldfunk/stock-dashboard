@@ -18,7 +18,7 @@
 - **本地 SQLite 持久化**：行情数据（`data.db`）与账户账本（`paper_account.db`）分离
 - **双数据源**：优先新浪财经（稳定），自动重试机制
 - **风控管理**：单笔限额、仓位上限、最大回撤止损
-- **AI 交易员**：固定交易时段运行（09:30–11:30/13:00–15:00）——收盘后 16:30–18:30 数据定稿时做下一交易日计划，开盘 09:30–10:00 执行计划，盘中只在异动时复盘；JSON 钳制执行+幂等闸+日亏熔断；**离场三件套**（止损/放飞/清仓）写进系统提示，卖出条件强制对应真实持仓（解析+挂单双层校验），**财联社要闻/政策快讯**辅助“催化”判断（`agent.news_enabled` 可关）；决策同时可输出**条件单**，盘中由规则引擎每分钟盯价执行（低于手续费地板/池外/非法类型/卖出无持仓会返回 `parse_rejected`，不静默）；`agent event` 在价格异动/持仓回撤时触发复盘（冷却+每日预算），不逐笔调用 LLM
+- **AI 交易员**：固定交易时段运行（09:30–11:30/13:00–15:00）——收盘后 16:30–18:30 数据定稿时做下一交易日计划，开盘 09:30–10:00 执行计划，盘中只在异动时复盘；JSON 钳制执行+幂等闸+日亏熔断；决策同时可输出**条件单**，盘中由规则引擎每分钟盯价执行（低于手续费地板/池外/非法类型会返回 `parse_rejected`，不静默）；`agent event` 在价格异动/持仓回撤时触发复盘（冷却+每日预算），不逐笔调用 LLM
 - **规则引擎（量化执行层）**：9 种规则（均线交叉 / RSI 区间 / 价格档位 / 涨跌幅阈值 / 移动止损 / 时间止损 / 偏离当日均价 / 日内冲高回落 / 分钟均线交叉），盘中守护进程每 60 秒判一次，**与 AI 走同一把风控尺子和同一个撮合口径**
 - **回测纪律**：T 日收盘信号最早 T+1 成交、真实费率（含最低 5 元佣金）、最低单 5000 元、日内买入当天不可卖；回测与实盘共用 `rules.py` 同一套判定，杜绝未来函数
 - **参数网格**：批量回测参数变体，按**超额收益**（对比等权买入持有）排序；配套**样本外检验**（前 60% 选参数、后 40% 检验）做过度拟合体检，掉下来的参数不进生产规则集
@@ -38,7 +38,7 @@ paper-trading/
 ├── secrets.local.json         # 本机密钥（0600，gitignored，不提交）
 ├── requirements.txt
 ├── MERGE_GUIDE.md             # 与 Stock Dashboard 合并契约
-├── tests/                     # 离线回归单测（core/agent/runtime/calendar/llm/schemes/schedule/integration/realtime/dashboard）
+├── tests/                     # 离线回归单测（core/agent/llm/schemes/schedule/integration/realtime/dashboard）
 └── paper_trading/
     ├── __init__.py
     ├── main.py                    # 独立入口：自动化调度与结算
@@ -293,7 +293,7 @@ python -m paper_trading.cli agent run --json
 # 运行时 tick（cron 调这个）：09:30–10:00 执行当天计划；
 # 16:30–18:30 数据定稿后做下一交易日计划；其他时间静默跳过
 python -m paper_trading.cli agent tick --json
-# 交易日历（同步“未来交易日”优先：只留最近 45 天 + 未来全部；失败回退周末+手填 holidays）
+# 交易日历（节假日以 akshare 同步缓存为准，失败回退周末+手填 holidays）
 python -m paper_trading.cli calendar sync --json
 python -m paper_trading.cli calendar status --json
 # 旧版 AI 定时队列（已停用，仅兼容查看/导出）
@@ -305,8 +305,6 @@ python -m paper_trading.cli agent event --dry-run --json
 python -m paper_trading.cli agent run --ignore-schedule --json
 # 休盘做计划（存下一交易日，开盘自动执行；不碰账本）
 python -m paper_trading.cli agent run --plan-only --json
-# 要闻/政策快讯开关在 config.yaml（agent.news_enabled / agent.news_limit；
-# akshare 财联社电报，15 分钟缓存，抓取失败自动回空不阻断决策）
 # 股票池来源（auto=全市场筛选优先→观察池→手填池兜底；需 Stock Dashboard 在同一台机器）
 python -m paper_trading.cli agent run --pool-from screening --pool-limit 20 --json
 # 关闭 AI 自主提名（只用程序候选池）
@@ -486,7 +484,7 @@ python -m paper_trading.cli cond tick --dry-run --json
 (crontab -l 2>/dev/null; echo "*/5 16-18 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
 # 事件驱动复盘（盘中每分钟检查，错开整点 tick；无异动/冷却/预算用完时零 LLM 调用）
 (crontab -l 2>/dev/null; echo "1-59 9-11,13-14 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent event --json >> agent.log 2>&1") | crontab -
-# 交易日历同步（每周六 10:00；同步未来交易日，只留最近 45 天+未来；失败回退周末+holidays）
+# 交易日历同步（每周六 10:00；失败回退周末+config.holidays）
 (crontab -l 2>/dev/null; echo "0 10 * * 6 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli calendar sync --json >> calendar.log 2>&1") | crontab -
 
 # 规则引擎守护（盘中每分钟一轮：判规则 + 检查条件单，触发才过风控下单）。

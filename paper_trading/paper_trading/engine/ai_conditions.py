@@ -32,9 +32,7 @@ COND_RULES = """条件单规则（违反即作废该条）：
    {min_ticket}~{max_value} 元之间（低于 {min_ticket} 元会因手续费地板被拒）；
    写 volume 时按 100 股整数倍，且按触发价估算的金额也要 ≥{min_ticket} 元。
    卖出 volume 可省略=全部可用。
-8. 全部中文。
-9. 卖出条件（side=sell）只能挂在**当前持仓**的代码上：没有持仓的代码给 sell
-   条件会直接作废（提示词与校验层双重保证，不是靠自觉）。"""
+8. 全部中文。"""
 
 
 def build_prompt(pool: list[str], quotes: dict, positions: list[dict],
@@ -72,16 +70,12 @@ def build_prompt(pool: list[str], quotes: dict, positions: list[dict],
 def parse_conditions_verbose(raw: Optional[str], pool: list[str],
                              max_conds: int = 5, max_value: float = 20000.0,
                              min_ticket: float = 1000.0,
-                             max_days: int = 30,
-                             holdings: Optional[list] = None
+                             max_days: int = 30
                              ) -> tuple[list[dict], list[dict]]:
     """解析并校验 LLM 条件单，返回 (合法条目, 被拒条目+原因)。
 
     不能只返回合法条目：模型给 2000 元买入（低于手续费地板）时，
     静默丢弃会让面板显示“解析 0 条”却看不到原因。拒单原因必须可审计。
-
-    `holdings` 传入真实持仓代码集时，卖出条件只允许挂在持仓上（无持仓即拒）；
-    为 None 时保持旧行为（不校验持仓），仅供手工/兼容调用。
     """
     from paper_trading.engine.conditional import CONDITION_TYPES
 
@@ -114,8 +108,6 @@ def parse_conditions_verbose(raw: Optional[str], pool: list[str],
         return [], rejected
 
     allow = set(pool or [])
-    held = ({str(s).strip() for s in holdings}
-            if holdings is not None else None)
     out: list[dict] = []
     for c in conds:
         if len(out) >= max_conds:
@@ -157,9 +149,6 @@ def parse_conditions_verbose(raw: Optional[str], pool: list[str],
             continue
         if side not in ("buy", "sell"):
             _reject(c, "side 必须是 buy/sell")
-            continue
-        if side == "sell" and held is not None and sym not in held:
-            _reject(c, "卖出条件必须对应真实持仓（当前无该代码持仓）")
             continue
         if ctype not in CONDITION_TYPES:
             _reject(c, "非法条件类型")
@@ -204,10 +193,9 @@ def parse_conditions_verbose(raw: Optional[str], pool: list[str],
 def parse_conditions(raw: Optional[str], pool: list[str],
                      max_conds: int = 5, max_value: float = 20000.0,
                      min_ticket: float = 1000.0,
-                     max_days: int = 30,
-                     holdings: Optional[list] = None) -> list[dict]:
+                     max_days: int = 30) -> list[dict]:
     """兼容旧调用：只要合法条目；需要审计原因时用 parse_conditions_verbose。"""
     valid, _rejected = parse_conditions_verbose(
         raw, pool, max_conds=max_conds, max_value=max_value,
-        min_ticket=min_ticket, max_days=max_days, holdings=holdings)
+        min_ticket=min_ticket, max_days=max_days)
     return valid

@@ -2,8 +2,7 @@
 import json
 import sys
 import tempfile
-import types
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time
 from pathlib import Path
 
 import pytest
@@ -87,53 +86,6 @@ def test_calendar_cache_controls_holidays(tmp_path, monkeypatch):
     assert st["available"] and st["source"] == "test"
     assert st["min_date"] == "2026-09-29" and st["max_date"] == "2026-10-09"
     clear_calendar_cache()
-
-
-def test_sync_keeps_future_drops_history(tmp_path, monkeypatch):
-    """日历同步是未来优先：全量历史不入库，只留最近尾部 + 全部未来。"""
-    from paper_trading.utils import trading_calendar as tc
-
-    today = date.today()
-    recent = (today - timedelta(days=40)).isoformat()   # 落在 45 天尾部内
-    old = (today - timedelta(days=120)).isoformat()      # 超出尾部的历史
-    future = (today + timedelta(days=300)).isoformat()   # 远期未来
-
-    class _Col:
-        def __init__(self, vals):
-            self._vals = vals
-
-        def tolist(self):
-            return self._vals
-
-    class _DF:
-        columns = ["trade_date"]
-
-        def __init__(self, vals):
-            self._vals = vals
-
-        def __getitem__(self, _key):
-            return _Col(self._vals)
-
-    fake = types.ModuleType("akshare")
-    fake.tool_trade_date_hist_sina = lambda: _DF(
-        ["1990-12-19", old, recent, future])
-    monkeypatch.setitem(sys.modules, "akshare", fake)
-
-    p = tmp_path / "cal.json"
-    res = tc.sync_calendar(path=p)
-    assert res["ok"] and res["history_tail_days"] == tc.HISTORY_TAIL_DAYS
-    rows = set(json.loads(p.read_text(encoding="utf-8"))["dates"])
-    assert "1990-12-19" not in rows and old not in rows  # 历史被裁掉
-    assert recent in rows and future in rows             # 尾部+未来保留
-
-    monkeypatch.setenv(tc.CALENDAR_ENV, str(p))
-    tc.clear_calendar_cache()
-    st = tc.calendar_status()
-    assert st["available"] and st["max_date"] == future
-    assert st["future_days"] >= 1
-    assert st["lookahead_days"] == (date.fromisoformat(future) - today).days
-    assert st["covers_today"] and not st["needs_sync"]
-    tc.clear_calendar_cache()
 
 
 def test_calendar_cache_drives_realtime_session(tmp_path, monkeypatch):

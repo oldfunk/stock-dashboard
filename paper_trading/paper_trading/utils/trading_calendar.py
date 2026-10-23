@@ -1,9 +1,4 @@
-"""交易日历：面向**未来**的交易日窗口（周末 + 节假日）。
-
-缓存要回答的是“今天/明天/下一交易日是不是交易日”——服务收盘计划的目标日、
-T+1 解冻日、实时交易时段判断。历史交易日与这些判断无关，所以 `calendar sync`
-只保存「最近 `HISTORY_TAIL_DAYS` 天（近况查询兜底）+ 源里全部可得的未来交易日」，
-不存 1990 年以来的全量历史。
+"""交易日历：周末 + 节假日 + 可缓存的交易所日历。
 
 优先级：
 
@@ -24,9 +19,6 @@ from typing import Iterable, Optional, Set
 
 CALENDAR_ENV = "PAPER_TRADING_CALENDAR"
 DEFAULT_CALENDAR_REL = Path("var") / "trading_calendar.json"
-#: 同步时保留的最近历史天数：只为“最近一个假期/节后审计”这类近况查询兜底，
-#: 不是存历史档案；缓存主体是未来交易日（更早历史要查就查数据源，别信缓存）。
-HISTORY_TAIL_DAYS = 45
 _CACHE: dict = {"path": "", "mtime_ns": -1, "data": {}}
 
 
@@ -120,11 +112,7 @@ def save_calendar(dates: Iterable[str | date | datetime],
 
 
 def sync_calendar(path: Optional[str | Path] = None) -> dict:
-    """从 akshare（新浪交易日历）同步**未来**交易日并缓存；失败返回 ok=False。
-
-    接口虽叫 hist，返回的是“历史 + 未来”的全量交易所日历；我们只留
-    「最近 HISTORY_TAIL_DAYS 天 + 未来全部」，历史部分不入库。
-    """
+    """从 akshare（新浪交易日历）同步并缓存；网络/依赖失败返回 ok=False。"""
     try:
         import akshare as ak  # type: ignore
     except Exception as e:  # noqa: BLE001
@@ -132,49 +120,35 @@ def sync_calendar(path: Optional[str | Path] = None) -> dict:
     try:
         df = ak.tool_trade_date_hist_sina()
         col = "trade_date" if "trade_date" in df.columns else df.columns[0]
-        cutoff = (date.today() - timedelta(days=HISTORY_TAIL_DAYS)).isoformat()
-        dates = [d for d in (str(x)[:10] for x in df[col].tolist()) if d >= cutoff]
+        dates = [str(x)[:10] for x in df[col].tolist()]
         info = save_calendar(dates, source="akshare.tool_trade_date_hist_sina",
                              path=path)
-        return {"ok": True, "history_tail_days": HISTORY_TAIL_DAYS, **info}
+        return {"ok": True, **info}
     except Exception as e:  # noqa: BLE001
         return {"ok": False,
                 "error": f"交易日历同步失败：{type(e).__name__}: {e}"}
 
 
 def calendar_status(path: Optional[str | Path] = None) -> dict:
-    """缓存覆盖范围/新鲜度（未来优先），供 CLI/面板展示。
-
-    `future_days`/`lookahead_days` 回答“未来还能看多远”，是同步是否该跑的依据。
-    """
+    """缓存覆盖范围/新鲜度，供 CLI/面板展示。"""
     data = _read_calendar(path)
     if not data:
         return {"available": False, "path": str(calendar_path(path)),
-                "source": "", "min_date": "", "max_date": "", "n": 0,
-                "future_days": 0, "lookahead_days": None,
-                "covers_today": False, "needs_sync": True, "stale": True}
-    today_d = date.today()
-    today = today_d.isoformat()
-    min_date = str(data["min_date"])
+                "source": "", "min_date": "", "max_date": "",
+                "covers_today": False, "needs_sync": True}
+    today = date.today().isoformat()
     max_date = str(data["max_date"])
-    future_days = sum(1 for d in data["dates"] if d > today)
     try:
-        lookahead_days = (date.fromisoformat(max_date) - today_d).days
-    except Exception:                             # noqa: BLE001
-        lookahead_days = None
-    try:
-        stale = (datetime.now()
-                 - datetime.fromisoformat(str(data["fetched_at"]))).days > 14
-    except Exception:                             # noqa: BLE001
-        stale = False
-    needs_sync = (lookahead_days is not None and lookahead_days < 45) or stale
+        need_after = (date.today() + timedelta(days=45)).isoformat()
+        needs_sync = max_date < need_after
+    except Exception:
+        needs_sync = False
     return {"available": True, "path": data["path"],
             "source": data["source"], "fetched_at": data["fetched_at"],
-            "min_date": min_date, "max_date": max_date,
-            "n": len(data["dates"]), "future_days": future_days,
-            "lookahead_days": lookahead_days,
-            "covers_today": min_date <= today <= max_date,
-            "needs_sync": bool(needs_sync), "stale": bool(stale)}
+            "min_date": data["min_date"], "max_date": max_date,
+            "n": len(data["dates"]),
+            "covers_today": data["min_date"] <= today <= max_date,
+            "needs_sync": bool(needs_sync)}
 
 
 def is_trading_day(d: date | datetime | str, holidays: Optional[Set[str]] = None) -> bool:

@@ -528,14 +528,6 @@ class ConditionRunner:
             chg = float(quote.get("change_pct") or 0.0)
             if not triggered(d, price, chg):
                 continue
-            # 离场优先：同标的当日已有卖出成交（规则止损/时间止损/条件卖出），
-            # 买入条件作废，禁止“刚止损又当日回补”的来回打脸与双边手续费。
-            if d["side"] == "buy" and self.b.broker.has_sell_fill_on(d["symbol"], day):
-                why = "同标的当日已有卖出成交（离场优先），买入条件作废"
-                out["rejected"].append({"id": d["id"], "symbol": d["symbol"],
-                                        "why": why})
-                self.orders.mark(d["id"], "rejected", price, {"why": why}, now)
-                continue
             res = self._execute(d, quote, price, now, day, prices)
             rec = {"id": d["id"], "symbol": d["symbol"], "side": d["side"], **res}
             if res.get("ok"):

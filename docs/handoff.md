@@ -3,7 +3,7 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 个股详情页细节优化 + 钉选卡上色 + 候选股颜色全覆盖 + vendor v0.6.7 + DB 锁修复；基线 待 gate）
+## 最后状态（2026-10-23 个股详情页细节优化 + 钉选卡上色 + 候选股颜色全覆盖 + DB 锁修复 + 发版 v2.0.0；vendor v0.6.7 暂缓）
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
 - **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
 - **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
@@ -14,9 +14,9 @@
 - **个股详情页细节优化**（`9d827e7`，基线 777→783）：四项——(1) 快照条指标按好/中/差上红/金/绿（主详情 + 钉选股分析两页，随开关）；(2) 空值占位统一为 `--`（去掉 `--%` / `--亿`）；(3) 硬编码颜色主题化（grade-b 金底金字、signal-hold、K线/SVG 灰、提问按钮白字）；(4) 间距线框统一（区块间距 40→32px；六关卡片去外框线改浅灰底色块；行分隔虚线改实线浅灰）。浏览器实测：CN good=红 / US good=绿，缺失值 `--`，六关 `border 0px + bg #f0f1f3`，行线 solid。
 - **验证**：生产 worktree gate **777 passed**（774 +3）；routes/JS/模板改动正确触发主服务重启；生产 4 路 200、双服务 active；CI 绿。
 - **验证（详情页）**：生产 worktree gate **783 passed**（777 +6）；模板改动正确触发主服务重启；浏览器实测四项全部生效；`scripts/gate-baseline.txt` 已更新为 783。
-- **vendor v0.6.7**（v0.6.5→v0.6.7，22 文件 +998/-61）：M1 收口、引擎退出纪律（buy 条件 exit-first、收盘 NAV 快照、方向型规则口径）、新闻催化（财联社/同花顺）、LLM 配置修复（model-only 保存免管理员令牌、key 接管兼容、退市模型告警软化）、交易日历 future-first 缓存。契约核对通过：`integration/` 零写母库、只读表全在契约内、CLI 无新增参数、`engine.enabled: false`（默认）、新增 `agent.news_enabled/news_limit`（无新表）。
+- **vendor v0.6.7 暂缓**：已尝试 `subtree pull v0.6.7`，但 v0.6.7 的 `run()` 类用例不隔离新闻抓取（`llm_context` → `fetch_market_news` 打真实 akshare），在 Pi 上网络 stall 无超时 → 母门禁挂死。已回退 vendor 到 v0.6.5，并提 Issue [#1](https://github.com/oldfunk/paper-trading/issues/1)（域内 bug，母方不修）；等子方 tag 修复后再 vendor 验收。
 - **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`；消除 `/api/indices` 轮询撞调度器写库时的 `database is locked`（近 2h 出现 2 次）。
-- **验证（本批）**：生产 worktree gate <待填> passed；`src/` + `paper_trading/` 改动正确触发双服务重启；健康检查 `active http:200 / active http:200`。
+- **验证（本批）**：生产 worktree gate <待填> passed；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`。
 
 ## 下一步方向
 1. （P1）观察 v0.6.5 固定交易时段 runtime 首观察：今日 16:30–18:30 plan window 的 `agent-tick.log`，非时段静默属正常
@@ -35,7 +35,7 @@
 - （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
 
 ## 历史交接区（追加，不删）
-- 2026-10-23 vendor v0.6.7 + DB 锁修复（busy_timeout + 非 WAL 才设置 journal_mode）；发版准备
+- 2026-10-23 vendor v0.6.7 暂缓（run() 用例打真实 akshare 挂死 gate，回退 v0.6.5 + 提子项目 Issue #1）+ DB 锁修复；发版 v2.0.0
 - 2026-10-23 个股详情页细节优化（快照条指标上色/空值占位统一/硬编码颜色主题化/间距线框统一；基线 777→783）
 - 2026-10-23 手动钉选卡指标按好/中/差上红/金/绿（与候选卡同口径；/api/watchlist 补全毛利率/净利率/OCF；基线 774→777）
 - 2026-10-23 修手动钉选卡信号文字恒黑（`.signal-*` 优先级被 `.metric-cell .value` 压过；无信号改中性灰 `signal-none`；升 watchlist.js 缓存戳；基线 773→774）

@@ -171,44 +171,6 @@ def test_condition_runner_skips_untriggered(tmp_path):
 
 # ---------- AI 条件单解析 ----------
 
-def test_condition_buy_suppressed_after_same_day_sell(tmp_path):
-    """离场优先：同标的当日已有卖出成交 → 买入条件作废，不当日回补。
-
-    10-23 观察日真实矛盾：trail-300390 要给 300390 止损清仓，同时
-    AI 的 300390 回踩买入条件也到价。开关打开后两者会同分钟对打
-    （卖出 100 股再买回），白付双边手续费，等于没止损。
-    """
-    from paper_trading.engine.runner import ConditionRunner
-    from paper_trading.models import Bar, Order, OrderType
-
-    b = _bridge(str(tmp_path))
-    b.data_db.upsert_bars([Bar(symbol="000001",
-                               timestamp=datetime.now() - timedelta(days=10000 + i),
-                               open=10.0, high=10.2, low=9.8,
-                               close=10.0, volume=100) for i in range(30)])
-    # 先建仓、解冻，再当日卖出成交（模拟规则止损/条件卖出）
-    b.broker.submit_order(Order(
-        symbol="000001", direction=1, volume=100, order_type=OrderType.LIMIT,
-        limit_price=10.0, prev_close=10.0, ref_high=10.2, ref_low=9.8))
-    b.broker.unfreeze_t1(datetime.now() + timedelta(days=10))
-    sell = b.broker.submit_order(Order(
-        symbol="000001", direction=-1, volume=100, order_type=OrderType.LIMIT,
-        limit_price=10.0, prev_close=10.0, ref_high=10.2, ref_low=9.8))
-    assert sell.status.value == "filled"
-
-    co = ConditionalOrders(str(tmp_path / "acct-dup.db"))
-    co.create({"symbol": "000001", "side": "buy", "cond_type": "price_below",
-               "cond_value": 10.0, "value": 20000})
-    quotes = {"000001": {"code": "000001", "price": 9.95, "prev_close": 10.0,
-                         "high": 10.0, "low": 9.9, "volume": 1e6,
-                         "change_pct": -0.5}}
-    r = ConditionRunner(b, co, min_ticket_cny=1000, max_per_day=5).tick(quotes)
-    assert not r["filled"]
-    assert r["rejected"] and "离场优先" in r["rejected"][0]["why"]
-    assert co.list_all(1)[0]["status"] == "rejected"
-    assert b.broker.get_position("000001") is None       # 没有被买回来
-
-
 def test_parse_conditions_filters_bad():
     raw = ('{"conditions":['
            '{"symbol":"600519","side":"buy","cond":{"type":"price_below",'
@@ -271,37 +233,6 @@ def test_parse_conditions_rejects_expiry_over_limit():
         raw, ["600519"], max_value=20000, min_ticket=5000, max_days=3)
     assert valid == []
     assert rejected and "有效期" in rejected[0]["why"]
-
-
-def test_sell_condition_requires_holding():
-    """卖出条件只许挂真实持仓；holdings=None 保持旧行为（纯兼容调用）。"""
-    from paper_trading.engine.ai_conditions import parse_conditions_verbose
-
-    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
-    raw = ('{"conditions":['
-           '{"symbol":"600519","side":"sell","cond":{"type":"price_above",'
-           f'"value":13.5}},"volume":100,"expiry":"{exp}","reason":"止盈"}},'
-           '{"symbol":"000858","side":"sell","cond":{"type":"price_below",'
-           f'"value":70}},"volume":100,"expiry":"{exp}","reason":"止损"}},'
-           '{"symbol":"000858","side":"buy","cond":{"type":"price_below",'
-           f'"value":70}},"value":8000,"expiry":"{exp}","reason":"回踩"}}]}}')
-    valid, rejected = parse_conditions_verbose(
-        raw, ["600519", "000858"], max_value=20000, min_ticket=1000,
-        max_days=3, holdings=["600519"])
-    got = [(c["symbol"], c["side"]) for c in valid]
-    assert ("600519", "sell") in got and ("000858", "buy") in got
-    assert len(rejected) == 1 and rejected[0]["symbol"] == "000858"
-    assert rejected[0]["side"] == "sell" and "持仓" in rejected[0]["why"]
-    # 不传 holdings：不校验（兼容旧行为，手动调用不因此变行为）
-    valid2, _ = parse_conditions_verbose(
-        raw, ["600519", "000858"], max_value=20000, min_ticket=1000, max_days=3)
-    assert len(valid2) == 3
-
-
-def test_cond_prompt_requires_holdings_for_sell():
-    """事件复盘/设计条件的提示词同步写明持仓约束（提示词与校验双保险）。"""
-    from paper_trading.engine.ai_conditions import COND_RULES
-    assert "卖出条件" in COND_RULES and "当前持仓" in COND_RULES
 
 
 def test_walk_forward_splits_and_reports():
