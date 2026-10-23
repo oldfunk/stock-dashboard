@@ -3,9 +3,9 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 母项目 v2.0.0 已发布；vendor v0.6.7 修复版已合并；价值投资方法论完善长线迭代中）
+## 最后状态（2026-10-23 价值投资方法论完善 P0 全部落地：数据底座 + 可复现估值 + 验证闭环；vendor v0.6.7 已合并；基线 844）
 
-> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。Phase 0 已完成；当前进行：Phase 1 数据底座（P0-1 股息回填起）。
+> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项（P0-1~P0-10）全部落地并经生产 Pi 实测。
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
 - **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
 - **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
@@ -26,15 +26,17 @@
 - **P0-5 历史价格 + 估值分位**（`0da72af` + `44ee328`，gate 831）：`scripts/backfill_price_history.py`（10 年前复权，候选+观察池+钉选）+ `src/analyzer/valuation_percentile.py`（PE = price/EPS、PB = price/BVPS、股息率 = 每股分红/price；每交易日取 `notice_date <= 当日` 的最新年报防前视）。**生产实测 24 只 59073 条（2016–2026）；海澜之家 5 年 PE 分位 11.8% / 10 年 6.0%、股息率分位 50.5%**；PB 因缺 total_equity/total_shares 暂 NULL（fail-closed）。
 - **P0-6 可复现估值模型**（`5c4fcf2` + `5b82a83` + `71c7a22`，gate 837）：`src/analyzer/valuation.py`（FCFF 两阶段折现，三档 = 增长率/折现率假设不同；`net_debt = 有息负债 − 现金`；`MOS = 1 − price / base`）+ `_model_valuation_line` 接入 AI prompt（LLM 改为校验/解释偏离，不再主观给估值）。修复：F10 响应 gzip、C2.5 补 `TOTAL_SHARE`。**生产实测茅台 保守 650.39 / 基准 967.80 / 乐观 1523.60，当前价 1253.80 → 安全边际 -29.6%**。
 - **P0-7 同业估值分位**（`4c1df09` + `798364a`，gate 840）：`get_sector_averages` 扩展为均值+中位数（pe/pb/roe）；新增 `get_sector_percentile`（个股在行业内的分位）；详情页/候选卡展示"本股 PE 分位"。**生产实测行业均值+中位数、个股分位（电子信息 PE=20 → 10.3% / PE=200 → 79.3%）**。
+- **P0-8 look-ahead-safe 回测**（`eb291d5` + `23fa5b7`，gate 842）：重写 `scripts/backtest_topk.py`——基本面源改 `financial_history`（年报 + `notice_date`），每个再平衡日只取 `notice_date <= 当日` 的最新年报（防前视）；费用口径（佣金 0.025%、印花税 0.05%）；买入不超现金。**生产实测 TopK20 月调仓 2024-01~2026-10：-36.79%，16 持仓**。
+- **P0-9 买入安全边际记录与预测力验证**（`63e95ac` + `ab041ab`，gate 844）：`analysis_outcome` 加 `mos_at_entry`（买入时模型 MOS，用 `notice_date <= 分析日` 的最新年报 + 入场价）；`summarize_by_mos` 按 MOS 分层统计。**生产实测**：深折让档（MOS 40–100%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 +17.2pp；中档（20–40%）20 日胜率仅 26%——**安全边际越大，胜率越高，支持价值投资命题**。
 - **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 
 ## 下一步方向
-1. （Phase 0）重新 `subtree pull v0.6.7`（tag 重指 `a0dd2ec` 修复版）+ 契约核对 + 生产 gate（预期不再挂死）
-2. （Phase 1）P0-1 股息率/分红率回填（数据已有，783 → >3000）→ P0-2 分红历史 → P0-3/4 三表关键字段 → P0-5 历史价格 → P0-10 披露日期
-3. （Phase 2）P0-6 可复现估值模型（核心）+ P0-7 同业分位
-4. （Phase 3）P0-8 look-ahead-safe 回测 + P0-9 买入 MOS 预测力验证
-5. （择要）E1 财务同环比高亮 / E2 搜索排序；C1 对齐子项目 M2；C2 观察 v0.6.5 runtime tick 日志
+1. （Phase 4，择要）E1 财务同环比高亮 / E2 搜索排序
+2. （协同）对齐子项目 M2（量化可信度）；跟进 Issue #1（已修复，v0.6.7 已合并）
+3. （观察）v0.6.5 固定交易时段 runtime tick 日志
+4. （可选）P0-5 的 PB 分位补 total_equity/total_shares 覆盖；P0-9 扩大样本（120 日）
+5. （收口）把估值模型估值展示到详情页（当前只注入 AI prompt）
 
 ## 已知隐患
 - **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报

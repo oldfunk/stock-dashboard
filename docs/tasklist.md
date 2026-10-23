@@ -26,8 +26,8 @@
 
 ## Phase 3 — 验证闭环
 
-- [ ] P0-8 look-ahead-safe 回测（修 `backtest_topk.py`）
-- [ ] P0-9 买入 MOS 记录 + 安全边际预测力分层验证
+- [x] P0-8 look-ahead-safe 回测（重写 `scripts/backtest_topk.py`：`financial_history.notice_date` 防前视 + 费用口径 + 买入不超现金）→ 生产实测 TopK20 月调仓 2024–2026：-36.79%，16 持仓；gate 842
+- [x] P0-9 买入 MOS 记录 + 预测力验证（`analysis_outcome.mos_at_entry` + `summarize_by_mos`）→ **深折让档（MOS 40–100%）60 日胜率 80%、超额 +17.2pp**，显著高于中档（26–42%）；gate 844
 
 ## Phase 4 — 体验与协同（择要）
 

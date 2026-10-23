@@ -165,6 +165,10 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-8 回测 + P0-9 买入 MOS 验证；基线 840→844）
+- **P0-8**（`eb291d5` + `23fa5b7`）：`scripts/backtest_topk.py` 原用 `financial_summary`（无 `code` 列、无时间序列）→ 报错且无前视防护。重写为基于 `financial_history`（年报 + `notice_date`）的 look-ahead-safe 回测：每个再平衡日只取 `notice_date <= 当日` 的最新年报；费用口径与纸盘一致（佣金 0.025% 双边、印花税 0.05% 卖出）；买入不超现金。**生产实测** TopK20 月调仓 2024-01~2026-10：-36.79%，16 持仓。
+- **P0-9**（`63e95ac` + `ab041ab`）：`analysis_outcome` 加 `mos_at_entry`（`_mos_at_entry` 用 `notice_date <= 分析日` 的最新年报 + 入场价算模型 MOS）；`summarize_by_mos` 按 MOS 分层。**生产实测**（390 分析）：深折让档（MOS 40–100%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 +17.2pp；0–20% 档 60 日胜率 41.7%；20–40% 档 20 日胜率仅 26%——安全边际越大胜率越高，支持价值投资命题（也提示中档可能是价值陷阱）。
+
 ### 2026-10-23（P0-7 同业估值分位；基线 837→840）
 - **缺口**：只有行业均值（AVG），无中位数、无个股行业内分位 → 跨行业绝对 PE 误判。
 - **实现**（`4c1df09` + `798364a`）：`StockSnapshotDAO.get_sector_averages` 扩展为均值+中位数（pe/pb/roe，pe/pb 仅正值样本）；新增 `get_sector_percentile(sector, value, metric)`（个股在行业内的分位 = <= value 的比例）；详情页/候选卡展示"本股 PE 分位"。+3 单测。
