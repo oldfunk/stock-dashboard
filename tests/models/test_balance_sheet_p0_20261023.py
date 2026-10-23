@@ -5,6 +5,8 @@
 - FinancialHistoryDAO 持久化新列
 """
 
+import urllib.parse
+
 import pytest
 
 from src.collector import balance_sheet_fetcher as bsf
@@ -33,11 +35,15 @@ def test_fetch_balance_sheet_annual_parses(monkeypatch):
                 {"REPORT_DATE": "2024-12-31 00:00:00"},
                 {"REPORT_DATE": "2025-06-30 00:00:00"},  # 非年报应忽略
             ]}
-        return {"data": [{
-            "REPORT_DATE": "2025-12-31 00:00:00",
-            "MONETARYFUNDS": 1000, "SHORT_LOAN": 10, "LONG_LOAN": 20,
-            "GOODWILL": 5, "TOTAL_ASSETS": 5000, "TOTAL_EQUITY": 3000,
-        }]}
+        # zcfzbAjaxNew：按 dates 参数返回每个日期一行
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        dates = (qs.get("dates", [""])[0] or "").split(",")
+        return {"data": [
+            {"REPORT_DATE": f"{d} 00:00:00", "MONETARYFUNDS": 1000,
+             "SHORT_LOAN": 10, "LONG_LOAN": 20, "GOODWILL": 5,
+             "TOTAL_ASSETS": 5000, "TOTAL_EQUITY": 3000}
+            for d in dates if d
+        ]}
 
     monkeypatch.setattr(bsf, "_get_json", fake)
     out = bsf.fetch_balance_sheet_annual("600519")
