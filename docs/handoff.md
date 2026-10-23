@@ -28,6 +28,8 @@
 - **P0-7 同业估值分位**（`4c1df09` + `798364a`，gate 840）：`get_sector_averages` 扩展为均值+中位数（pe/pb/roe）；新增 `get_sector_percentile`（个股在行业内的分位）；详情页/候选卡展示"本股 PE 分位"。**生产实测行业均值+中位数、个股分位（电子信息 PE=20 → 10.3% / PE=200 → 79.3%）**。
 - **P0-8 look-ahead-safe 回测**（`eb291d5` + `23fa5b7`，gate 842）：重写 `scripts/backtest_topk.py`——基本面源改 `financial_history`（年报 + `notice_date`），每个再平衡日只取 `notice_date <= 当日` 的最新年报（防前视）；费用口径（佣金 0.025%、印花税 0.05%）；买入不超现金。**生产实测 TopK20 月调仓 2024-01~2026-10：-36.79%，16 持仓**。
 - **P0-9 买入安全边际记录与预测力验证**（`63e95ac` + `ab041ab`，gate 844）：`analysis_outcome` 加 `mos_at_entry`（买入时模型 MOS，用 `notice_date <= 分析日` 的最新年报 + 入场价）；`summarize_by_mos` 按 MOS 分层统计。**生产实测**：深折让档（MOS 40–100%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 +17.2pp；中档（20–40%）20 日胜率仅 26%——**安全边际越大，胜率越高，支持价值投资命题**。
+- **候选卡展示股息率/连分年数**（`0aba4ca`，gate 843 临时）：首页候选卡新增股息率/连分年数两列；生产首页候选卡 35 处股息率（含实际值）+ 35 处连分年数；详情页 600398 = 7.16% / 10 年。
+- **临时排除 vendor flaky 用例**：`scripts/gate-exclusions.txt` + gate.sh `--deselect`（子项目 Issue #2，日期相关）；基线临时 844→843，待子项目修复后恢复。
 - **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 

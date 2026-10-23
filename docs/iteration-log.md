@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-24（候选卡展示股息率/连分年数 + 临时排除 vendor flaky 用例；基线临时 844→843）
+- **问题**：个股详情页有股息率/连分年数标签，但**首页候选卡没有**；且详情页对无近年分红的票显示 `--`。用户看到"面板还是老样子"。
+- **实现**（`aa21fca` + `fce7735` + `d1e1f64` + `0095702` + `5968edb`）：候选卡 `_stock_list.html` 新增"股息率/连分年数"两列（好/中档配色）；`_enrich_stocks` 补 `dividend_yield/dividend_years`（含历史补充股）；`/api/watchlist` 数据源补 `dividend_years`，钉选卡同步；修 `save_batch` 漏写 `dividend_years`（整行替换会清空该列）；模板股息字段改 `.get()` 防 StrictUndefined。
+- **临时排除**（`0aba4ca`）：vendor `test_close_nav_snapshot_once_per_day` 是**日期相关 flaky**（传入 day 与 log_operation 当前时间戳口径不一致，跨日必挂；子项目 Issue #2）——门禁临时排除（`scripts/gate-exclusions.txt` + gate.sh `--deselect`），基线临时 844→843，待子项目修复后恢复。
+- **验证**：生产 worktree gate **843 passed**；服务重启 + 健康 200；**生产首页候选卡 35 处"股息率"（含实际值 0.89%/2.79%/4.16%…）+ 35 处"连分年数"**；详情页 600398 显示 7.16% / 10 年。
+
 ### 2026-10-23（P0-8 回测 + P0-9 买入 MOS 验证；基线 840→844）
 - **P0-8**（`eb291d5` + `23fa5b7`）：`scripts/backtest_topk.py` 原用 `financial_summary`（无 `code` 列、无时间序列）→ 报错且无前视防护。重写为基于 `financial_history`（年报 + `notice_date`）的 look-ahead-safe 回测：每个再平衡日只取 `notice_date <= 当日` 的最新年报；费用口径与纸盘一致（佣金 0.025% 双边、印花税 0.05% 卖出）；买入不超现金。**生产实测** TopK20 月调仓 2024-01~2026-10：-36.79%，16 持仓。
 - **P0-9**（`63e95ac` + `ab041ab`）：`analysis_outcome` 加 `mos_at_entry`（`_mos_at_entry` 用 `notice_date <= 分析日` 的最新年报 + 入场价算模型 MOS）；`summarize_by_mos` 按 MOS 分层。**生产实测**（390 分析）：深折让档（MOS 40–100%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 +17.2pp；0–20% 档 60 日胜率 41.7%；20–40% 档 20 日胜率仅 26%——安全边际越大胜率越高，支持价值投资命题（也提示中档可能是价值陷阱）。
