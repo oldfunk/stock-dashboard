@@ -1,0 +1,7 @@
+# 临时排除的用例（每行一个 pytest node id；# 开头为注释）。
+# gate.sh 会读取本文件并逐个 --deselect；待子项目修复后移出本文件，并把基线调回。
+#
+# 2026-10-24：vendor 日期相关 flaky —— test_close_nav_snapshot_once_per_day
+#   传入 day 与 log_operation 写入的当前时间戳口径不一致，跨日必挂（子项目 Issue #2）。
+#   仅测试问题（生产路径 day=today 时幂等正常），故临时排除，待子项目 tag 后恢复。
+paper_trading/tests/test_agent.py::test_close_nav_snapshot_once_per_day

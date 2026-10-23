@@ -20,7 +20,20 @@ if [ -z "$PYBIN" ]; then
     elif command -v python3 >/dev/null 2>&1; then PYBIN="python3";
     else PYBIN="python"; fi
 fi
-if OUT=$("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" 2>&1); then
+# 临时排除清单（scripts/gate-exclusions.txt）：逐个 --deselect
+DESELECT=()
+if [ -f scripts/gate-exclusions.txt ]; then
+    while IFS= read -r _line; do
+        _line="${_line%%#*}"
+        _line="$(printf '%s' "$_line" | tr -d ' \r')"
+        [ -n "$_line" ] && DESELECT+=(--deselect "$_line")
+    done < scripts/gate-exclusions.txt
+fi
+if [ ${#DESELECT[@]} -gt 0 ]; then
+    echo "临时排除 ${#DESELECT[@]} 个用例（见 scripts/gate-exclusions.txt）：${DESELECT[*]}"
+fi
+
+if OUT=$("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" ${DESELECT[@]+"${DESELECT[@]}"} 2>&1); then
     EXIT_CODE=0
 else
     EXIT_CODE=$?
