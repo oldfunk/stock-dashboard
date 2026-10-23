@@ -119,6 +119,55 @@ def ensure_dividend_data(config: dict | None = None) -> dict:
         return {"error": str(e), "report_date": report_date, "records": count}
 
 
+def backfill_snapshot_dividends(report_date: str | None = None) -> dict:
+    """用最新年报分红回填 stock_snapshot 的股息率/分红率/年份（2026-10-23 P0-1）。
+
+    - 股息率 = 每股现金分红 / 现价 × 100；分红率 = 每股现金分红 / EPS × 100
+    - 缺价或缺分红保持 NULL（不零填），红利策略据此 fail-closed
+    - 幂等：同一数据重复执行结果一致
+    """
+    from src.models.database import db_conn
+
+    report_date = report_date or latest_annual_report_date()
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT stock_code, report_date, cash_per_share, eps "
+            "FROM dividend_annual WHERE report_date = ?",
+            (report_date,),
+        ).fetchall()
+        div = {r["stock_code"]: r for r in rows}
+        snaps = conn.execute(
+            "SELECT code, current_price FROM stock_snapshot"
+        ).fetchall()
+        updated = with_yield = with_payout = 0
+        for s in snaps:
+            code = s["code"]
+            price = _num(s["current_price"])
+            rec = div.get(code)
+            cash = _num(rec["cash_per_share"]) if rec else None
+            eps = _num(rec["eps"]) if rec else None
+            year = str(rec["report_date"])[:4] if rec else None
+            dy = round(cash / price * 100, 3) \
+                if (cash is not None and price and price > 0) else None
+            pr = round(cash / eps * 100, 2) \
+                if (cash is not None and eps and eps > 0) else None
+            conn.execute(
+                "UPDATE stock_snapshot SET dividend_yield=?, payout_ratio=?, "
+                "dividend_year=? WHERE code=?",
+                (dy, pr, year, code),
+            )
+            updated += 1
+            if dy is not None:
+                with_yield += 1
+            if pr is not None:
+                with_payout += 1
+        logger.info(f"[股息] snapshot 回填 {updated} 行：{with_yield} 有股息率 / "
+                    f"{with_payout} 有分红率（分红记录 {len(div)} 只）")
+        return {"report_date": report_date, "dividend_stocks": len(div),
+                "snapshots": len(snaps), "updated": updated,
+                "with_yield": with_yield, "with_payout": with_payout}
+
+
 def attach_dividends(stocks: list[dict],
                      report_date: str | None = None) -> list[dict]:
     """把年度分红挂到候选股 dict（纯 DB 读，不联网）。

@@ -122,6 +122,15 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
     except Exception as e:
         logger.warning(f"[Sector] 行业回填失败（不影响主流程）: {e}")
 
+    # ── 股息率回填：用最新年报分红 × 现价重算 snapshot 股息率/分红率 ──
+    # 2026-10-23 P0-1：此前只有候选股经 attach_dividends 有值，全市场快照股息率覆盖低。
+    try:
+        from src.collector.dividend_fetcher import backfill_snapshot_dividends
+        stats = backfill_snapshot_dividends()
+        logger.info(f"[股息] snapshot 回填 {stats['with_yield']}/{stats['snapshots']} 只有股息率")
+    except Exception as e:
+        logger.warning(f"[股息] snapshot 回填失败（不影响主流程）: {e}")
+
     if not candidates:
         logger.warning("No candidates from pipeline")
         RunLogDAO().complete_run(run_id, total_stocks, 0, 0, "no candidates")
