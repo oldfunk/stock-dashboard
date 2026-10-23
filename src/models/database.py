@@ -22,10 +22,16 @@ def get_connection() -> sqlite3.Connection:
     """获取数据库连接（裸连接，调用方需自行 close）。
 
     推荐改用 ``db_conn()`` 上下文管理器以避免连接泄漏。
+
+    2026-10-23：``PRAGMA journal_mode=WAL`` 需要写锁，调度器写库期间读连接
+    （如首页轮询 /api/indices）会抛 ``database is locked``。改为：
+    busy_timeout 等待锁 + 仅在非 WAL 时才设置（读连接不再抢写锁）。
     """
-    conn = sqlite3.connect(get_db_path())
+    conn = sqlite3.connect(get_db_path(), timeout=5.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
