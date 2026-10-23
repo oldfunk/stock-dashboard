@@ -420,7 +420,7 @@ async def index(request: Request):
         else:
             for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
                        'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
-                       'dividend_yield', 'payout_ratio',
+                       'dividend_yield', 'dividend_years', 'payout_ratio',
                        'score', 'reason', 'score_detail_parsed'):
                 item[k] = None
 
