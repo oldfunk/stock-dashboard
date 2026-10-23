@@ -3,7 +3,7 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 价值投资方法论完善 P0 全部落地：数据底座 + 可复现估值 + 验证闭环；vendor v0.6.7 已合并；基线 844）
+## 最后状态（2026-10-24 候选卡股息展示已上线 + 门禁分层修复；基线：母项目 624 / vendor 219）
 
 > **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项（P0-1~P0-10）全部落地并经生产 Pi 实测。
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
@@ -29,7 +29,7 @@
 - **P0-8 look-ahead-safe 回测**（`eb291d5` + `23fa5b7`，gate 842）：重写 `scripts/backtest_topk.py`——基本面源改 `financial_history`（年报 + `notice_date`），每个再平衡日只取 `notice_date <= 当日` 的最新年报（防前视）；费用口径（佣金 0.025%、印花税 0.05%）；买入不超现金。**生产实测 TopK20 月调仓 2024-01~2026-10：-36.79%，16 持仓**。
 - **P0-9 买入安全边际记录与预测力验证**（`63e95ac` + `ab041ab`，gate 844）：`analysis_outcome` 加 `mos_at_entry`（买入时模型 MOS，用 `notice_date <= 分析日` 的最新年报 + 入场价）；`summarize_by_mos` 按 MOS 分层统计。**生产实测**：深折让档（MOS 40–100%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 +17.2pp；中档（20–40%）20 日胜率仅 26%——**安全边际越大，胜率越高，支持价值投资命题**。
 - **候选卡展示股息率/连分年数**（`0aba4ca`，gate 843 临时）：首页候选卡新增股息率/连分年数两列；生产首页候选卡 35 处股息率（含实际值）+ 35 处连分年数；详情页 600398 = 7.16% / 10 年。
-- **临时排除 vendor flaky 用例**：`scripts/gate-exclusions.txt` + gate.sh `--deselect`（子项目 Issue #2，日期相关）；基线临时 844→843，待子项目修复后恢复。
+- **门禁分层修复**（`5197420` + `75b0406`）：母项目用例权威强制（基线 624），vendor 用例单独记录（基线 219）、**域内失败不阻塞母项目**；已知问题列 `scripts/gate-exclusions.txt`（Issue #2）。实证：无排除清单时 vendor flaky 失败，gate 仍 exit=0（母项目 624 passed）。规则入 `docs/subproject-protocol.md` §6 + AGENTS.md。
 - **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 

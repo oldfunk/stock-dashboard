@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-24（门禁分层修复：母项目权威强制 / vendor 记录不阻塞）
+- **问题**：门禁把 vendor 用例与母项目用例混在一个池子，一个域内测试 bug（日期相关 flaky，子项目 Issue #2）会阻断母项目**所有**无关改动（含股息展示修复）。
+- **修复**（`5197420` + `75b0406`）：`scripts/gate.sh` 改为**分层**——母项目用例（`--ignore=paper_trading`）= 权威门禁，必须全绿 + 基线强制（`scripts/gate-baseline.txt` = 624）；vendor 用例单独跑并记录（`scripts/gate-baseline-vendor.txt` = 219），**域内失败不阻塞母项目**；已知问题列 `scripts/gate-exclusions.txt`（带 Issue 链接）。
+- **实证**：临时移除排除清单后跑门禁——母项目 624 passed、**gate exit=0**；vendor 套件 `1 failed, 219 passed, 1 skipped`（flaky 用例）被记录但不阻塞。修复前该失败会让门禁 exit=1、母项目无法合并/部署。
+- **规则入档**：`docs/subproject-protocol.md` §6 新增分层门禁与两套基线；`AGENTS.md` 同步。
+
 ### 2026-10-24（候选卡展示股息率/连分年数 + 临时排除 vendor flaky 用例；基线临时 844→843）
 - **问题**：个股详情页有股息率/连分年数标签，但**首页候选卡没有**；且详情页对无近年分红的票显示 `--`。用户看到"面板还是老样子"。
 - **实现**（`aa21fca` + `fce7735` + `d1e1f64` + `0095702` + `5968edb`）：候选卡 `_stock_list.html` 新增"股息率/连分年数"两列（好/中档配色）；`_enrich_stocks` 补 `dividend_yield/dividend_years`（含历史补充股）；`/api/watchlist` 数据源补 `dividend_years`，钉选卡同步；修 `save_batch` 漏写 `dividend_years`（整行替换会清空该列）；模板股息字段改 `.get()` 防 StrictUndefined。

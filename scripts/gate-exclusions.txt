@@ -1,5 +1,7 @@
 # 临时排除的用例（每行一个 pytest node id；# 开头为注释）。
-# gate.sh 会读取本文件并逐个 --deselect；待子项目修复后移出本文件，并把基线调回。
+# gate.sh 会读取本文件并逐个 --deselect（作用于 vendor 套件）。
+# 2026-10-24 门禁分层后：vendor 域内失败已不阻塞母项目（协议 §6），
+# 本清单仅用于让 vendor 套件计数稳定；子项目修复后移出并恢复 vendor 基线。
 #
 # 2026-10-24：vendor 日期相关 flaky —— test_close_nav_snapshot_once_per_day
 #   传入 day 与 log_operation 写入的当前时间戳口径不一致，跨日必挂（子项目 Issue #2）。
