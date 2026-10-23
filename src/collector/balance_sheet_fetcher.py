@@ -8,6 +8,7 @@ akshare 的 ``stock_balance_sheet_by_report_em`` 依赖 HTML 抓 ``company_type`
 - 有息负债 = 短期借款 + 一年内到期的非流动负债 + 长期借款 + 应付债券 + 短期应付债券。
 """
 
+import gzip
 import json
 import logging
 import math
@@ -20,6 +21,7 @@ _F10 = "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis"
 _HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Referer": "https://emweb.securities.eastmoney.com/",
+    "Accept-Encoding": "identity",
 }
 
 
@@ -38,6 +40,8 @@ def _num(value):
 def _get_json(url: str, timeout: int = 15):
     req = urllib.request.Request(url, headers=_HEADERS)
     raw = urllib.request.urlopen(req, timeout=timeout).read()
+    if raw[:2] == b"\x1f\x8b":  # gzip 兜底（服务端偶发压缩）
+        raw = gzip.decompress(raw)
     return json.loads(raw.decode("utf-8", "ignore"))
 
 
