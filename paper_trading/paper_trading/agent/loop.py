@@ -49,6 +49,10 @@ class AgentConfig:
     event_min_interval_min: int = 15
     event_max_calls_per_day: int = 6
     event_max_conditions: int = 3
+    # 要闻/政策快讯：给模型判断“催化”用（外部原文，仅作信息；失败回空）
+    news_enabled: bool = True
+    news_limit: int = 12        # 进 prompt 的条数上限（政策类排前）
+    news_timeout_sec: float = 15.0  # 抓取硬超时：连不上的源按超时回空，不挂死
 
 
 def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
@@ -295,10 +299,13 @@ class AgentTrader:
             return 0.0
 
     def _conditions_from_raw(self, raw: Optional[str],
-                             pool: list[str]) -> tuple[list[dict], list[dict]]:
+                             pool: list[str],
+                             holdings: Optional[list] = None
+                             ) -> tuple[list[dict], list[dict]]:
         """从决策 JSON 里取 conditions，返回 (合法条目, 被拒原因)。
 
-        坏输出/池外/金额越界不能静默消失；原因要进 ai:decide / ai:plan 流水。
+        坏输出/池外/金额越界/卖出无持仓 不能静默消失；原因要进
+        ai:decide / ai:plan 流水。`holdings`=真实持仓代码（卖出条件只许挂持仓）。
         """
         if not self.cfg.conditions_enabled:
             return [], []
@@ -310,7 +317,8 @@ class AgentTrader:
                 max_conds=int(self.cfg.max_conditions),
                 max_value=float(self.cfg.max_order_value),
                 min_ticket=self._engine_min_ticket(),
-                max_days=int(self.cfg.condition_max_days))
+                max_days=int(self.cfg.condition_max_days),
+                holdings=holdings)
         except Exception as e:                # noqa: BLE001 - 条件单失败不阻断主决策
             return [], [{"why": f"解析异常：{type(e).__name__}: {e}"}]
 
@@ -339,13 +347,24 @@ class AgentTrader:
                 (str(d.get("symbol") or ""), str(d.get("side") or ""))
                 for d in orders.pending()
             }
+            # 挂单时的持仓兜底：解析层已按计划时点校验过，但计划可能过夜、
+            # 持仓可能已变（例：计划里的卖出条件标的根本不是持仓）。
+            # 这里是最后一道闸，宁可拒掉也绝不挂一条必然失败的卖单。
+            held_now = {str(p.symbol)
+                        for p in self.bridge.broker.get_all_positions()}
             filtered: list[dict] = []
             skipped: list[dict] = []
+            arm_rejected: list[dict] = []
             for c in conditions:
                 if not isinstance(c, dict):
                     continue
                 sym = str(c.get("symbol") or "")
                 side = str(c.get("side") or "")
+                if side == "sell" and sym not in held_now:
+                    arm_rejected.append(
+                        {"id": 0, "symbol": sym,
+                         "why": "卖出条件必须对应真实持仓（挂单时无持仓，未挂）"})
+                    continue
                 if (sym, side) in direct:
                     skipped.append({"symbol": sym, "side": side,
                                     "why": "与直接动作重复，避免双重下单"})
@@ -357,6 +376,8 @@ class AgentTrader:
                 seen.add((sym, side))
                 filtered.append(c)
             res = orders.create_many(filtered, min_ticket=self._engine_min_ticket())
+            res["rejected"] = list(res.get("rejected") or []) + arm_rejected
+            res["n_rejected"] = len(res["rejected"])
             res["skipped"] = skipped
             return res
         except Exception as e:                # noqa: BLE001 - 条件单故障不能回滚已成交动作
@@ -404,7 +425,8 @@ class AgentTrader:
         conds, parse_rejected = parse_conditions_verbose(
             raw, pool, max_conds=int(max_conds or self.cfg.event_max_conditions),
             max_value=max_value, min_ticket=min_ticket,
-            max_days=int(self.cfg.condition_max_days))
+            max_days=int(self.cfg.condition_max_days),
+            holdings=[p.symbol for p in b.broker.get_all_positions()])
         res = self._arm_conditions(conds, dry_run=dry_run)
         b.broker.log_operation(
             "ai:review", {"pool": pool, "event": event_txt[:300],
@@ -414,6 +436,30 @@ class AgentTrader:
         return {"ok": True, "pool": pool, "parsed": len(conds),
                 "parse_rejected": parse_rejected, **res,
                 "raw": str(raw or "")[:600]}
+
+    def _snapshot_close_nav(self, symbols: list[str],
+                            day: Optional[str] = None) -> None:
+        """收盘后记一条 NAV（每天一次）：NAV 序列不留空洞。
+
+        只在运行时收盘计划窗口调用（此时最新日线已定稿，是收盘口径）。
+        用 op_log 的 ``nav:close`` 标记保证幂等；快照失败只告警、不阻断计划。
+        背景：nav_history 此前只在有交易/决策时才写，没有交易的交易日
+        整天没有一行，逐日收益与回撤基线会因此失真。
+        """
+        from paper_trading.utils import get_logger
+
+        logger = get_logger(__name__)
+        b = self.bridge
+        day = day or today_str()
+        try:
+            if b.broker.has_operation("nav:close", day):
+                return
+            snap = b.portfolio.record_nav(b.price_map(symbols))
+            b.broker.log_operation("nav:close", {"symbols": len(symbols)}, True,
+                                   {"date": day, "nav": round(snap.total_value, 2)},
+                                   snap.cash, snap.total_value)
+        except Exception as e:      # noqa: BLE001 - 快照失败不能拖垮计划
+            logger.warning(f"close nav snapshot failed: {e}")
 
     def _plan(self, symbols: list[str], candidates: Optional[list] = None,
               pool_source: str = "config",
@@ -460,6 +506,10 @@ class AgentTrader:
         if require_today and not force and asof != base_now.date().isoformat():
             return {"ok": True, "skipped": "no-fresh-data", "asof": asof,
                     "plan_date": plan_date, "timestamp": now, "symbols": symbols}
+        # 只有运行时收盘计划窗口（require_today 且数据已定稿到今天）才记收盘
+        # NAV：无交易的交易日也要有一行，否则逐日收益/回撤基线出现空洞。
+        if require_today:
+            self._snapshot_close_nav(symbols, base_now.date().isoformat())
 
         ref = b.strategy.generate_signals(all_bars)
         ref_txt = "无" if not ref else "、".join(
@@ -500,7 +550,9 @@ class AgentTrader:
             return {"ok": False, "error": "LLM 输出非 JSON 计划，已作废",
                     "timestamp": now, "symbols": symbols}
         summary = str((plan or {}).get("summary", ""))[:200]
-        conditions, conditions_rejected = self._conditions_from_raw(raw, symbols)
+        held_syms = [p.symbol for p in b.broker.get_all_positions()]
+        conditions, conditions_rejected = self._conditions_from_raw(
+            raw, symbols, holdings=held_syms)
         # 计划基准价：买/卖动作一律回填定稿收盘价（prompt 约定 null=最新收盘）。
         # 不采信 LLM 自报价格；带 price_source 的基准价才允许在执行缺价时兜底。
         for a in actions:
@@ -752,7 +804,8 @@ class AgentTrader:
         if not isinstance(actions, list):
             actions = []
         summary = str((plan or {}).get("summary", ""))[:200] if plan else ""
-        conditions, conditions_rejected = self._conditions_from_raw(raw, symbols)
+        conditions, conditions_rejected = self._conditions_from_raw(
+            raw, symbols, holdings=set(positions))
 
         # 7. 逐条钳制执行（现决与计划执行共用实现）
         return self._execute_actions(
@@ -766,7 +819,8 @@ class AgentTrader:
             conditions_rejected=conditions_rejected)
 
     def _execute_plan(self, pending: dict, all_bars: dict,
-                      latest: dict, slot: Optional[str] = None) -> dict:
+                      latest: dict, slot: Optional[str] = None,
+                      exec_day: Optional[str] = None) -> dict:
         """执行今日待执行计划（休盘计划开盘执行；计划标的自动补数，缺价 fail-closed）。"""
         from paper_trading.utils import get_logger
 
@@ -782,6 +836,19 @@ class AgentTrader:
         conditions_rejected = plan.get("conditions_rejected", [])
         if not isinstance(conditions_rejected, list):
             conditions_rejected = []
+        # 计划条件的有效期必须覆盖执行日：跨周末计划里 expiry 可能落在
+        # 周六/周日（执行日前就过期，等于条件白挂）。以执行日为基准复核，
+        # 不足则顺延到执行日当天 23:59——意图明确，顺延比作废更合理，
+        # 调整写进 note 可审计（原计划 JSON 保留原始值）。
+        exec_day = exec_day or today_str()
+        for c in conditions:
+            if not isinstance(c, dict):
+                continue
+            exp = str(c.get("expiry") or "")[:10]
+            if exp and exp < exec_day:
+                c["expiry"] = f"{exec_day}T23:59"
+                c["note"] = (f"[有效期顺延至执行日{exec_day}] "
+                             f"{str(c.get('note') or '')}")[:200]
         summary = str(plan.get("summary", ""))[:200]
         syms = [s for s in str(pending.get("symbols", "")).split(",") if s]
         # 计划可能包含本轮运行股票池之外的新增标的（AI 提名等）。

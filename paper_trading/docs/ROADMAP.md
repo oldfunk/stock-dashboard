@@ -4,9 +4,9 @@
 > **每次迭代开始前先读本文件，完成后回来勾选复选框并补一行进度记录。**
 > 迭代时不得遗忘这里的事项；未完成的 P0 不进入下一里程碑。
 
-- 当前里程碑：**M1 — 正确性与口径统一**（M1 验收通过；v0.6.5 把 AI 调度改成固定交易时段运行时并接入交易日历，待 Pi dry-run 观察；`engine.enabled` 仍为 `false`）
-- 当前版本：v0.6.5（固定 09:30–11:30/13:00–15:00 + 开盘执行计划 + 收盘计划 + 事件复盘 + 日历缓存；本地 192 项全绿）
-- 纪律：**M1 全部验收通过前，`engine.enabled` 保持 `false`**（只看不买，允许 `--dry-run`）
+- 当前里程碑：**M1 已验收（2026-10-23）**：观察日全绿后按门禁在 Pi 开启引擎（本机 `engine.local.yaml`，repo 默认保持 `false`）；下一步 M1.5 除权除息自动化
+- 当前版本：v0.6.7（观察日验收 + Pi 开启引擎；离场优先闸 + 每日收盘 NAV + 方向型规则合并；双端 217 项全绿）
+- 纪律：**M1 已验收，Pi 于 2026-10-23 开启引擎**（本机 `engine.local.yaml`；发布版 `config.yaml` 保持 `enabled: false`，防止母项目/新克隆被自动开启）
 - 相关：`README.md`（用法）、`AGENTS.md`（Agent 硬约束）、`docs/`（本文档）
 
 ---
@@ -47,8 +47,8 @@
 - [x] 本地与 Pi 双端 `python -m pytest -q` 全绿。（本地 170 项；Pi 170 项，2026-10-21 验证）
 - [x] v0.6.0 发版、Pi 部署、母项目已通知按 tag 取用（stock-dashboard#1）。
       （Release: https://github.com/oldfunk/paper-trading/releases/tag/v0.6.0；Pi `da9bc44`）
-- [ ] 本文件勾选完成，`engine.enabled` 才允许从 `false` 改为 `true`（改之前先在 Pi 上 `--dry-run` 观察一个交易日）。
-      **当前仍为 `false`**：双端验收已过，但尚未做开盘 dry-run 观察；开启前需单独确认。
+- [x] 本文件勾选完成，`engine.enabled` 才允许从 `false` 改为 `true`（改之前先在 Pi 上 `--dry-run` 观察一个交易日）。
+      **2026-10-23 已开启**：Pi 217 项验收通过 + 观察日（首个完整交易日）证据齐全；开关走本机 `engine.local.yaml`（gitignored），发布版默认值保持 `false`。
 
 ### M1-A 持仓元数据（实盘止损可信）
 
@@ -129,7 +129,7 @@
 - [x] 自动交易日历（akshare 缓存 + 本地回退），T+1 解冻不再依赖手填 `holidays`（v0.6.5：`calendar sync/status`，缓存 `var/trading_calendar.json`，失败回退周末+`config.holidays`）。
 - [ ] 分红税口径（持股 1 个月内 20%、1 月–1 年 10%、超 1 年免税）建模。
 
-### M1.6 — AI 实时执行层（v0.6.2–v0.6.4，提前于 M1.5 落地）
+### M1.6 — AI 实时执行层（v0.6.2–v0.6.5，提前于 M1.5 落地）
 
 > 定位：AI 低频决策（一天几次）→ 输出可验证条件单（现在不成交）→ 规则引擎每分钟盯盘执行。
 > **不是**让 LLM 逐笔/tick 调用，也不是 HFT；实时性来自引擎，AI 调用频率与成本仍受预算控制。
@@ -142,15 +142,22 @@
 - [x] 事件驱动复盘 `agent event`：价格异动 / 持仓峰值回撤才调 LLM；全局最小间隔 + 单标冷却 + 每日预算；只产条件单，不直接下单。
 - [x] 计划目标日 = 下一交易日；运行时开盘只消费 `plan_date=今天` 的 pending；手动 run 保留 `get_executable_plan`（最近 7 天）兜底。
 - [x] v0.6.5 固定运行时：交易时段写死 09:30–11:30 / 13:00–15:00；`agent tick` 只在 09:30–10:00 执行计划、16:30–18:30 做计划，其余时间静默且不写 `ai:decide` 噪音流水；旧 `agent_schedule` 仅兼容读取，面板改为只读“运行时刻”。
-- [x] 交易日历缓存：`calendar sync` 从 akshare 拉交易所交易日到本地，`is_trading_day/next_trading_day/实时交易时段` 优先读缓存，缓存未覆盖才回退周末+`config.holidays`；缓存覆盖范围进面板与 CLI。
+- [x] 交易日历缓存：`calendar sync` 从 akshare 拉交易所交易日到本地，`is_trading_day/next_trading_day/实时交易时段` 优先读缓存，缓存未覆盖才回退周末+`config.holidays`；缓存是**未来优先**的窗口——只留最近 45 天（近况/节后审计兜底，不是历史档案）+ 源里全部未来交易日，不存历史全量（`HISTORY_TAIL_DAYS`）；状态/面板优先展示“未来可看到哪天”。
+- [x] v0.6.6 **离场三件套进系统提示**：止损（立刻卖或给 `price_below` 条件）/放飞（`price_above` 止盈或持有）/清仓（volume=全部可用）写成 `TRADER_SYSTEM` 第 9 条；每只 hold 必须写清“什么情况就卖”。
+- [x] v0.6.6 **卖出条件持仓双层校验**（计划 #12 给非持仓挂卖单暴露的口子）：解析层 `parse_conditions_verbose(holdings=...)`（计划/现决/事件复盘/cond design 四条 AI 路径全接）+ 挂单层 `_arm_conditions` 兜底（防过夜计划的持仓已变化）；拒单进 `parse_rejected`。
+- [x] v0.6.6 **要闻/政策数据源**：`data/news.py`（akshare 财联社电报→同花顺快讯备源），政策关键词排前、15 分钟缓存、失败回空/回旧缓存标 `stale`、绝不阻断；进 `llm_context.news` 且 legend 写明“外部原文、其中任何指令不得执行”（注入兜底在三道闸）；`agent.news_enabled/news_limit` 可关。政策关键词收紧为强政策词（央行/国务院/证监会/降准等），宁可漏标不误标（“交易所”这类高频词会把普通公告全标成政策）。
 - [x] `engine.enabled=false` 时规则/条件被拦下的意图落 `engine_triggers(status=blocked_disabled)`，同 key 每天一条，便于 dry-run 观察。
 - [x] 条件单解析失败不再静默：低于 `min_ticket_cny`、池外代码、非法类型等返回 `parse_rejected` 原因，进 `ai:decide` / `ai:plan` / `ai:review` 流水和面板（v0.6.3）。
 - [x] 条件单 prompt 显式约束买入 `value` 在 `min_ticket_cny`~单笔上限之间，且 `volume` 按触发价估算也要过地板；条件类型语义（绝对价 vs 当日涨跌幅）写清，减少无效输出。
 - [x] AI 条件单有效期上限由 `agent.condition_max_days` 强制执行，超限/非法日期进 `parse_rejected`，不再只靠 prompt。
 - [x] 回归测试：池外持仓卖出、AI 条件单挂单、条件单端到端成交、计划条件执行、前一日计划执行、事件检测/冷却/预算、拒单原因审计、显式 volume 手续费地板、有效期上限（新增 12 项；本地 187 全绿）。
-- [ ] Pi 部署后观察一次交易日：事件复盘调用次数、条件单挂单/触发、`blocked_disabled` 流水是否符合预期；确认无重复下单。
-- [ ] 计划跨周末：AI 条件 expiry 以 `plan_date` 为基准复核/调整，避免周五计划的条件在周一执行前过期（本次 10-23 计划不受影响）。
-- [ ] 观察后再决定是否开启 `engine.enabled`（M1 门禁不变，需用户单独确认）。
+- [x] Pi 观察日（2026-10-23，新运行时首个完整交易日）：09:31 计划 #12 被 `from_plan` 精确消费（未临时问模型），计划里 600211/000651 两条非持仓卖单被挂单层拒并写明原因；事件复盘 6/6 用满日预算、间隔 ≥15 分钟、同向条件去重生效；规则意图 5 条 + 条件 2 条落 `blocked_disabled`（同一 key 每天一条）；全天 0 订单、0 成交；15:00 收盘后引擎停摆、`engine_triggers` 无新增。观察中发现并修复两个问题（离场优先闸、每日收盘 NAV）。
+- [x] 计划跨周末：AI 条件 expiry 以**执行日**为基准复核——执行日前过期的顺延到执行日 23:59 并在 note 留痕（原计划 JSON 保留原始值）（v0.6.6 后手，新增 1 项测试，本地 203 全绿）。
+- [x] v0.6.6 后手核实：规则引擎 `_execute` 与 `RiskManager.check_signal` 的**卖出路径无 5000 元金额地板**（清仓优先），877 元的 002215 也能正常移动止损；Pi `engine.local.yaml` 重写为**只放 rules**（开关/限额唯一真相源=config.yaml，消除双源），原 6 条规则原样保留 + 6 条 trailing 8% 覆盖全部持仓；60 日回测通路正常（0.79%、最大回撤 0.57%——仅验证规则集能跑，不作绩效承诺）。
+- [x] 回测 `trades_detail` “rule id 互换”查清：**不是展示层 bug**，是方向型规则语义——`ma_cross` 由信号决定方向（金叉买/死叉卖），`action.side` 只作默认（`rules.py` 注释 + `test_ma_cross_fires_only_on_cross` 锁定）。10-19 Pi 旧规则把金叉/死叉拆成两条，每条都会双向触发（同向重复成交）；已合并为每标的 1 条 `ma_cross`（buy + value），并在 `config.yaml` 注释与 AGENTS 纪律写明口径。
+- [x] 观察日发现①（离场优先）：`trail-300390` 要给 300390 止损清仓，AI 的 300390 回踩买入条件同分钟也到价——开关打开后会“卖出再买回”白付双边手续费。`ConditionRunner` 增加闸门：同标的当日已有卖出成交时，到价的买入条件作废并记拒因；新增回归测试。
+- [x] 观察日发现②（NAV 空洞）：`nav_history` 只在有交易/决策时写，10-22 整日无交易就没有 NAV 行（10-23 只有 09:31 一条）。收盘计划窗口（16:30–18:30、数据已定稿到今天）现在记一条 `nav:close` 收盘 NAV（op_log 幂等标记，无交易也记，失败不阻断计划）；新增回归测试。
+- [x] 开启 `engine.enabled`（用户 2026-10-22 已全权授权，按门禁流程执行）：观察日证据齐全 + M1 全部勾选后，Pi 本机 `engine.local.yaml` 置 `enabled: true`（发布版 `config.yaml` 保持 `false`）；本机规则 10 条（2 条方向型 `ma_cross` + 8 条离场规则），AI 条件单同步获得执行能力。首日盘后即触发 4 只持仓止损意图（300390/002192/000792/600989），下一交易日 09:30 执行。
 
 ---
 
@@ -196,3 +203,13 @@
 | 2026-10-22 | v0.6.4 | 部署/运维 | Pi `git pull` 到 `7e69bd2`，`pytest` 187 项全绿；dashboard active、HTTP 200、版本 0.6.4；`engine.enabled=false`。cron 对齐队列：tick 改 `5,20,35,50 9-15`（09:35 精确消费计划），event 改 `2,7,12,… 9-15`（错开 tick，避免 `run_lock` 冲突）。 |
 | 2026-10-22 | v0.6.4 | 事件复盘验证 | 13:02 真实事件复盘（300390/600989/002192）模型输出 3 条买入条件：`parsed=3`、`parse_rejected=[]`、`created=3`（id 7–9，`value=10000`，expiry 10-24，status=armed）；`engine.enabled=false` 下无新 orders/fills，条件保持待触发。12:17 另用合成行情干跑同一 prompt，同样 `parsed=3`、无拒单。 |
 | 2026-10-22 | v0.6.5 | M1.6/运维 | AI 调度重构为固定运行时：新增 `utils/market_time.py`（09:30–11:30/13:00–15:00、开盘 09:30–10:00、计划 16:30–18:30）与 `agent/runtime.py`；`agent tick` 不再读 `agent_schedule`，无到点动作不写 `ai:decide` 噪音流水；手动 `agent run` 摘掉旧队列闸；面板“AI 定时”改为只读“运行时刻”。新增交易日历缓存 `calendar sync/status`（akshare → `var/trading_calendar.json`，失败回退周末+`config.holidays`），实时交易时段/条件单执行接入缓存。重写运行时/日历测试，本地 192 项全绿。 |
+| 2026-10-22 | v0.6.5 | 部署/验证 | Pi `git pull` 到 `8fff43c`（tag `v0.6.5`），双端 `pytest` 193 项全绿；dashboard active/HTTP 200，`engine.enabled=false`。按用户反馈改日历**未来优先**：同步只留最近 45 天（近况/节后审计兜底）+ 全部未来，缓存 `n=8797→78`（`2026-09-07~12-31`，`future_days=50`、`lookahead=70 天`、`needs_sync=false`），抽查 10-01/10-07 休市、10-08/10-23 交易日、`next(09-30)=10-08` 全对。cron 切新运行时（旧 cron 备份 `crontab.v0.6.4.bak`），切换后 `not-in-schedule` 噪音归零。16:30 计划窗口实测：16:30 行情未定稿 → 静默 `no-fresh-data` 重试；16:35 定稿后问模型遇 glm 429 过载 → fail-closed 记 `ai:plan ok=0`、不落计划；16:40 重试成功生成计划 #12（`plan_date=2026-10-23`、`asof=2026-10-22`、7 动作+2 条件、条件 expiry 10-25 未超 3 天上限）；16:44 再 tick 命中 `plan-exists` 幂等零调用。手动 tick 撞锁时礼貌退出，不双跑。明早 09:30 是新“开盘执行”路径首次实盘（计划 #12 为首个 `plan_date=当天` 的精确消费）。 |
+| 2026-10-22 | v0.6.6 | M1.6 | 用户确认的三项策略补齐（回应“AI 是否参考基本面/政策/行业与止损放飞清仓”审计）：① **离场三件套**写进 `TRADER_SYSTEM`（止损给动作或 `price_below` 条件、放飞给 `price_above` 条件、清仓写全部可用股，每只 hold 必须交代“什么情况就卖”）；② **卖出条件持仓双层校验**——解析层 `holdings=` 接入计划/现决/事件复盘/cond design 四条路径 + 挂单层 `_arm_conditions` 兜底（堵计划 #12 给非持仓 600211/000651 挂卖单的口子，明早执行计划时会被兜底拒掉）；③ **要闻/政策源** `data/news.py`（akshare 财联社电报主源+同花顺备源，政策关键词排前、15 分钟缓存、失败回空/回旧缓存标 stale），进 `llm_context.news` 并在 legend 声明外部原文注入防护，`agent.news_enabled/news_limit` 可关。新增 9 项测试，本地 202 全绿。 |
+| 2026-10-22 | v0.6.6 后手 | M1 收口 | 用户全权授权开启引擎（按门禁流程执行，不绕过观察）：① 收掉“计划跨周末 expiry”项——执行日前过期的条件顺延到执行日 23:59 并在 note 留痕（`_execute_plan(exec_day=...)`），新增 1 项测试，本地 **203** 全绿；② 核实引擎/风控卖出路径无 5000 元地板（清仓优先，877 元的 002215 也能止损）；③ Pi `engine.local.yaml` 重写为**只放 rules**（消除与 config.yaml 的双真相源）：原 6 条规则原样保留 + trailing 8% × 6 覆盖全部持仓，60 日回测通路正常（0.79%、MD 0.57%，仅通路验证）；④ `engine.enabled` 仍 false，待 10-23 观察日（开盘执行计划 #12 + 事件复盘 + blocked_disabled 全天）证据齐全后一处开启。附带发现：回测 `trades_detail` rule id 疑似互换（原因/方向正确，纯展示层），已记待办。 |
+| 2026-10-23 | 审计对齐 | 交接 | 用户自主审计后新增 3 个提交：`tests/test_caliber_consistency.py`（口径单源断言：TradingConfig 7 项 + FeeModel 4 项默认值 == config.yaml，分叉即 CI 红）、`docs/automation-audit.md`（手工步骤盘点与不自动化理由）。已对齐：12 项测试通过、全量 215 全绿；未改撮合行为。 |
+| 2026-10-23 | v0.6.7 | 观察日/M1.6 | 新运行时首个交易日：09:31 计划 #12 被 `from_plan` 精确消费（未临时问模型），计划里 600211/000651 两条非持仓卖单被挂单层拒并留原因；事件复盘 09:31–10:50 共 6 次用满日预算、间隔 ≥15 分钟、同向条件去重生效（`cond:7/9` 到价只记 `blocked_disabled`）；规则意图 5 条 + 条件 2 条 `blocked_disabled`，每 key 每日一条；全天 0 订单 0 成交。发现并修复两个问题：① 同标的止损卖出与 AI 回踩买入同日同分钟对打 → `ConditionRunner`「离场优先」闸（当日有卖出成交则买入条件作废+拒因）；② `nav_history` 在无交易交易日整天空洞（10-22 缺失）→ 收盘计划窗口记 `nav:close`（op_log 幂等、无交易也记）。新增 2 项测试，本地 217 全绿。 |
+| 2026-10-23 | v0.6.7 | M1 验收/开引擎/发版 | 观察日全绿后按门禁开启：Pi 本机 `engine.local.yaml` 置 `enabled: true`（发布版 `config.yaml` 保持 `false`）+ 版本 0.6.7 + tag `v0.6.7`；Pi 217 项验收。首日盘后即触发 4 只持仓止损意图（300390/002192/000792/600989），下一交易日 09:30 执行；AI 条件单 7–13 周末到期，周一由事件复盘重新生成。另修方向型规则语义（10-19 金叉/死叉拆条会双向重复触发，已合并为每标的一条）。 |
+| 2026-10-23 | 后手 | 面板/LLM 配置 | 修「已存 Key 仍反复要求重输」：旧逻辑任何 LLM 配置写入都要浏览器口令，而口令只存 localStorage（换浏览器/换访问地址/清站点数据即丢）→ 拉模型选完保存就 403 让重输 Key。改为：**只改接口地址 `base_url` 才需要口令**（它决定已存 Key 会被发去哪里，是唯一有外泄风险的写操作），改模型名/厂商/Key 直接放行；且接管必须填**与已存一致**的 Key（乱填不再覆盖真 Key）。新增 4 项面板测试，本地 221 全绿。 |
+| 2026-10-23 | 后手 | 面板/LLM 配置（修正） | 按用户反馈调整：① 接管改地址改为**兼容优先**——接受任意非空 Key，不做“与已存一致”的强校验（各家 API 的 Key 字段差异大）；② `glm-4.5-flash` 官方列表虽无但**仍可调用**，不换模型，“不在列表”提示改为“列表可能不全”的中性说法。本地 220 全绿，Pi 已部署验证。 |
+| 2026-10-23 | v0.6.7 | 发版口径 | 按用户要求**不新增版本号**：`v0.6.7` tag 重指到包含上述 LLM 配置修复的提交（母项目尚未拉取过 v0.6.7，force-move 安全）；版本号仍为 0.6.7，tag 与 main 顶端一致。 |
+| 2026-10-23 | v0.6.7（重指） | 修母项目 Issue #1 | 母项目 `subtree pull v0.6.7` 后 gate 挂死：`run()`→`llm_context`→`fetch_market_news` 打真实 akshare 且无超时，网络 stall 时无限挂死。修复：① 抓取走守护线程 + 硬超时（`agent.news_timeout_sec`，默认 15s），超时按“回空/stale”处理，不再挂死；② `tests/conftest.py` 全局打桩 `fetch_market_news`（`test_news.py` 自行还原真函数），单测在任何网络环境下确定、离线。新增 1 项超时测试，本地 221 全绿。 |

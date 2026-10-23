@@ -63,6 +63,10 @@ agent:
   event_min_interval_min: 15  # 任意两次复盘最小间隔
   event_max_calls_per_day: 6  # 每日模型调用预算
   event_max_conditions: 3     # 单次复盘最多挂几条条件单
+  # 要闻/政策快讯：给模型判断“催化”用（akshare 财联社/同花顺，15 分钟缓存）
+  news_enabled: true
+  news_limit: 12              # 进 prompt 最多几条（政策类排前；失败回空不阻断）
+  news_timeout_sec: 15        # 抓取硬超时（秒）：连不上的源按超时回空，绝不挂死
 
 # 规则引擎（盘中量化执行层；与 LLM 分工：引擎负责择时执行，LLM 负责选股与策略）
 engine:
@@ -77,6 +81,10 @@ engine:
   # 规则集（9 种类型：日线 6 种 + 日内 3 种；示例见 AGENTS.md）
   # 本机覆盖写 engine.local.yaml（gitignored，不进仓库）
   rules: []
+  #   # 方向型规则（ma_cross / rsi_zone / pct_change / vwap_dev …）：
+  #   # 方向由信号决定（金叉=买、死叉=卖），action.side 只作默认、不覆盖信号。
+  #   # 同一标的的"金叉买+死叉卖"用**一条**规则即可（buy + value），
+  #   # 拆成金叉/死叉两条 → 每条都会双向触发（曾致回测里同向重复成交）。
   #   - id: trail-002192
   #     type: trailing_stop          # 日线：移动止损
   #     symbol: "002192"
