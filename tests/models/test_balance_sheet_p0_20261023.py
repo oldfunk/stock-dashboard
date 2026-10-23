@@ -23,8 +23,8 @@ def test_interest_bearing_debt_sum():
 
 
 def test_em_symbol():
-    assert bsf._em_symbol("600519") == "600519.SH"
-    assert bsf._em_symbol("000001") == "000001.SZ"
+    assert bsf._em_symbol("600519") == "SH600519"
+    assert bsf._em_symbol("000001") == "SZ000001"
 
 
 def test_fetch_balance_sheet_annual_parses(monkeypatch):

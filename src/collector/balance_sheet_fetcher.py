@@ -42,7 +42,8 @@ def _get_json(url: str, timeout: int = 15):
 
 
 def _em_symbol(code: str) -> str:
-    return f"{code}.SH" if code.startswith(("6", "9")) else f"{code}.SZ"
+    """东财 F10 用前缀格式：SH600519 / SZ000001。"""
+    return f"SH{code}" if code.startswith(("6", "9")) else f"SZ{code}"
 
 
 def _interest_bearing_debt(row: dict) -> float | None:
