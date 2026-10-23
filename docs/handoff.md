@@ -3,7 +3,9 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 个股详情页细节优化 + 钉选卡上色 + 候选股颜色全覆盖 + DB 锁修复；母项目 v2.0.0 已发布；vendor v0.6.7 暂缓）
+## 最后状态（2026-10-23 母项目 v2.0.0 已发布；启动价值投资方法论完善长线迭代；vendor v0.6.7 待重新合并）
+
+> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。当前进行：Phase 0 重新合并子项目 v0.6.7（Issue #1 已修复）→ Phase 1 数据底座（P0-1 股息回填起）。
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
 - **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
 - **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
@@ -20,11 +22,11 @@
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 
 ## 下一步方向
-1. （P1）观察 v0.6.5 固定交易时段 runtime 首观察：今日 16:30–18:30 plan window 的 `agent-tick.log`，非时段静默属正常
-2. （P1，已完成）vendor v0.6.7 触发 `paper_trading/` 改动，验证 deploy.sh 的 `NEED_PARENT=1` 重启分支
-3. （P1）红利池 fail-closed 命中率跟踪（若干轮筛选统计），阈值是否调整待数据 + 拍板
-4. （P2）`financial_history` 披露日期 / `scripts/backtest_topk.py` 前视风险收口；股息覆盖率 65% 兜底评估
-5. （P3，待拍板）AI 笔记增强 / 时间线交互 / 详情页体验；红绿开关剩余非涨跌元素是否拆 token
+1. （Phase 0）重新 `subtree pull v0.6.7`（tag 重指 `a0dd2ec` 修复版）+ 契约核对 + 生产 gate（预期不再挂死）
+2. （Phase 1）P0-1 股息率/分红率回填（数据已有，783 → >3000）→ P0-2 分红历史 → P0-3/4 三表关键字段 → P0-5 历史价格 → P0-10 披露日期
+3. （Phase 2）P0-6 可复现估值模型（核心）+ P0-7 同业分位
+4. （Phase 3）P0-8 look-ahead-safe 回测 + P0-9 买入 MOS 预测力验证
+5. （择要）E1 财务同环比高亮 / E2 搜索排序；C1 对齐子项目 M2；C2 观察 v0.6.5 runtime tick 日志
 
 ## 已知隐患
 - **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报
