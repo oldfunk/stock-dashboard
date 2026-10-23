@@ -3,9 +3,9 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 母项目 v2.0.0 已发布；启动价值投资方法论完善长线迭代；vendor v0.6.7 待重新合并）
+## 最后状态（2026-10-23 母项目 v2.0.0 已发布；vendor v0.6.7 修复版已合并；价值投资方法论完善长线迭代中）
 
-> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。当前进行：Phase 0 重新合并子项目 v0.6.7（Issue #1 已修复）→ Phase 1 数据底座（P0-1 股息回填起）。
+> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。Phase 0 已完成；当前进行：Phase 1 数据底座（P0-1 股息回填起）。
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
 - **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
 - **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
@@ -18,6 +18,7 @@
 - **验证（详情页）**：生产 worktree gate **783 passed**（777 +6）；模板改动正确触发主服务重启；浏览器实测四项全部生效；`scripts/gate-baseline.txt` 已更新为 783。
 - **vendor v0.6.7 暂缓**：已尝试 `subtree pull v0.6.7`，但 v0.6.7 的 `run()` 类用例不隔离新闻抓取（`llm_context` → `fetch_market_news` 打真实 akshare），在 Pi 上网络 stall 无超时 → 母门禁挂死。已回退 vendor 到 v0.6.5，并提 Issue [#1](https://github.com/oldfunk/paper-trading/issues/1)（域内 bug，母方不修）；等子方 tag 修复后再 vendor 验收。
 - **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`；消除 `/api/indices` 轮询撞调度器写库时的 `database is locked`（近 2h 出现 2 次）。
+- **vendor v0.6.7 修复版已合并**（`f8fa260`，tag 重指 `a0dd2ec`）：`fetch_market_news` 加硬超时（守护线程 + `agent.news_timeout_sec` 默认 15s）+ `tests/conftest.py` 全局离线打桩（Issue #1 已闭环）。因先前 revert 造成合并基线错位，改用 `read-tree --prefix=paper_trading/` 整树重读为 v0.6.7；契约核对通过（integration 零写母库、engine 默认关、CLI 兼容）。**gate 810 passed**（785 +25 vendor 用例）；`NEED_PARENT=1` 正确重启纸盘面板。
 - **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 
@@ -38,6 +39,7 @@
 - （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
 
 ## 历史交接区（追加，不删）
+- 2026-10-23 vendor v0.6.7 修复版合并（Issue #1 闭环；整树重读；gate 785→810；NEED_PARENT 验证）+ 价值投资方法论完善方案/TODO List 入档
 - 2026-10-23 母项目 v2.0.0 发布（tag + GitHub Release）；vendor v0.6.7 暂缓 + DB 锁修复
 - 2026-10-23 vendor v0.6.7 暂缓（run() 用例打真实 akshare 挂死 gate，回退 v0.6.5 + 提子项目 Issue #1）+ DB 锁修复；发版 v2.0.0
 - 2026-10-23 个股详情页细节优化（快照条指标上色/空值占位统一/硬编码颜色主题化/间距线框统一；基线 777→783）

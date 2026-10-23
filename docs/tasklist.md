@@ -3,11 +3,11 @@
 > 创建：2026-10-23 · 上游：`docs/value-investing-methodology.md`（方案）+ `docs/roadmap.md`（路线）· 状态：进行中
 > 规则：每次只做一件小而实的事；完成即勾选并记录验证（命令 + 输出）；全仓 pytest 只升不降。
 
-## Phase 0 — 子项目 v0.6.7 合并（前置）
+## Phase 0 — 子项目 v0.6.7 合并（前置）✅ 2026-10-23
 
-- [ ] P0-0 重新 `subtree pull v0.6.7`（tag 已重指 `a0dd2ec` 修复版）+ 契约核对 + 生产 gate（不再挂死）
-- [ ] P0-0b 契约核对：`integration/` 零写母库、只读表在契约内、CLI 参数兼容、`engine.enabled=false`、无新表
-- [ ] P0-0c 部署 + 双服务健康检查
+- [x] P0-0 重新 `subtree pull v0.6.7`（tag 重指 `a0dd2ec` 修复版；因先前 revert 冲突，改为 `read-tree --prefix=paper_trading/` 整树重读，版本 0.6.7）
+- [x] P0-0b 契约核对：`integration/` 零写母库、只读表在契约内、CLI 参数兼容、`engine.enabled=false`、无新表（新增 `agent.news_timeout_sec`）
+- [x] P0-0c 部署 + 双服务健康检查：gate **810 passed**（785 +25 vendor）；`NEED_PARENT=1` 正确重启 `paper-trading-parent.service`；`:9527`/`:8081` 均 200
 
 ## Phase 1 — 数据底座（P0）
 

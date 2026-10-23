@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（vendor v0.6.7 修复版合并 + 价值投资方法论完善方案入档；基线 785→810）
+- **vendor v0.6.7 修复版**（`f8fa260`）：子项目已修 Issue #1（`fetch_market_news` 守护线程 + 硬超时 `agent.news_timeout_sec` 默认 15s；`tests/conftest.py` 全局离线打桩）。因先前 revert 使 `subtree pull` 合并基线错位（非冲突文件保留 revert 后的 0.6.5），改用 `git read-tree --prefix=paper_trading/ -u v0.6.7^{commit}` 整树重读为 v0.6.7。契约核对：`integration/` 零写母库、只读表在契约内、CLI 参数兼容、`engine.enabled=false`、无新表。
+- **价值投资方法论完善方案入档**：新增 `docs/value-investing-methodology.md`（P0 逐项：目标/数据源/实现/单测/生产验收）+ `docs/tasklist.md`（TODO List）+ `docs/roadmap.md` 更新（主线）。核心缺口：估值不可复现（LLM 主观）+ 质量度量是会计指标非经济质量（缺 ROIC vs 资本成本/增量 ROIC/资本密集度/净负债）+ 数据底座缺完整三表关键字段。
+- **验证**：生产 worktree gate **810 passed**（785 +25 vendor 用例，不再挂死）；`NEED_PARENT=1` 正确重启 `paper-trading-parent.service`；`:9527`/`:8081` 均 200；CI 绿。
+
 ### 2026-10-23（vendor v0.6.7 暂缓 + DB 锁修复 + 发版 v2.0.0 准备）
 - **vendor v0.6.7 暂缓**：尝试 `subtree pull v0.6.7` 后，v0.6.7 的 `run()` 类用例不隔离新闻抓取——`llm_context` 调 `fetch_market_news` 打真实 akshare（`stock_info_global_cls`），`tests/test_agent.py` 的 `_no_network` fixture 只 mock `TradingBridge.sync_data`，且抓取无超时；Pi 网络 stall 时**无限挂死**（`fetch_market_news(force=True)` >90s 无返回），母 `gate.sh` 卡死（基线 783 → 挂起）。已**回退 vendor 到 v0.6.5**（`git revert -m 1` 子树合并，v0.6.7 新增文件已清），并提子项目 Issue [#1](https://github.com/oldfunk/paper-trading/issues/1)（域内 bug：用例未隔离 + 抓取无超时；母方不修）。等子方 tag 修复后再 vendor 验收。
 - **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`。原实现每次连接都执行 `PRAGMA journal_mode=WAL`（需写锁），调度器写库期间读连接（首页轮询 `/api/indices`）抛 `database is locked`（近 2h 出现 2 次）。+2 回归用例。
