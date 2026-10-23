@@ -158,7 +158,7 @@
                     {% if _sa %}
                     <div class="sd-row sd-sector">
                         <span class="sd-name">行业均值（{{ stock.sector }}）</span>
-                        <span class="sd-detail">ROE {{ "%.2f"|format(_sa.avg_roe) if _sa.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(_sa.avg_pe) if _sa.avg_pe is not none else '--' }}（{{ _sa.n }}只）{% if _sa.pe_pct is not none %} · 本股 PE 分位 {{ "%.0f"|format(_sa.pe_pct) }}%{% endif %}</span>
+                        <span class="sd-detail">ROE {{ "%.2f"|format(_sa.avg_roe) if _sa.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(_sa.avg_pe) if _sa.avg_pe is not none else '--' }}（{{ _sa.n }}只）{% set _pct = _sa.get('pe_pct') %}{% if _pct is not none %} · 本股 PE 分位 {{ "%.0f"|format(_pct) }}%{% endif %}</span>
                     </div>
                     {% endif %}
                 </div>
