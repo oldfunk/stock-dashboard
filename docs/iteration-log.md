@@ -19,7 +19,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - 2026-10-21 专业化三件套：信号前向收益验证（`/outcomes`）、真实年报股息 + fail-closed 红利池、AI prompt 新闻事件上下文；周六 09:00 自动维护。
 - 2026-10-22 UI 三修：候选卡评分拆解点击跳转（缺 stopPropagation）、历史笔记页 500（`journal_by_date` 未定义 `_news_dao`，数据未丢）、红绿开关详情页/信号页/K线不跟随（补 us CSS 覆盖 + localStorage 恢复 + K线取色随开关）。
 - 2026-10-22 UI 净化 + vendor：评分拆解去深色线框（浅灰底区块 + 行线/总分线用浅灰变量）；子项目 vendored v0.4.0→v0.6.5（条件单/回测修正/AI 实时执行层/固定交易时段 runtime）。
-- gate 基线：下限记录 `scripts/gate-baseline.txt`，gate.sh 自动强制（2026-10-22 起；当前 768 passed，2026-10-22 生产 worktree 实测；按测试规则本机不跑 pytest）。CI（GitHub Actions `gate.yml`）自 2026-10-22 起对每次 main push 留机器测试记录，权威门禁仍是生产 gate。
+- gate 基线：下限记录 `scripts/gate-baseline.txt`，gate.sh 自动强制（2026-10-22 起；按测试规则本机不跑 pytest）。CI（GitHub Actions `gate.yml`）自 2026-10-22 起对每次 main push 留机器测试记录，权威门禁仍是生产 gate。
 - 数据缺口：82 只无 roic/fcf（多为东财无数据的小盘股，C2.5 永久兜底，非 bug）；`sector` 生产回填 2594/5527 行（S8 新浪 49 板块映射 2999 只，2026-09-22 live 实证；未收录新股保持 NULL，行业均值 WHERE 过滤不受污染）。
 - 面板短板（P1）：评分透明化已落地；AI 笔记增强/时间线交互/详情页体验待做。
 
@@ -76,7 +76,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 迭代约束（开发必须遵守）
 - 每次只做一件小而实的事，禁止改多个无关模块
-- 全仓 pytest 零失败（基线 768 passed，只升不降）
+- 全仓 pytest 零失败（下限见 `scripts/gate-baseline.txt`，只升不降）
 - `collector/` `screener/` `analyzer/` 改动必须附单测
 - 禁删 S1–S10 适配函数（除非替代 + 单测同到）
 - 禁止 emoji（仅允许 → ↑ ↓ ✓）

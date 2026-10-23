@@ -12,7 +12,7 @@
 | 账本 | `docs/iteration-log.md` | 迭代日志。提交信息中的基线数字（如「基线 768 passed」）记录在此 |
 | 纸盘 | `paper-trading`（上游 `oldfunk/paper-trading`；本仓内为 `paper_trading/` 子树） | 模拟交易子项目。「纸盘」是行业既有口语（模拟盘，对「实盘」），非本仓独创 |
 | 包工头 | 项目负责人（人） | 跨仓争议唯一裁决、决定 vendor 版本。见 `docs/subproject-protocol.md` §1 |
-| 三表契约 | 子项目合并时的字段契约（子方「拥有 / 只读 / 永不碰」三类，见 `docs/subproject-protocol.md` §8） | **注意**：金融语境「三表」指资产负债表 / 利润表 / 现金流量表；此处是借用，语义完全不同。当前实例为 `data.db` / `paper_account.db` / `config.yaml` |
+| 三表契约 | 子项目合并时的字段契约（子方「拥有 / 只读 / 永不碰」三类，见 `docs/subproject-protocol.md` §8） | **注意**：金融语境「三表」指资产负债表 / 利润表 / 现金流量表；此处是借用，语义完全不同。这里的「三」指**三类归属**，不是三张具体表；当前实例见 `paper_trading/MERGE_GUIDE.md` §2（拥有 `paper_account.db` / `data.db`；只读母库候选、观察池、快照、AI 历史等表；永不碰母库其余表） |
 
 来源区分（避免误当成本仓独创术语）：
 
@@ -145,7 +145,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；基线只升不降——下限记录 `scripts/gate-baseline.txt`，由 gate.sh 自动强制（2026-10-22 起；当前 768 passed，2026-10-22 生产服务器 worktree gate 实测）。
+- 全仓 `pytest` 零失败；基线只升不降——下限记录 `scripts/gate-baseline.txt`，由 gate.sh 自动强制（2026-10-22 起；按测试规则本机不跑 pytest）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
