@@ -392,9 +392,13 @@
         table.ai-queue { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
         table.ai-queue th, table.ai-queue td { border-bottom: 1px solid var(--divider); padding: 4px 6px; text-align: left; }
         table.ai-queue button { font-size: 11px; padding: 2px 8px; }
-        .signal-buy { color: var(--color-up); font-weight: 600; }
-        .signal-hold { color: #ffc107; font-weight: 600; }
-        .signal-avoid { color: var(--color-down); font-weight: 600; }
+        /* 2026-10-23：手动钉选卡的信号值带 .metric-cell .value 前缀，原 .signal-* 优先级
+           低于 .metric-cell .value，导致信号文字永远显示成黑色。改用更高优先级，
+           并补 signal-none（无信号=中性灰，不再借用金色 HOLD）。 */
+        .metric-cell .value.signal-buy { color: var(--color-up); font-weight: 600; }
+        .metric-cell .value.signal-hold { color: #ffc107; font-weight: 600; }
+        .metric-cell .value.signal-avoid { color: var(--color-down); font-weight: 600; }
+        .metric-cell .value.signal-none { color: var(--text-tertiary); font-weight: 600; }
 
         .section-header {
             display: flex;

@@ -70,7 +70,7 @@ function loadWatchlist() {
             }
             el.innerHTML = items.map(function(s) {
                 var signal = s.last_signal || '';
-                var signalClass = signal === 'BUY' ? 'signal-buy' : (signal === 'AVOID' ? 'signal-avoid' : 'signal-hold');
+                var signalClass = signal === 'BUY' ? 'signal-buy' : (signal === 'AVOID' ? 'signal-avoid' : (signal === 'HOLD' ? 'signal-hold' : 'signal-none'));
                 var signalText = signal === 'BUY' ? '买入' : (signal === 'HOLD' ? '持有' : (signal === 'AVOID' ? '回避' : '无'));
                 var price = '--';
                 if (s.current_price != null) price = s.current_price.toFixed(2);

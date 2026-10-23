@@ -70,6 +70,22 @@ def test_watchlist_detail_positive_follows_toggle():
     assert ".signal-buy { background: var(--color-up-bg); color: var(--color-up); }" in css
 
 
+def test_manual_watchlist_signal_text_not_black():
+    """手动钉选卡信号文字不得被 .metric-cell .value 压成黑色。
+
+    信号值带 `value signal-*` 类，`.metric-cell .value`（0,2,0）曾压过 `.signal-*`（0,1,0），
+    导致买入/回避/持有/无 全部显示为 --text-primary 黑色。现规则提到 0,3,0，
+    且无信号改用 signal-none（中性灰）而非借用金色 HOLD。
+    """
+    css = _read("index.html")
+    assert ".metric-cell .value.signal-buy { color: var(--color-up);" in css
+    assert ".metric-cell .value.signal-avoid { color: var(--color-down);" in css
+    assert ".metric-cell .value.signal-none { color: var(--text-tertiary);" in css
+    js = (TPL_DIR.parent / "static" / "watchlist.js").read_text(encoding="utf-8")
+    assert "signal-none" in js
+    assert "'signal-hold' : 'signal-none'" in js
+
+
 def test_candidate_card_price_change_is_inline_scheme(client):
     """渲染候选卡：涨跌百分比用内联 var(--color-up/down)，随开关翻色"""
     from src.models.database import StockSnapshotDAO
