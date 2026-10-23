@@ -139,5 +139,5 @@ def test_candidate_card_shows_dividend_metrics(client):
     html = client.get("/").text
     assert "股息率" in html
     assert "连分年数" in html
-    assert "7.16%" in html      # 7.155 → 7.16%
-    assert ">10<" in html        # 连分年数 10
+    assert "7.16%" in html          # 7.155 → 7.16%
+    assert ">10</div>" in html      # 连分年数 10
