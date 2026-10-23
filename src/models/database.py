@@ -392,6 +392,7 @@ CREATE TABLE IF NOT EXISTS analysis_outcome (
     verdict         TEXT,                   -- 通过 / 不通过 / 灰色地带
     entry_date      TEXT,                   -- T+1 交易日（分析日之后第一个交易日）
     entry_price     REAL,                   -- 前复权收盘价
+    mos_at_entry    REAL,                   -- 买入时安全边际 %（2026-10-23 P0-9，模型可复现）
     ret_20          REAL,                   -- 个股收益 %（前复权，含分红）
     ret_60          REAL,
     ret_120         REAL,
@@ -445,6 +446,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'stock_snapshot', 'payout_ratio', 'REAL')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_year', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_years', 'INTEGER')  # 2026-10-23 连续分红年数
+        _add_column_if_not_exists(conn, 'analysis_outcome', 'mos_at_entry', 'REAL')  # 2026-10-23 P0-9 买入安全边际
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status_reason', 'TEXT')
@@ -1402,7 +1404,7 @@ class AnalysisOutcomeDAO:
     _FIELDS = (
         'analysis_id', 'benchmark_code', 'stock_code', 'stock_name',
         'analysis_date', 'signal', 'confidence', 'verdict',
-        'entry_date', 'entry_price',
+        'entry_date', 'entry_price', 'mos_at_entry',
         'ret_20', 'ret_60', 'ret_120',
         'bench_20', 'bench_60', 'bench_120',
         'excess_20', 'excess_60', 'excess_120',

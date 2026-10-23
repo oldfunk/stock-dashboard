@@ -63,6 +63,30 @@ def refresh_benchmarks(config: dict | None = None,
     return stats
 
 
+def _mos_at_entry(fin_dao, code: str, analysis_date: str,
+                  entry_price: float | None) -> float | None:
+    """买入时安全边际 %（P0-9）：用 notice_date <= 分析日 的最新年报 + 入场价算模型 MOS。"""
+    try:
+        rows = fin_dao.get_annual_reports(code)
+    except Exception:
+        rows = []
+    rec = None
+    for r in rows:  # 按 report_date 倒序
+        nd = r.get("notice_date") or r.get("report_date")
+        if nd and nd <= analysis_date:
+            rec = r
+            break
+    if rec is None or entry_price is None:
+        return None
+    val = intrinsic_value({
+        "fcf": rec.get("fcf"),
+        "total_shares": rec.get("total_shares"),
+        "cash": rec.get("cash"),
+        "interest_bearing_debt": rec.get("interest_bearing_debt"),
+    }, entry_price)
+    return val.get("margin_of_safety")
+
+
 def _is_complete(existing: dict | None, horizons: tuple[int, ...]) -> bool:
     if not existing:
         return False
@@ -85,9 +109,10 @@ def refresh_outcomes(config: dict | None = None,
     )
     from src.models.database import (
         AnalysisOutcomeDAO, BenchmarkDailyDAO, StockAnalysisHistoryDAO,
-        StockSnapshotDAO,
+        StockSnapshotDAO, FinancialHistoryDAO,
     )
     from src.collector.akshare_fetcher import fetch_kline_data
+    from src.analyzer.valuation import intrinsic_value
 
     config = config or {}
     horizons = _horizons(config)
@@ -126,6 +151,7 @@ def refresh_outcomes(config: dict | None = None,
         by_code.setdefault(a["stock_code"], []).append(a)
 
     snap_dao = StockSnapshotDAO()
+    fin_dao = FinancialHistoryDAO()
     names: dict[str, str] = {}
     rows_to_save: list[dict] = []
     fetched = skipped = complete = 0
@@ -186,6 +212,12 @@ def refresh_outcomes(config: dict | None = None,
                 }
                 for k in ("entry_date", "entry_price"):
                     merged[k] = old.get(k) if old.get(k) is not None else computed[k]
+                # P0-9：买入时安全边际（可复现模型；缺数据留空）
+                merged["mos_at_entry"] = old.get("mos_at_entry")
+                if (merged.get("mos_at_entry") is None
+                        and merged.get("entry_price") is not None):
+                    merged["mos_at_entry"] = _mos_at_entry(
+                        fin_dao, code, a["analysis_date"], merged["entry_price"])
                 for h in horizons:
                     for prefix in ("ret", "bench", "excess"):
                         key = f"{prefix}_{h}"
@@ -216,3 +248,26 @@ def refresh_outcomes(config: dict | None = None,
         "no_signal": no_signal,
         "deleted": deleted,
     }
+
+
+def summarize_by_mos(benchmark_code: str | None = None,
+                     tiers=((-100, 0), (0, 20), (20, 40), (40, 100)),
+                     horizons=(20, 60)) -> list[dict]:
+    """按买入安全边际分层统计收益/超额/胜率（P0-9：验证 MOS 是否有预测力）。"""
+    from src.models.database import AnalysisOutcomeDAO
+    rows = AnalysisOutcomeDAO().get_all(benchmark_code)
+    out = []
+    for lo, hi in tiers:
+        sel = [r for r in rows
+               if r.get("mos_at_entry") is not None and lo <= r["mos_at_entry"] < hi]
+        stat: dict = {"tier": f"{lo}~{hi}", "n": len(sel)}
+        if sel:
+            for h in horizons:
+                rets = [r[f"ret_{h}"] for r in sel if r.get(f"ret_{h}") is not None]
+                exc = [r[f"excess_{h}"] for r in sel if r.get(f"excess_{h}") is not None]
+                stat[f"avg_ret_{h}"] = round(sum(rets) / len(rets), 2) if rets else None
+                stat[f"avg_excess_{h}"] = round(sum(exc) / len(exc), 2) if exc else None
+                stat[f"hit_{h}"] = (round(100.0 * sum(1 for v in rets if v > 0) / len(rets), 1)
+                                    if rets else None)
+        out.append(stat)
+    return out
