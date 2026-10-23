@@ -602,16 +602,17 @@ class StockSnapshotDAO:
                     INSERT OR REPLACE INTO stock_snapshot
                     (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
                      roe, revenue, revenue_growth, profit, profit_growth, debt_ratio,
-                     dividend_yield, payout_ratio, dividend_year, current_price,
-                     high_52w, low_52w, is_st, list_date, snapshot_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     dividend_yield, payout_ratio, dividend_year, dividend_years,
+                     current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (r['code'], r['name'], r.get('market', 'A'),
                       sector, r.get('pe'), r.get('pb'), r.get('ps'),
                       r.get('market_cap'), r.get('circulating_cap'),
                       r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
                       r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
                       r.get('dividend_yield'), r.get('payout_ratio'),
-                      r.get('dividend_year'), r.get('current_price'),
+                      r.get('dividend_year'), r.get('dividend_years'),
+                      r.get('current_price'),
                       r.get('high_52w'), r.get('low_52w'),
                       1 if r.get('is_st') else 0, r.get('list_date'),
                       r['snapshot_date']))
