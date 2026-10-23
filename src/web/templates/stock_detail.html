@@ -22,6 +22,7 @@
             --accent: #1a73e8;
             --accent-hover: #1557b0;
             --accent-soft: #e8f0fe;
+            --text-on-accent: #ffffff;
             --green: #137333;
             --green-bg: #e6f4ea;
             --red: #c5221f;
@@ -102,6 +103,10 @@
         .sd-metric { display: flex; flex-direction: column; gap: 2px; }
         .sd-metric .label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
         .sd-metric .value { font-size: 18px; font-weight: 500; }
+        /* 2026-10-23：详情页快照条指标与主页卡片同口径上色（好/中/差 → 红/金/绿，随红绿开关） */
+        .sd-metric .value.good { color: var(--color-up); }
+        .sd-metric .value.warn { color: var(--gold); }
+        .sd-metric .value.bad { color: var(--color-down); }
 
         /* ========== 综合评分拆解卡片 ========== */
         .sd-score-detail { margin-bottom: 32px; }
@@ -118,7 +123,7 @@
             align-items: center;
             gap: 10px;
             padding: 7px 0;
-            border-bottom: 1px dashed var(--divider-thin);
+            border-bottom: 1px solid var(--divider-thin);
         }
         .sd-sd-name { font-weight: 500; }
         .sd-sd-bar { height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden; }
@@ -129,11 +134,11 @@
         .sd-sd-row.sd-sd-total-row { border-bottom: none; border-top: 1px solid var(--divider); margin-top: 4px; padding-top: 10px; }
         .sd-sd-row.sd-sd-total-row .sd-sd-name { font-weight: 700; }
 
-        .sd-section { margin-bottom: 40px; }
+        .sd-section { margin-bottom: 32px; }
         .sd-section-title {
             font-size: 18px;
             margin: 0 0 16px;
-            padding-bottom: 8px;
+            padding-bottom: 10px;
             border-bottom: 1px solid var(--divider-thin);
             font-weight: 600;
         }
@@ -143,7 +148,8 @@
         .sd-note-body p { margin: 0 0 12px; line-height: 1.7; }
 
         .sd-checklist { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-        .sd-cl-item { border: 1px solid var(--divider); border-radius: 6px; padding: 10px 12px; }
+        /* 2026-10-23：六关卡片去外框线，改浅灰底色块（延续主页"少线框、浅灰"风格），保留通过/警示左侧条 */
+        .sd-cl-item { background: var(--bg-tertiary); border-radius: 6px; padding: 10px 12px; }
         .sd-cl-item.sd-cl-pass { border-left: 3px solid var(--color-up); }
         .sd-cl-item.sd-cl-fail { border-left: 3px solid var(--color-down); }
         .sd-cl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -170,7 +176,7 @@
         .sd-veto-hit .sd-veto-mark { color: var(--color-down); }
         .sd-info-badge { font-weight: 600; padding: 3px 12px; border-radius: 4px; font-size: 15px; }
         .sd-info-badge.grade-a { background: var(--color-up-bg); color: var(--color-up); }
-        .sd-info-badge.grade-b { background: rgba(220, 170, 40, 0.18); color: #b8860b; }
+        .sd-info-badge.grade-b { background: var(--gold-bg); color: var(--gold); }
         .sd-info-badge.grade-c { background: var(--color-down-bg); color: var(--color-down); }
         .sd-info-basis { color: var(--text-secondary); font-size: 13px; }
 
@@ -180,7 +186,7 @@
             grid-template-columns: 120px 100px 80px 1fr;
             gap: 16px;
             padding: 8px 0;
-            border-bottom: 1px dashed var(--divider-thin);
+            border-bottom: 1px solid var(--divider-thin);
             align-items: center;
         }
         .sd-moat-name { font-weight: 500; }
@@ -195,7 +201,7 @@
         .sd-mgmt-summary { color: var(--text-secondary); font-size: 13px; margin-top: 8px; line-height: 1.6; }
 
         .sd-value-table { display: flex; flex-direction: column; gap: 0; }
-        .sd-value-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--divider-thin); }
+        .sd-value-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--divider-thin); }
         .sd-value-row.highlight { background: var(--bg-hover); padding: 8px 12px; border-radius: var(--radius-sm); border-bottom: none; }
         .sd-value-row .label { color: var(--text-secondary); }
         .sd-value-row .value { font-weight: 500; }
@@ -216,7 +222,7 @@
         .signal-hold { background: var(--gold-bg); color: var(--gold); }
         .signal-avoid { background: var(--bg-tertiary); color: var(--text-secondary); }
         .sd-trade .confidence { color: var(--text-secondary); font-size: 13px; }
-        .sd-trade-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--divider-thin); }
+        .sd-trade-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--divider-thin); }
         .sd-trade-row .label { color: var(--text-secondary); }
         .sd-trade-row .value { font-weight: 500; }
 
@@ -284,7 +290,7 @@
             font-size: 13px; transition: background 0.15s, color 0.15s;
         }
         .kline-period-btn:hover { background: var(--bg-hover); }
-        .kline-period-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .kline-period-btn.active { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
         .kline-indicator-btn {
             padding: 4px 10px; border: 1px solid var(--divider); background: transparent;
             color: var(--text-tertiary); border-radius: var(--radius-sm); cursor: pointer;
@@ -319,7 +325,7 @@
             grid-template-columns: 100px 70px 60px 1fr;
             gap: 12px;
             padding: 10px 0;
-            border-bottom: 1px dashed var(--divider-thin);
+            border-bottom: 1px solid var(--divider-thin);
             align-items: start;
         }
         .sd-timeline-date { color: var(--text-tertiary); font-size: 13px; }
@@ -337,7 +343,7 @@
             text-align: center;
         }
         .sd-signal-buy { background: var(--color-up-bg); color: var(--color-up); }
-        .sd-signal-hold { background: rgba(255,193,7,0.2); color: #ffc107; }
+        .sd-signal-hold { background: var(--gold-bg); color: var(--gold); }
         .sd-signal-avoid { background: var(--color-down-bg); color: var(--color-down); }
         .sd-signal-none { background: var(--divider-thin); color: var(--text-tertiary); }
         .sd-timeline-note {
@@ -412,14 +418,14 @@
 
     <!-- 2. 关键指标快照条 -->
     <section class="sd-snapshot-bar">
-        <div class="sd-metric"><span class="label">PE</span><span class="value">{{ "%.1f"|format(snapshot.pe) if snapshot.pe is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">PB</span><span class="value">{{ "%.2f"|format(snapshot.pb) if snapshot.pb is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">ROE</span><span class="value">{{ "%.1f"|format(snapshot.roe) if snapshot.roe is not none else '--' }}%</span></div>
-        <div class="sd-metric"><span class="label">营收增</span><span class="value">{{ "%+.1f"|format(snapshot.revenue_growth) if snapshot.revenue_growth is not none else '--' }}%</span></div>
-        <div class="sd-metric"><span class="label">利润增</span><span class="value">{{ "%+.1f"|format(snapshot.profit_growth) if snapshot.profit_growth is not none else '--' }}%</span></div>
-        <div class="sd-metric"><span class="label">市值</span><span class="value">{{ "%.0f"|format(snapshot.market_cap) if snapshot.market_cap is not none else '--' }}亿</span></div>
-        <div class="sd-metric"><span class="label">负债率</span><span class="value">{{ "%.1f"|format(snapshot.debt_ratio) if snapshot.debt_ratio is not none else '--' }}%</span></div>
-        <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ "%.2f"|format(snapshot.dividend_yield) if snapshot.dividend_yield is not none else '--' }}%</span></div>
+        <div class="sd-metric"><span class="label">PE</span><span class="value {{ 'good' if snapshot.pe is not none and snapshot.pe < 15 else ('warn' if snapshot.pe is not none and snapshot.pe < 20 else '') }}">{{ ("%.1f"|format(snapshot.pe)) if snapshot.pe is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">PB</span><span class="value {{ 'good' if snapshot.pb is not none and snapshot.pb < 2 else ('warn' if snapshot.pb is not none and snapshot.pb < 3.5 else '') }}">{{ ("%.2f"|format(snapshot.pb)) if snapshot.pb is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">ROE</span><span class="value {{ 'good' if snapshot.roe is not none and snapshot.roe >= 15 else ('warn' if snapshot.roe is not none else '') }}">{{ ("%.1f%%"|format(snapshot.roe)) if snapshot.roe is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">营收增</span><span class="value {{ 'good' if snapshot.revenue_growth is not none and snapshot.revenue_growth >= 10 else ('warn' if snapshot.revenue_growth is not none else '') }}">{{ ("%+.1f%%"|format(snapshot.revenue_growth)) if snapshot.revenue_growth is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">利润增</span><span class="value {{ 'good' if snapshot.profit_growth is not none and snapshot.profit_growth >= 10 else ('warn' if snapshot.profit_growth is not none else '') }}">{{ ("%+.1f%%"|format(snapshot.profit_growth)) if snapshot.profit_growth is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">市值</span><span class="value">{{ ("%.0f亿"|format(snapshot.market_cap)) if snapshot.market_cap is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">负债率</span><span class="value {{ 'good' if snapshot.debt_ratio is not none and snapshot.debt_ratio < 40 else ('warn' if snapshot.debt_ratio is not none else '') }}">{{ ("%.1f%%"|format(snapshot.debt_ratio)) if snapshot.debt_ratio is not none else '--' }}</span></div>
+        <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ ("%.2f%%"|format(snapshot.dividend_yield)) if snapshot.dividend_yield is not none else '--' }}</span></div>
     </section>
 
     <!-- 2.3 综合评分拆解（透明化：五维子分 + 一致性加分） -->
@@ -458,7 +464,7 @@
             {% if sector_avg %}
             <div class="sd-sd-row sd-sd-sector">
                 <span class="sd-sd-name">行业均值（{{ sector_avg.sector }}）</span>
-                <span class="sd-sd-detail">ROE {{ "%.2f"|format(sector_avg.avg_roe) if sector_avg.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(sector_avg.avg_pe) if sector_avg.avg_pe is not none else '--' }}（{{ sector_avg.n }}只）</span>
+                <span class="sd-sd-detail">ROE {{ ("%.2f%%"|format(sector_avg.avg_roe)) if sector_avg.avg_roe is not none else '--' }} · PE {{ ("%.1f"|format(sector_avg.avg_pe)) if sector_avg.avg_pe is not none else '--' }}（{{ sector_avg.n }}只）</span>
             </div>
             {% endif %}
         </div>
@@ -912,7 +918,7 @@
             <input type="text" id="askInput" maxlength="500" placeholder="比如：这家自由现金流能覆盖分红吗？"
                 style="flex:1; font-size:14px; padding:7px 10px; border:1px solid var(--divider); border-radius:8px; background:var(--bg-secondary); color:var(--text-primary);">
             <button id="askBtn" onclick="askStock()"
-                style="font-size:14px; padding:7px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer;">提问</button>
+                style="font-size:14px; padding:7px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:var(--text-on-accent); cursor:pointer;">提问</button>
         </div>
         <div id="askAnswer" style="display:none; white-space:pre-wrap; font-size:14px; line-height:1.7; background:var(--bg-primary); border:1px solid var(--divider); border-radius:8px; padding:12px;"></div>
         <div id="askMeta" style="font-size:13px; color:var(--text-secondary); margin-top:6px;"></div>
@@ -946,8 +952,8 @@
         {% if n >= 2 %}
         <div class="sd-score-chart">
             <svg width="{{ svg_w }}" height="{{ svg_h }}" viewBox="0 0 {{ svg_w }} {{ svg_h }}">
-                <line x1="{{ pad }}" y1="{{ svg_h - pad }}" x2="{{ svg_w - pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
-                <line x1="{{ pad }}" y1="{{ pad }}" x2="{{ pad }}" y2="{{ svg_h - pad }}" stroke="#ccc" stroke-width="1"/>
+                <line x1="{{ pad }}" y1="{{ svg_h - pad }}" x2="{{ svg_w - pad }}" y2="{{ svg_h - pad }}" stroke="var(--divider)" stroke-width="1"/>
+                <line x1="{{ pad }}" y1="{{ pad }}" x2="{{ pad }}" y2="{{ svg_h - pad }}" stroke="var(--divider)" stroke-width="1"/>
                 {% for h in analysis_history|reverse %}
                 {% set i = loop.index0 %}
                 {% set x = pad + (plot_w * i / (n - 1)) if n > 1 else pad + plot_w / 2 %}
@@ -1154,19 +1160,20 @@
             // candle_up_stroke = 仅上涨K线空心，下跌K线保持实心
             try {
                 var _kc = klineSchemeColors();
+                var _nc = (getComputedStyle(document.documentElement).getPropertyValue('--divider') || '#888888').trim();
                 chart.setStyles({
                     candle: {
                         type: 'candle_up_stroke',
                         bar: {
                             upColor: _kc.up,
                             downColor: _kc.down,
-                            noChangeColor: '#888888',
+                            noChangeColor: _nc,
                             upBorderColor: _kc.up,
                             downBorderColor: _kc.down,
-                            noChangeBorderColor: '#888888',
+                            noChangeBorderColor: _nc,
                             upWickColor: _kc.up,
                             downWickColor: _kc.down,
-                            noChangeWickColor: '#888888'
+                            noChangeWickColor: _nc
                         }
                     }
                 });
