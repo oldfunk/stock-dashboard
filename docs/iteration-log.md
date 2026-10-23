@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（修手动钉选卡信号文字恒黑；基线 773→774）
+- **根因**：手动钉选卡由 `watchlist.js` 渲染，信号值形如 `<div class="value signal-buy">买入</div>`；`.metric-cell .value`（优先级 0,2,0）压过 `.signal-buy/hold/avoid`（0,1,0），所以无论信号是买入/回避/持有/无，文字永远 `--text-primary`（近黑）。
+- **修复**（`bf82acc`）：`.signal-*` 规则提到 `.metric-cell .value.signal-*`（0,3,0）；无信号不再借用金色 HOLD，新增 `.metric-cell .value.signal-none`（中性灰 `--text-tertiary`），JS 对无信号改判 `signal-none`。
+- **缓存戳**（`869fbf5`）：`index.html` 的 `watchlist.js?v=20260928c→20261023a`——不升戳浏览器会缓存旧 JS，修复不生效（实测：升戳后 7 张钉选卡信号文字均为 `signal-none` 中性灰）。
+- **验证**：+1 回归用例；生产 worktree gate **774 passed**；浏览器实测合成元素 BUY/AVOID 在 CN/US 分别红/绿、绿/红，无信号恒中性灰。
+
 ### 2026-10-23（候选股颜色全覆盖红绿开关 + CI 升 Node24 + 下一步规划入档；基线 768→773）
 - **候选股颜色表达统一走红绿开关**（`78a34ec`）：红绿开关此前只覆盖涨跌文字与 K线。候选卡里编码正/负语义的颜色仍用 `--green/--red`，切换 `data-color-scheme="us"` 时不翻色。本轮把下列全部改走 `--color-up / --color-down(-bg)`：候选卡指标 `good/bad`、评分条/贡献/总分（`.sd-bar i`、`.sd-contrib`）、`signal-avoid`；详情页 `.sd-sd-contrib`、`.signal-buy`、`.sd-signal-buy/avoid`、`.sd-mirror-pass/fail`、`.sd-info-badge.grade-a/c`；观察池详情页 `.wd-watchlist-status.in`、`.wd-pool-card` 左边框、`.wd-sd-contrib`、`.signal-buy`。**保持不动的**：中性档（AVOID 灰、HOLD 金）、状态类 UI（流水线状态绿、live-dot、AI 消息 ok/err、知识面板 kp-body 好坏色）——它们不是价格方向表达，翻色反而误读。
 - **CI 动作升级**：`actions/checkout@v4→v6`、`actions/setup-python@v5→v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6，需观察 CI 绿）。

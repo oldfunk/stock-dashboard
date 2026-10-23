@@ -3,12 +3,13 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-23 候选股颜色全覆盖红绿开关 + CI 升 Node24 + 下一步规划；基线 773）
+## 最后状态（2026-10-23 候选股颜色全覆盖红绿开关 + 钉选信号恒黑修复 + CI 升 Node24 + 下一步规划；基线 774）
 - **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
 - **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
 - **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
 - **下一步规划入档**：`docs/roadmap.md` 新增「下一阶段规划（2026-10-23 起）」，分 P1 验证收口 / P2 数据正确性 / P3 体验（须拍板），逐项带验收判据。
 - **验证**：生产 worktree gate **773 passed**（基线 768→773，含新增 5 例；模板改动正确触发主服务重启）→ 合 main → 生产同步 → 健康检查第 1 轮 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 773。
+- **修手动钉选卡信号文字恒黑**（`bf82acc` + `869fbf5`，基线 773→774）：信号值带 `value signal-*` 类，`.metric-cell .value`（0,2,0）压过 `.signal-*`（0,1,0）→ 买入/回避/持有/无 永远黑。规则提到 0,3,0；无信号改用 `signal-none`（中性灰）不再借用金色 HOLD；升 `watchlist.js` 缓存戳 `20260928c→20261023a`（否则浏览器缓存旧 JS 不生效）。生产浏览器实测：7 张钉选卡信号文字均为 `signal-none` 中性灰，BUY/AVOID 合成元素随开关翻色。
 
 ## 下一步方向
 1. （P1）观察 v0.6.5 固定交易时段 runtime 首观察：今日 16:30–18:30 plan window 的 `agent-tick.log`，非时段静默属正常
@@ -21,11 +22,13 @@
 - **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报
 - **CI 环境非生产等同**：ubuntu runner 与生产 Pi 不完全等同——CI 是记录与信号，权威门禁仍是生产 gate，CI 红不等于生产坏；本轮动作升到 v6 后需观察 CI 是否仍绿
 - **回测前视风险**：`financial_history` 无披露日期，`scripts/backtest_topk.py` 仍坏（`no such column: code`）——见 roadmap P2
+- **静态 JS 改后必须升版本戳**：`/static/watchlist.js` 在 `index.html` 用 `?v=YYYYMMDDx` 引用；改了 JS 不升戳，浏览器缓存旧文件、修复不生效（2026-10-23 signal-none 实证）。同理 `news.js`
 - （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断
 - （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）
 - （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
 
 ## 历史交接区（追加，不删）
+- 2026-10-23 修手动钉选卡信号文字恒黑（`.signal-*` 优先级被 `.metric-cell .value` 压过；无信号改中性灰 `signal-none`；升 watchlist.js 缓存戳；基线 773→774）
 - 2026-10-23 候选股颜色全覆盖红绿开关 + CI 升 Node24 + 下一步规划入档 + 生产残留 worktree 清理（基线 768→773）
 - 2026-10-23 对齐上轮审计（PR #3 术语表合入 `3240cec`；术语表口径修正；基线单一事实源补齐）+ deploy.sh SSH 限流修复并实弹复验（gate 768 / 137.33s；健康检查单连接）
 - 2026-10-22 审计二轮落地：P1 deploy.sh 一键部署 + P2 基线自动强制 + P3 死脚本清理（CI 表述修正 / 协议补关 Issue 规则 / Issue #1 关闭）
