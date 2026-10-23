@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-1 股息率回填：783 → 3384；基线 810→814）
+- **缺口**：3619 只有年报股息数据、5206 只有现价，但 `stock_snapshot.dividend_yield` 仅 783（此前只有候选股经 `attach_dividends` 有值，全市场快照未回填）→ 红利池 fail-closed 常被误判为"阈值太严"。
+- **实现**（`8257887`）：`src/collector/dividend_fetcher.backfill_snapshot_dividends`（`yield = cash/price×100`、`payout = cash/EPS×100`、`dividend_year`；缺价/缺分红保持 NULL，幂等）+ `scripts/backfill_dividend_yield.py`（含 `--dry-run`）+ 挂进 `orchestrator` 每日流水线（行业回填之后）。+4 单测。
+- **验证**：生产 worktree gate **814 passed**（810 +4）；**生产 Pi 实跑**：`dividend_yield` 783 → **3384（61%）**、`payout_ratio` 3520、`yield≥4` 187 只；服务 active、`:9527`/`:8081` 200。
+
 ### 2026-10-23（vendor v0.6.7 修复版合并 + 价值投资方法论完善方案入档；基线 785→810）
 - **vendor v0.6.7 修复版**（`f8fa260`）：子项目已修 Issue #1（`fetch_market_news` 守护线程 + 硬超时 `agent.news_timeout_sec` 默认 15s；`tests/conftest.py` 全局离线打桩）。因先前 revert 使 `subtree pull` 合并基线错位（非冲突文件保留 revert 后的 0.6.5），改用 `git read-tree --prefix=paper_trading/ -u v0.6.7^{commit}` 整树重读为 v0.6.7。契约核对：`integration/` 零写母库、只读表在契约内、CLI 参数兼容、`engine.enabled=false`、无新表。
 - **价值投资方法论完善方案入档**：新增 `docs/value-investing-methodology.md`（P0 逐项：目标/数据源/实现/单测/生产验收）+ `docs/tasklist.md`（TODO List）+ `docs/roadmap.md` 更新（主线）。核心缺口：估值不可复现（LLM 主观）+ 质量度量是会计指标非经济质量（缺 ROIC vs 资本成本/增量 ROIC/资本密集度/净负债）+ 数据底座缺完整三表关键字段。
