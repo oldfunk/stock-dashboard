@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（vendor v0.6.7 + DB 锁修复；发版准备）
+- **vendor v0.6.7**（v0.6.5→v0.6.7，22 文件 +998/-61）：M1 收口、引擎退出纪律（buy 条件 exit-first guard、收盘 NAV 快照、方向型 ma_cross 规则口径统一）、新闻催化（财联社/同花顺，`agent.news_enabled/news_limit`）、LLM 配置修复（model-only 保存免管理员令牌、key 接管兼容、退市模型告警软化）、交易日历 future-first 缓存（近端 45 天）。**契约核对通过**：`integration/` 对母库零写、只读表全在契约内、CLI 无新增参数、`engine.enabled: false`（默认，Pi 侧由 `engine.local.yaml` 显式开启）、无新表。
+- **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`。原实现每次连接都执行 `PRAGMA journal_mode=WAL`（需写锁），调度器写库期间读连接（首页轮询 `/api/indices`）抛 `database is locked`（近 2h 出现 2 次）。+2 回归用例。
+- **验证**：生产 worktree gate 全绿（计数见 handoff 本批验证行）；`src/` + `paper_trading/` 改动触发双服务重启；健康检查通过。
+
 ### 2026-10-23（个股详情页细节优化：快照条上色 / 空值占位 / 颜色主题化 / 间距线框；基线 777→783）
 - **快照条指标上色**（`9d827e7`）：主详情页 `.sd-metric` 与钉选股分析页 `.wd-metric` 的指标值按好/中/差加 `good/warn/bad` 类（阈值与候选卡一致：PE<15/20、PB<2/3.5、ROE≥15、负债率<40、营收/利润增≥10），CSS 映射 `--color-up / --gold / --color-down`，随红绿开关翻色；市值、股息率保持中性（非好坏语义）。
 - **空值占位统一**：`--%` / `--亿` 改为在格式化时带单位、缺失时纯 `--`（`("%.1f%%"|format(x)) if x is not none else '--'`），消除"占位符+单位"的别扭显示。

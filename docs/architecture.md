@@ -87,7 +87,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored v0.6.5，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored v0.6.7，原生页面独立运行） | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
 
