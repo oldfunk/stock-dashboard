@@ -165,6 +165,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（候选股颜色全覆盖红绿开关 + CI 升 Node24 + 下一步规划入档；基线 768→773）
+- **候选股颜色表达统一走红绿开关**（`78a34ec`）：红绿开关此前只覆盖涨跌文字与 K线。候选卡里编码正/负语义的颜色仍用 `--green/--red`，切换 `data-color-scheme="us"` 时不翻色。本轮把下列全部改走 `--color-up / --color-down(-bg)`：候选卡指标 `good/bad`、评分条/贡献/总分（`.sd-bar i`、`.sd-contrib`）、`signal-avoid`；详情页 `.sd-sd-contrib`、`.signal-buy`、`.sd-signal-buy/avoid`、`.sd-mirror-pass/fail`、`.sd-info-badge.grade-a/c`；观察池详情页 `.wd-watchlist-status.in`、`.wd-pool-card` 左边框、`.wd-sd-contrib`、`.signal-buy`。**保持不动的**：中性档（AVOID 灰、HOLD 金）、状态类 UI（流水线状态绿、live-dot、AI 消息 ok/err、知识面板 kp-body 好坏色）——它们不是价格方向表达，翻色反而误读。
+- **CI 动作升级**：`actions/checkout@v4→v6`、`actions/setup-python@v5→v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6，需观察 CI 绿）。
+- **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已 `worktree remove` + 删分支；Pi 上现只剩 `main` + `sd-verify`。
+- **下一步规划入档**：`docs/roadmap.md` 新增「下一阶段规划（2026-10-23 起）」——P1 验证收口（v0.6.5 runtime 首观察 / deploy.sh 纸盘分支 / 红利池命中率跟踪）、P2 数据正确性（披露日期与 backtest_topk 前视收口 / 股息覆盖率 65% 兜底 / 120 日增量）、P3 体验（须拍板）；逐项带验收判据。
+- **验证**：生产 worktree gate **773 passed**（768 + 新增 5 例 `tests/web/test_candidate_colors_20261023.py`）；模板改动经 deploy.sh 判定 `NEED_MAIN=1` 正确重启 `stock-dashboard.service`；合 main `78a34ec` → 生产 fast-forward → 健康检查第 1 轮 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 更新 768→773。
+
 ### 2026-10-23（对齐上轮审计 + deploy.sh SSH 限流修复；基线 768）
 - **对齐**：合并 PR #3（`architecture.md` 术语表）到 main，rebase 后为 `3240cec`（CI run 39906328994 success）——GitHub 中该"Issue"即 PR #3 本身，随合并关闭。术语表口径修正：`三表契约`的「三」指**三类归属**（拥有/只读/永不碰），不是三张具体表，实例指向 `paper_trading/MERGE_GUIDE.md` §2。
 - **基线单一事实源补齐**（`6978163`）：README 结构树/验证行/工作流行、roadmap §防回归门禁、iteration-log 迭代约束去写死 768，统一改为引用 `scripts/gate-baseline.txt`；architecture.md §5.3 去掉"当前 768 passed"。上轮审计只改了 AGENTS/architecture/iteration-log，README/roadmap 漏网，本次补齐。
