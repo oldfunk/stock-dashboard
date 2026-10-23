@@ -12,7 +12,7 @@
 ## Phase 1 — 数据底座（P0）
 
 - [x] P0-1 股息率/分红率回填（`scripts/backfill_dividend_yield.py` + `backfill_snapshot_dividends` + 挂进每日流水线）→ **生产实测 783 → 3384（61%）**，分红率 3520，yield≥4 有 187 只；gate 814
-- [ ] P0-2 分红历史（连续分红年数 / 每股分红序列）
+- [x] P0-2 分红历史（`refresh_dividend_history` + `compute_dividend_years` + `backfill_dividend_years` + 详情页"连分年数"）→ **生产实测 10 年 31513 条，3620 只有连续分红年数**（10 年 1003 只 / ≥5 年 2217 只）；gate 819
 - [ ] P0-3 资产负债表关键字段（货币资金/有息负债/商誉/净资产 → 净负债/EV）
 - [ ] P0-4 现金流关键字段（折旧摊销/资本开支/营运资本 → owner earnings）
 - [ ] P0-5 历史价格序列 + 历史 PE/PB/股息率分位

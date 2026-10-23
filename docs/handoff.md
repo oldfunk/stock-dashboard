@@ -20,6 +20,7 @@
 - **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`；消除 `/api/indices` 轮询撞调度器写库时的 `database is locked`（近 2h 出现 2 次）。
 - **vendor v0.6.7 修复版已合并**（`f8fa260`，tag 重指 `a0dd2ec`）：`fetch_market_news` 加硬超时（守护线程 + `agent.news_timeout_sec` 默认 15s）+ `tests/conftest.py` 全局离线打桩（Issue #1 已闭环）。因先前 revert 造成合并基线错位，改用 `read-tree --prefix=paper_trading/` 整树重读为 v0.6.7；契约核对通过（integration 零写母库、engine 默认关、CLI 兼容）。**gate 810 passed**（785 +25 vendor 用例）；`NEED_PARENT=1` 正确重启纸盘面板。
 - **P0-1 股息率回填**（`8257887`，gate 814）：`backfill_snapshot_dividends`（用最新年报分红 × 现价重算）+ 独立脚本 + 挂进每日流水线。**生产实测 `stock_snapshot.dividend_yield` 783 → 3384（61%）**、payout 3520、yield≥4 有 187 只——此前红利池为空主要是回填缺口，非阈值太严。
+- **P0-2 分红历史**（`c896efe`，gate 819）：`refresh_dividend_history`（10 年年报分红）+ `compute_dividend_years`（从最新年倒推连续分红）+ `backfill_dividend_years`（回填 `stock_snapshot.dividend_years`）+ 详情页"连分年数"。**生产实测 10/10 年成功、31513 条；3620 只有连续分红年数（10 年 1003 只 / ≥5 年 2217 只）**；周六自动刷新历史。
 - **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 

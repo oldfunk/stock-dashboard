@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-2 分红历史：连续分红年数；基线 814→819）
+- **缺口**：`dividend_annual` 只有 2025 一年，无法区分"连续稳定分红"与"一次性分红"。
+- **实现**（`c896efe`）：`refresh_dividend_history(years=10)`（逐年 `stock_fhps_em` 补历史，单年失败只告警）+ `compute_dividend_years()`（从最新年报年倒推，必须有当年分红且 >0、年份连续才累加）+ `backfill_dividend_years()`（回填 `stock_snapshot.dividend_years`，无则 NULL）+ `scripts/backfill_dividend_history.py` + 详情页/钉选页"连分年数" + 周六自动刷新历史。+5 单测。
+- **验证**：生产 worktree gate **819 passed**（814 +5）；**生产 Pi 实跑**：10/10 年成功、31513 条；`dividend_years` 3620 只（10 年 1003 只 / ≥5 年 2217 只）；详情页显示"连分年数"。
+
 ### 2026-10-23（P0-1 股息率回填：783 → 3384；基线 810→814）
 - **缺口**：3619 只有年报股息数据、5206 只有现价，但 `stock_snapshot.dividend_yield` 仅 783（此前只有候选股经 `attach_dividends` 有值，全市场快照未回填）→ 红利池 fail-closed 常被误判为"阈值太严"。
 - **实现**（`8257887`）：`src/collector/dividend_fetcher.backfill_snapshot_dividends`（`yield = cash/price×100`、`payout = cash/EPS×100`、`dividend_year`；缺价/缺分红保持 NULL，幂等）+ `scripts/backfill_dividend_yield.py`（含 `--dry-run`）+ 挂进 `orchestrator` 每日流水线（行业回填之后）。+4 单测。
