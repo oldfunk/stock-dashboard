@@ -165,6 +165,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（个股详情页细节优化：快照条上色 / 空值占位 / 颜色主题化 / 间距线框；基线 777→783）
+- **快照条指标上色**（`9d827e7`）：主详情页 `.sd-metric` 与钉选股分析页 `.wd-metric` 的指标值按好/中/差加 `good/warn/bad` 类（阈值与候选卡一致：PE<15/20、PB<2/3.5、ROE≥15、负债率<40、营收/利润增≥10），CSS 映射 `--color-up / --gold / --color-down`，随红绿开关翻色；市值、股息率保持中性（非好坏语义）。
+- **空值占位统一**：`--%` / `--亿` 改为在格式化时带单位、缺失时纯 `--`（`("%.1f%%"|format(x)) if x is not none else '--'`），消除"占位符+单位"的别扭显示。
+- **硬编码颜色主题化**：`.sd-info-badge.grade-b`（`rgba(220,170,40,.18)`+`#b8860b`）→ `--gold-bg/--gold`；`.sd-signal-hold` → 同款；`.kline-period-btn.active` 白字 → `--text-on-accent`（新增 token）；时间线 SVG 坐标轴 `#ccc` → `var(--divider)`；K线平盘色 `#888888` → 运行时读 `--divider`；"提问"按钮白字 → `--text-on-accent`。
+- **间距线框统一**：`.sd-section` 间距 40→32px、标题下间距 8→10px；六关 Checklist 卡片去外框线（`border:1px` → `background:var(--bg-tertiary)`），保留通过/警示左侧条；行分隔虚线 → 实线 `--divider-thin`（评分拆解/护城河/估值/交易/时间线）。
+- **验证**：+6 回归用例（主详情上色/空值/硬编码清零/六关底色/行线实线/钉选页同步）；生产 worktree gate **783 passed**；模板改动正确触发主服务重启；浏览器实测 CN good=红 / US good=绿、缺失值 `--`、六关 `border 0px + bg #f0f1f3`、行线 solid。
+
 ### 2026-10-23（手动钉选卡指标按好/中/差上红/金/绿；基线 774→777）
 - **需求**：手动钉选卡（钉选股票视图）的指标值此前全黑，与候选卡/AI 观察池卡不可比；要求按好/中/差上红/金/绿（随涨跌开关），"和其他自选股一样，具备辨识性"。
 - **实现**（`03c995c`）：`watchlist.js` 渲染指标时按候选卡同口径加 `good/warn/bad` 类（PE good<15/warn<20；PB good<2/warn<3.5；ROE good≥15 否则 warn；负债率 good<40 否则 warn；营收/利润增 good≥10 否则 warn；毛利率 good≥30/warn≥15/否则 bad；净利率 good≥15/warn≥5/否则 bad；OCF/股 good>0 否则 bad）。`/api/watchlist` 从 `ScreeningResultDAO.get_latest_for_code` 补全 `gross_margin/net_margin/ocf_per_share`（这三列只在 `screening_result`，不在 `stock_snapshot`；缺失时保留快照值），卡片补这三列让"差"档绿色出现。升 `watchlist.js` 缓存戳 `20261023b`。
