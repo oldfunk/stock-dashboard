@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-3 资产负债表关键字段；基线 819→824）
+- **缺口**：缺货币资金/有息负债/商誉/总资产/净资产 → 无净负债、无 EV、无清算价值；估值分母失真。
+- **实现**（`46689b4` + `9dfc1ec`）：新增 `src/collector/balance_sheet_fetcher.py`——akshare 的 `stock_balance_sheet_by_report_em` 依赖 HTML 抓 `company_type`（Pi 上失败），改为**直连东财 F10** `zcfzbDateAjaxNew`（报告期列表）/ `zcfzbAjaxNew`（资产负债表），代码格式 `SH600519`/`SZ000001`，company_type 缺省 4（一般）且空则回退 1/2/3（银行/保险/证券）；有息负债 = 短借 + 一年内到期非流动负债 + 长借 + 应付债券 + 短期应付债券。落 `financial_history` 新列 `cash/interest_bearing_debt/goodwill/total_assets/total_equity`，并合并进 `collect_historical_financial_data`（C2.5 之后）。+5 单测。
+- **验证**：生产 worktree gate **824 passed**（819 +5）；**生产 Pi 实跑**：`fetch_balance_sheet_annual` 茅台现金 516.9 亿 / 平安银行有息负债 5445.3 亿 / 中国平安总资产 138984.7 亿；`collect_historical_financial_data(force_full)` 3 只落库正确（`financial_history` 新列非空）。
+
 ### 2026-10-23（P0-2 分红历史：连续分红年数；基线 814→819）
 - **缺口**：`dividend_annual` 只有 2025 一年，无法区分"连续稳定分红"与"一次性分红"。
 - **实现**（`c896efe`）：`refresh_dividend_history(years=10)`（逐年 `stock_fhps_em` 补历史，单年失败只告警）+ `compute_dividend_years()`（从最新年报年倒推，必须有当年分红且 >0、年份连续才累加）+ `backfill_dividend_years()`（回填 `stock_snapshot.dividend_years`，无则 NULL）+ `scripts/backfill_dividend_history.py` + 详情页/钉选页"连分年数" + 周六自动刷新历史。+5 单测。
