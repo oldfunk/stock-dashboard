@@ -165,6 +165,11 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-23（P0-5 历史价格 + 估值分位；基线 828→831）
+- **缺口**：K 线只有近期数据（13209 行），无历史估值分位；只有绝对门槛（PE 3–20 一刀切）。
+- **实现**（`0da72af` + `44ee328`）：`scripts/backfill_price_history.py`（`fetch_kline_data` 起点 2016-01-01，前复权，候选+观察池+钉选，幂等 upsert）+ `src/analyzer/valuation_percentile.py`（PE = price/EPS、PB = price/BVPS、股息率 = 每股分红/price；每交易日取 `notice_date <= 当日` 的最新年报防前视；分位 = 当前值在窗口中的百分位）。+3 单测。
+- **验证**：生产 worktree gate **831 passed**（828 +3）；**生产 Pi 实跑**：24 只 59073 条（2016–2026）；海澜之家 5 年 PE 分位 11.8% / 10 年 6.0%、股息率分位 50.5%；PB 因缺 total_equity/total_shares 暂 NULL（fail-closed）。
+
 ### 2026-10-23（P0-4 现金流 + P0-10 披露日期；基线 824→828）
 - **P0-4**：新增 `src/collector/cashflow_fetcher.py`——直连东财 F10 `xjllbDateAjaxNew`（报告期）/ `xjllbAjaxNew`（现金流量表），取 `capex = CONSTRUCT_LONG_ASSET`、`net_operate_cashflow = NETCASH_OPERATE`；落 `financial_history` 新列并合并进 `collect_historical_financial_data`。
 - **P0-10**：`_fetch_eastmoney_roic_fcf`（东财主财务兜底）扩展返回 `notice_date`（`NOTICE_DATE`），落 `financial_history.notice_date`，供 look-ahead-safe 回测过滤未来数据。
