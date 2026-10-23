@@ -19,7 +19,9 @@ def db(tmp_path, monkeypatch):
 
 
 def _conn(tmp_path):
-    return sqlite3.connect(str(tmp_path / "b.db"))
+    conn = sqlite3.connect(str(tmp_path / "b.db"))
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _kline(code, dates):
