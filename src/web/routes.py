@@ -1457,10 +1457,15 @@ async def api_search(q: str = ""):
 
 @app.get("/api/watchlist")
 async def api_watchlist():
-    """钉选列表（带最新行情与最近 AI 信号）"""
+    """钉选列表（带最新行情、最近 AI 信号与最新筛选指标）
+
+    2026-10-23：补 screening_result 指标（毛利率/净利率/OCF 等），
+    使手动钉选卡与候选卡 / AI 观察池卡同口径上色（好/中/差 → 红/金/绿）。
+    """
     items = WatchlistDAO().list_all()
     # 合并实时行情缓存；无实时行情时用 stock_snapshot 的价格作 fallback
     realtime = get_realtime_cache()
+    sr_dao = ScreeningResultDAO()
     for item in items:
         code = item['code']
         if code in realtime:
@@ -1468,6 +1473,15 @@ async def api_watchlist():
             item['change_percent'] = realtime[code].get('change_percent')
         elif item.get('snapshot_price') is not None:
             item['current_price'] = item['snapshot_price']
+        # 从最新筛选结果补全指标（缺失时保留 stock_snapshot 的值）
+        sr = sr_dao.get_latest_for_code(code) or {}
+        for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
+                  'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
+                  'score', 'reason'):
+            if sr.get(k) is not None:
+                item[k] = sr[k]
+            elif item.get(k) is None:
+                item[k] = None
     return items
 
 
