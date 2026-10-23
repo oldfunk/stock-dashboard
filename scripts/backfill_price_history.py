@@ -23,8 +23,9 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 from src.models.database import (
-    init_database, KlineDAO, ScreeningResultDAO, AiWatchlistDAO, WatchlistDAO,
+    init_database, KlineDAO, ScreeningResultDAO, WatchlistDAO,
 )
+from src.models.ai_watchlist import AiWatchlistDAO
 from src.collector.akshare_fetcher import fetch_kline_data
 
 
