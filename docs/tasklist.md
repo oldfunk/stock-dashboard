@@ -21,13 +21,13 @@
 ## Phase 2 — 估值模型（核心）
 
 - [x] P0-6 可复现估值模型（`src/analyzer/valuation.py` FCFF 两阶段折现 + 程序化安全边际）+ P0-6b 接入 AI prompt（LLM 改为校验/解释偏离）→ **生产实测茅台 保守 650/基准 968/乐观 1524，安全边际 -29.6%**；gate 837
-- [ ] P0-6b AI 分工调整：LLM 从"给估值"改为"校验 + 解释偏离"
+- [x] P0-6b AI 分工调整：LLM 从"给估值"改为"校验 + 解释偏离"（prompt 规则 4 已改写 + `_model_valuation_line` 注入；2026-10-24 复核：生产 `_model_valuation_line('600519')` 返回完整估值锚）
 - [x] P0-7 同业/行业估值分位（`get_sector_averages` 均值+中位数 pe/pb/roe；`get_sector_percentile` 个股行业内分位；详情页/候选卡展示）→ 生产实测行业均值+中位数、个股分位（电子信息 PE20→10.3%）；gate 840
 
 ## Phase 3 — 验证闭环
 
-- [x] P0-8 look-ahead-safe 回测（重写 `scripts/backtest_topk.py`：`financial_history.notice_date` 防前视 + 费用口径 + 买入不超现金）→ 生产实测 TopK20 月调仓 2024–2026：-36.79%，16 持仓；gate 842
-- [x] P0-9 买入 MOS 记录 + 预测力验证（`analysis_outcome.mos_at_entry` + `summarize_by_mos`）→ **深折让档（MOS 40–100%）60 日胜率 80%、超额 +17.2pp**，显著高于中档（26–42%）；gate 844
+- [x] P0-8 look-ahead-safe 回测（重写 `scripts/backtest_topk.py`：`financial_history.notice_date` 防前视 + 费用口径 + 买入不超现金）→ 初版 2024–2026：-36.79%；**2026-10-24 改 fail-closed（无披露日不入选，不回退 report_date）后：-16.66%**（域仅 37 只有披露日 / 35 只有价格——旧数字含约 3 个月前视泄漏，且域更小）；gate 630
+- [x] P0-9 买入 MOS 记录 + 预测力验证（`analysis_outcome.mos_at_entry` + `summarize_by_mos`）→ **深折让档（MOS ≥40%）60 日胜率 80%、超额 +8.9pp**，显著高于中档（20–40%，12.5%）；**2026-10-24 修分层静默丢弃**（旧区间 ±100 丢 24% 样本）后覆盖 750/750，结论不变；gate 630
 
 ## Phase 4 — 体验与协同（择要）
 
@@ -35,6 +35,13 @@
 - [ ] E2 搜索结果按 PE/ROE/市值排序
 - [ ] C1 对齐子项目 M2（量化可信度）路线图
 - [ ] C2 观察 v0.6.5 固定交易时段 runtime tick 日志
+
+## Phase 5 — 可信度收口（2026-10-24 排查后）✅
+
+- [x] 修 `summarize_by_mos` 分层静默丢弃：默认覆盖全区间（≤0/0~20/20~40/≥40），区间外显式列"未分层" → 生产实测覆盖 **750/750**（旧 ±100 区间丢 180 行/24%）；gate 630
+- [x] 门禁超时保护：GNU `timeout` 包裹 pytest（母 900s / vendor 600s）+ 通过数无法解析即 fail-closed → 强制 2s 超时实测 `exit 124`
+- [x] 详情页展示系统模型估值（可复现 FCFF 三档 + 当前价 + 安全边际 + 假设 + 数据来源）；无数据 fail-closed 显示"数据不足" → 生产 600519 = 650.39 / 967.80 / 1523.60、安全边际 -29.6%；605099 fail-closed
+- [x] 回测 fail-closed（无 `notice_date` 不入选）+ 可用域透明化（`fundamental_codes`/`eligible_max`）
 
 ## 已完成（本文件历史）
 
