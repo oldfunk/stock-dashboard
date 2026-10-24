@@ -79,3 +79,58 @@ def intrinsic_value(financials: dict, price: float | None) -> dict:
         "method": "FCFF 两阶段折现（Gordon 终值）",
         "sufficient": fcf is not None and shares is not None,
     }
+
+
+def scenario_assumptions() -> dict:
+    """三档假设（供 UI 展示：同一模型 → 同一结果，可审计）。"""
+    return {
+        name: {"years1": y1, "g1": g1, "g2": g2, "g_term": gt, "discount": r}
+        for name, (y1, g1, g2, gt, r) in _SCENARIOS.items()
+    }
+
+
+def load_financials(code: str) -> dict | None:
+    """取某股最新年报的估值输入（fcf/total_shares/cash/interest_bearing_debt）。
+
+    只读 ``financial_history`` 年报；无数据返回 None（调用方 fail-closed）。
+    """
+    if not code:
+        return None
+    from src.models.database import FinancialHistoryDAO
+    try:
+        rows = FinancialHistoryDAO().get_annual_reports(code)
+    except Exception:  # noqa: BLE001 - 取数失败按“无数据”处理，不阻断页面
+        return None
+    if not rows:
+        return None
+    r = rows[0]
+    return {
+        "fcf": r.get("fcf"),
+        "total_shares": r.get("total_shares"),
+        "cash": r.get("cash"),
+        "interest_bearing_debt": r.get("interest_bearing_debt"),
+        "report_date": r.get("report_date"),
+    }
+
+
+def intrinsic_value_for_code(code: str, price: float | None = None) -> dict | None:
+    """按股票代码算模型估值（统一入口：Web 展示 + AI prompt 共用）。
+
+    返回 ``intrinsic_value()`` 结果 + ``price``/``report_date``/``assumptions``；
+    无年报数据返回 None。价格缺省时从快照读当前价。
+    """
+    fin = load_financials(code)
+    if fin is None:
+        return None
+    if price is None:
+        from src.models.database import StockSnapshotDAO
+        try:
+            snap = StockSnapshotDAO().get_by_code(code)
+            price = snap.get("current_price") if snap else None
+        except Exception:  # noqa: BLE001
+            price = None
+    out = intrinsic_value(fin, price)
+    out["price"] = price
+    out["report_date"] = fin.get("report_date")
+    out["assumptions"] = scenario_assumptions()
+    return out

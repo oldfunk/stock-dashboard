@@ -66,3 +66,28 @@ def test_model_valuation_line_injected(tmp_path, monkeypatch):
     assert "系统模型估值" in line
     assert "安全边际" in line
     assert _model_valuation_line("999999", price=12.0) == ""
+
+
+def test_intrinsic_value_for_code_fail_closed(tmp_path, monkeypatch):
+    """统一入口：有年报 → 三档 + 安全边际 + 假设；无年报 → None（fail-closed）。"""
+    from src.models import database as db_mod
+    monkeypatch.setattr(db_mod, "get_db_path", lambda: str(tmp_path / "v.db"))
+    db_mod.init_database()
+    from src.models.database import FinancialHistoryDAO
+    from src.analyzer.valuation import intrinsic_value_for_code
+    # 无数据：不硬算
+    assert intrinsic_value_for_code("000001", price=10.0) is None
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "600519", "report_date": "2025-12-31",
+        "fcf": 100.0, "total_shares": 10.0, "cash": 20.0,
+        "interest_bearing_debt": 50.0,
+    }])
+    val = intrinsic_value_for_code("600519", price=12.0)
+    assert val is not None and val["sufficient"] is True
+    assert val["report_date"] == "2025-12-31"
+    assert val["price"] == 12.0
+    assert val["intrinsic_value"]["base_case"] == pytest.approx(149.11288141027643, rel=1e-9)
+    assert val["margin_of_safety"] == 92.0
+    # 三档假设随结果返回（UI 展示同一模型的可审计依据）
+    assert val["assumptions"]["base_case"]["discount"] == 0.09
+    assert val["assumptions"]["conservative"]["g1"] == 0.0

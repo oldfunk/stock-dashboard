@@ -1640,31 +1640,15 @@ def _model_valuation_line(code: str, price: float | None = None) -> str:
     """
     if not code:
         return ""
-    from src.analyzer.valuation import intrinsic_value
-    from src.models.database import FinancialHistoryDAO, StockSnapshotDAO
+    from src.analyzer.valuation import intrinsic_value_for_code
     try:
-        rows = FinancialHistoryDAO().get_annual_reports(code)
-    except Exception:
-        rows = []
-    if not rows:
-        return ""
-    r = rows[0]
-    if price is None:
-        try:
-            snap = StockSnapshotDAO().get_by_code(code)
-            price = snap.get("current_price") if snap else None
-        except Exception:
-            price = None
-    fin = {
-        "fcf": r.get("fcf"),
-        "total_shares": r.get("total_shares"),
-        "cash": r.get("cash"),
-        "interest_bearing_debt": r.get("interest_bearing_debt"),
-    }
-    val = intrinsic_value(fin, price)
-    if not val.get("sufficient") or val.get("margin_of_safety") is None:
+        val = intrinsic_value_for_code(code, price)
+    except Exception:  # noqa: BLE001 - 取数/估值失败不阻断分析
+        val = None
+    if not val or not val.get("sufficient") or val.get("margin_of_safety") is None:
         return ""
     iv = val["intrinsic_value"]
+    price = val.get("price")
 
     def f(x):
         return f"{x:.2f}" if isinstance(x, (int, float)) else "N/A"

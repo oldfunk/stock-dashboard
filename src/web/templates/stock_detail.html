@@ -602,6 +602,52 @@
     </section>
     {% endif %}
 
+    <!-- 6.1 系统模型估值（P0-6 可复现 FCFF；与 AI prompt 同源，纯数据版也展示） -->
+    <section class="sd-section">
+        <h2 class="sd-section-title">系统模型估值（可复现）</h2>
+        {% if model_valuation and model_valuation.sufficient %}
+        <div class="sd-value-table">
+            <div class="sd-value-row">
+                <span class="label">保守估值</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.intrinsic_value.conservative) if model_valuation.intrinsic_value.conservative is not none else '--' }}</span>
+            </div>
+            <div class="sd-value-row highlight">
+                <span class="label">基准估值</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.intrinsic_value.base_case) if model_valuation.intrinsic_value.base_case is not none else '--' }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">乐观估值</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.intrinsic_value.optimistic) if model_valuation.intrinsic_value.optimistic is not none else '--' }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">当前价</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.price) if model_valuation.price is not none else '--' }}</span>
+            </div>
+            {% set mmos = model_valuation.margin_of_safety %}
+            <div class="sd-value-row">
+                <span class="label">安全边际</span>
+                <span class="value {{ 'pos' if mmos is not none and mmos > 0 else ('neg' if mmos is not none else '') }}">{{ "%.1f%%"|format(mmos) if mmos is not none else '--' }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">净负债（亿元）</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.net_debt / 100000000) if model_valuation.net_debt is not none else '--' }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">方法</span>
+                <span class="value">{{ model_valuation.method }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">数据来源</span>
+                <span class="value">{{ model_valuation.report_date or '--' }} 年报</span>
+            </div>
+        </div>
+        {% set ma = model_valuation.assumptions %}
+        <p class="sd-sd-sub">三档 = 假设不同（非倍数）：保守 增长 {{ (ma.conservative.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.conservative.discount * 100)|round(0)|int }}%；基准 增长 {{ (ma.base_case.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.base_case.discount * 100)|round(0)|int }}%；乐观 增长 {{ (ma.optimistic.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.optimistic.discount * 100)|round(0)|int }}%。安全边际 = 1 − 现价 / 基准估值；同假设同结果，可复现。</p>
+        {% else %}
+        <p class="sd-sd-sub">数据不足（缺 FCF 或总股本），不做估算——宁缺勿滥，不以占位值填充。</p>
+        {% endif %}
+    </section>
+
     <!-- 6.5 镜子测试 -->
     {% if ai_parsed.mirror_test %}
     {% set mt = ai_parsed.mirror_test %}

@@ -597,6 +597,14 @@ async def stock_detail(request: Request, code: str):
     config = load_config()
     page_title = config.get("web", {}).get("page_title", "价值投资选股看板")
 
+    # 9. 系统模型估值（P0-6，可复现 FCFF）：与 AI prompt 同源，纯数据版也能展示
+    model_valuation = None
+    try:
+        from src.analyzer.valuation import intrinsic_value_for_code
+        model_valuation = intrinsic_value_for_code(code, snapshot.get("current_price"))
+    except Exception:  # noqa: BLE001 - 估值失败不阻断页面
+        model_valuation = None
+
     return templates.TemplateResponse(request, "stock_detail.html", {
         "request": request,
         "page_title": page_title,
@@ -613,6 +621,7 @@ async def stock_detail(request: Request, code: str):
         "watchlist_history": watchlist_history,
         "score_detail_parsed": score_detail_parsed,
         "sector_avg": sector_avg,
+        "model_valuation": model_valuation,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
