@@ -252,16 +252,30 @@ def refresh_outcomes(config: dict | None = None,
 
 
 def summarize_by_mos(benchmark_code: str | None = None,
-                     tiers=((-100, 0), (0, 20), (20, 40), (40, 100)),
+                     tiers=None,
                      horizons=(20, 60)) -> list[dict]:
-    """按买入安全边际分层统计收益/超额/胜率（P0-9：验证 MOS 是否有预测力）。"""
+    """按买入安全边际分层统计收益/超额/胜率（P0-9：验证 MOS 是否有预测力）。
+
+    默认分层覆盖**全区间**（``≤0 / 0~20 / 20~40 / ≥40``，MOS 为百分数）。
+    任何落在给定 ``tiers`` 之外的样本会以 ``未分层`` 档**显式列出**——
+    历史教训：旧默认 ``(-100, 100)`` 曾静默丢弃 24% 样本（MOS 可低至 -523%），
+    导致正档胜率被系统性高估。
+    """
     from src.models.database import AnalysisOutcomeDAO
+    if tiers is None:
+        tiers = ((float("-inf"), 0), (0, 20), (20, 40), (40, float("inf")))
     rows = AnalysisOutcomeDAO().get_all(benchmark_code)
-    out = []
-    for lo, hi in tiers:
-        sel = [r for r in rows
-               if r.get("mos_at_entry") is not None and lo <= r["mos_at_entry"] < hi]
-        stat: dict = {"tier": f"{lo}~{hi}", "n": len(sel)}
+    with_mos = [r for r in rows if r.get("mos_at_entry") is not None]
+
+    def _label(lo, hi) -> str:
+        if lo == float("-inf"):
+            return f"≤{hi}"
+        if hi == float("inf"):
+            return f"≥{lo}"
+        return f"{lo}~{hi}"
+
+    def _stat(sel: list[dict], label: str) -> dict:
+        stat: dict = {"tier": label, "n": len(sel)}
         if sel:
             for h in horizons:
                 rets = [r[f"ret_{h}"] for r in sel if r.get(f"ret_{h}") is not None]
@@ -270,5 +284,18 @@ def summarize_by_mos(benchmark_code: str | None = None,
                 stat[f"avg_excess_{h}"] = round(sum(exc) / len(exc), 2) if exc else None
                 stat[f"hit_{h}"] = (round(100.0 * sum(1 for v in rets if v > 0) / len(rets), 1)
                                     if rets else None)
-        out.append(stat)
+        return stat
+
+    out = []
+    assigned = 0
+    for lo, hi in tiers:
+        sel = [r for r in with_mos if lo <= r["mos_at_entry"] < hi]
+        assigned += len(sel)
+        out.append(_stat(sel, _label(lo, hi)))
+
+    # 兜底：区间外样本显式成档，绝不静默丢弃
+    if assigned < len(with_mos):
+        rest = [r for r in with_mos
+                if not any(lo <= r["mos_at_entry"] < hi for lo, hi in tiers)]
+        out.append(_stat(rest, "未分层"))
     return out
