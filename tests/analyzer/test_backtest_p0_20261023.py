@@ -50,6 +50,21 @@ def test_fundamentals_at_lookahead(db, tmp_path):
     assert bt.fundamentals_at(fund, "000001", "2025-05-01") is not None
 
 
+def test_fundamentals_at_fail_closed_without_notice_date(db, tmp_path):
+    """fail-closed：无 notice_date 的年报不入选（不回退 report_date，否则约 3 个月前视）。"""
+    from src.models.database import FinancialHistoryDAO
+    from scripts import backtest_topk as bt
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "000002", "report_date": "2023-12-31", "notice_date": None,
+        "roe": 12.0, "eps": 1.0, "gross_margin": 20.0, "net_margin": 10.0,
+        "debt_ratio": 40.0, "fcf": 1e8,
+    }])
+    conn = _conn(tmp_path)
+    fund = bt.load_fundamentals(conn)
+    # 即使回测日已远晚于会计年末，仍不可用（宁缺勿滥）
+    assert bt.fundamentals_at(fund, "000002", "2024-12-31") is None
+
+
 def test_run_backtest_smoke(db, tmp_path):
     from scripts import backtest_topk as bt
     dates = [(f"2024-{m:02d}-02", 10.0 + m) for m in range(1, 13)]
@@ -61,3 +76,7 @@ def test_run_backtest_smoke(db, tmp_path):
     assert res["positions"] == 1
     # 价格从 11 涨到 22（10+m，m=1..12）→ 正收益
     assert res["total_return_pct"] > 0
+    # 可用域透明化（防"看着像全市场回测"）
+    assert res["fundamental_codes"] == 1
+    assert res["price_codes"] == 1
+    assert res["eligible_max"] == 1

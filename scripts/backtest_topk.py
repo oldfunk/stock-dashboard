@@ -2,6 +2,9 @@
 
 - 基本面源：``financial_history``（年报，含 ``notice_date``）；每个再平衡日只取
   ``notice_date <= 当日`` 的最新年报，**杜绝前视**（P0-10 数据）。
+  **fail-closed（2026-10-24）**：无 ``notice_date`` 的年报**不入选**，不回退
+  ``report_date``（会计年末 vs 实际披露差约 3 个月，回退即前视泄漏）。
+  因此回测域 = 有披露日的股票（输出 ``fundamental_codes``/``eligible_max`` 透明化）。
 - 价格源：``kline_daily``（前复权）。
 - 评分：简化五维（ROE / PE / PB / 净利率 / 负债率），与主筛选器口径方向一致。
 - 费用：佣金 0.025%（买卖双扣）、印花税 0.05%（卖出）。
@@ -52,9 +55,14 @@ def load_fundamentals(conn) -> dict:
 
 
 def fundamentals_at(fund: dict, code: str, date: str) -> dict | None:
-    """notice_date <= date 的最新年报；无则 None（防前视）。"""
+    """``notice_date <= date`` 的最新年报；无 ``notice_date`` 或未披露 → None（fail-closed）。
+
+    防前视：只用**披露日** ``notice_date``，**不回退** ``report_date``——年报的
+    ``report_date`` 是会计年末（如 2024-12-31），实际披露在次年 3–4 月，回退会造成
+    约 3 个月前视泄漏。数据缺口以"不入选"表达，不用近似值填补。
+    """
     for rec in fund.get(code, []):
-        nd = rec["notice_date"] or rec["report_date"]
+        nd = rec["notice_date"]
         if nd and nd <= date:
             return rec
     return None
@@ -128,6 +136,7 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
 
     cash = INITIAL_CASH
     positions: dict[str, dict] = {}
+    eligible_max = 0
 
     def mark_to_market(date):
         v = cash
@@ -147,6 +156,7 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
                 if rec is None or not price or price <= 0:
                     continue
                 eligible.append((score_stock(rec, price), code))
+            eligible_max = max(eligible_max, len(eligible))
             eligible.sort(reverse=True)
             top = {code for _, code in eligible[:topk]}
 
@@ -186,6 +196,11 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
         "final_value": round(final_value, 2),
         "total_return_pct": round((final_value - INITIAL_CASH) / INITIAL_CASH * 100, 2),
         "positions": len(positions),
+        # 透明化：防前视 fail-closed 后的真实可用域（避免"看着像全市场回测"）
+        "fundamental_codes": sum(1 for c in fund
+                                 if any(r["notice_date"] for r in fund[c])),
+        "price_codes": len(prices),
+        "eligible_max": eligible_max,
     }
 
 
