@@ -7,7 +7,7 @@
 
 > **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项全部落地；**Phase 5 可信度收口 4 项完成，P5-1 回填进行中**。
 > **阶段判断**：功能层已齐；数据层正在补覆盖。**关键事实**：`financial_history` 只有 **959 只**股票有年报（全市场 5527），本轮先把这 959 只的补充字段填满，全市场历史财务是下一步 P5-2。
-- **P5-1 补充字段回填（进行中）**：新增 `scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连，不依赖 akshare）+ `FinancialHistoryDAO.update_extra_fields`（只填 NULL/白名单/只动年报行）+ `backfill_progress` 进度表（断点续跑，修"老年份永远 NULL 无限重跑"）。**当前 done=100 / 3174 行**；行级覆盖 cash 785→**3623**、capex 762→**3281**、notice 261→**912**；可估值股票 36→**122**。Pi 负载 1.5→0.8。（实时进度以 `--status` 为准）
+- **P5-1 补充字段回填（持续跑中）**：新增 `scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连，不依赖 akshare）+ `FinancialHistoryDAO.update_extra_fields`（只填 NULL/白名单/只动年报行）+ `backfill_progress` 进度表（断点续跑，修"老年份永远 NULL 无限重跑"）+ **单实例锁**（防与夜间 cron 重叠）。**2026-10-24 16:08 起 `--until-done` 常驻持续跑**：实测 ≈7.5s/只、Pi 负载 0.4；当前 done=115 / 3547 行，剩余 844，预计 ~1h45m 跑完。（实时进度：`scripts/backfill_financial_extra.py --status`）
 - **夜间慢速任务**：Pi crontab `30 2 * * *` 每晚 250 只（sleep 1s / 上限 90min），日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。查看进度：`.venv/bin/python scripts/backfill_financial_extra.py --status`。
 - **门禁**：母项目 **641** / vendor 219；回填脚本有 9 个单测（含 `main()` 路径，修过 `args.dry-run` 拼写崩溃）。
 - **① MOS 分层静默丢弃修复**（`fc1ef06`，gate 626）：`summarize_by_mos` 旧区间 `(-100,100)` 与 MOS 实际 `-523.7~74.8` 不匹配，**静默丢 180 行/24%**（被丢样本 20 日胜率 37.9%，系统性高估正档）。改默认覆盖全区间 + 区间外显式"未分层"。**生产实测 750/750 全覆盖**；≥40 档 60 日胜率 80.0% / 超额 **+8.9pp**（旧文档 +17.2pp 有误，已更正）。

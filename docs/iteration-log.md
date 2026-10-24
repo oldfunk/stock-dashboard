@@ -174,7 +174,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
   - `scripts/backfill_financial_extra.py`：逐只限速（`--sleep`）、单次限量（`--limit`）、软预算（`--max-seconds`）、`--dry-run/--status/--retry-no-data`；fail-closed 不写占位值。
   - 9 个单测（DAO 只填 NULL/白名单/年报行、进度表续跑、三源合并、单源失败、main() dry-run 与正常路径、mainfin 解析）。
 - **灌数（生产 Pi，慢速）**：第一批 50 只 510s（≈10.2s/只）→ 第二批 20 只验证续跑（从 `000630` 开始）→ 第三批 30 只。**当前 done=100 / 3174 行**；行级覆盖 cash **785→3623**、capex **762→3281**、notice **261→912**；可估值股票 **36→122**。Pi 负载 1.5→0.8，无压力。
-- **夜间任务**：Pi crontab `30 2 * * *`，每晚 250 只 / sleep 1s / 上限 90min，日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。
+- **夜间任务**：Pi crontab `30 2 * * *`，每晚 250 只 / sleep 1s / 上限 90min，日志 `logs/backfill_extra.log`；作为兜底（跑完自动空转）。
+- **改持续跑（用户要求尽快完成）**：新增 `--until-done`（一批接一批直到目标集为空）+ **单实例锁**（`fcntl`，防持续进程与夜间 cron 重叠）+ `--batch-sleep`。**16:08 起常驻**（limit 25 / sleep 0.8 / 批间 2s），实测 **≈7.5s/只、负载 0.38**，预计 ~1h45m 跑完；第二实例实测返回 `{"skipped": "another backfill is already running"}`。
 - **缺陷发现（重要）**：`financial_history` 只有 **959 只**股票有年报（不是全市场 5527）→ 本轮只解决"已有年报的补充字段"，全市场财务历史仍需 P5-2。
 - **验证**：生产 worktree gate **641 passed**；抽样 `000001`（平安银行）total_equity 5511.8 亿 / 总资产 59257.8 亿 / capex 28.9 亿 / 披露日 2026-03-21 正确；银行/保险因 `fcf` 缺失 `sufficient=False`（正确 fail-closed，不硬算）。
 
