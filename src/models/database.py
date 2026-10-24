@@ -1049,6 +1049,55 @@ class FinancialHistoryDAO:
             """, (code,)).fetchall()
         return [dict(r) for r in rows]
 
+    # 补充字段白名单（P0-3/4/10 + C2.5 兜底）：只允许这些列被回填
+    EXTRA_FIELDS = ("cash", "interest_bearing_debt", "goodwill", "total_assets",
+                    "total_equity", "capex", "net_operate_cashflow",
+                    "notice_date", "fcf", "roic", "total_shares")
+
+    def update_extra_fields(self, code: str, report_date: str,
+                            values: dict) -> int:
+        """只填 NULL 的补充字段（``COALESCE`` 保序），返回受影响行数。
+
+        - 列白名单（``EXTRA_FIELDS``）：防止拼错列名写坏库。
+        - 已有值**不覆盖**（幂等；重跑安全）。
+        - 只作用于年报行（``report_type='A'``）。
+        """
+        cols = [k for k in self.EXTRA_FIELDS if values.get(k) is not None]
+        if not cols:
+            return 0
+        sets = ", ".join(f"{c} = COALESCE({c}, ?)" for c in cols)
+        params = [values[c] for c in cols] + [code, report_date]
+        with db_conn() as conn:
+            cur = conn.execute(
+                f"UPDATE financial_history SET {sets} "
+                "WHERE stock_code = ? AND report_date = ? AND report_type = 'A'",
+                params)
+            return cur.rowcount
+
+    def get_codes_missing_extra(self, limit: int | None = None,
+                                offset: int = 0) -> list[str]:
+        """返回"年报补充字段仍有 NULL"的股票代码（按 code 升序，可断点续跑）。
+
+        判定：任一字段（cash / capex / notice_date）在该股任一年报为 NULL。
+        回填后该股自然从结果集消失，故重跑即续跑。
+        """
+        sql = """
+            SELECT stock_code FROM financial_history
+            WHERE report_type = 'A'
+            GROUP BY stock_code
+            HAVING SUM(cash IS NULL) > 0
+                OR SUM(capex IS NULL) > 0
+                OR SUM(notice_date IS NULL) > 0
+            ORDER BY stock_code
+        """
+        params: list = []
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params = [limit, offset]
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [r["stock_code"] for r in rows]
+
     def get_all_annual(self, min_year: int = 2016) -> list[dict]:
         """获取所有股票的年报数据（默认2016起，覆盖10年）"""
         with db_conn() as conn:

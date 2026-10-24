@@ -37,8 +37,8 @@ def _num(value):
     return v
 
 
-def _get_json(url: str, timeout: int = 15):
-    req = urllib.request.Request(url, headers=_HEADERS)
+def _get_json(url: str, timeout: int = 15, headers: dict | None = None):
+    req = urllib.request.Request(url, headers=headers or _HEADERS)
     raw = urllib.request.urlopen(req, timeout=timeout).read()
     if raw[:2] == b"\x1f\x8b":  # gzip 兜底（服务端偶发压缩）
         raw = gzip.decompress(raw)
