@@ -106,7 +106,8 @@ def main() -> int:
                         help="连同上次无数据的股票一起重试")
     args = parser.parse_args()
 
-    os.chdir(PROJ)          # 相对路径（data/db）以项目根为基准；只在 main 里生效，import 无副作用
+    # 注意：不要 os.chdir —— get_db_path() 基于 __file__ 返回绝对路径；
+    # chdir 会污染调用方（pytest 会话中途换 cwd 曾导致偶发挂起）。
     init_database()
     dao = FinancialHistoryDAO()
 

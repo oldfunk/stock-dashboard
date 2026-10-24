@@ -23,11 +23,12 @@ if [ -z "$PYBIN" ]; then
 fi
 
 # 超时保护（2026-10-24）：挂死用例从“无限阻塞”变为“限时失败”（fail-closed）。
-# 背景：v0.6.7 曾有 vendor 用例打真实网络挂死，无超时会卡死整条部署。
+# 背景：v0.6.7 曾有 vendor 用例打真实网络挂死，无超时会卡死整条部署；
+# 2026-10-24 母套件也出现过一次偶发挂起（akshare 真实调用），故母套件 600s 上限（正常约 230s）。
 # 只认 GNU coreutils 的 timeout（Windows 自带 timeout.exe 语法不同，误用会破坏本机语法检查）。
 TIMEOUT_BIN=""
 if timeout --version >/dev/null 2>&1; then TIMEOUT_BIN="timeout"; fi
-MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-900}"
+MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-600}"
 VENDOR_TIMEOUT="${GATE_TIMEOUT_VENDOR:-600}"
 
 # vendor 已知问题排除清单（带 Issue 链接；修复后移出并恢复基线）
