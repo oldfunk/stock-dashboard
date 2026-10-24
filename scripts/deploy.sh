@@ -94,14 +94,18 @@ if [ "$AHEAD" -gt 0 ]; then
     fi
     GATE_OUT=$(ssh_do "$DEPLOY_SSH" "cd $VERIFY_DIR && PYTHON=$DEPLOY_DIR/.venv/bin/python bash scripts/gate.sh" 2>&1)
     GATE_RC=$?
-    PASSED=$(printf '%s\n' "$GATE_OUT" | grep -oE '[0-9]+ passed' | head -1 | awk '{print $1}')
+    # 分层门禁：只取**母项目**通过数（不能抓第一个 "N passed"，那可能是 vendor 的 219）
+    PASSED=$(printf '%s\n' "$GATE_OUT" | grep -oE '母项目 [0-9]+ passed' | head -1 | awk '{print $2}')
+    if [ -z "$PASSED" ]; then
+        PASSED=$(printf '%s\n' "$GATE_OUT" | grep -oE '[0-9]+ passed' | head -1 | awk '{print $1}')
+    fi
     if [ $GATE_RC -ne 0 ]; then
         printf '%s\n' "$GATE_OUT" | tail -40
         echo "!!! 门禁失败（exit $GATE_RC）：中止——main 未动、生产未重启、留痕分支已推"
         exit 1
     fi
     printf '%s\n' "$GATE_OUT" | tail -3
-    echo "门禁通过：${PASSED:-?} passed"
+    echo "门禁通过：母项目 ${PASSED:-?} passed（vendor 单独记录）"
 fi
 
 # ---- 3. ff 推 main ----
