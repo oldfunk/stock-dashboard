@@ -69,6 +69,33 @@ def test_get_codes_missing_extra_shrinks_after_backfill(db):
     assert dao.get_codes_missing_extra() == ["000001"]
 
 
+def test_progress_table_makes_backfill_resumable(db):
+    """进度表：处理过的股票不再出现（即使仍残留老年份 NULL），可续跑、可重试。"""
+    from src.models.database import FinancialHistoryDAO
+    # 模拟"上游只回 10 年"：2010 年永远填不上
+    _save_annual(code="600519", report_date="2010-12-31")
+    _save_annual(code="600519", report_date="2025-12-31",
+                 cash=1.0, capex=1.0, notice_date="2026-04-01")
+    dao = FinancialHistoryDAO()
+    assert dao.get_codes_missing_extra() == ["600519"]           # 纯 NULL 判定：仍在
+    dao.mark_backfill_done("financial_extra", "600519", 37, "done")
+    assert dao.get_codes_missing_extra(task="financial_extra") == []   # 带任务：已排除
+    assert dao.backfill_progress_summary("financial_extra") == {
+        "done": 1, "no_data": 0, "updated_rows": 37}
+
+
+def test_retry_no_data_includes_previous_no_data(db):
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="000001")
+    _save_annual(code="000002")
+    dao = FinancialHistoryDAO()
+    dao.mark_backfill_done("financial_extra", "000001", 0, "no_data")
+    dao.mark_backfill_done("financial_extra", "000002", 5, "done")
+    assert dao.get_codes_missing_extra(task="financial_extra") == []
+    assert dao.get_codes_missing_extra(task="financial_extra",
+                                       retry_no_data=True) == ["000001"]
+
+
 def test_collect_extra_for_code_merges_sources():
     from scripts.backfill_financial_extra import collect_extra_for_code
 

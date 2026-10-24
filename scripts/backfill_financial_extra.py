@@ -12,13 +12,16 @@ capex / net_operate_cashflow / notice_date` 此前只对候选池（~36 只）�
 **Pi 友好**：
 - 逐只限速（`--sleep`，默认 0.5s），避免打爆上游与占满 Pi。
 - 单次限量（`--limit`，默认 100）+ 软预算（`--max-seconds`，默认 600）到点优雅退出。
-- 幂等续跑：只填 NULL，已回填的股票自然从目标集消失；`--offset` 可显式分页。
+- **进度表断点续跑**：每只处理后写 `backfill_progress(task='financial_extra')`；
+  已处理的股票不再重复出现（否则老股票因上游只回 10 年、老年份永远 NULL 而无限重跑）。
+  `--retry-no-data` 可重试上次"无数据"的股票。
 - fail-closed：请求失败/无数据一律跳过，绝不写 0 或占位值。
 
 用法：
   python scripts/backfill_financial_extra.py --limit 100 --sleep 0.5
   python scripts/backfill_financial_extra.py --dry-run          # 只看目标规模
-  python scripts/backfill_financial_extra.py --limit 50 --offset 100
+  python scripts/backfill_financial_extra.py --status           # 看进度
+  python scripts/backfill_financial_extra.py --limit 50 --retry-no-data
 """
 
 import argparse
@@ -88,26 +91,38 @@ def apply_code(dao: FinancialHistoryDAO, code: str, payload: dict) -> int:
     return updated
 
 
+TASK = "financial_extra"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="全市场回填年报补充字段")
     parser.add_argument("--limit", type=int, default=100, help="本次最多处理股票数")
-    parser.add_argument("--offset", type=int, default=0, help="跳过前 N 只（分页）")
+    parser.add_argument("--offset", type=int, default=0, help="跳过前 N 只（一般不用，进度表已续跑）")
     parser.add_argument("--sleep", type=float, default=0.5, help="每只之间停顿秒数")
     parser.add_argument("--max-seconds", type=float, default=600.0,
                         help="软预算：超过则优雅退出（0=不限）")
     parser.add_argument("--dry-run", action="store_true", help="只统计目标规模")
+    parser.add_argument("--status", action="store_true", help="只看进度汇总")
+    parser.add_argument("--retry-no-data", action="store_true",
+                        help="连同上次无数据的股票一起重试")
     args = parser.parse_args()
 
     init_database()
     dao = FinancialHistoryDAO()
 
-    if args.dry_run:
-        total = len(dao.get_codes_missing_extra())
+    if args.status:
+        print(json.dumps(dao.backfill_progress_summary(TASK), ensure_ascii=False))
+        return 0
+
+    if args.dry-run:
+        total = len(dao.get_codes_missing_extra(task=TASK))
         print(json.dumps({"missing_extra_codes": total}, ensure_ascii=False))
         return 0
 
-    codes = dao.get_codes_missing_extra(limit=args.limit, offset=args.offset)
-    logger.info(f"[extra] 目标 {len(codes)} 只（offset={args.offset}, limit={args.limit}）")
+    codes = dao.get_codes_missing_extra(limit=args.limit, offset=args.offset,
+                                        task=TASK,
+                                        retry_no_data=args.retry_no_data)
+    logger.info(f"[extra] 目标 {len(codes)} 只（limit={args.limit}, retry_no_data={args.retry_no_data}）")
 
     started = time.monotonic()
     processed = updated_rows = no_data = 0
@@ -116,10 +131,13 @@ def main() -> int:
             logger.info(f"[extra] 达到软预算 {args.max_seconds}s，优雅退出（已处理 {processed}）")
             break
         payload = collect_extra_for_code(code)
-        if not payload:
-            no_data += 1
+        n = apply_code(dao, code, payload) if payload else 0
+        if payload:
+            updated_rows += n
         else:
-            updated_rows += apply_code(dao, code, payload)
+            no_data += 1
+        # 进度落表：无论有无数据都标记，避免无限重跑（no_data 可 --retry-no-data 重试）
+        dao.mark_backfill_done(TASK, code, n, "done" if payload else "no_data")
         processed += 1
         if idx % 20 == 0 or idx == len(codes) - 1:
             logger.info(f"[extra] {idx + 1}/{len(codes)} {code} "
@@ -133,8 +151,8 @@ def main() -> int:
         "updated_rows": updated_rows,
         "no_data": no_data,
         "elapsed_sec": elapsed,
-        "next_offset": args.offset + processed,
-        "remaining": len(dao.get_codes_missing_extra()),
+        "progress": dao.backfill_progress_summary(TASK),
+        "remaining": len(dao.get_codes_missing_extra(task=TASK)),
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0

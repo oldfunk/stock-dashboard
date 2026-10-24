@@ -495,6 +495,19 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
             'ON kline_daily(code, trade_date)'
         )
+        # 回填进度表（2026-10-24）：全市场回填的断点续跑标记。
+        # 动机：老股票有 20 年年报、上游只回 10 年，未填的老年份会让"按 NULL 判定"
+        # 的目标集永远不缩小 → 无限重复处理。进度表让每只股票只处理一次。
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS backfill_progress (
+                task         TEXT NOT NULL,
+                code         TEXT NOT NULL,
+                updated_rows INTEGER DEFAULT 0,
+                status       TEXT NOT NULL,      -- done / no_data
+                updated_at   TEXT NOT NULL,
+                PRIMARY KEY (task, code)
+            )
+        ''')
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
@@ -1075,28 +1088,60 @@ class FinancialHistoryDAO:
             return cur.rowcount
 
     def get_codes_missing_extra(self, limit: int | None = None,
-                                offset: int = 0) -> list[str]:
+                                offset: int = 0, task: str | None = None,
+                                retry_no_data: bool = False) -> list[str]:
         """返回"年报补充字段仍有 NULL"的股票代码（按 code 升序，可断点续跑）。
 
         判定：任一字段（cash / capex / notice_date）在该股任一年报为 NULL。
-        回填后该股自然从结果集消失，故重跑即续跑。
+
+        - ``task``：给了就用 ``backfill_progress`` 排除**已处理过**的股票
+          （否则老股票因上游只回 10 年、老年份永远 NULL 而永不消失）。
+        - ``retry_no_data``：连同上次"无数据"的股票一起重试。
         """
-        sql = """
-            SELECT stock_code FROM financial_history
-            WHERE report_type = 'A'
+        sql = "SELECT stock_code FROM financial_history WHERE report_type = 'A'"
+        params: list = []
+        if task:
+            if retry_no_data:
+                sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
+                        " WHERE task = ? AND status = 'done')")
+            else:
+                sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
+                        " WHERE task = ?)")
+            params.append(task)
+        sql += """
             GROUP BY stock_code
             HAVING SUM(cash IS NULL) > 0
                 OR SUM(capex IS NULL) > 0
                 OR SUM(notice_date IS NULL) > 0
             ORDER BY stock_code
         """
-        params: list = []
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
-            params = [limit, offset]
+            params += [limit, offset]
         with db_conn() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [r["stock_code"] for r in rows]
+
+    def mark_backfill_done(self, task: str, code: str, updated_rows: int = 0,
+                           status: str = "done") -> None:
+        """记录回填进度（``task``+``code`` 唯一，幂等覆盖）。"""
+        with db_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO backfill_progress"
+                " (task, code, updated_rows, status, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (task, code, updated_rows, status, now_cn().isoformat()))
+
+    def backfill_progress_summary(self, task: str) -> dict:
+        """某任务的进度汇总：{done, no_data, updated_rows}。"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT SUM(status = 'done') AS done,"
+                "       SUM(status = 'no_data') AS no_data,"
+                "       SUM(updated_rows) AS updated_rows"
+                " FROM backfill_progress WHERE task = ?", (task,)).fetchone()
+        return {"done": row["done"] or 0, "no_data": row["no_data"] or 0,
+                "updated_rows": row["updated_rows"] or 0}
 
     def get_all_annual(self, min_year: int = 2016) -> list[dict]:
         """获取所有股票的年报数据（默认2016起，覆盖10年）"""
