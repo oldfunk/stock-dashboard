@@ -33,7 +33,6 @@ import time
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJ)
-os.chdir(PROJ)
 
 from src.logging_config import setup_logging
 setup_logging()
@@ -107,6 +106,7 @@ def main() -> int:
                         help="连同上次无数据的股票一起重试")
     args = parser.parse_args()
 
+    os.chdir(PROJ)          # 相对路径（data/db）以项目根为基准；只在 main 里生效，import 无副作用
     init_database()
     dao = FinancialHistoryDAO()
 
@@ -114,7 +114,7 @@ def main() -> int:
         print(json.dumps(dao.backfill_progress_summary(TASK), ensure_ascii=False))
         return 0
 
-    if args.dry-run:
+    if args.dry_run:
         total = len(dao.get_codes_missing_extra(task=TASK))
         print(json.dumps({"missing_extra_codes": total}, ensure_ascii=False))
         return 0

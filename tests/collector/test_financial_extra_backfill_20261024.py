@@ -160,3 +160,31 @@ def test_fetch_mainfin_annual_parses_annual_only(monkeypatch):
     assert out["2025-12-31"]["notice_date"] == "2026-04-01"
     assert out["2025-12-31"]["fcf"] == 100.0
     assert out["2025-12-31"]["total_share"] == 12.5
+
+
+def test_main_dry_run_reports_target_count(db, monkeypatch, capsys):
+    """main() 的 --dry-run 分支可用（曾因 args.dry-run 拼写错误崩溃，门禁未覆盖）。"""
+    from scripts import backfill_financial_extra as s
+    _save_annual(code="600519")
+    monkeypatch.setattr("sys.argv", ["backfill", "--dry-run"])
+    assert s.main() == 0
+    assert '"missing_extra_codes": 1' in capsys.readouterr().out
+
+
+def test_main_processes_and_marks_progress(db, monkeypatch, capsys):
+    """main() 正常跑一只：写库 + 进度落表 + 目标集缩小（断点续跑）。"""
+    from src.models.database import FinancialHistoryDAO
+    from scripts import backfill_financial_extra as s
+    _save_annual(code="600519")
+    monkeypatch.setattr(
+        s, "collect_extra_for_code",
+        lambda code: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                     "notice_date": "2026-04-01"}})
+    monkeypatch.setattr("sys.argv", ["backfill", "--limit", "5", "--sleep", "0"])
+    assert s.main() == 0
+    dao = FinancialHistoryDAO()
+    row = dao.get_annual_reports("600519")[0]
+    assert row["cash"] == 1.0 and row["capex"] == 2.0
+    assert dao.backfill_progress_summary("financial_extra")["done"] == 1
+    assert dao.get_codes_missing_extra(task="financial_extra") == []
+    assert '"processed": 1' in capsys.readouterr().out
