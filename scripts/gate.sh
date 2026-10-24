@@ -22,6 +22,14 @@ if [ -z "$PYBIN" ]; then
     else PYBIN="python"; fi
 fi
 
+# 超时保护（2026-10-24）：挂死用例从“无限阻塞”变为“限时失败”（fail-closed）。
+# 背景：v0.6.7 曾有 vendor 用例打真实网络挂死，无超时会卡死整条部署。
+# 只认 GNU coreutils 的 timeout（Windows 自带 timeout.exe 语法不同，误用会破坏本机语法检查）。
+TIMEOUT_BIN=""
+if timeout --version >/dev/null 2>&1; then TIMEOUT_BIN="timeout"; fi
+MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-900}"
+VENDOR_TIMEOUT="${GATE_TIMEOUT_VENDOR:-600}"
+
 # vendor 已知问题排除清单（带 Issue 链接；修复后移出并恢复基线）
 DESELECT=()
 if [ -f scripts/gate-exclusions.txt ]; then
@@ -38,23 +46,29 @@ _floor() {  # $1=基线文件
     printf '%s' "$f"
 }
 
-_run() {  # $1=标签；其余=pytest 参数
-    local label="$1"; shift
+_run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
+    local label="$1" limit="$2"; shift 2
     local out rc
-    if out=$("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" "$@" 2>&1); then rc=0; else rc=$?; fi
+    local cmd=("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" "$@")
+    if [ -n "$TIMEOUT_BIN" ]; then cmd=("$TIMEOUT_BIN" "$limit" "${cmd[@]}"); fi
+    if out=$("${cmd[@]}" 2>&1); then rc=0; else rc=$?; fi
+    if [ "$rc" = "124" ]; then
+        echo "!!! $label 套件超时（>${limit}s，timeout 终止）——视为失败"
+    fi
     printf '%s\n' "$out" | tail -3
     printf '%s\n' "$out" | grep -oE '[0-9]+ passed' | head -1 | awk '{print $1}' > "$BASETEMP/$label.count"
     printf '%s' "$rc" > "$BASETEMP/$label.rc"
 }
 
 echo "=== 母项目门禁（权威：排除 paper_trading/）==="
-_run mother --ignore=paper_trading
+echo "（超时保护：母 ${MOTHER_TIMEOUT}s / vendor ${VENDOR_TIMEOUT}s；timeout=${TIMEOUT_BIN:-无}）"
+_run mother "$MOTHER_TIMEOUT" --ignore=paper_trading
 MOTHER_PASSED=$(cat "$BASETEMP/mother.count" 2>/dev/null)
 MOTHER_RC=$(cat "$BASETEMP/mother.rc" 2>/dev/null)
 MOTHER_FLOOR=$(_floor scripts/gate-baseline.txt)
 
 echo "=== vendor 套件（记录，不阻塞母项目）==="
-_run vendor paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"}
+_run vendor "$VENDOR_TIMEOUT" paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"}
 VENDOR_PASSED=$(cat "$BASETEMP/vendor.count" 2>/dev/null)
 VENDOR_RC=$(cat "$BASETEMP/vendor.rc" 2>/dev/null)
 VENDOR_FLOOR=$(_floor scripts/gate-baseline-vendor.txt)
@@ -65,7 +79,13 @@ if [ "$MOTHER_RC" != "0" ]; then
     echo "=== Gate FAILED：母项目用例失败（exit $MOTHER_RC）==="
     exit "$MOTHER_RC"
 fi
-if [ -n "$MOTHER_PASSED" ] && [ "$MOTHER_PASSED" -lt "$MOTHER_FLOOR" ]; then
+# 通过数为空 = 无法解析结果（收集异常/输出异常）→ fail-closed，不得当成功
+if [ -z "$MOTHER_PASSED" ]; then
+    echo ""
+    echo "=== Gate FAILED：母项目通过数无法解析（不能验证下限，fail-closed）==="
+    exit 1
+fi
+if [ "$MOTHER_PASSED" -lt "$MOTHER_FLOOR" ]; then
     echo ""
     echo "=== Gate FAILED：母项目 ${MOTHER_PASSED} passed 低于下限 ${MOTHER_FLOOR}（只升不降）==="
     exit 1
