@@ -173,7 +173,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
   - `backfill_progress` 表 + `mark_backfill_done` / `backfill_progress_summary`：**进度表断点续跑**（修"老股票老年份永远 NULL 导致无限重跑"的设计缺陷）。
   - `scripts/backfill_financial_extra.py`：逐只限速（`--sleep`）、单次限量（`--limit`）、软预算（`--max-seconds`）、`--dry-run/--status/--retry-no-data`；fail-closed 不写占位值。
   - 9 个单测（DAO 只填 NULL/白名单/年报行、进度表续跑、三源合并、单源失败、main() dry-run 与正常路径、mainfin 解析）。
-- **灌数（生产 Pi，慢速）**：第一批 50 只 510s（≈10.2s/只）→ 第二批 20 只验证续跑（从 `000630` 开始）。**当前 done=70 / 2261 行**；行级覆盖 cash **785→2806**、capex **762→2545**、notice **261→723**；可估值股票 **36→97**、有披露日 **37→103**。Pi 负载 1.5→0.4，无压力。
+- **灌数（生产 Pi，慢速）**：第一批 50 只 510s（≈10.2s/只）→ 第二批 20 只验证续跑（从 `000630` 开始）→ 第三批 30 只。**当前 done=100 / 3174 行**；行级覆盖 cash **785→3623**、capex **762→3281**、notice **261→912**；可估值股票 **36→122**。Pi 负载 1.5→0.8，无压力。
 - **夜间任务**：Pi crontab `30 2 * * *`，每晚 250 只 / sleep 1s / 上限 90min，日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。
 - **缺陷发现（重要）**：`financial_history` 只有 **959 只**股票有年报（不是全市场 5527）→ 本轮只解决"已有年报的补充字段"，全市场财务历史仍需 P5-2。
 - **验证**：生产 worktree gate **641 passed**；抽样 `000001`（平安银行）total_equity 5511.8 亿 / 总资产 59257.8 亿 / capex 28.9 亿 / 披露日 2026-03-21 正确；银行/保险因 `fcf` 缺失 `sufficient=False`（正确 fail-closed，不硬算）。
