@@ -165,6 +165,19 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-24（P5-1 补充字段全量回填：代码 + 慢速灌数）
+- **目标**：把 `cash / interest_bearing_debt / goodwill / total_assets / total_equity / capex / net_operate_cashflow / notice_date` 从"只覆盖候选池 36 只"扩到**所有已有年报的 959 只**（`financial_history` 年报股票总数就是 959，其余 ~4500 只从未采集历史财务——那是下一步 P5-2）。
+- **代码**（`4b77e64` + `de17456` + `9913128` + `d41aaeb`，gate 641）：
+  - `src/collector/mainfin_fetcher.py`：东财 `RPT_F10_FINANCE_MAINFINADATA` 直连（1 次请求取回全部年报的 `notice_date/fcf/roic/total_share`），只依赖 urllib，不 import akshare。
+  - `FinancialHistoryDAO.update_extra_fields`：**只填 NULL**（`COALESCE`）+ 列白名单 + 只作用于年报行；`get_codes_missing_extra`。
+  - `backfill_progress` 表 + `mark_backfill_done` / `backfill_progress_summary`：**进度表断点续跑**（修"老股票老年份永远 NULL 导致无限重跑"的设计缺陷）。
+  - `scripts/backfill_financial_extra.py`：逐只限速（`--sleep`）、单次限量（`--limit`）、软预算（`--max-seconds`）、`--dry-run/--status/--retry-no-data`；fail-closed 不写占位值。
+  - 9 个单测（DAO 只填 NULL/白名单/年报行、进度表续跑、三源合并、单源失败、main() dry-run 与正常路径、mainfin 解析）。
+- **灌数（生产 Pi，慢速）**：第一批 50 只 510s（≈10.2s/只）→ 第二批 20 只验证续跑（从 `000630` 开始）。**当前 done=70 / 2261 行**；行级覆盖 cash **785→2806**、capex **762→2545**、notice **261→723**；可估值股票 **36→97**、有披露日 **37→103**。Pi 负载 1.5→0.4，无压力。
+- **夜间任务**：Pi crontab `30 2 * * *`，每晚 250 只 / sleep 1s / 上限 90min，日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。
+- **缺陷发现（重要）**：`financial_history` 只有 **959 只**股票有年报（不是全市场 5527）→ 本轮只解决"已有年报的补充字段"，全市场财务历史仍需 P5-2。
+- **验证**：生产 worktree gate **641 passed**；抽样 `000001`（平安银行）total_equity 5511.8 亿 / 总资产 59257.8 亿 / capex 28.9 亿 / 披露日 2026-03-21 正确；银行/保险因 `fcf` 缺失 `sufficient=False`（正确 fail-closed，不硬算）。
+
 ### 2026-10-24（可信度收口：MOS 分层丢弃 / 门禁超时 / 模型估值上屏 / 回测 fail-closed）
 - **背景**：用户要求"梳理昨夜进度 + 排查"。实测排查出 4 个真缺陷 + 5 处文档失真（P0 十项在"功能存在"层面已落地，但**数据覆盖只到候选池 ~36 只**，不是全市场）。
 - **① 修 `summarize_by_mos` 分层静默丢弃**（`fc1ef06`）：旧默认区间 `(-100, 100)` 与 MOS 实际范围 `-523.7~74.8` 不匹配，**静默丢弃 180 行/24%**（被丢样本 20 日胜率 37.9%，系统性高估正档）。改为默认覆盖全区间（`≤0/0~20/20~40/≥40`）+ 区间外显式列"未分层"。**生产实测覆盖 750/750**（≤0 档 302→482）；≥40 档 60 日胜率仍 80.0%、超额 +8.9pp（此前文档误写 +17.2pp）。+2 单测。

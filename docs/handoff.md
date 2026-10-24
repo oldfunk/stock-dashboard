@@ -3,10 +3,13 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-24 可信度收口：MOS 分层/门禁超时/模型估值上屏/回测 fail-closed；基线：母项目 630 / vendor 219）
+## 最后状态（2026-10-24 P5-1 补充字段回填进行中：已 70/959 只；基线：母项目 641 / vendor 219）
 
-> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项（P0-1~P0-10）全部落地并经生产 Pi 实测；**2026-10-24 排查后新增 Phase 5 可信度收口（4 项）已全部完成**。
-> **阶段判断**：功能层已齐（数据底座 + 可复现估值 + 验证闭环），但**数据覆盖只到候选池（~36 只）**，不是全市场——这是下一步的主要瓶颈。
+> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项全部落地；**Phase 5 可信度收口 4 项完成，P5-1 回填进行中**。
+> **阶段判断**：功能层已齐；数据层正在补覆盖。**关键事实**：`financial_history` 只有 **959 只**股票有年报（全市场 5527），本轮先把这 959 只的补充字段填满，全市场历史财务是下一步 P5-2。
+- **P5-1 补充字段回填（进行中）**：新增 `scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连，不依赖 akshare）+ `FinancialHistoryDAO.update_extra_fields`（只填 NULL/白名单/只动年报行）+ `backfill_progress` 进度表（断点续跑，修"老年份永远 NULL 无限重跑"）。**当前 done=70 / 2261 行**；行级覆盖 cash 785→**2806**、capex 762→**2545**、notice 261→**723**；可估值股票 36→**97**、有披露日 37→**103**。Pi 负载 1.5→0.4。
+- **夜间慢速任务**：Pi crontab `30 2 * * *` 每晚 250 只（sleep 1s / 上限 90min），日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。查看进度：`.venv/bin/python scripts/backfill_financial_extra.py --status`。
+- **门禁**：母项目 **641** / vendor 219；回填脚本有 9 个单测（含 `main()` 路径，修过 `args.dry-run` 拼写崩溃）。
 - **① MOS 分层静默丢弃修复**（`fc1ef06`，gate 626）：`summarize_by_mos` 旧区间 `(-100,100)` 与 MOS 实际 `-523.7~74.8` 不匹配，**静默丢 180 行/24%**（被丢样本 20 日胜率 37.9%，系统性高估正档）。改默认覆盖全区间 + 区间外显式"未分层"。**生产实测 750/750 全覆盖**；≥40 档 60 日胜率 80.0% / 超额 **+8.9pp**（旧文档 +17.2pp 有误，已更正）。
 - **② 门禁超时保护**（`8ece7a3`，gate 626）：`timeout` 包裹 pytest（母 900s/vendor 600s）+ 通过数无法解析即 fail-closed。**实证**：`GATE_TIMEOUT_MOTHER=2` → `exit 124`，挂死用例不再无限阻塞部署。
 - **③ 详情页展示系统模型估值**（`227fafb` + `bd740e1`，gate 629）：新增"系统模型估值（可复现）"章节（三档+当前价+安全边际+净负债+假设+数据来源），无数据 fail-closed。**生产实测 600519 = 650.39 / 967.80 / 1523.60、安全边际 -29.6%；605099 = "数据不足"**。`valuation.py` 加统一入口 `intrinsic_value_for_code`（AI prompt 复用）。
@@ -41,17 +44,19 @@
 - **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
 
 ## 下一步方向
-1. **（最高优先）扩大字段覆盖**：`financial_history` 的 `cash/capex/total_equity/notice_date` 只覆盖 36–37 只——把 P0-3/4/10 采集扩到全市场（或至少全候选+观察池历史），估值模型与防前视回测才具备全市场意义
-2. （Phase 4，择要）E1 财务同环比高亮 / E2 搜索排序
-3. （协同）对齐子项目 M2（量化可信度）；Issue #1 修复已并入 v0.6.7，但 GitHub 上仍 **OPEN**（待子方关闭）；Issue #2（nav:close 幂等跨日 flaky）仍 OPEN
-4. （观察）v0.6.5 固定交易时段 runtime tick 日志
-5. （可选）P0-5 的 PB 分位补 `total_equity/total_shares` 覆盖；P0-9 扩大样本（120 日窗口 2027-01 起有数据）
+1. **（进行中）P5-1 回填跑完**：等 Pi 夜间任务把 959 只填满（约 4 晚），再复查可估值股票数/披露日覆盖；中途可用 `--status` 看进度
+2. **P5-2 年报历史扩到全市场**：`financial_history` 仅 959 只有年报（全市场 5527）——需要更重的慢速回填（akshare 同花顺摘要 + F10），先小批量测速再定夜间切片
+3. （Phase 4，择要）E1 财务同环比高亮 / E2 搜索排序
+4. （协同）对齐子项目 M2（量化可信度）；Issue #1 修复已并入 v0.6.7，但 GitHub 上仍 **OPEN**；Issue #2（nav:close 幂等跨日 flaky）仍 OPEN
+5. （可选）P0-5 的 PB 分位补 `total_equity/total_shares` 覆盖（本轮回填后已具备数据条件）；P0-9 扩大样本（120 日窗口 2027-01 起有数据）
 6. （可选）模型三档假设标定：当前折现 9%/增长 3% 对多数股票偏保守，MOS 深度为负者众，区分度不足
 
 ## 已知隐患
 - **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报
 - **CI 环境非生产等同**：ubuntu runner 与生产 Pi 不完全等同——CI 是记录与信号，权威门禁仍是生产 gate，CI 红不等于生产坏；本轮动作升到 v6 后需观察 CI 是否仍绿
-- **回测域极小（非前视风险，是覆盖风险）**：`scripts/backtest_topk.py` 已 fail-closed（无 `notice_date` 不入选，不回退 `report_date`），但披露日只有 37 只股票有值 → 回测域仅 35 只，**结果是"指示性"而非组合级**；要得到可信回测须先扩 `notice_date` 覆盖（见下一步方向 1）
+- **回填任务与业务表共用同一 SQLite（WAL）**：夜间回填（02:30）与纸盘 cron/定时器可能重叠；已用 `busy_timeout=5000`，但若出现 `database is locked` 应把回填改到更晚或降 `--limit`
+- **`financial_history` 只有 959 只有年报**：全市场 5527 只中约 4500 只从未采集历史财务；估值/回测/分位的"全市场"结论在 P5-2 完成前仍不成立
+- **回测域仍小**：`scripts/backtest_topk.py` 已 fail-closed（无 `notice_date` 不入选），但披露日目前只有 103 只（回填前 37 只）→ 结果是"指示性"而非组合级，随 P5-1 完成会自然改善
 - **静态 JS 改后必须升版本戳**：`/static/watchlist.js` 在 `index.html` 用 `?v=YYYYMMDDx` 引用；改了 JS 不升戳，浏览器缓存旧文件、修复不生效（2026-10-23 signal-none 实证）。同理 `news.js`
 - （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断
 - （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）
