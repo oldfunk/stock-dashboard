@@ -19,6 +19,7 @@ capex / net_operate_cashflow / notice_date` 此前只对候选池（~36 只）�
 
 用法：
   python scripts/backfill_financial_extra.py --limit 100 --sleep 0.5
+  python scripts/backfill_financial_extra.py --until-done --limit 25 --sleep 0.8   # 持续跑到跑完
   python scripts/backfill_financial_extra.py --dry-run          # 只看目标规模
   python scripts/backfill_financial_extra.py --status           # 看进度
   python scripts/backfill_financial_extra.py --limit 50 --retry-no-data
@@ -38,7 +39,7 @@ from src.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-from src.models.database import FinancialHistoryDAO, init_database
+from src.models.database import FinancialHistoryDAO, get_db_path, init_database
 
 
 def collect_extra_for_code(code: str, bs_fetcher=None, cf_fetcher=None,
@@ -93,6 +94,53 @@ def apply_code(dao: FinancialHistoryDAO, code: str, payload: dict) -> int:
 TASK = "financial_extra"
 
 
+def _acquire_lock():
+    """单实例锁（Linux ``fcntl``）：返回文件句柄 / False（已在跑）/ None（平台不支持）。
+
+    动机：持续跑 + 夜间 cron 可能重叠，双进程会重复请求上游并加重 Pi 负担。
+    """
+    try:
+        import fcntl
+    except ImportError:      # Windows 开发机：不加锁
+        return None
+    lock_path = os.path.join(os.path.dirname(get_db_path()),
+                             "backfill_financial_extra.lock")
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
+
+def _process_codes(dao: FinancialHistoryDAO, codes: list[str], args,
+                   started: float, totals: dict) -> bool:
+    """处理一批；返回 True 表示达到软预算（应停止）。"""
+    for code in codes:
+        if args.max_seconds and (time.monotonic() - started) > args.max_seconds:
+            logger.info(f"[extra] 达到软预算 {args.max_seconds}s，优雅退出"
+                        f"（已处理 {totals['processed']}）")
+            return True
+        payload = collect_extra_for_code(code)
+        n = apply_code(dao, code, payload) if payload else 0
+        if payload:
+            totals["updated_rows"] += n
+        else:
+            totals["no_data"] += 1
+        # 进度落表：无论有无数据都标记，避免无限重跑（no_data 可 --retry-no-data 重试）
+        dao.mark_backfill_done(TASK, code, n, "done" if payload else "no_data")
+        totals["processed"] += 1
+        if totals["processed"] % 20 == 0:
+            logger.info(f"[extra] 累计 {totals['processed']} 只"
+                        f"（更新行 {totals['updated_rows']}，无数据 {totals['no_data']}）")
+        if args.sleep:
+            time.sleep(args.sleep)
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="全市场回填年报补充字段")
     parser.add_argument("--limit", type=int, default=100, help="本次最多处理股票数")
@@ -100,6 +148,10 @@ def main() -> int:
     parser.add_argument("--sleep", type=float, default=0.5, help="每只之间停顿秒数")
     parser.add_argument("--max-seconds", type=float, default=600.0,
                         help="软预算：超过则优雅退出（0=不限）")
+    parser.add_argument("--until-done", action="store_true",
+                        help="持续跑：一批接一批直到目标集为空（跑完自动退出）")
+    parser.add_argument("--batch-sleep", type=float, default=2.0,
+                        help="--until-done 模式下批次之间的停顿秒数")
     parser.add_argument("--dry-run", action="store_true", help="只统计目标规模")
     parser.add_argument("--status", action="store_true", help="只看进度汇总")
     parser.add_argument("--retry-no-data", action="store_true",
@@ -120,37 +172,39 @@ def main() -> int:
         print(json.dumps({"missing_extra_codes": total}, ensure_ascii=False))
         return 0
 
-    codes = dao.get_codes_missing_extra(limit=args.limit, offset=args.offset,
-                                        task=TASK,
-                                        retry_no_data=args.retry_no_data)
-    logger.info(f"[extra] 目标 {len(codes)} 只（limit={args.limit}, retry_no_data={args.retry_no_data}）")
+    lock = _acquire_lock()
+    if lock is False:
+        print(json.dumps({"skipped": "another backfill is already running"},
+                         ensure_ascii=False))
+        return 0
 
     started = time.monotonic()
-    processed = updated_rows = no_data = 0
-    for idx, code in enumerate(codes):
-        if args.max_seconds and (time.monotonic() - started) > args.max_seconds:
-            logger.info(f"[extra] 达到软预算 {args.max_seconds}s，优雅退出（已处理 {processed}）")
+    totals = {"processed": 0, "updated_rows": 0, "no_data": 0}
+    rounds = 0
+    while True:
+        codes = dao.get_codes_missing_extra(
+            limit=args.limit, offset=args.offset, task=TASK,
+            # 持续模式下只在首轮重试 no_data，否则会无限循环
+            retry_no_data=args.retry_no_data and rounds == 0)
+        if not codes:
             break
-        payload = collect_extra_for_code(code)
-        n = apply_code(dao, code, payload) if payload else 0
-        if payload:
-            updated_rows += n
-        else:
-            no_data += 1
-        # 进度落表：无论有无数据都标记，避免无限重跑（no_data 可 --retry-no-data 重试）
-        dao.mark_backfill_done(TASK, code, n, "done" if payload else "no_data")
-        processed += 1
-        if idx % 20 == 0 or idx == len(codes) - 1:
-            logger.info(f"[extra] {idx + 1}/{len(codes)} {code} "
-                        f"（更新行 {updated_rows}，无数据 {no_data}）")
-        if args.sleep:
-            time.sleep(args.sleep)
+        rounds += 1
+        logger.info(f"[extra] 第 {rounds} 批：{len(codes)} 只"
+                    f"（limit={args.limit}, until_done={args.until_done}）")
+        if _process_codes(dao, codes, args, started, totals):
+            break
+        if not args.until_done:
+            break
+        remaining = len(dao.get_codes_missing_extra(task=TASK))
+        if remaining == 0:
+            break
+        logger.info(f"[extra] 批间停顿 {args.batch_sleep}s（剩余 {remaining}）")
+        time.sleep(args.batch_sleep)
 
     elapsed = round(time.monotonic() - started, 1)
     summary = {
-        "processed": processed,
-        "updated_rows": updated_rows,
-        "no_data": no_data,
+        **totals,
+        "rounds": rounds,
         "elapsed_sec": elapsed,
         "progress": dao.backfill_progress_summary(TASK),
         "remaining": len(dao.get_codes_missing_extra(task=TASK)),

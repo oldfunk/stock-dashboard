@@ -6,6 +6,8 @@
 - `fetch_mainfin_annual`：只取年报，解析 notice_date/fcf/roic/total_share
 """
 
+import os
+
 import pytest
 
 from src.models import database as db_mod
@@ -188,3 +190,48 @@ def test_main_processes_and_marks_progress(db, monkeypatch, capsys):
     assert dao.backfill_progress_summary("financial_extra")["done"] == 1
     assert dao.get_codes_missing_extra(task="financial_extra") == []
     assert '"processed": 1' in capsys.readouterr().out
+
+def test_until_done_runs_all_batches(db, monkeypatch, capsys):
+    """--until-done：一批接一批直到目标集为空（limit=2, 3 只 → 2 批）。"""
+    from src.models.database import FinancialHistoryDAO
+    from scripts import backfill_financial_extra as s
+    for code in ("600519", "000001", "000002"):
+        _save_annual(code=code)
+    monkeypatch.setattr(
+        s, "collect_extra_for_code",
+        lambda code: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                     "notice_date": "2026-04-01"}})
+    monkeypatch.setattr("sys.argv", ["backfill", "--until-done", "--limit", "2",
+                                     "--sleep", "0", "--batch-sleep", "0",
+                                     "--max-seconds", "0"])
+    assert s.main() == 0
+    out = capsys.readouterr().out
+    assert '"processed": 3' in out
+    assert '"rounds": 2' in out
+    assert FinancialHistoryDAO().get_codes_missing_extra(task="financial_extra") == []
+
+
+def test_until_done_retry_no_data_only_first_round(db, monkeypatch, capsys):
+    """--until-done + --retry-no-data 不得无限循环：no_data 只在首轮重试。"""
+    from scripts import backfill_financial_extra as s
+    _save_annual(code="600519")
+    monkeypatch.setattr(s, "collect_extra_for_code", lambda code: {})
+    monkeypatch.setattr("sys.argv", ["backfill", "--until-done", "--retry-no-data",
+                                     "--limit", "5", "--sleep", "0",
+                                     "--batch-sleep", "0", "--max-seconds", "0"])
+    assert s.main() == 0
+    out = capsys.readouterr().out
+    assert '"processed": 1' in out
+    assert '"no_data": 1' in out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="fcntl 仅在 POSIX 可用")
+def test_lock_prevents_double_run(db, monkeypatch, capsys):
+    """单实例锁：已有进程在跑时，第二个实例直接跳过（不重复打上游）。"""
+    from scripts import backfill_financial_extra as s
+    _save_annual(code="600519")
+    held = s._acquire_lock()
+    assert held not in (None, False)
+    monkeypatch.setattr("sys.argv", ["backfill", "--limit", "5", "--sleep", "0"])
+    assert s.main() == 0
+    assert "already running" in capsys.readouterr().out
