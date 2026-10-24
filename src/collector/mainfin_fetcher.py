@@ -33,7 +33,6 @@ def fetch_mainfin_annual(code: str, timeout: int = 15) -> dict:
     - ``notice_date`` 披露日期（防前视的关键字段）。
     - 失败返回 {}（缺数据保持 NULL，不阻断）。
     """
-    sym = _em_symbol(code)  # noqa: F841 - 保留前缀格式语义一致性
     secucode = _secucode(code)
     url = (
         f"{_MAINFIN}?type=RPT_F10_FINANCE_MAINFINADATA&sty=ALL"
