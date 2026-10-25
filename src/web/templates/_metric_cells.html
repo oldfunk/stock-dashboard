@@ -1,0 +1,16 @@
+{# 指标单元格唯一渲染点（2026-10-25）
+   变量：metrics = stock_metrics.metric_items(stock)
+        variant = card(默认) / wl(观察池卡) / sd(个股详情) / wd(观察池详情)
+   所有表面必须走这里；不要在模板或 JS 里再手写指标。 #}
+{% set _metrics = metrics if metrics is defined else [] %}
+{% for m in _metrics %}
+{% if variant == 'wl' %}
+<div class="wl-m"{% if m.title %} title="{{ m.title }}"{% endif %}><span class="wl-m-label">{{ m.label }}</span><span class="wl-m-value {{ m.cls }}">{{ m.text }}</span></div>
+{% elif variant == 'sd' %}
+<div class="sd-metric"{% if m.title %} title="{{ m.title }}"{% endif %}><span class="label">{{ m.label }}</span><span class="value {{ m.cls }}">{{ m.text }}</span></div>
+{% elif variant == 'wd' %}
+<div class="wd-metric"{% if m.title %} title="{{ m.title }}"{% endif %}><span class="label">{{ m.label }}</span><span class="value {{ m.cls }}">{{ m.text }}</span></div>
+{% else %}
+<div class="metric-cell"{% if m.title %} title="{{ m.title }}"{% endif %}><div class="label">{{ m.label }}</div><div class="value {{ m.cls }}">{{ m.text }}</div></div>
+{% endif %}
+{% endfor %}

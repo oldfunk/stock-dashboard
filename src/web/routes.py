@@ -37,6 +37,7 @@ from src.scheduler import (
     _active_codes, _cache_lock, _realtime_cache,
 )
 from src.utils import now_cn
+from src.web.stock_metrics import metric_items
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,9 @@ def _enrich_stocks(stocks: list[dict]) -> None:
                 s['dividend_years'] = snap.get('dividend_years')
             if s.get('dividend_year') is None:
                 s['dividend_year'] = snap.get('dividend_year')
+
+        # 指标单元格统一由 stock_metrics 生成（5 个表面共用同一口径）
+        s['metrics'] = metric_items(s)
 
         # 2. 历史分析摘要（先查，最新一条用于回退填空）
         history = hist_dao.get_history(code, limit=5)
@@ -288,6 +292,22 @@ templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(templates_dir))
 
+
+def static_url(name: str) -> str:
+    """静态资源 URL + 文件 mtime 版本号（2026-10-25）。
+
+    旧做法是在模板手写 ``?v=YYYYMMDDx``，改 JS 忘记升版本 → 浏览器继续跑旧文件
+    （已多次发生）。现在由文件 mtime 自动生成，改完文件即自动失效缓存。
+    """
+    try:
+        version = int((static_dir / name).stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"/static/{name}?v={version}"
+
+
+templates.env.globals["static_url"] = static_url
+
 import markdown as _markdown
 
 
@@ -436,7 +456,7 @@ async def index(request: Request):
         else:
             for k in ('pe', 'pb', 'roe', 'debt_ratio', 'market_cap', 'revenue_growth',
                        'profit_growth', 'gross_margin', 'net_margin', 'ocf_per_share',
-                       'dividend_yield', 'dividend_years', 'payout_ratio',
+                       'dividend_yield', 'dividend_years', 'dividend_year', 'payout_ratio',
                        'score', 'reason', 'score_detail_parsed'):
                 item[k] = None
 
@@ -461,6 +481,8 @@ async def index(request: Request):
                 item['dividend_yield'] = snap.get('dividend_yield')
             if item.get('dividend_years') is None:
                 item['dividend_years'] = snap.get('dividend_years')
+            if item.get('dividend_year') is None:
+                item['dividend_year'] = snap.get('dividend_year')
             if item.get('payout_ratio') is None:
                 item['payout_ratio'] = snap.get('payout_ratio')
 
@@ -487,6 +509,8 @@ async def index(request: Request):
                 }
         except Exception:
             pass
+
+        item['metrics'] = metric_items(item)
 
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()
@@ -607,6 +631,9 @@ async def stock_detail(request: Request, code: str):
         model_valuation = intrinsic_value_for_code(code, snapshot.get("current_price"))
     except Exception:  # noqa: BLE001 - 估值失败不阻断页面
         model_valuation = None
+
+    # 指标单元格统一由 stock_metrics 生成（与卡片同一口径）
+    snapshot["metrics"] = metric_items(snapshot)
 
     # 9b. 历史估值分位（P0-5）：无 K 线/无披露日时返回 {}，页面不显示该段
     valuation_percentiles = {}
@@ -1527,6 +1554,10 @@ async def api_watchlist():
                 item[k] = sr[k]
             elif item.get(k) is None:
                 item[k] = None
+    tpl = templates.env.get_template('_metric_cells.html')
+    for item in items:
+        item['metrics'] = metric_items(item)
+        item['metrics_html'] = tpl.render(metrics=item['metrics'], variant='wl')
     return items
 
 
@@ -1868,6 +1899,7 @@ async def watchlist_detail(request: Request, code: str):
                     _sector, snapshot["pe"], "pe")
 
     page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
+    snapshot["metrics"] = metric_items(snapshot)
 
     return templates.TemplateResponse(request, "watchlist_detail.html", {
         "page_title": page_title,

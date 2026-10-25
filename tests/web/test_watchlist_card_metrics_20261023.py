@@ -62,6 +62,8 @@ def test_api_watchlist_enriches_margin_metrics(client):
     assert item["dividend_yield"] == 3.5
     assert item["dividend_years"] == 7
     assert item["dividend_year"] == "2024"
+    assert "股息率" in item["metrics_html"]
+    assert "3.50%" in item["metrics_html"]
 
 
 def test_api_watchlist_falls_back_to_snapshot(client):
@@ -92,10 +94,12 @@ def test_watchlist_js_renders_metric_color_classes():
     assert "s.pe < 15 ? 'good' : (s.pe < 20 ? 'warn' : '')" in js
 
 
-def test_watchlist_js_always_renders_dividend_cells():
-    """股息率/连分年数始终渲染（缺失显示 --），并带分红年度 tooltip。"""
+def test_watchlist_js_uses_server_rendered_metrics():
+    """钉选卡指标由服务端统一渲染；JS 不再手写标签/阈值（防再次漂移）。"""
     js = (TPL_DIR / "static" / "watchlist.js").read_text(encoding="utf-8")
-    assert ">股息率<" in js
-    assert ">连分年数<" in js
-    assert "s.dividend_year" in js
-    assert ": '--'" in js
+    assert "s.metrics_html" in js
+    assert "s.dividend_yield" not in js
+    assert "s.dividend_years" not in js
+    from src.web.stock_metrics import CARD_METRICS
+    labels = [m.label for m in CARD_METRICS]
+    assert "股息率" in labels and "连分年数" in labels

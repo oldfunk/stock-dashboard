@@ -34,6 +34,9 @@ DATA_MARKERS_STOCKLIST = [
 
 
 def _render(tpl: str, **ctx) -> str:
+    from src.web.stock_metrics import metric_items
+    for item in list(ctx.get("stocks") or []) + list(ctx.get("watchlist") or []):
+        item.setdefault("metrics", metric_items(item))
     env = Environment(loader=FileSystemLoader(TPL_DIR),
                       autoescape=select_autoescape(["html"]))
     return env.get_template(tpl).render(**ctx)

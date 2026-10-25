@@ -418,15 +418,8 @@
 
     <!-- 2. 关键指标快照条 -->
     <section class="sd-snapshot-bar">
-        <div class="sd-metric"><span class="label">PE</span><span class="value {{ 'good' if snapshot.pe is not none and snapshot.pe < 15 else ('warn' if snapshot.pe is not none and snapshot.pe < 20 else '') }}">{{ ("%.1f"|format(snapshot.pe)) if snapshot.pe is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">PB</span><span class="value {{ 'good' if snapshot.pb is not none and snapshot.pb < 2 else ('warn' if snapshot.pb is not none and snapshot.pb < 3.5 else '') }}">{{ ("%.2f"|format(snapshot.pb)) if snapshot.pb is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">ROE</span><span class="value {{ 'good' if snapshot.roe is not none and snapshot.roe >= 15 else ('warn' if snapshot.roe is not none else '') }}">{{ ("%.1f%%"|format(snapshot.roe)) if snapshot.roe is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">营收增</span><span class="value {{ 'good' if snapshot.revenue_growth is not none and snapshot.revenue_growth >= 10 else ('warn' if snapshot.revenue_growth is not none else '') }}">{{ ("%+.1f%%"|format(snapshot.revenue_growth)) if snapshot.revenue_growth is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">利润增</span><span class="value {{ 'good' if snapshot.profit_growth is not none and snapshot.profit_growth >= 10 else ('warn' if snapshot.profit_growth is not none else '') }}">{{ ("%+.1f%%"|format(snapshot.profit_growth)) if snapshot.profit_growth is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">市值</span><span class="value">{{ ("%.0f亿"|format(snapshot.market_cap)) if snapshot.market_cap is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">负债率</span><span class="value {{ 'good' if snapshot.debt_ratio is not none and snapshot.debt_ratio < 40 else ('warn' if snapshot.debt_ratio is not none else '') }}">{{ ("%.1f%%"|format(snapshot.debt_ratio)) if snapshot.debt_ratio is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">股息率</span><span class="value">{{ ("%.2f%%"|format(snapshot.dividend_yield)) if snapshot.dividend_yield is not none else '--' }}</span></div>
-        <div class="sd-metric"><span class="label">连分年数</span><span class="value">{{ snapshot.dividend_years if snapshot.dividend_years is not none else '--' }}</span></div>
+        {% set variant = 'sd' %}
+        {% with metrics = snapshot.metrics %}{% include '_metric_cells.html' %}{% endwith %}
     </section>
 
     <!-- 2.3 综合评分拆解（透明化：五维子分 + 一致性加分） -->

@@ -76,23 +76,8 @@ function loadWatchlist() {
                 if (s.current_price != null) price = s.current_price.toFixed(2);
                 else if (s.latest_price != null) price = s.latest_price.toFixed(2);
                 var addedDate = (s.added_at || '').slice(0, 10);
-                var metricsHtml = '';
-                // 2026-10-23：手动钉选卡指标与候选卡同口径上色（好/中/差 → 红/金/绿，随红绿开关）
-                if (s.pe != null) metricsHtml += '<div class="metric-cell"><div class="label">PE</div><div class="value ' + (s.pe < 15 ? 'good' : (s.pe < 20 ? 'warn' : '')) + '">' + s.pe.toFixed(1) + '</div></div>';
-                if (s.pb != null) metricsHtml += '<div class="metric-cell"><div class="label">PB</div><div class="value ' + (s.pb < 2 ? 'good' : (s.pb < 3.5 ? 'warn' : '')) + '">' + s.pb.toFixed(2) + '</div></div>';
-                if (s.roe != null) metricsHtml += '<div class="metric-cell"><div class="label">ROE</div><div class="value ' + (s.roe >= 15 ? 'good' : 'warn') + '">' + s.roe.toFixed(1) + '%</div></div>';
-                if (s.debt_ratio != null) metricsHtml += '<div class="metric-cell"><div class="label">负债率</div><div class="value ' + (s.debt_ratio < 40 ? 'good' : 'warn') + '">' + s.debt_ratio.toFixed(1) + '%</div></div>';
-                if (s.revenue_growth != null) metricsHtml += '<div class="metric-cell"><div class="label">营收增</div><div class="value ' + (s.revenue_growth >= 10 ? 'good' : 'warn') + '">' + s.revenue_growth.toFixed(1) + '%</div></div>';
-                if (s.profit_growth != null) metricsHtml += '<div class="metric-cell"><div class="label">利润增</div><div class="value ' + (s.profit_growth >= 10 ? 'good' : 'warn') + '">' + s.profit_growth.toFixed(1) + '%</div></div>';
-                if (s.market_cap != null) metricsHtml += '<div class="metric-cell"><div class="label">市值</div><div class="value">' + s.market_cap.toFixed(0) + '亿</div></div>';
-                if (s.gross_margin != null) metricsHtml += '<div class="metric-cell"><div class="label">毛利率</div><div class="value ' + (s.gross_margin >= 30 ? 'good' : (s.gross_margin >= 15 ? 'warn' : 'bad')) + '">' + s.gross_margin.toFixed(1) + '%</div></div>';
-                if (s.net_margin != null) metricsHtml += '<div class="metric-cell"><div class="label">净利率</div><div class="value ' + (s.net_margin >= 15 ? 'good' : (s.net_margin >= 5 ? 'warn' : 'bad')) + '">' + s.net_margin.toFixed(1) + '%</div></div>';
-                if (s.ocf_per_share != null) metricsHtml += '<div class="metric-cell"><div class="label">OCF/股</div><div class="value ' + (s.ocf_per_share > 0 ? 'good' : 'bad') + '">' + s.ocf_per_share.toFixed(2) + '</div></div>';
-                // 股息两列始终渲染（缺失显示 --），避免"有的卡有、有的卡没有"
-                var dyTitle = s.dividend_year ? ' title="股息率 = ' + s.dividend_year + ' 年报每股分红 / 现价"' : '';
-                metricsHtml += '<div class="metric-cell"' + dyTitle + '><div class="label">股息率</div><div class="value ' + (s.dividend_yield != null ? (s.dividend_yield >= 4 ? 'good' : (s.dividend_yield >= 2 ? 'warn' : '')) : '') + '">' + (s.dividend_yield != null ? s.dividend_yield.toFixed(2) + '%' : '--') + '</div></div>';
-                var dyrTitle = s.dividend_year ? ' title="连续分红年数（截至 ' + s.dividend_year + ' 年报）"' : '';
-                metricsHtml += '<div class="metric-cell"' + dyrTitle + '><div class="label">连分年数</div><div class="value ' + (s.dividend_years != null ? (s.dividend_years >= 5 ? 'good' : (s.dividend_years >= 3 ? 'warn' : '')) : '') + '">' + (s.dividend_years != null ? s.dividend_years : '--') + '</div></div>';
+                // 指标单元格由服务端 _metric_cells.html 统一渲染（与候选卡/观察池同一口径，JS 不再手写标签与阈值）
+                var metricsHtml = s.metrics_html || '';
                 return '<div class="stock-card clickable" data-code="' + s.code + '"' +
                     ' onclick="location.href=\'/stock/' + s.code + '\'" title="查看 ' + s.name + ' 详情">' +
                     '<div class="stock-row">' +

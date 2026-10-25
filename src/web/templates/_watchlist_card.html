@@ -30,57 +30,8 @@
                 <span class="wl-m-change" style="color:{{ 'var(--color-up)' if stock.change_percent >= 0 else 'var(--color-down)' }}">{{ "%+.2f"|format(stock.change_percent) }}%</span>
                 {% endif %}
             </div>
-            <div class="wl-m">
-                <span class="wl-m-label">PE</span>
-                <span class="wl-m-value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">{{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">PB</span>
-                <span class="wl-m-value {{ 'good' if stock.pb is not none and stock.pb < 2 else '' }}">{{ "%.2f"|format(stock.pb) if stock.pb is not none else '--' }}</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">ROE</span>
-                <span class="wl-m-value {{ 'good' if stock.roe is not none and stock.roe >= 15 else '' }}">{{ "%.1f"|format(stock.roe) if stock.roe is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">负债率</span>
-                <span class="wl-m-value {{ 'good' if stock.debt_ratio is not none and stock.debt_ratio < 40 else '' }}">{{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">营收↑</span>
-                <span class="wl-m-value {{ 'good' if stock.revenue_growth is not none and stock.revenue_growth >= 10 else '' }}">{{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">利润↑</span>
-                <span class="wl-m-value {{ 'good' if stock.profit_growth is not none and stock.profit_growth >= 10 else '' }}">{{ "%.1f"|format(stock.profit_growth) if stock.profit_growth is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">市值</span>
-                <span class="wl-m-value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}亿</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">毛利率</span>
-                <span class="wl-m-value {{ 'good' if stock.gross_margin is not none and stock.gross_margin >= 30 else '' }}">{{ "%.1f"|format(stock.gross_margin) if stock.gross_margin is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">净利率</span>
-                <span class="wl-m-value {{ 'good' if stock.net_margin is not none and stock.net_margin >= 15 else '' }}">{{ "%.1f"|format(stock.net_margin) if stock.net_margin is not none else '--' }}%</span>
-            </div>
-            <div class="wl-m">
-                <span class="wl-m-label">OCF/股</span>
-                <span class="wl-m-value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else '' }}">{{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}</span>
-            </div>
-            {% set _dy = stock.get('dividend_yield') %}
-            {% set _dyr = stock.get('dividend_years') %}
-            {% set _dyy = stock.get('dividend_year') %}
-            <div class="wl-m" title="股息率 = {{ _dyy or '最近' }} 年报每股分红 / 现价">
-                <span class="wl-m-label">股息率</span>
-                <span class="wl-m-value {{ 'good' if (_dy is not none and _dy >= 4) else ('warn' if (_dy is not none and _dy >= 2) else '') }}">{{ ("%.2f%%"|format(_dy)) if _dy is not none else '--' }}</span>
-            </div>
-            <div class="wl-m" title="连续分红年数（截至 {{ _dyy or '最新' }} 年报）">
-                <span class="wl-m-label">连分年数</span>
-                <span class="wl-m-value {{ 'good' if (_dyr is not none and _dyr >= 5) else ('warn' if (_dyr is not none and _dyr >= 3) else '') }}">{{ _dyr if _dyr is not none else '--' }}</span>
-            </div>
+            {% set variant = 'wl' %}
+            {% with metrics = stock.metrics %}{% include '_metric_cells.html' %}{% endwith %}
         </div>
 
         {# ── 5y/10y 历史行 ── #}

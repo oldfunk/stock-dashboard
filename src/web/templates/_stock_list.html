@@ -34,77 +34,8 @@
                             {% endif %}
                         </div>
                     </div>
-                    <div class="metric-cell">
-                        <div class="label">市盈率</div>
-                        <div class="value {{ 'good' if stock.pe is not none and stock.pe < 15 else ('warn' if stock.pe is not none and stock.pe < 20 else '') }}">
-                            {{ "%.1f"|format(stock.pe) if stock.pe is not none else '--' }}
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">市净率</div>
-                        <div class="value {{ 'good' if stock.pb is not none and stock.pb < 2 else ('warn' if stock.pb is not none and stock.pb < 3.5 else '') }}">
-                            {{ "%.2f"|format(stock.pb) if stock.pb is not none else '--' }}
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">ROE</div>
-                        <div class="value {{ 'good' if stock.roe is not none and stock.roe >= 15 else 'warn' }}">
-                            {{ "%.1f"|format(stock.roe) if stock.roe is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">负债率</div>
-                        <div class="value {{ 'good' if stock.debt_ratio is not none and stock.debt_ratio < 40 else 'warn' }}">
-                            {{ "%.1f"|format(stock.debt_ratio) if stock.debt_ratio is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">营收增长</div>
-                        <div class="value {{ 'good' if stock.revenue_growth is not none and stock.revenue_growth >= 10 else 'warn' }}">
-                            {{ "%.1f"|format(stock.revenue_growth) if stock.revenue_growth is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">利润增长</div>
-                        <div class="value {{ 'good' if stock.profit_growth is not none and stock.profit_growth >= 10 else 'warn' }}">
-                            {{ "%.1f"|format(stock.profit_growth) if stock.profit_growth is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">市值</div>
-                        <div class="value">{{ "%.0f"|format(stock.market_cap) if stock.market_cap else '--' }}亿</div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">毛利率</div>
-                        <div class="value {{ 'good' if stock.gross_margin is not none and stock.gross_margin >= 30 else ('warn' if stock.gross_margin is not none and stock.gross_margin >= 15 else 'bad') }}">
-                            {{ "%.1f"|format(stock.gross_margin) if stock.gross_margin is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">净利率</div>
-                        <div class="value {{ 'good' if stock.net_margin is not none and stock.net_margin >= 15 else ('warn' if stock.net_margin is not none and stock.net_margin >= 5 else 'bad') }}">
-                            {{ "%.1f"|format(stock.net_margin) if stock.net_margin is not none else '--' }}%
-                        </div>
-                    </div>
-                    <div class="metric-cell">
-                        <div class="label">OCF/股</div>
-                        <div class="value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else 'bad' }}">
-                            {{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}
-                        </div>
-                    </div>
-                    {% set _dy = stock.get('dividend_yield') %}
-                    {% set _dy_cls = 'good' if (_dy is not none and _dy >= 4) else ('warn' if (_dy is not none and _dy >= 2) else '') %}
-                    {% set _dy_year = stock.get('dividend_year') %}
-                    <div class="metric-cell" title="股息率 = {{ _dy_year or '最近' }} 年报每股分红 / 现价">
-                        <div class="label">股息率</div>
-                        <div class="value {{ _dy_cls }}">{{ ("%.2f%%"|format(_dy)) if _dy is not none else '--' }}</div>
-                    </div>
-                    {% set _dyr = stock.get('dividend_years') %}
-                    {% set _dyr_cls = 'good' if (_dyr is not none and _dyr >= 5) else ('warn' if (_dyr is not none and _dyr >= 3) else '') %}
-                    <div class="metric-cell" title="连续分红年数（截至 {{ _dy_year or '最新' }} 年报）">
-                        <div class="label">连分年数</div>
-                        <div class="value {{ _dyr_cls }}">{{ _dyr if _dyr is not none else '--' }}</div>
-                    </div>
+                    {% set variant = 'card' %}
+                    {% with metrics = stock.metrics %}{% include '_metric_cells.html' %}{% endwith %}
                     {% if stock._summary and stock._summary.data_years %}
                     <div class="metric-cell history-cell">
                         <div class="label">5y/10y 历史 <span class="hist-badge">{{ stock._summary.data_years }}</span></div>
