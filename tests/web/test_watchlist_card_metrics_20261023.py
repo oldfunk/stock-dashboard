@@ -35,6 +35,7 @@ def _seed(client):
         "pe": 25.0, "pb": 4.0, "roe": 5.0, "debt_ratio": 55.0,
         "revenue_growth": 3.0, "profit_growth": -10.0, "market_cap": 980.0,
         "current_price": 18.42, "snapshot_date": "2026-10-21",
+        "dividend_yield": 3.5, "dividend_years": 7, "dividend_year": "2024",
     }])
     ScreeningResultDAO().save_batch([{
         "run_id": "20261021_153010", "run_date": "2026-10-21",
@@ -57,6 +58,10 @@ def test_api_watchlist_enriches_margin_metrics(client):
     assert item["gross_margin"] == 10.0
     assert item["net_margin"] == 2.0
     assert item["ocf_per_share"] == -0.5
+    # 股息三字段：钉选卡直接读这三个（year 用于 title 标注分红年度）
+    assert item["dividend_yield"] == 3.5
+    assert item["dividend_years"] == 7
+    assert item["dividend_year"] == "2024"
 
 
 def test_api_watchlist_falls_back_to_snapshot(client):
@@ -85,3 +90,12 @@ def test_watchlist_js_renders_metric_color_classes():
     assert "s.ocf_per_share > 0 ? 'good' : 'bad'" in js
     assert "s.roe >= 15 ? 'good' : 'warn'" in js
     assert "s.pe < 15 ? 'good' : (s.pe < 20 ? 'warn' : '')" in js
+
+
+def test_watchlist_js_always_renders_dividend_cells():
+    """股息率/连分年数始终渲染（缺失显示 --），并带分红年度 tooltip。"""
+    js = (TPL_DIR / "static" / "watchlist.js").read_text(encoding="utf-8")
+    assert ">股息率<" in js
+    assert ">连分年数<" in js
+    assert "s.dividend_year" in js
+    assert ": '--'" in js

@@ -88,8 +88,11 @@ function loadWatchlist() {
                 if (s.gross_margin != null) metricsHtml += '<div class="metric-cell"><div class="label">毛利率</div><div class="value ' + (s.gross_margin >= 30 ? 'good' : (s.gross_margin >= 15 ? 'warn' : 'bad')) + '">' + s.gross_margin.toFixed(1) + '%</div></div>';
                 if (s.net_margin != null) metricsHtml += '<div class="metric-cell"><div class="label">净利率</div><div class="value ' + (s.net_margin >= 15 ? 'good' : (s.net_margin >= 5 ? 'warn' : 'bad')) + '">' + s.net_margin.toFixed(1) + '%</div></div>';
                 if (s.ocf_per_share != null) metricsHtml += '<div class="metric-cell"><div class="label">OCF/股</div><div class="value ' + (s.ocf_per_share > 0 ? 'good' : 'bad') + '">' + s.ocf_per_share.toFixed(2) + '</div></div>';
-                if (s.dividend_yield != null) metricsHtml += '<div class="metric-cell"><div class="label">股息率</div><div class="value ' + (s.dividend_yield >= 4 ? 'good' : (s.dividend_yield >= 2 ? 'warn' : '')) + '">' + s.dividend_yield.toFixed(2) + '%</div></div>';
-                if (s.dividend_years != null) metricsHtml += '<div class="metric-cell"><div class="label">连分年数</div><div class="value ' + (s.dividend_years >= 5 ? 'good' : (s.dividend_years >= 3 ? 'warn' : '')) + '">' + s.dividend_years + '</div></div>';
+                // 股息两列始终渲染（缺失显示 --），避免"有的卡有、有的卡没有"
+                var dyTitle = s.dividend_year ? ' title="股息率 = ' + s.dividend_year + ' 年报每股分红 / 现价"' : '';
+                metricsHtml += '<div class="metric-cell"' + dyTitle + '><div class="label">股息率</div><div class="value ' + (s.dividend_yield != null ? (s.dividend_yield >= 4 ? 'good' : (s.dividend_yield >= 2 ? 'warn' : '')) : '') + '">' + (s.dividend_yield != null ? s.dividend_yield.toFixed(2) + '%' : '--') + '</div></div>';
+                var dyrTitle = s.dividend_year ? ' title="连续分红年数（截至 ' + s.dividend_year + ' 年报）"' : '';
+                metricsHtml += '<div class="metric-cell"' + dyrTitle + '><div class="label">连分年数</div><div class="value ' + (s.dividend_years != null ? (s.dividend_years >= 5 ? 'good' : (s.dividend_years >= 3 ? 'warn' : '')) : '') + '">' + (s.dividend_years != null ? s.dividend_years : '--') + '</div></div>';
                 return '<div class="stock-card clickable" data-code="' + s.code + '"' +
                     ' onclick="location.href=\'/stock/' + s.code + '\'" title="查看 ' + s.name + ' 详情">' +
                     '<div class="stock-row">' +
