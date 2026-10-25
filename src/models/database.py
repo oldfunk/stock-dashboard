@@ -875,9 +875,12 @@ class RunLogDAO:
             )
 
     def get_latest_run(self) -> Optional[dict]:
+        """最新一轮**筛选**（排除周六复盘 run：它 screened_count=5，会把首页
+        "候选数"显示成 5，而候选列表来自真正的筛选轮 20 只）。"""
         with db_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM run_log ORDER BY start_time DESC LIMIT 1"
+                "SELECT * FROM run_log WHERE run_id NOT LIKE '%_review' "
+                "ORDER BY start_time DESC LIMIT 1"
             ).fetchone()
         return dict(row) if row else None
 

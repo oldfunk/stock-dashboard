@@ -37,7 +37,7 @@ from src.scheduler import (
     _active_codes, _cache_lock, _realtime_cache,
 )
 from src.utils import now_cn
-from src.web.stock_metrics import metric_items
+from src.web.stock_metrics import metric_items, format_value, spec_for
 
 logger = logging.getLogger(__name__)
 
@@ -1529,6 +1529,12 @@ async def api_search(q: str = ""):
                 item['last_signal'] = ts.get('signal')
             except Exception:
                 pass
+        # 搜索结果摘要也走同一格式化器，JS 不再自己 toFixed
+        item['summary'] = " | ".join([
+            f"PE {format_value(spec_for('pe'), item.get('pe'))}",
+            f"ROE {format_value(spec_for('roe'), item.get('roe'))}",
+            f"市值 {format_value(spec_for('market_cap'), item.get('market_cap'))}",
+        ])
         results.append(item)
     return results
 

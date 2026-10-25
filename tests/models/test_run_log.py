@@ -30,3 +30,17 @@ class TestLatestCompleted:
     def test_failed_excluded(self, db):
         _add(db, "20260925_153016", "2026-09-25T15:30:16", status="failed")
         assert db.RunLogDAO().get_latest_completed_run_id() is None
+
+
+class TestLatestRun:
+    """首页"上次运行/候选数"必须取最新**筛选**轮，不能被周六复盘 run 顶掉。"""
+
+    def test_skips_review_run(self, db):
+        _add(db, "20260925_153016", "2026-09-25T15:30:16")
+        _add(db, "20260926_000027_review", "2026-09-26T00:00:27")
+        run = db.RunLogDAO().get_latest_run()
+        assert run["run_id"] == "20260925_153016"
+
+    def test_returns_running_screening_run(self, db):
+        _add(db, "20260925_153016", "2026-09-25T15:30:16", status="running")
+        assert db.RunLogDAO().get_latest_run()["status"] == "running"

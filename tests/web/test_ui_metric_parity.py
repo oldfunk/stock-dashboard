@@ -140,6 +140,18 @@ def test_static_assets_use_automatic_version():
     assert re.fullmatch(r"/static/watchlist\.js\?v=\d+", url), url
 
 
+def test_search_summary_uses_registry(client):
+    from src.models.database import StockSnapshotDAO
+    snap = dict(FULL)
+    snap.update({"market": "A", "sector": "化工", "ps": 1.0,
+                 "circulating_cap": 80.0, "revenue": 10.0, "profit": 2.0,
+                 "high_52w": 10.0, "low_52w": 8.0, "is_st": False,
+                 "list_date": "2010-01-01", "snapshot_date": "2026-10-23"})
+    StockSnapshotDAO().save_batch([snap])
+    items = client.get("/api/search", params={"q": "002215"}).json()
+    assert items and items[0]["summary"] == "PE 11.2 | ROE 16.6% | 市值 86亿"
+
+
 def test_template_partial_is_the_only_metric_markup():
     """卡片模板里不得再出现任何手写指标标签（防回潮）。"""
     from pathlib import Path

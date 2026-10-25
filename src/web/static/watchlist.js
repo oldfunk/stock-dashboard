@@ -143,14 +143,11 @@ function searchStocks() {
                     var st = s.last_signal === 'BUY' ? '买入' : (s.last_signal === 'HOLD' ? '持有' : (s.last_signal === 'AVOID' ? '回避' : s.last_signal));
                     badges += '<span class="badge badge-signal">' + st + '</span>';
                 }
-                var peStr = s.pe != null ? s.pe.toFixed(1) : '--';
-                var roeStr = s.roe != null ? s.roe.toFixed(1) + '%' : '--';
-                var mcStr = s.market_cap != null ? s.market_cap.toFixed(0) + '亿' : '--';
                 var btnClass = s.watched ? 'watch-btn watched' : 'watch-btn';
                 var btnText = s.watched ? '已钉' : '钉选';
                 return '<div class="search-item clickable" title="查看详情" onclick="location.href=\'/stock/' + s.code + '\'">' +
                     '<div class="si-info"><span class="si-code">' + s.code + '</span> ' + s.name + ' ' + badges + '</div>' +
-                    '<div class="si-metrics">PE ' + peStr + ' | ROE ' + roeStr + ' | 市值 ' + mcStr + '</div>' +
+                    '<div class="si-metrics">' + (s.summary || '') + '</div>' +
                     '<button class="' + btnClass + '" data-scode="' + s.code + '">' + btnText + '</button>' +
                     '</div>';
             }).join('');
