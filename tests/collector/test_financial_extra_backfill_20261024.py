@@ -117,6 +117,37 @@ def test_retry_partial_includes_source_failures(db):
     assert dao.backfill_progress_summary("financial_extra")["partial"] == 1
 
 
+def test_new_annual_report_makes_code_eligible_again(db):
+    """未来年报不得被进度表锁死：新报告期到达后自动重新入选。"""
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="600519", report_date="2025-12-31",
+                 cash=1.0, capex=1.0, notice_date="2026-04-01")
+    dao = FinancialHistoryDAO()
+    dao.mark_backfill_done("financial_extra", "600519", 1, "done")
+    assert dao.get_codes_missing_extra(task="financial_extra") == []
+    # 下一个年报季：插入 2026 年报（字段还没回填）
+    _save_annual(code="600519", report_date="2026-12-31", roe=21.0)
+    assert dao.get_codes_missing_extra(task="financial_extra") == ["600519"]
+
+
+def test_batch_save_preserves_backfilled_extra_fields(db):
+    """重采集只带基础字段时，不得把回填的 cash/capex/notice_date 清空。"""
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="600519", cash=1.0, capex=2.0, notice_date="2026-04-01")
+    dao = FinancialHistoryDAO()
+    before = dao.get_annual_reports("600519")[0]["created_at"]
+    dao.batch_save([{"stock_code": "600519", "report_date": "2025-12-31",
+                     "roe": 21.0}])
+    rows = dao.get_annual_reports("600519")
+    assert len(rows) == 1                        # upsert 不新增重复行
+    row = rows[0]
+    assert row["roe"] == 21.0                    # 新值正常更新
+    assert row["cash"] == 1.0
+    assert row["capex"] == 2.0
+    assert row["notice_date"] == "2026-04-01"
+    assert row["created_at"] == before           # 首次写入时间保留（审计溯源）
+
+
 def test_collect_extra_for_code_merges_sources():
     from scripts.backfill_financial_extra import collect_extra_for_code
 

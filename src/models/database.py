@@ -503,10 +503,20 @@ def init_database():
                 task         TEXT NOT NULL,
                 code         TEXT NOT NULL,
                 updated_rows INTEGER DEFAULT 0,
-                status       TEXT NOT NULL,      -- done / no_data
+                status       TEXT NOT NULL,      -- done / partial / no_data
                 updated_at   TEXT NOT NULL,
                 PRIMARY KEY (task, code)
             )
+        ''')
+        # 2026-10-25：记录"已覆盖到哪个报告期"。只按 (task, code) 排除会让
+        # 未来新增的年报永远进不了目标集（审计实证：插入 2026 年报后目标集仍为空）；
+        # 现在只有 covered_report_date >= 当前最新年报时才排除该股票。
+        _add_column_if_not_exists(conn, 'backfill_progress', 'covered_report_date', 'TEXT')
+        conn.execute('''
+            UPDATE backfill_progress SET covered_report_date = (
+                SELECT MAX(f.report_date) FROM financial_history f
+                WHERE f.stock_code = backfill_progress.code
+            ) WHERE covered_report_date IS NULL
         ''')
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
@@ -1025,20 +1035,39 @@ class FinancialHistoryDAO:
     """财务历史数据 DAO（时序表 — 按日累积）"""
 
     def batch_save(self, records: list[dict]):
-        """批量保存财务历史（UPSERT 避免重复）"""
+        """批量保存财务历史（UPSERT：新值为空时保留旧值）。
+
+        **2026-10-25 修**：旧实现用 ``INSERT OR REPLACE`` 整行替换，重采集时
+        缺省字段会把回填的 ``cash/capex/notice_date`` 等重置为 NULL（审计已用
+        临时库复现）。现在改为 ``ON CONFLICT`` 逐列 ``COALESCE``：采集器没提供
+        的字段保持原值；``created_at`` 保留首次写入时间（审计溯源）。
+        """
         now = now_cn().isoformat()
+        data_cols = (
+            "roe", "gross_margin", "net_margin", "ocf_per_share", "debt_ratio",
+            "revenue_growth", "profit_growth", "net_profit", "interest_coverage",
+            "fcf", "total_shares", "roic", "eps", "cash", "interest_bearing_debt",
+            "goodwill", "total_assets", "total_equity", "capex",
+            "net_operate_cashflow", "notice_date",
+        )
+        updates = ", ".join(f"{c} = COALESCE(excluded.{c}, {c})" for c in data_cols)
+        sql = f"""
+            INSERT INTO financial_history
+            (stock_code, report_date, report_type, roe, gross_margin, net_margin,
+             ocf_per_share, debt_ratio, revenue_growth, profit_growth,
+             net_profit, interest_coverage, fcf, total_shares, roic, eps,
+             cash, interest_bearing_debt, goodwill, total_assets, total_equity,
+             capex, net_operate_cashflow, notice_date,
+             data_source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stock_code, report_date) DO UPDATE SET
+                report_type = excluded.report_type,
+                data_source = COALESCE(excluded.data_source, data_source),
+                {updates}
+        """
         with db_conn() as conn:
             for r in records:
-                conn.execute("""
-                    INSERT OR REPLACE INTO financial_history
-                    (stock_code, report_date, report_type, roe, gross_margin, net_margin,
-                     ocf_per_share, debt_ratio, revenue_growth, profit_growth,
-                     net_profit, interest_coverage, fcf, total_shares, roic, eps,
-                     cash, interest_bearing_debt, goodwill, total_assets, total_equity,
-                     capex, net_operate_cashflow, notice_date,
-                     data_source, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
+                conn.execute(sql, (
                     r['stock_code'], r['report_date'],
                     'A' if r['report_date'].endswith('12-31') else 'Q',
                     r.get('roe'), r.get('gross_margin'), r.get('net_margin'),
@@ -1097,6 +1126,7 @@ class FinancialHistoryDAO:
 
         - ``task``：给了就用 ``backfill_progress`` 排除**已处理过**的股票
           （否则老股票因上游只回 10 年、老年份永远 NULL 而永不消失）。
+          只有进度记录覆盖到该股当前最新年报时才排除；新报告期到达后自动重新入选。
         - ``retry_no_data`` / ``retry_partial``：把上次对应状态的股票重新纳入
           （``partial`` = 至少一个数据源失败或返回空，字段可能没填全）。
         """
@@ -1109,8 +1139,14 @@ class FinancialHistoryDAO:
             if not retry_partial:
                 skip.append("partial")
             marks = ", ".join("?" for _ in skip)
-            sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
-                    f" WHERE task = ? AND status IN ({marks}))")
+            # 只有进度记录覆盖到"当前最新年报"时才排除；新报告期到达后自动重新入选
+            sql += (" AND NOT EXISTS (SELECT 1 FROM backfill_progress p"
+                    " WHERE p.task = ? AND p.code = financial_history.stock_code"
+                    f" AND p.status IN ({marks})"
+                    " AND COALESCE(p.covered_report_date, '') >="
+                    " (SELECT MAX(f2.report_date) FROM financial_history f2"
+                    "  WHERE f2.stock_code = financial_history.stock_code"
+                    "    AND f2.report_type = 'A'))")
             params.append(task)
             params.extend(skip)
         sql += """
@@ -1128,18 +1164,29 @@ class FinancialHistoryDAO:
         return [r["stock_code"] for r in rows]
 
     def mark_backfill_done(self, task: str, code: str, updated_rows: int = 0,
-                           status: str = "done") -> None:
+                           status: str = "done",
+                           covered_report_date: str | None = None) -> None:
         """记录回填进度（``task``+``code`` 唯一，幂等覆盖）。
 
         status：``done``（三源都返回数据）/ ``partial``（至少一源失败或空，
         字段可能漏填，需重试）/ ``no_data``（整只无数据）。
+
+        ``covered_report_date`` 缺省取该股当前最新年报日期；查询目标集时只有
+        覆盖到最新报告期才排除该股票 —— 否则未来年报会被进度表永久锁死。
         """
         with db_conn() as conn:
+            if covered_report_date is None:
+                row = conn.execute(
+                    "SELECT MAX(report_date) AS rd FROM financial_history"
+                    " WHERE stock_code = ? AND report_type = 'A'",
+                    (code,)).fetchone()
+                covered_report_date = row["rd"] if row else None
             conn.execute(
                 "INSERT OR REPLACE INTO backfill_progress"
-                " (task, code, updated_rows, status, updated_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (task, code, updated_rows, status, now_cn().isoformat()))
+                " (task, code, updated_rows, status, covered_report_date, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (task, code, updated_rows, status, covered_report_date,
+                 now_cn().isoformat()))
 
     def backfill_progress_summary(self, task: str) -> dict:
         """某任务的进度汇总：{done, partial, no_data, updated_rows}。"""
