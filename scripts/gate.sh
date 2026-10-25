@@ -53,8 +53,15 @@ _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
     local cmd=("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" "$@")
     if [ -n "$TIMEOUT_BIN" ]; then cmd=("$TIMEOUT_BIN" "$limit" "${cmd[@]}"); fi
     if out=$("${cmd[@]}" 2>&1); then rc=0; else rc=$?; fi
+    # 保留完整输出，失败时可追溯（2026-10-25：偶发 ERROR 因只留 tail -3 无法定位）
+    GATE_LOG="${TMPDIR:-/tmp}/gate-${label}-last.log"
+    printf '%s\n' "$out" > "$GATE_LOG"
     if [ "$rc" = "124" ]; then
         echo "!!! $label 套件超时（>${limit}s，timeout 终止）——视为失败"
+    fi
+    if [ "$rc" != "0" ]; then
+        echo "!!! $label 失败详情（完整日志 $GATE_LOG）："
+        printf '%s\n' "$out" | tail -60
     fi
     printf '%s\n' "$out" | tail -3
     printf '%s\n' "$out" | grep -oE '[0-9]+ passed' | head -1 | awk '{print $1}' > "$BASETEMP/$label.count"
