@@ -1089,25 +1089,30 @@ class FinancialHistoryDAO:
 
     def get_codes_missing_extra(self, limit: int | None = None,
                                 offset: int = 0, task: str | None = None,
-                                retry_no_data: bool = False) -> list[str]:
+                                retry_no_data: bool = False,
+                                retry_partial: bool = False) -> list[str]:
         """返回"年报补充字段仍有 NULL"的股票代码（按 code 升序，可断点续跑）。
 
         判定：任一字段（cash / capex / notice_date）在该股任一年报为 NULL。
 
         - ``task``：给了就用 ``backfill_progress`` 排除**已处理过**的股票
           （否则老股票因上游只回 10 年、老年份永远 NULL 而永不消失）。
-        - ``retry_no_data``：连同上次"无数据"的股票一起重试。
+        - ``retry_no_data`` / ``retry_partial``：把上次对应状态的股票重新纳入
+          （``partial`` = 至少一个数据源失败或返回空，字段可能没填全）。
         """
         sql = "SELECT stock_code FROM financial_history WHERE report_type = 'A'"
         params: list = []
         if task:
-            if retry_no_data:
-                sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
-                        " WHERE task = ? AND status = 'done')")
-            else:
-                sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
-                        " WHERE task = ?)")
+            skip = ["done"]
+            if not retry_no_data:
+                skip.append("no_data")
+            if not retry_partial:
+                skip.append("partial")
+            marks = ", ".join("?" for _ in skip)
+            sql += (" AND stock_code NOT IN (SELECT code FROM backfill_progress"
+                    f" WHERE task = ? AND status IN ({marks}))")
             params.append(task)
+            params.extend(skip)
         sql += """
             GROUP BY stock_code
             HAVING SUM(cash IS NULL) > 0
@@ -1124,7 +1129,11 @@ class FinancialHistoryDAO:
 
     def mark_backfill_done(self, task: str, code: str, updated_rows: int = 0,
                            status: str = "done") -> None:
-        """记录回填进度（``task``+``code`` 唯一，幂等覆盖）。"""
+        """记录回填进度（``task``+``code`` 唯一，幂等覆盖）。
+
+        status：``done``（三源都返回数据）/ ``partial``（至少一源失败或空，
+        字段可能漏填，需重试）/ ``no_data``（整只无数据）。
+        """
         with db_conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO backfill_progress"
@@ -1133,14 +1142,16 @@ class FinancialHistoryDAO:
                 (task, code, updated_rows, status, now_cn().isoformat()))
 
     def backfill_progress_summary(self, task: str) -> dict:
-        """某任务的进度汇总：{done, no_data, updated_rows}。"""
+        """某任务的进度汇总：{done, partial, no_data, updated_rows}。"""
         with db_conn() as conn:
             row = conn.execute(
                 "SELECT SUM(status = 'done') AS done,"
+                "       SUM(status = 'partial') AS partial,"
                 "       SUM(status = 'no_data') AS no_data,"
                 "       SUM(updated_rows) AS updated_rows"
                 " FROM backfill_progress WHERE task = ?", (task,)).fetchone()
-        return {"done": row["done"] or 0, "no_data": row["no_data"] or 0,
+        return {"done": row["done"] or 0, "partial": row["partial"] or 0,
+                "no_data": row["no_data"] or 0,
                 "updated_rows": row["updated_rows"] or 0}
 
     def get_all_annual(self, min_year: int = 2016) -> list[dict]:

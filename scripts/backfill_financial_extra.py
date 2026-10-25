@@ -14,7 +14,10 @@ capex / net_operate_cashflow / notice_date` 此前只对候选池（~36 只）�
 - 单次限量（`--limit`，默认 100）+ 软预算（`--max-seconds`，默认 600）到点优雅退出。
 - **进度表断点续跑**：每只处理后写 `backfill_progress(task='financial_extra')`；
   已处理的股票不再重复出现（否则老股票因上游只回 10 年、老年份永远 NULL 而无限重跑）。
-  `--retry-no-data` 可重试上次"无数据"的股票。
+  `--retry-no-data` 重试上次"无数据"的股票，`--retry-partial` 重试数据源失败的股票。
+- **状态语义（2026-10-25 修）**：三源都返回数据才记 `done`；任一源失败/返回空记
+  `partial`（字段可能没填全，可重试）；整只无数据记 `no_data`。旧实现只要有任一
+  payload 就记 `done`，导致 29 只最新年净负债/现金缺口被永久跳过。
 - fail-closed：请求失败/无数据一律跳过，绝不写 0 或占位值。
 
 用法：
@@ -23,6 +26,7 @@ capex / net_operate_cashflow / notice_date` 此前只对候选池（~36 只）�
   python scripts/backfill_financial_extra.py --dry-run          # 只看目标规模
   python scripts/backfill_financial_extra.py --status           # 看进度
   python scripts/backfill_financial_extra.py --limit 50 --retry-no-data
+  python scripts/backfill_financial_extra.py --codes 600389,600350   # 指定股票强制重跑
 """
 
 import argparse
@@ -43,10 +47,12 @@ from src.models.database import FinancialHistoryDAO, get_db_path, init_database
 
 
 def collect_extra_for_code(code: str, bs_fetcher=None, cf_fetcher=None,
-                           mf_fetcher=None) -> dict:
+                           mf_fetcher=None, return_meta: bool = False):
     """合并三个来源，返回 ``{report_date: {字段: 值}}``（只含有值的项）。
 
-    任一路失败按空处理（不阻断其他来源，不写占位值）。
+    ``return_meta=True`` 时返回 ``{"payload": ..., "sources": {"bs"/"cf"/"mf":
+    "ok"/"empty"/"error"}}``，供调用方区分"上游确无数据"与"本次请求失败"
+    （失败必须记 ``partial`` 以便重试，不能当 done）。
     """
     if bs_fetcher is None:
         from src.collector.balance_sheet_fetcher import fetch_balance_sheet_annual
@@ -58,16 +64,21 @@ def collect_extra_for_code(code: str, bs_fetcher=None, cf_fetcher=None,
         from src.collector.mainfin_fetcher import fetch_mainfin_annual
         mf_fetcher = fetch_mainfin_annual
 
-    def _safe(fn):
+    sources: dict[str, str] = {}
+
+    def _safe(name, fn):
         try:
-            return fn(code) or {}
+            data = fn(code) or {}
+            sources[name] = "ok" if data else "empty"
+            return data
         except Exception as e:  # noqa: BLE001 - 单源失败不影响其他源
-            logger.debug(f"[extra] {code} 源失败: {e}")
+            logger.debug(f"[extra] {code} 源 {name} 失败: {e}")
+            sources[name] = "error"
             return {}
 
-    bs = _safe(bs_fetcher)
-    cf = _safe(cf_fetcher)
-    mf = _safe(mf_fetcher)
+    bs = _safe("bs", bs_fetcher)
+    cf = _safe("cf", cf_fetcher)
+    mf = _safe("mf", mf_fetcher)
 
     payload: dict[str, dict] = {}
     for src in (bs, cf, mf):
@@ -78,6 +89,8 @@ def collect_extra_for_code(code: str, bs_fetcher=None, cf_fetcher=None,
                     continue
                 # mainfin 的 total_share → 落库列名 total_shares
                 bucket["total_shares" if k == "total_share" else k] = v
+    if return_meta:
+        return {"payload": payload, "sources": sources}
     return payload
 
 
@@ -124,18 +137,32 @@ def _process_codes(dao: FinancialHistoryDAO, codes: list[str], args,
             logger.info(f"[extra] 达到软预算 {args.max_seconds}s，优雅退出"
                         f"（已处理 {totals['processed']}）")
             return True
-        payload = collect_extra_for_code(code)
+        res = collect_extra_for_code(code, return_meta=True)
+        if isinstance(res, dict) and "payload" in res and "sources" in res:
+            payload = res.get("payload") or {}
+            sources = res.get("sources") or {}
+        else:  # 兼容旧调用/测试桩：只有 payload
+            payload = res or {}
+            sources = {}
         n = apply_code(dao, code, payload) if payload else 0
         if payload:
             totals["updated_rows"] += n
         else:
             totals["no_data"] += 1
-        # 进度落表：无论有无数据都标记，避免无限重跑（no_data 可 --retry-no-data 重试）
-        dao.mark_backfill_done(TASK, code, n, "done" if payload else "no_data")
+        # 状态语义：三源都 ok 才算 done；任一源失败/空记 partial 以便重试
+        if not payload:
+            status = "no_data"
+        elif any(v != "ok" for v in sources.values()):
+            status = "partial"
+            totals["partial"] += 1
+        else:
+            status = "done"
+        dao.mark_backfill_done(TASK, code, n, status)
         totals["processed"] += 1
         if totals["processed"] % 20 == 0:
             logger.info(f"[extra] 累计 {totals['processed']} 只"
-                        f"（更新行 {totals['updated_rows']}，无数据 {totals['no_data']}）")
+                        f"（更新行 {totals['updated_rows']}，无数据 {totals['no_data']}，"
+                        f"部分成功 {totals['partial']}）")
         if args.sleep:
             time.sleep(args.sleep)
     return False
@@ -156,6 +183,10 @@ def main() -> int:
     parser.add_argument("--status", action="store_true", help="只看进度汇总")
     parser.add_argument("--retry-no-data", action="store_true",
                         help="连同上次无数据的股票一起重试")
+    parser.add_argument("--retry-partial", action="store_true",
+                        help="连同上次数据源失败的股票一起重试")
+    parser.add_argument("--codes", default="",
+                        help="指定股票代码（逗号分隔）强制重跑，忽略进度表")
     args = parser.parse_args()
 
     # 注意：不要 os.chdir —— get_db_path() 基于 __file__ 返回绝对路径；
@@ -179,21 +210,27 @@ def main() -> int:
         return 0
 
     started = time.monotonic()
-    totals = {"processed": 0, "updated_rows": 0, "no_data": 0}
+    totals = {"processed": 0, "updated_rows": 0, "no_data": 0, "partial": 0}
+    explicit = [c.strip() for c in args.codes.split(",") if c.strip()]
     rounds = 0
     while True:
-        codes = dao.get_codes_missing_extra(
-            limit=args.limit, offset=args.offset, task=TASK,
-            # 持续模式下只在首轮重试 no_data，否则会无限循环
-            retry_no_data=args.retry_no_data and rounds == 0)
+        if explicit and rounds == 0:
+            codes = explicit
+        else:
+            codes = dao.get_codes_missing_extra(
+                limit=args.limit, offset=args.offset, task=TASK,
+                # 持续模式下只在首轮重试失败/无数据的股票，否则会无限循环
+                retry_no_data=args.retry_no_data and rounds == 0,
+                retry_partial=args.retry_partial and rounds == 0)
         if not codes:
             break
         rounds += 1
         logger.info(f"[extra] 第 {rounds} 批：{len(codes)} 只"
-                    f"（limit={args.limit}, until_done={args.until_done}）")
+                    f"（limit={args.limit}, until_done={args.until_done},"
+                    f" explicit={bool(explicit and rounds == 1)}）")
         if _process_codes(dao, codes, args, started, totals):
             break
-        if not args.until_done:
+        if explicit or not args.until_done:
             break
         remaining = len(dao.get_codes_missing_extra(task=TASK))
         if remaining == 0:

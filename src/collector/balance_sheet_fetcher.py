@@ -12,6 +12,7 @@ import gzip
 import json
 import logging
 import math
+import time
 import urllib.parse
 import urllib.request
 
@@ -37,12 +38,34 @@ def _num(value):
     return v
 
 
-def _get_json(url: str, timeout: int = 15, headers: dict | None = None):
-    req = urllib.request.Request(url, headers=headers or _HEADERS)
-    raw = urllib.request.urlopen(req, timeout=timeout).read()
-    if raw[:2] == b"\x1f\x8b":  # gzip 兜底（服务端偶发压缩）
-        raw = gzip.decompress(raw)
-    return json.loads(raw.decode("utf-8", "ignore"))
+def _get_json(url: str, timeout: int = 15, headers: dict | None = None,
+              retries: int = 2):
+    """GET + JSON 解析，带有限重试（2026-10-25）。
+
+    东财 F10 偶发返回 BOM 前缀或整页 HTML（限流/风控页），旧实现直接
+    ``json.loads(utf-8)`` 抛 ``JSONDecodeError`` 且不重试，导致单源静默失败、
+    回填却仍被标 ``done``（真实案例：300750 资产负债表数据接口返回 ``\\xef\\xbb\\xbf<``）。
+    现在：按 ``utf-8-sig`` 解码剥 BOM；HTML/空响应视为失败并重试；
+    全部失败后抛最后一个异常（调用方按"该源失败"处理，不写占位值）。
+    """
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(url, headers=headers or _HEADERS)
+            raw = urllib.request.urlopen(req, timeout=timeout).read()
+            if raw[:2] == b"\x1f\x8b":  # gzip 兜底（服务端偶发压缩）
+                raw = gzip.decompress(raw)
+            text = raw.decode("utf-8-sig", "ignore").lstrip()
+            if not text:
+                raise ValueError("空响应")
+            if text[0] == "<":
+                raise ValueError(f"HTML 而非 JSON（前 32 字节 {raw[:32]!r}）")
+            return json.loads(text)
+        except Exception as e:  # noqa: BLE001 - 重试后仍失败交给调用方
+            last = e
+            if attempt < retries:
+                time.sleep(0.4 * (attempt + 1))
+    raise last  # type: ignore[misc]
 
 
 def _em_symbol(code: str) -> str:

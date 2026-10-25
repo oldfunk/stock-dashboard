@@ -83,7 +83,7 @@ def test_progress_table_makes_backfill_resumable(db):
     dao.mark_backfill_done("financial_extra", "600519", 37, "done")
     assert dao.get_codes_missing_extra(task="financial_extra") == []   # 带任务：已排除
     assert dao.backfill_progress_summary("financial_extra") == {
-        "done": 1, "no_data": 0, "updated_rows": 37}
+        "done": 1, "partial": 0, "no_data": 0, "updated_rows": 37}
 
 
 def test_retry_no_data_includes_previous_no_data(db):
@@ -96,6 +96,25 @@ def test_retry_no_data_includes_previous_no_data(db):
     assert dao.get_codes_missing_extra(task="financial_extra") == []
     assert dao.get_codes_missing_extra(task="financial_extra",
                                        retry_no_data=True) == ["000001"]
+
+
+def test_retry_partial_includes_source_failures(db):
+    """partial（数据源失败）默认不重跑，--retry-partial 才重新纳入。"""
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="000001")
+    _save_annual(code="000002")
+    _save_annual(code="000003")
+    dao = FinancialHistoryDAO()
+    dao.mark_backfill_done("financial_extra", "000001", 3, "partial")
+    dao.mark_backfill_done("financial_extra", "000002", 0, "no_data")
+    dao.mark_backfill_done("financial_extra", "000003", 5, "done")
+    assert dao.get_codes_missing_extra(task="financial_extra") == []
+    assert dao.get_codes_missing_extra(task="financial_extra",
+                                       retry_partial=True) == ["000001"]
+    assert dao.get_codes_missing_extra(task="financial_extra",
+                                       retry_no_data=True,
+                                       retry_partial=True) == ["000001", "000002"]
+    assert dao.backfill_progress_summary("financial_extra")["partial"] == 1
 
 
 def test_collect_extra_for_code_merges_sources():
@@ -129,6 +148,61 @@ def test_collect_extra_survives_source_failure():
         "600519", boom, lambda c: {"2025-12-31": {"capex": 1.0}},
         lambda c: {"2025-12-31": {"notice_date": "2026-04-01"}})
     assert payload["2025-12-31"] == {"capex": 1.0, "notice_date": "2026-04-01"}
+
+
+def test_collect_extra_meta_reports_source_status():
+    """return_meta：区分 ok / empty / error（供回填判 done vs partial）。"""
+    from scripts.backfill_financial_extra import collect_extra_for_code
+
+    def boom(code):
+        raise RuntimeError("network down")
+
+    res = collect_extra_for_code(
+        "600519", boom, lambda c: {"2025-12-31": {"capex": 1.0}},
+        lambda c: {"2025-12-31": {"notice_date": "2026-04-01"}},
+        return_meta=True)
+    assert res["sources"] == {"bs": "error", "cf": "ok", "mf": "ok"}
+    assert res["payload"]["2025-12-31"]["capex"] == 1.0
+
+
+def test_main_marks_partial_when_source_fails(db, monkeypatch, capsys):
+    """任一源失败 → status=partial（可 --retry-partial），不再误记 done。"""
+    from scripts import backfill_financial_extra as s
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="600519")
+    monkeypatch.setattr(
+        s, "collect_extra_for_code",
+        lambda code, **kw: {
+            "payload": {"2025-12-31": {"capex": 2.0}},
+            "sources": {"bs": "error", "cf": "ok", "mf": "ok"},
+        })
+    monkeypatch.setattr("sys.argv", ["backfill", "--limit", "5", "--sleep", "0"])
+    assert s.main() == 0
+    dao = FinancialHistoryDAO()
+    assert dao.backfill_progress_summary("financial_extra")["partial"] == 1
+    assert dao.get_codes_missing_extra(task="financial_extra") == []
+    assert dao.get_codes_missing_extra(task="financial_extra",
+                                       retry_partial=True) == ["600519"]
+
+
+def test_main_explicit_codes_ignores_progress(db, monkeypatch, capsys):
+    """--codes：忽略进度表强制重跑指定股票（用于修已知缺口）。"""
+    from scripts import backfill_financial_extra as s
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="600519")
+    dao = FinancialHistoryDAO()
+    dao.mark_backfill_done("financial_extra", "600519", 0, "done")
+    monkeypatch.setattr(
+        s, "collect_extra_for_code",
+        lambda code, **kw: {
+            "payload": {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                       "notice_date": "2026-04-01"}},
+            "sources": {"bs": "ok", "cf": "ok", "mf": "ok"},
+        })
+    monkeypatch.setattr("sys.argv", ["backfill", "--codes", "600519",
+                                     "--sleep", "0", "--max-seconds", "0"])
+    assert s.main() == 0
+    assert FinancialHistoryDAO().get_annual_reports("600519")[0]["cash"] == 1.0
 
 
 def test_apply_code_skips_unknown_report_dates(db):
@@ -180,8 +254,8 @@ def test_main_processes_and_marks_progress(db, monkeypatch, capsys):
     _save_annual(code="600519")
     monkeypatch.setattr(
         s, "collect_extra_for_code",
-        lambda code: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
-                                     "notice_date": "2026-04-01"}})
+        lambda code, **kw: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                           "notice_date": "2026-04-01"}})
     monkeypatch.setattr("sys.argv", ["backfill", "--limit", "5", "--sleep", "0"])
     assert s.main() == 0
     dao = FinancialHistoryDAO()
@@ -199,8 +273,8 @@ def test_until_done_runs_all_batches(db, monkeypatch, capsys):
         _save_annual(code=code)
     monkeypatch.setattr(
         s, "collect_extra_for_code",
-        lambda code: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
-                                     "notice_date": "2026-04-01"}})
+        lambda code, **kw: {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                           "notice_date": "2026-04-01"}})
     monkeypatch.setattr("sys.argv", ["backfill", "--until-done", "--limit", "2",
                                      "--sleep", "0", "--batch-sleep", "0",
                                      "--max-seconds", "0"])
@@ -215,7 +289,7 @@ def test_until_done_retry_no_data_only_first_round(db, monkeypatch, capsys):
     """--until-done + --retry-no-data 不得无限循环：no_data 只在首轮重试。"""
     from scripts import backfill_financial_extra as s
     _save_annual(code="600519")
-    monkeypatch.setattr(s, "collect_extra_for_code", lambda code: {})
+    monkeypatch.setattr(s, "collect_extra_for_code", lambda code, **kw: {})
     monkeypatch.setattr("sys.argv", ["backfill", "--until-done", "--retry-no-data",
                                      "--limit", "5", "--sleep", "0",
                                      "--batch-sleep", "0", "--max-seconds", "0"])
