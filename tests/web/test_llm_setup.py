@@ -28,6 +28,27 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _offline_ai_queue(monkeypatch):
+    """队列全离线：任何遗留排队任务都不得调用真实 LLM。
+
+    2026-10-25 门禁实证：队列测试会在用例结束前把任务塞进单例队列，负载高时
+    任务在 monkeypatch 撤销之后才被 worker 取到，于是走真实 ``analyze_batch_parallel``
+    → 生产 Key 401 → 60s 退避重试 → 整个套件挂到 600s 超时。
+    这里给模块级 ``analyze_batch_parallel`` 兜底成瞬时假实现；用例内自己的
+    monkeypatch 仍然优先生效（teardown 后回落到本兜底）。
+    """
+    from src import ai_queue as ai_queue_mod
+
+    def _fake_batch(stocks, run_id, interval_seconds=60, max_workers=2,
+                    extra_instruction=None, on_progress=None):
+        if on_progress:
+            on_progress(len(stocks), 0, len(stocks))
+        return len(stocks), 0
+
+    monkeypatch.setattr(ai_queue_mod, "analyze_batch_parallel", _fake_batch)
+
+
 class _FakeResp:
     def __init__(self, status_code=200, payload=None):
         self.status_code = status_code
@@ -545,7 +566,7 @@ def _seed_snap(codes):
                 " VALUES (?, ?, ?)", (c, "名" + c, "2026-09-28"))
 
 
-def _wait_task(client, tid, timeout_s=5.0):
+def _wait_task(client, tid, timeout_s=15.0):
     import time
     deadline = time.time() + timeout_s
     last = {}
