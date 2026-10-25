@@ -216,6 +216,27 @@ def test_main_marks_partial_when_source_fails(db, monkeypatch, capsys):
                                        retry_partial=True) == ["600519"]
 
 
+def test_main_task_namespace_isolated(db, monkeypatch, capsys):
+    """--task：深层回填用独立任务名，不污染主回填进度。"""
+    from scripts import backfill_financial_extra as s
+    from src.models.database import FinancialHistoryDAO
+    _save_annual(code="600519")
+    monkeypatch.setattr(
+        s, "collect_extra_for_code",
+        lambda code, **kw: {
+            "payload": {"2025-12-31": {"cash": 1.0, "capex": 2.0,
+                                       "notice_date": "2026-04-01"}},
+            "sources": {"bs": "ok", "cf": "ok", "mf": "ok"},
+        })
+    monkeypatch.setattr("sys.argv", ["backfill", "--task", "deep",
+                                     "--limit", "5", "--sleep", "0",
+                                     "--max-seconds", "0"])
+    assert s.main() == 0
+    dao = FinancialHistoryDAO()
+    assert dao.backfill_progress_summary("deep")["done"] == 1
+    assert dao.backfill_progress_summary("financial_extra")["done"] == 0
+
+
 def test_main_explicit_codes_ignores_progress(db, monkeypatch, capsys):
     """--codes：忽略进度表强制重跑指定股票（用于修已知缺口）。"""
     from scripts import backfill_financial_extra as s
@@ -252,6 +273,7 @@ def test_fetch_mainfin_annual_parses_annual_only(monkeypatch):
 
     def fake_get_json(url, timeout=15, headers=None):
         assert "SECUCODE%3D%22600519.SH%22" in url
+        assert "REPORT_TYPE%3D%22%E5%B9%B4%E6%8A%A5%22" in url  # 只要年报（否则 ps=30 被季报占满）
         return {"result": {"data": [
             {"REPORT_TYPE": "年报", "REPORT_DATE": "2025-12-31 00:00:00",
              "NOTICE_DATE": "2026-04-01 00:00:00", "FCFF_BACK": 100.0,

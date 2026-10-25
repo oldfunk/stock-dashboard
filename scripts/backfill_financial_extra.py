@@ -130,7 +130,7 @@ def _acquire_lock():
 
 
 def _process_codes(dao: FinancialHistoryDAO, codes: list[str], args,
-                   started: float, totals: dict) -> bool:
+                   started: float, totals: dict, task: str = TASK) -> bool:
     """处理一批；返回 True 表示达到软预算（应停止）。"""
     for code in codes:
         if args.max_seconds and (time.monotonic() - started) > args.max_seconds:
@@ -157,7 +157,7 @@ def _process_codes(dao: FinancialHistoryDAO, codes: list[str], args,
             totals["partial"] += 1
         else:
             status = "done"
-        dao.mark_backfill_done(TASK, code, n, status)
+        dao.mark_backfill_done(task, code, n, status)
         totals["processed"] += 1
         if totals["processed"] % 20 == 0:
             logger.info(f"[extra] 累计 {totals['processed']} 只"
@@ -185,6 +185,8 @@ def main() -> int:
                         help="连同上次无数据的股票一起重试")
     parser.add_argument("--retry-partial", action="store_true",
                         help="连同上次数据源失败的股票一起重试")
+    parser.add_argument("--task", default=TASK,
+                        help="进度表任务名（默认 financial_extra；深层历史回填可另起任务）")
     parser.add_argument("--codes", default="",
                         help="指定股票代码（逗号分隔）强制重跑，忽略进度表")
     args = parser.parse_args()
@@ -195,11 +197,11 @@ def main() -> int:
     dao = FinancialHistoryDAO()
 
     if args.status:
-        print(json.dumps(dao.backfill_progress_summary(TASK), ensure_ascii=False))
+        print(json.dumps(dao.backfill_progress_summary(args.task), ensure_ascii=False))
         return 0
 
     if args.dry_run:
-        total = len(dao.get_codes_missing_extra(task=TASK))
+        total = len(dao.get_codes_missing_extra(task=args.task))
         print(json.dumps({"missing_extra_codes": total}, ensure_ascii=False))
         return 0
 
@@ -218,7 +220,7 @@ def main() -> int:
             codes = explicit
         else:
             codes = dao.get_codes_missing_extra(
-                limit=args.limit, offset=args.offset, task=TASK,
+                limit=args.limit, offset=args.offset, task=args.task,
                 # 持续模式下只在首轮重试失败/无数据的股票，否则会无限循环
                 retry_no_data=args.retry_no_data and rounds == 0,
                 retry_partial=args.retry_partial and rounds == 0)
@@ -228,11 +230,11 @@ def main() -> int:
         logger.info(f"[extra] 第 {rounds} 批：{len(codes)} 只"
                     f"（limit={args.limit}, until_done={args.until_done},"
                     f" explicit={bool(explicit and rounds == 1)}）")
-        if _process_codes(dao, codes, args, started, totals):
+        if _process_codes(dao, codes, args, started, totals, task=args.task):
             break
         if explicit or not args.until_done:
             break
-        remaining = len(dao.get_codes_missing_extra(task=TASK))
+        remaining = len(dao.get_codes_missing_extra(task=args.task))
         if remaining == 0:
             break
         logger.info(f"[extra] 批间停顿 {args.batch_sleep}s（剩余 {remaining}）")
@@ -243,8 +245,8 @@ def main() -> int:
         **totals,
         "rounds": rounds,
         "elapsed_sec": elapsed,
-        "progress": dao.backfill_progress_summary(TASK),
-        "remaining": len(dao.get_codes_missing_extra(task=TASK)),
+        "progress": dao.backfill_progress_summary(args.task),
+        "remaining": len(dao.get_codes_missing_extra(task=args.task)),
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0

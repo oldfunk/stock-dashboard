@@ -34,9 +34,12 @@ def fetch_mainfin_annual(code: str, timeout: int = 15) -> dict:
     - 失败返回 {}（缺数据保持 NULL，不阻断）。
     """
     secucode = _secucode(code)
+    # 2026-10-25：显式只要年报。旧 URL 无过滤、ps=30 被季报占满，只回 ~7 年；
+    # 加过滤后 600519 可回 28 年（1998–2025），2016–2018 的披露日才能补上。
     url = (
         f"{_MAINFIN}?type=RPT_F10_FINANCE_MAINFINADATA&sty=ALL"
         f"&filter=(SECUCODE%3D%22{secucode}%22)"
+        f"(REPORT_TYPE%3D%22%E5%B9%B4%E6%8A%A5%22)"
         f"&p=1&ps=30&sr=-1&st=REPORT_DATE&source=HSF10&client=PC"
     )
     try:
