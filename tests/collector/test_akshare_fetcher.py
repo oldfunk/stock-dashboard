@@ -290,24 +290,35 @@ class TestNowCn:
 
 
 class TestC2EastmoneyFallback:
-    """C2 东财 datacenter 直连兜底测试。"""
+    """C2 东财 datacenter 直连兜底测试（全部打桩，不依赖外网）。"""
 
     def test_fetch_eastmoney_direct_success(self):
-        """正常股票返回完整财务字段。"""
-        from src.collector.akshare_fetcher import _fetch_eastmoney_direct
-        result = _fetch_eastmoney_direct('600519')
-        assert result is not None
-        assert 'roe' in result
-        assert 'gross_margin' in result
-        assert 'eps' in result
-        assert result['roe'] is not None
-        assert result['roe'] > 0
+        """正常响应解析出完整财务字段（打桩 curl_get）。"""
+        import json
+        from unittest.mock import patch
+        import src.collector.akshare_fetcher as fetcher
 
-    def test_fetch_eastmoney_direct_invalid_code(self):
-        """无效代码返回 None。"""
-        from src.collector.akshare_fetcher import _fetch_eastmoney_direct
-        result = _fetch_eastmoney_direct('999999')
-        assert result is None
+        payload = {"result": {"data": [{
+            "ROEJQ": 32.5, "XSMLL": 91.2, "EPSJB": 65.66, "BPS": 200.0,
+            "TOTALOPERATEREVETZ": 15.0, "PARENTNETPROFITTZ": 20.0,
+            "PARENTNETPROFIT": 800e8,
+        }]}}
+        with patch.object(fetcher, 'curl_get', return_value=json.dumps(payload)):
+            result = fetcher._fetch_eastmoney_direct('600519')
+        assert result is not None
+        assert result['roe'] == 32.5
+        assert result['gross_margin'] == 91.2
+        assert result['eps'] == 65.66
+        assert result['net_profit'] == 800e8
+
+    def test_fetch_eastmoney_direct_empty_result(self):
+        """上游返回空 data → None（不抛异常、不造数据）。"""
+        from unittest.mock import patch
+        import src.collector.akshare_fetcher as fetcher
+
+        with patch.object(fetcher, 'curl_get',
+                          return_value='{"result": {"data": []}}'):
+            assert fetcher._fetch_eastmoney_direct('999999') is None
 
     def test_code_to_em_format(self):
         """股票代码转东财格式正确。"""
@@ -317,7 +328,7 @@ class TestC2EastmoneyFallback:
         assert _code_to_em('300750') == '300750.SZ'
 
     def test_enrich_fallback_on_akshare_failure(self):
-        """AKShare 失败时自动触发 C2 兜底，填充财务字段。"""
+        """AKShare 失败时自动触发 C2 兜底，填充财务字段（C2 打桩，不依赖外网）。"""
         import src.collector.akshare_fetcher as fetcher
         from unittest.mock import MagicMock, patch
 
@@ -325,15 +336,20 @@ class TestC2EastmoneyFallback:
         mock_ak.stock_yjbb_em.side_effect = Exception('simulated failure')
 
         stocks = [{'code': '600519', 'name': '茅台'}]
+        fallback = {
+            'roe': 32.5, 'gross_margin': 91.2, 'eps': 65.66, 'bvps': 200.0,
+            'revenue_growth': 15.0, 'profit_growth': 20.0, 'net_profit': 800e8,
+        }
 
         with patch.dict('sys.modules', {'akshare': mock_ak}):
             with patch.object(fetcher, 'ak', mock_ak, create=True):
-                result = fetcher.enrich_financial_data(stocks)
+                with patch.object(fetcher, '_fetch_eastmoney_direct',
+                                  return_value=fallback):
+                    result = fetcher.enrich_financial_data(stocks)
 
         s = result[0]
-        assert s.get('roe') is not None
-        assert s['roe'] > 0
-        assert s.get('gross_margin') is not None
+        assert s.get('roe') == 32.5
+        assert s.get('gross_margin') == 91.2
 
     def test_enrich_normal_path_unchanged(self):
         """AKShare 正常时不触发 C2 兜底（正常路径不受影响）。"""
