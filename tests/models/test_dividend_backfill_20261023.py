@@ -91,3 +91,25 @@ def test_backfill_idempotent(db):
     s2 = backfill_snapshot_dividends("2025-12-31")
     assert s1["with_yield"] == s2["with_yield"] == 1
     assert _row("000001")["dividend_yield"] == 5.0
+
+
+def test_fallback_to_previous_year(db):
+    """2025 年报未分红/未披露，但 2024 有分红 → 仍算股息率并标 2024。"""
+    _snap(code="000004", price=10.0)
+    _div(code="000004", report_date="2024-12-31", cash=0.6, eps=1.0)
+    from src.collector.dividend_fetcher import backfill_snapshot_dividends
+    backfill_snapshot_dividends("2025-12-31")
+    row = _row("000004")
+    assert row["dividend_yield"] == 6.0
+    assert row["dividend_year"] == "2024"
+
+
+def test_stale_dividend_beyond_window_keeps_null(db):
+    """2023 的分红距最新年报 2 年 → 视为过期，不填（避免拿老数据充数）。"""
+    _snap(code="000005", price=10.0)
+    _div(code="000005", report_date="2023-12-31", cash=0.5, eps=1.0)
+    from src.collector.dividend_fetcher import backfill_snapshot_dividends
+    backfill_snapshot_dividends("2025-12-31")
+    row = _row("000005")
+    assert row["dividend_yield"] is None
+    assert row["dividend_year"] is None

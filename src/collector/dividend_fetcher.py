@@ -151,10 +151,14 @@ def refresh_dividend_history(years: int = 10, save: bool = True) -> dict:
 
 
 def compute_dividend_years() -> dict:
-    """每只股票截至最新年报的连续分红年数（中断即停）。
+    """每只股票最近一段连续的年度分红年数（中断即停）。
 
-    从最新年报年倒推：必须有当年的现金分红记录且 >0，且年份连续，才累加；
-    任一年缺失/无分红 → 停。返回 {code: years}。
+    起始年份取该股**最新的分红记录年**；只有它不早于"最新应披露年报年 - 1"
+    才计算（避免拿 2016 年的老分红充数）。从起始年倒推：必须有当年现金分红
+    且 >0、年份连续才累加；任一年缺失/无分红 → 停。返回 {code: years}。
+
+    2026-10-25 调整：旧实现固定从全局最新年报年（2025）起算，导致只披露到
+    2024 年报分红的股票整列变 NULL（真实案例 300390 有 2022–2024 连续分红）。
     """
     from src.models.database import db_conn
 
@@ -169,8 +173,10 @@ def compute_dividend_years() -> dict:
     latest_year = int(latest_annual_report_date()[:4])
     out: dict[str, int] = {}
     for code, recs in by_code.items():
+        expected = int(recs[0]["report_date"][:4])
+        if expected < latest_year - 1:
+            continue
         years = 0
-        expected = latest_year
         for r in recs:  # 已按日期倒序
             y = int(r["report_date"][:4])
             cash = _num(r["cash_per_share"])
@@ -201,22 +207,30 @@ def backfill_dividend_years() -> dict:
 
 
 def backfill_snapshot_dividends(report_date: str | None = None) -> dict:
-    """用最新年报分红回填 stock_snapshot 的股息率/分红率/年份（2026-10-23 P0-1）。
+    """用最近一个已披露年报的分红回填 stock_snapshot 的股息率/分红率/年份。
 
     - 股息率 = 每股现金分红 / 现价 × 100；分红率 = 每股现金分红 / EPS × 100
+    - **2026-10-25 调整**：优先取 ``report_date`` 当年记录，没有则回退到前一年
+      （不少公司只披露到 2024 年报口径；旧实现只认全局最新年，导致 300390 等
+      连续分红股整列 NULL）。再往前（≥2 年）视为过期，保持 NULL。
     - 缺价或缺分红保持 NULL（不零填），红利策略据此 fail-closed
     - 幂等：同一数据重复执行结果一致
     """
     from src.models.database import db_conn
 
     report_date = report_date or latest_annual_report_date()
+    latest_year = int(report_date[:4])
     with db_conn() as conn:
         rows = conn.execute(
             "SELECT stock_code, report_date, cash_per_share, eps "
-            "FROM dividend_annual WHERE report_date = ?",
-            (report_date,),
+            "FROM dividend_annual WHERE substr(report_date, 1, 4) >= ? "
+            "ORDER BY stock_code, report_date DESC",
+            (str(latest_year - 1),),
         ).fetchall()
-        div = {r["stock_code"]: r for r in rows}
+        # 每只股票取窗口内最新一条
+        div: dict[str, object] = {}
+        for r in rows:
+            div.setdefault(r["stock_code"], r)
         snaps = conn.execute(
             "SELECT code, current_price FROM stock_snapshot"
         ).fetchall()

@@ -25,11 +25,11 @@ AI_MARKERS = [
 # 数据展示标记：必须保留
 DATA_MARKERS_WATCHLIST = [
     "600519", "贵州茅台", "Score 88", "池3周", "评分拆解",
-    "ROE 5y", "监控 →", "ROE 三连",
+    "ROE 5y", "监控 →", "ROE 三连", "股息率", "连分年数", "3.52%",
 ]
 DATA_MARKERS_STOCKLIST = [
     "600519", "贵州茅台", "88", "评分拆解", "ROE:",
-    "钉选", "ROE 三连",
+    "钉选", "ROE 三连", "股息率", "连分年数", "3.52%",
 ]
 
 
@@ -48,6 +48,7 @@ def _full_watchlist_item() -> dict:
         "pe": 22.0, "pb": 8.0, "roe": 30.0, "debt_ratio": 20.0,
         "revenue_growth": 15.0, "profit_growth": 18.0, "market_cap": 19000,
         "gross_margin": 91.0, "net_margin": 52.0, "ocf_per_share": 12.0,
+        "dividend_yield": 3.517, "dividend_years": 7, "dividend_year": "2024",
         "_summary": {"data_years": 10, "roe_5y_avg": 29.0, "roe_10y_avg": 28.0,
                      "intcov_5y_avg": 99.0, "fcf_5y_sum": 1e11,
                      "fcf_positive_years_10": 10, "share_dilution_5y": 0.0},
@@ -115,3 +116,14 @@ def test_empty_watchlist():
     """空池状态"""
     html = _render("_watchlist_card.html", watchlist=[])
     assert "观察池为空" in html
+
+
+def test_dividend_missing_shows_placeholder():
+    """缺分红数据时两列仍存在、显示 --（不隐藏、不零填）。"""
+    item = _full_watchlist_item()
+    item["dividend_yield"] = None
+    item["dividend_years"] = None
+    item["dividend_year"] = None
+    html = _render("_watchlist_card.html", watchlist=[item])
+    assert "股息率" in html and "连分年数" in html
+    assert "3.52%" not in html

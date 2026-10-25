@@ -70,6 +70,17 @@
                 <span class="wl-m-label">OCF/股</span>
                 <span class="wl-m-value {{ 'good' if stock.ocf_per_share is not none and stock.ocf_per_share > 0 else '' }}">{{ "%.2f"|format(stock.ocf_per_share) if stock.ocf_per_share is not none else '--' }}</span>
             </div>
+            {% set _dy = stock.get('dividend_yield') %}
+            {% set _dyr = stock.get('dividend_years') %}
+            {% set _dyy = stock.get('dividend_year') %}
+            <div class="wl-m" title="股息率 = {{ _dyy or '最近' }} 年报每股分红 / 现价">
+                <span class="wl-m-label">股息率</span>
+                <span class="wl-m-value {{ 'good' if (_dy is not none and _dy >= 4) else ('warn' if (_dy is not none and _dy >= 2) else '') }}">{{ ("%.2f%%"|format(_dy)) if _dy is not none else '--' }}</span>
+            </div>
+            <div class="wl-m" title="连续分红年数（截至 {{ _dyy or '最新' }} 年报）">
+                <span class="wl-m-label">连分年数</span>
+                <span class="wl-m-value {{ 'good' if (_dyr is not none and _dyr >= 5) else ('warn' if (_dyr is not none and _dyr >= 3) else '') }}">{{ _dyr if _dyr is not none else '--' }}</span>
+            </div>
         </div>
 
         {# ── 5y/10y 历史行 ── #}

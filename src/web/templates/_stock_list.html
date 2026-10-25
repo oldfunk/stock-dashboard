@@ -94,13 +94,14 @@
                     </div>
                     {% set _dy = stock.get('dividend_yield') %}
                     {% set _dy_cls = 'good' if (_dy is not none and _dy >= 4) else ('warn' if (_dy is not none and _dy >= 2) else '') %}
-                    <div class="metric-cell">
+                    {% set _dy_year = stock.get('dividend_year') %}
+                    <div class="metric-cell" title="股息率 = {{ _dy_year or '最近' }} 年报每股分红 / 现价">
                         <div class="label">股息率</div>
                         <div class="value {{ _dy_cls }}">{{ ("%.2f%%"|format(_dy)) if _dy is not none else '--' }}</div>
                     </div>
                     {% set _dyr = stock.get('dividend_years') %}
                     {% set _dyr_cls = 'good' if (_dyr is not none and _dyr >= 5) else ('warn' if (_dyr is not none and _dyr >= 3) else '') %}
-                    <div class="metric-cell">
+                    <div class="metric-cell" title="连续分红年数（截至 {{ _dy_year or '最新' }} 年报）">
                         <div class="label">连分年数</div>
                         <div class="value {{ _dyr_cls }}">{{ _dyr if _dyr is not none else '--' }}</div>
                     </div>

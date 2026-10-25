@@ -65,10 +65,19 @@ def test_break_on_zero_dividend(db, monkeypatch):
     assert df.compute_dividend_years()["000002"] == 1
 
 
-def test_missing_latest_year_is_zero(db, monkeypatch):
+def test_latest_record_within_one_year_counts(db, monkeypatch):
+    """最新分红在 2024（2025 未披露/未分红）→ 以 2024 为起点计算，不整列 NULL。"""
     monkeypatch.setattr(df, "latest_annual_report_date", lambda: "2025-12-31")
-    _div("000003", "2024-12-31", 0.1)  # 2025 无记录
-    assert "000003" not in df.compute_dividend_years()
+    _div("000003", "2024-12-31", 0.1)
+    _div("000003", "2023-12-31", 0.1)
+    assert df.compute_dividend_years()["000003"] == 2
+
+
+def test_stale_record_beyond_one_year_is_ignored(db, monkeypatch):
+    """分红记录超过一年未更新（2023 vs 最新 2025）→ 不拿来充数。"""
+    monkeypatch.setattr(df, "latest_annual_report_date", lambda: "2025-12-31")
+    _div("000004", "2023-12-31", 0.1)
+    assert "000004" not in df.compute_dividend_years()
 
 
 def test_backfill_sets_null_for_others(db, monkeypatch):
