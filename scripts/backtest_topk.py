@@ -137,6 +137,8 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
     cash = INITIAL_CASH
     positions: dict[str, dict] = {}
     eligible_max = 0
+    first_eligible_date = None
+    first_position_date = None
 
     def mark_to_market(date):
         v = cash
@@ -157,6 +159,8 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
                     continue
                 eligible.append((score_stock(rec, price), code))
             eligible_max = max(eligible_max, len(eligible))
+            if eligible and first_eligible_date is None:
+                first_eligible_date = date
             eligible.sort(reverse=True)
             top = {code for _, code in eligible[:topk]}
 
@@ -185,8 +189,21 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
                 cost = c * max_vol * (1 + COMMISSION)
                 cash -= cost
                 positions[code] = {"volume": max_vol}
+            if positions and first_position_date is None:
+                first_position_date = date
 
     final_value = mark_to_market(trading_dates[-1])
+    effective_start = first_position_date or first_eligible_date
+    effective_years = None
+    cagr_pct = None
+    if effective_start:
+        days = (datetime.strptime(trading_dates[-1], "%Y-%m-%d")
+                - datetime.strptime(effective_start, "%Y-%m-%d")).days
+        if days > 0:
+            effective_years = round(days / 365.25, 2)
+            if final_value > 0:
+                cagr_pct = round(
+                    ((final_value / INITIAL_CASH) ** (1 / effective_years) - 1) * 100, 2)
     return {
         "start_date": start_date,
         "end_date": end_date,
@@ -201,6 +218,12 @@ def run_backtest(conn, start_date: str, end_date: str, topk: int = 20,
                                  if any(r["notice_date"] for r in fund[c])),
         "price_codes": len(prices),
         "eligible_max": eligible_max,
+        # 真实有效区间（旧实现 2016/2020 起跑结果相同，因 2016–2019 无可选域）
+        "first_eligible_date": first_eligible_date,
+        "first_position_date": first_position_date,
+        "effective_start": effective_start,
+        "effective_years": effective_years,
+        "cagr_pct": cagr_pct,
     }
 
 
