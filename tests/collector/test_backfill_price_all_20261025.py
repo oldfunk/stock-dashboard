@@ -28,6 +28,25 @@ def _row(day="2025-01-02"):
             "low": 1.0, "volume": 0, "amount": 0, "turnover": 0}
 
 
+def test_fetch_kline_curl_parses_eastmoney_klines(monkeypatch):
+    """curl 直连解析：日期/OHLC/量额；坏行跳过；secid 与 beg 正确。"""
+    from scripts import backfill_price_history as s
+    seen = {}
+
+    def fake_json(url, timeout=15):
+        seen["url"] = url
+        return {"data": {"klines": ["2024-01-02,10,11,12,9,100,1000,0",
+                                    "bad,line"]}}
+
+    monkeypatch.setattr(s, "_curl_json", fake_json)
+    rows = s.fetch_kline_curl("600519", "2016-01-01")
+    assert rows == [{"trade_date": "2024-01-02", "open": 10.0, "close": 11.0,
+                     "high": 12.0, "low": 9.0, "volume": 100.0,
+                     "amount": 1000.0, "turnover": None}]
+    assert "secid=1.600519" in seen["url"]
+    assert "beg=20160101" in seen["url"]
+
+
 def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsys):
     from scripts import backfill_price_history as s
     _annual("600519")
@@ -38,7 +57,7 @@ def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsy
         called.append(code)
         return [_row()]
 
-    monkeypatch.setattr(s, "fetch_kline_data", fake)
+    monkeypatch.setattr(s, "fetch_kline_curl", fake)
     # 600519 已完成：--all 不得重复抓取
     db_mod.FinancialHistoryDAO().mark_backfill_done(s.PROGRESS_TASK, "600519", 1, "done")
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
@@ -59,7 +78,7 @@ def test_no_data_is_skipped_unless_retry(db, monkeypatch, capsys):
         calls.append(code)
         return []
 
-    monkeypatch.setattr(s, "fetch_kline_data", empty)
+    monkeypatch.setattr(s, "fetch_kline_curl", empty)
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     assert calls == ["600519"]
