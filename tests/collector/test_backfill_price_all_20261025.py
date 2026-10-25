@@ -94,3 +94,26 @@ def test_no_data_is_skipped_unless_retry(db, monkeypatch, capsys):
                                      "--retry-no-data"])
     assert s.main() == 0
     assert calls == ["600519", "600519"]
+
+
+def test_consecutive_failures_abort_and_mark_partial(db, monkeypatch, capsys):
+    """上游限流时连续失败即中止，标 partial（可重试），不把全市场标成 no_data。"""
+    from scripts import backfill_price_history as s
+    for code in ("600519", "000001", "000002", "000003", "000004", "000005"):
+        _annual(code)
+    calls = []
+
+    def boom(code, start_date=None):
+        calls.append(code)
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(s, "fetch_kline_curl", boom)
+    monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
+    assert s.main() == 0
+    out = capsys.readouterr().out
+    assert "连续失败已中止" in out
+    assert len(calls) == 5          # 第 6 只不再打上游
+    with db_mod.db_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM backfill_progress"
+                         " WHERE task='price_history' AND status='partial'").fetchone()[0]
+    assert n == 5

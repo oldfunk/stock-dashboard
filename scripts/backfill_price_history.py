@@ -71,10 +71,15 @@ def fetch_kline_curl(code: str, start_date: str) -> list[dict]:
 
     akshare 的 ``stock_zh_a_hist`` 在 Pi 上走 requests，被代理阻断后回退腾讯
     （不复权、约 30s/只）。curl 直连 push2his 约 0.3s/只，口径仍是前复权。
+
+    网络失败（连不上/被限流）抛 ``RuntimeError``，与"上游确无数据"（返回 []）
+    区分开：前者记 partial 可重试，后者记 no_data。
     """
     secid = ("1." if code.startswith(("6", "9")) else "0.") + code
     data = _curl_json(_KLINE_URL.format(secid=secid,
                                         beg=start_date.replace("-", "")))
+    if data is None:
+        raise RuntimeError("东财 K 线接口无响应（限流/网络）")
     klines = ((data or {}).get("data") or {}).get("klines") or []
     out = []
     for line in klines:
@@ -145,6 +150,8 @@ def main() -> int:
                         help="重试上次无数据的股票")
     parser.add_argument("--source", default="curl", choices=["curl", "akshare"],
                         help="价格源：curl=东财直连前复权（默认，快）；akshare=旧链路")
+    parser.add_argument("--max-consecutive-failures", type=int, default=5,
+                        help="连续失败达到 N 只即中止（防上游限流时把全市场标成失败）")
     args = parser.parse_args()
 
     init_database()
@@ -171,6 +178,8 @@ def main() -> int:
                                                    adjust="qfq"))
     ok = 0
     total_rows = 0
+    consecutive_failures = 0
+    aborted = False
     started = time.monotonic()
     for idx, code in enumerate(codes, 1):
         try:
@@ -180,18 +189,28 @@ def main() -> int:
                 progress.mark_backfill_done(PROGRESS_TASK, code, n, "done")
                 ok += 1
                 total_rows += n
+                consecutive_failures = 0
                 logger.info(f"[P0-5] {idx}/{len(codes)} {code}: {n} 条"
                             f"（{records[0]['trade_date']}~{records[-1]['trade_date']}）")
             else:
                 progress.mark_backfill_done(PROGRESS_TASK, code, 0, "no_data")
+                consecutive_failures += 1
                 logger.warning(f"[P0-5] {code}: 无数据")
         except Exception as e:
-            progress.mark_backfill_done(PROGRESS_TASK, code, 0, "no_data")
-            logger.warning(f"[P0-5] {code} 失败: {e}")
+            progress.mark_backfill_done(PROGRESS_TASK, code, 0, "partial")
+            consecutive_failures += 1
+            logger.warning(f"[P0-5] {code} 失败（可重试）: {e}")
+        if args.max_consecutive_failures and \
+                consecutive_failures >= args.max_consecutive_failures:
+            logger.error(f"[P0-5] 连续 {consecutive_failures} 只失败，中止本轮"
+                         f"（上游可能限流；稍后直接重跑即可续传）")
+            aborted = True
+            break
         if args.sleep:
             time.sleep(args.sleep)
     elapsed = round(time.monotonic() - started, 1)
-    print(f"回填 {ok}/{len(codes)} 只，共 {total_rows} 条（{elapsed}s）")
+    print(f"回填 {ok}/{len(codes)} 只，共 {total_rows} 条（{elapsed}s）"
+          + ("；连续失败已中止" if aborted else ""))
     return 0
 
 
