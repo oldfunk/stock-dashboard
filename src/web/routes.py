@@ -605,6 +605,14 @@ async def stock_detail(request: Request, code: str):
     except Exception:  # noqa: BLE001 - 估值失败不阻断页面
         model_valuation = None
 
+    # 9b. 历史估值分位（P0-5）：无 K 线/无披露日时返回 {}，页面不显示该段
+    valuation_percentiles = {}
+    try:
+        from src.analyzer.valuation_percentile import compute_percentiles
+        valuation_percentiles = compute_percentiles(code)
+    except Exception:  # noqa: BLE001 - 分位失败不阻断页面
+        valuation_percentiles = {}
+
     return templates.TemplateResponse(request, "stock_detail.html", {
         "request": request,
         "page_title": page_title,
@@ -622,6 +630,7 @@ async def stock_detail(request: Request, code: str):
         "score_detail_parsed": score_detail_parsed,
         "sector_avg": sector_avg,
         "model_valuation": model_valuation,
+        "valuation_percentiles": valuation_percentiles,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 

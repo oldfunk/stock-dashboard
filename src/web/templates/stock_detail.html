@@ -785,6 +785,25 @@
         {% endif %}
     </section>
 
+    <!-- 6.2 历史估值分位（P0-5：PE/PB/股息率 5/10 年分位，披露日防前视） -->
+    {% if valuation_percentiles %}
+    <section class="sd-section">
+        <h2 class="sd-section-title">历史估值分位</h2>
+        <div class="sd-value-table">
+            {% for y in ['5', '10'] %}
+            {% set p = valuation_percentiles[y] %}
+            {% if p %}
+            <div class="sd-value-row">
+                <span class="label">{{ y }} 年分位</span>
+                <span class="value">PE {{ "%.0f%%"|format(p.pe_pct) if p.pe_pct is not none else '--' }} · PB {{ "%.0f%%"|format(p.pb_pct) if p.pb_pct is not none else '--' }} · 股息率 {{ "%.0f%%"|format(p.dy_pct) if p.dy_pct is not none else '--' }}（{{ p.n }} 个交易日）</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <p class="sd-sd-sub">分位 = 当前值在历史窗口中的百分位，越低越便宜；只用披露日已到的年报（无披露日不参与，防前视）；PB 的当年股本优先用净利润/EPS 反推。</p>
+    </section>
+    {% endif %}
+
     <!-- 8. 逆向思考 -->
     {% if ai_parsed.reverse_thinking %}
     <section class="sd-section">

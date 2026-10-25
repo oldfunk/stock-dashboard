@@ -94,3 +94,26 @@ def test_detail_missing_net_debt_explains_reason(client):
     assert "净负债无法确定" in html
     assert "基准估值" not in html
     assert "未知" in html
+
+
+def test_detail_shows_valuation_percentiles(client):
+    """历史估值分位已接入详情页（此前只有测试调用 compute_percentiles）。"""
+    from datetime import date, timedelta
+    from src.models.database import (StockSnapshotDAO, FinancialHistoryDAO,
+                                     KlineDAO)
+    StockSnapshotDAO().save_batch([_snapshot()])
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "600519", "report_date": "2022-12-31",
+        "eps": 5.0, "net_profit": 50.0, "total_shares": 10.0,
+        "total_equity": 100.0, "notice_date": "2023-04-01",
+    }])
+    start = date(2023, 5, 1)
+    KlineDAO().upsert_many("600519", [{
+        "trade_date": (start + timedelta(days=i)).isoformat(),
+        "open": 10.0, "close": 10.0 + i * 0.1, "high": 10.0, "low": 10.0,
+        "volume": 0, "amount": 0, "turnover": 0,
+    } for i in range(40)])
+    html = client.get("/stock/600519").text
+    assert "历史估值分位" in html
+    assert "5 年分位" in html and "10 年分位" in html
+    assert "防前视" in html

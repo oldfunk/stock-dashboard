@@ -74,5 +74,28 @@ def test_no_lookahead(db):
     assert out == {}
 
 
+def test_report_without_notice_date_is_not_used(db):
+    """缺披露日不得回退 report_date（否则前视约 3 个月）。"""
+    prices = [(f"2023-{m:02d}-15", 10.0) for m in range(1, 13)]
+    prices += [(f"2024-{m:02d}-15", 10.0) for m in range(1, 4)]
+    _kline("600519", prices)
+    _report("600519", "2022-12-31", eps=1.0, shares=100, equity=500, notice=None)
+    assert compute_percentiles("600519") == {}
+
+
+def test_shares_at_prefers_derived_historical_shares():
+    """历史年份用 net_profit/eps 反推股本；反推不出则为 None（不拿当前股本硬算）。"""
+    from src.analyzer.valuation_percentile import _shares_at
+    old = {"report_date": "2020-12-31", "net_profit": 500.0, "eps": 1.0,
+           "total_shares": 1000.0}
+    assert _shares_at(old, "2025-12-31") == 500.0
+    unknown = {"report_date": "2020-12-31", "net_profit": None, "eps": None,
+               "total_shares": 1000.0}
+    assert _shares_at(unknown, "2025-12-31") is None
+    latest = {"report_date": "2025-12-31", "net_profit": None, "eps": None,
+              "total_shares": 1000.0}
+    assert _shares_at(latest, "2025-12-31") == 1000.0
+
+
 def test_insufficient_data_returns_empty(db):
     assert compute_percentiles("999999") == {}
