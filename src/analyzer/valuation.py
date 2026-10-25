@@ -6,7 +6,10 @@
 - 自由现金流取 ``financial_history.fcf``（东财 FCFF_BACK，年报口径）。
 - 净负债 = 有息负债 − 货币资金（P0-3 数据）。
 - 三档 = 增长率/折现率假设不同（保守/基准/乐观），不是倍数不同。
-- 数据不足（缺 fcf / shares）→ 返回 None，如实标注，不硬算。
+- **fail-closed（2026-10-25）**：缺 fcf / 总股本 / 货币资金 / 有息负债任一项，
+  或 fcf <= 0，都不出估值，``sufficient=False`` 并给出具体原因。
+  历史教训：旧实现只查 fcf + shares，201 只 fcf<=0 的股票 ``sufficient=True``
+  却三档全空；29 只净负债未知被当成 0，600389 基准估值被高估到 3.72（应为 0.21）。
 """
 
 import logging
@@ -41,43 +44,85 @@ def dcf_value(fcf: float, years1: int, g1: float, g2: float,
 
 def equity_per_share(firm_value: float | None, net_debt: float | None,
                      shares: float | None) -> float | None:
-    """股权价值 = 企业价值 − 净负债；每股 = 股权价值 / 总股本。"""
-    if firm_value is None or shares is None or shares <= 0:
+    """股权价值 = 企业价值 − 净负债；每股 = 股权价值 / 总股本。
+
+    ``net_debt`` 未知（None）→ None：未知净负债不能当 0 处理（会把估值算高）。
+    """
+    if firm_value is None or shares is None or shares <= 0 or net_debt is None:
         return None
-    nd = net_debt or 0.0
-    return (firm_value - nd) / shares
+    return (firm_value - net_debt) / shares
 
 
 def net_debt(financials: dict) -> float | None:
+    """净负债 = 有息负债 − 货币资金；任一侧缺失返回 None（未知 ≠ 0）。"""
     ibd = financials.get("interest_bearing_debt")
     cash = financials.get("cash")
-    if ibd is None and cash is None:
+    if ibd is None or cash is None:
         return None
-    return (ibd or 0.0) - (cash or 0.0)
+    return ibd - cash
+
+
+# 估值不可用原因（供 UI / AI prompt 如实说明，不显示占位数字）
+_REASON_TEXT = {
+    "missing_fcf": "最新年报缺自由现金流（FCF）",
+    "negative_fcf": "最新年报自由现金流为负（FCF ≤ 0），两阶段 DCF 不适用",
+    "missing_shares": "最新年报缺总股本，无法换算每股价值",
+    "missing_net_debt": "最新年报缺货币资金或有息负债，净负债无法确定",
+    "not_discountable": "折现假设不成立（折现率不高于永续增长）",
+}
+
+
+def _insufficient_reason(fcf, shares, nd) -> str | None:
+    """按优先级判断估值输入是否完整；完整返回 None。"""
+    if fcf is None:
+        return "missing_fcf"
+    if fcf <= 0:
+        return "negative_fcf"
+    if shares is None or shares <= 0:
+        return "missing_shares"
+    if nd is None:
+        return "missing_net_debt"
+    return None
 
 
 def intrinsic_value(financials: dict, price: float | None) -> dict:
-    """返回 {intrinsic_value:{三档}, margin_of_safety, method, net_debt}。
+    """返回 {intrinsic_value:{三档}, margin_of_safety, method, net_debt, sufficient, ...}。
 
-    缺 fcf / shares 时对应档为 None（数据不足，不硬算）。
+    **fail-closed**：任一估值输入缺失或 FCF 非正 → 三档全 None、
+    ``sufficient=False``，并在 ``insufficient_reason`` 给出机器可读原因、
+    ``insufficient_text`` 给出中文说明。不硬算、不用占位值。
     """
     fcf = financials.get("fcf")
     shares = financials.get("total_shares")
     nd = net_debt(financials)
+    reason = _insufficient_reason(fcf, shares, nd)
     out: dict[str, float | None] = {}
     for name, (y1, g1, g2, gt, r) in _SCENARIOS.items():
-        fv = dcf_value(fcf, y1, g1, g2, gt, r)
-        out[name] = equity_per_share(fv, nd, shares)
+        if reason is not None:
+            out[name] = None
+            continue
+        out[name] = equity_per_share(
+            dcf_value(fcf, y1, g1, g2, gt, r), nd, shares)
     base = out.get("base_case")
+    if reason is None and base is None:
+        reason = "not_discountable"  # 折现率 <= 永续增长等假设失效
     mos = None
-    if base and price and base > 0:
+    if reason is None and base and price and base > 0:
         mos = round((1 - price / base) * 100, 1)
     return {
         "intrinsic_value": out,
         "margin_of_safety": mos,
         "net_debt": nd,
         "method": "FCFF 两阶段折现（Gordon 终值）",
-        "sufficient": fcf is not None and shares is not None,
+        "sufficient": reason is None and base is not None,
+        "insufficient_reason": reason,
+        "insufficient_text": _REASON_TEXT.get(reason) if reason else None,
+        "inputs": {
+            "fcf": fcf,
+            "total_shares": shares,
+            "cash": financials.get("cash"),
+            "interest_bearing_debt": financials.get("interest_bearing_debt"),
+        },
     }
 
 

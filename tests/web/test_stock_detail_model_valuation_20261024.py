@@ -64,3 +64,33 @@ def test_detail_model_valuation_fail_closed_without_financials(client):
     assert "系统模型估值" in html
     assert "数据不足" in html
     assert "基准估值" not in html
+
+
+def test_detail_negative_fcf_explains_reason(client):
+    """FCF <= 0：说明原因，不渲染三档空表（旧实现会渲染一整表 '--'）。"""
+    from src.models.database import StockSnapshotDAO, FinancialHistoryDAO
+    StockSnapshotDAO().save_batch([_snapshot()])
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "600519", "report_date": "2025-12-31",
+        "fcf": -1.0, "total_shares": 10.0, "cash": 20.0,
+        "interest_bearing_debt": 50.0,
+    }])
+    html = client.get("/stock/600519").text
+    assert "自由现金流为负" in html
+    assert "保守估值" not in html and "基准估值" not in html
+    assert "2025-12-31 年报" in html
+
+
+def test_detail_missing_net_debt_explains_reason(client):
+    """净负债输入缺失：不把未知当 0 出估值，页面说明缺什么。"""
+    from src.models.database import StockSnapshotDAO, FinancialHistoryDAO
+    StockSnapshotDAO().save_batch([_snapshot()])
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "600519", "report_date": "2025-12-31",
+        "fcf": 100.0, "total_shares": 10.0, "cash": 20.0,
+        "interest_bearing_debt": None,
+    }])
+    html = client.get("/stock/600519").text
+    assert "净负债无法确定" in html
+    assert "基准估值" not in html
+    assert "未知" in html

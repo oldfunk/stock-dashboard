@@ -1636,7 +1636,11 @@ def _model_valuation_line(code: str, price: float | None = None) -> str:
     """系统模型估值（P0-6）：把可复现估值接入 AI 分析 prompt。
 
     从最新年报 financial_history 取 fcf/total_shares/cash/interest_bearing_debt，
-    用两阶段 FCFF 折现算三档估值 + 安全边际。数据不足返回空串（不阻断）。
+    用两阶段 FCFF 折现算三档估值 + 安全边际。
+
+    - 无年报 → 空串（不阻断）。
+    - 有年报但输入不全 / FCF 非正 → 明确告知模型"不可用"及原因，禁止它自行编造
+      DCF 数字（fail-closed 语义要传到 prompt，否则模型会补一个主观值）。
     """
     if not code:
         return ""
@@ -1645,8 +1649,14 @@ def _model_valuation_line(code: str, price: float | None = None) -> str:
         val = intrinsic_value_for_code(code, price)
     except Exception:  # noqa: BLE001 - 取数/估值失败不阻断分析
         val = None
-    if not val or not val.get("sufficient") or val.get("margin_of_safety") is None:
+    if not val:
         return ""
+    if not val.get("sufficient") or val.get("margin_of_safety") is None:
+        reason = val.get("insufficient_text") or "估值输入不足"
+        return (
+            f"系统模型估值（可复现，FCFF 两阶段折现）：不可用——{reason}。"
+            f"不要自行编造 DCF 数值；如需谈估值，必须明确说明数据不足及其原因。"
+        )
     iv = val["intrinsic_value"]
     price = val.get("price")
 

@@ -764,7 +764,24 @@
         {% set ma = model_valuation.assumptions %}
         <p class="sd-sd-sub">三档 = 假设不同（非倍数）：保守 增长 {{ (ma.conservative.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.conservative.discount * 100)|round(0)|int }}%；基准 增长 {{ (ma.base_case.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.base_case.discount * 100)|round(0)|int }}%；乐观 增长 {{ (ma.optimistic.g1 * 100)|round(0)|int }}% / 折现 {{ (ma.optimistic.discount * 100)|round(0)|int }}%。安全边际 = 1 − 现价 / 基准估值；同假设同结果，可复现。</p>
         {% else %}
-        <p class="sd-sd-sub">数据不足（缺 FCF 或总股本），不做估算——宁缺勿滥，不以占位值填充。</p>
+        <p class="sd-sd-sub">{% if model_valuation and model_valuation.insufficient_text %}{{ model_valuation.insufficient_text }}{% else %}数据不足（无年报数据）{% endif %}——不做估算，宁缺勿滥，不以占位值填充。</p>
+        {% if model_valuation %}
+        {% set mi = model_valuation.inputs %}
+        <div class="sd-value-table">
+            <div class="sd-value-row">
+                <span class="label">报告期</span>
+                <span class="value">{{ model_valuation.report_date or '--' }} 年报</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">自由现金流（亿元）</span>
+                <span class="value">{{ "%.2f"|format(mi.fcf / 100000000) if mi and mi.fcf is not none else '未知' }}</span>
+            </div>
+            <div class="sd-value-row">
+                <span class="label">净负债（亿元）</span>
+                <span class="value">{{ "%.2f"|format(model_valuation.net_debt / 100000000) if model_valuation.net_debt is not none else '未知' }}</span>
+            </div>
+        </div>
+        {% endif %}
         {% endif %}
     </section>
 
