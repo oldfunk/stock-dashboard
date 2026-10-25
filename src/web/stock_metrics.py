@@ -38,7 +38,7 @@ CARD_METRICS = (
     MetricSpec("profit_growth", "利润增长", "pct1signed", "growth"),
     MetricSpec("market_cap", "市值", "yi", "none"),
     MetricSpec("gross_margin", "毛利率", "pct1", "margin"),
-    MetricSpec("net_margin", "净利率", "pct1", "margin"),
+    MetricSpec("net_margin", "净利率", "pct1", "net_margin"),
     MetricSpec("ocf_per_share", "OCF/股", "2f", "ocf"),
     MetricSpec("dividend_yield", "股息率", "pct2", "yield"),
     MetricSpec("dividend_years", "连分年数", "int", "years"),
@@ -101,6 +101,8 @@ def tone_for(spec: MetricSpec, value) -> str:
         return "good" if v >= 10 else ("warn" if v >= 0 else "bad")
     if t == "margin":
         return "good" if v >= 30 else ("warn" if v >= 15 else "bad")
+    if t == "net_margin":
+        return "good" if v >= 15 else ("warn" if v >= 5 else "bad")
     if t == "ocf":
         return "good" if v > 0 else "bad"
     if t == "yield":
