@@ -1563,7 +1563,8 @@ async def api_watchlist():
     tpl = templates.env.get_template('_metric_cells.html')
     for item in items:
         item['metrics'] = metric_items(item)
-        item['metrics_html'] = tpl.render(metrics=item['metrics'], variant='wl')
+        # 手动钉选卡与候选卡共用 .metric-cell 网格（不能用 wl 外壳，否则样式错位）
+        item['metrics_html'] = tpl.render(metrics=item['metrics'], variant='card')
     return items
 
 

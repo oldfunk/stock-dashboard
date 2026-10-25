@@ -64,6 +64,9 @@ def test_api_watchlist_enriches_margin_metrics(client):
     assert item["dividend_year"] == "2024"
     assert "股息率" in item["metrics_html"]
     assert "3.50%" in item["metrics_html"]
+    # 与候选卡共用 .metric-cell 网格（wl 外壳只属于 AI 观察池卡）
+    assert 'class="metric-cell"' in item["metrics_html"]
+    assert "wl-m" not in item["metrics_html"]
 
 
 def test_api_watchlist_falls_back_to_snapshot(client):
