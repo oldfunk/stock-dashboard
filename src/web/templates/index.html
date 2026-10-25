@@ -1058,7 +1058,7 @@
             <button class="view-tab" onclick="switchView('watchlist-ai', event)">AI 观察池</button>
             <button class="view-tab" onclick="switchView('watchlist', event)">钉选股票 <span id="watchCount"></span></button>
         </div>
-        <span class="section-count" id="aiWatchCount">{{ stocks|length if stocks else 0 }} 只</span>
+        <span class="section-count" id="aiWatchCount" title="最新筛选 {{ latest_candidate_count }} 只 + 历史分析 {{ history_candidate_count }} 只">{{ stocks|length if stocks else 0 }} 只</span>
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="搜索代码/名称..." />
             <button onclick="searchStocks()">搜索</button>

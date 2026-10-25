@@ -160,3 +160,9 @@ def test_template_partial_is_the_only_metric_markup():
         text = (tpl_dir / name).read_text(encoding="utf-8")
         for label in (">PE<", ">PB<", ">ROE<", ">毛利率<", ">股息率<", ">连分年数<"):
             assert label not in text, f"{name} 又手写了指标 {label}"
+    for name in ("stock_detail.html", "watchlist_detail.html"):
+        text = (tpl_dir / name).read_text(encoding="utf-8")
+        assert "_metric_cells.html" in text
+        for bad in ("format(snapshot.pe)", "format(snapshot.roe)",
+                    "format(snapshot.gross_margin)", "format(snapshot.dividend_yield)"):
+            assert bad not in text, f"{name} 又手写了格式化 {bad}"

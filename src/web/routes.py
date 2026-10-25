@@ -374,6 +374,8 @@ async def index(request: Request):
             })
 
     # 注入 active codes 到调度器（只在首次加载时）
+    latest_candidate_count = len(codes_in_results)
+    history_candidate_count = len(stocks) - latest_candidate_count
     codes = [s['code'] for s in stocks]
     set_active_codes(codes)
 
@@ -522,6 +524,8 @@ async def index(request: Request):
         "page_title": page_title,
         "indices": indices,
         "stocks": stocks,
+        "latest_candidate_count": latest_candidate_count,
+        "history_candidate_count": history_candidate_count,
         "run_log": run_log,
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
