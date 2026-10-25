@@ -165,6 +165,28 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-25（全量审计 13 项缺陷 + 估值 fail-closed 上线；基线 644→650）
+
+- **背景**：P5-1 回填跑完后复查"是否真的可信"。回填终值：`done=959 / no_data=0 / updated_rows=19771 / remaining=0`；覆盖 cash 18471、capex 18228、notice_date 6886、fcf 6312；年报 959 只 / 19964 行。
+- **审计（生产实证，13 项）**：
+  1. 29 只 `status='done'` 但最新年 cash/有息负债仍 NULL，逐只复核**上游 29/29 有值**；6 只估值偏差 ≥5%（600389 基准 3.72→0.21 −94.5%、600350 16.53→2.50 −84.8%、600064 −22.9%、688036 +30.4%、600461 −15.1%、002404 +9.4%）。
+  2. `sufficient` 只查 `fcf + total_shares`：201 只 fcf≤0 仍 `sufficient=True`、三档全空，生产 `/stock/001332` 渲染整表 `--`；10 只缺 cash、29 只缺有息负债被当 0（net_debt 缺失即失真）。
+  3. `603165` notice_date NULL（东财上游 2026-04-01）；最新年 capex 缺失 13 只。
+  4. `backfill_progress` 按 `(task, code)` 键：临时库标记 600519 done 后插入 2026-12-31 年报，`get_codes_missing_extra()` 返回 `[]` → 未来年报永久漏采。
+  5. `batch_save` 用 `INSERT OR REPLACE`：临时库用只含 `roe` 的记录重存 → `cash/capex/notice_date` 全变 NULL；夜间候选刷新与 `onboard_stock(force_full=True)` 都是活路径。
+  6. 夜间 `collect_historical_financial_data` 只刷候选约 20 只，其余 939 只拿不到 FY2026 年报。
+  7. mainfin `ps=30` 混季报，只覆盖 2019–2025 年报；加 `REPORT_TYPE="年报"` 后 600519 返回 28 年（1998–2025）。因此 notice 6886/19964（34.5%）、fcf 6312（31.6%）；2016–2018 仅 43 条 notice / 2714 行。
+  8. `total_shares` 是当前股本盖到所有年份：815/958 只年际完全不变；300750 2020 年库值 4.627bn vs `net_profit/eps` 反推 2.242bn。
+  9. 回测被价格卡死：`kline_daily` 仅 49 只、2026-10-23 有价 24 只；可选域 2016–2019 = 0、2020–2024 = 23–24；`--start 2016` 与 `--start 2020` 输出同为 **−6.5%**。旧 "+45%" 已失效。
+  10. `backfill_price_history.target_codes()` 只取最新 25 条筛选结果 + watchlist + pinned，从未扩到全市场。
+  11. `valuation_percentile._report_at` 在 `notice_date` 为 NULL 时回退 `report_date`（与文档相反，属前视），并用当前股本算历史 BVPS；且 UI 未接入（只有测试调用 `compute_percentiles`）。
+  12. MOS 样本 750 行集中在 2026-07-08~09-29，60 日窗口重叠约等于一个 cohort；MOS=0 的 2 行落入 `0~20` 档但标签写作 `≤0`。
+  13. `balance_sheet_fetcher._get_json` 直接 UTF-8 `json.loads`，东财偶发 BOM+HTML（`\xef\xbb\xbf<`）→ `JSONDecodeError` 且无重试（300750 已复现）；单源失败时其他源仍产出 payload，于是被标 `done`。
+- **A1 修复（`367a75a`）**：`net_debt` 任一侧缺失返回 None（不再当 0）；`equity_per_share` 缺净负债返回 None；`intrinsic_value` 返回 `insufficient_reason/insufficient_text/inputs`，`sufficient` 以 `base_case` 非空为准；详情页 fail-closed 分支显示具体原因 + 报告期/FCF/净负债；`_model_valuation_line` 在不可用时明确写"不可用+原因+禁止编造 DCF"。+8 单测（负 FCF / 缺现金 / 缺有息负债 / 缺股本 / prompt 拒编造 / 页面原因展示）。
+- **生产验证**：`/stock/001332` → "最新年报自由现金流为负（FCF ≤ 0），两阶段 DCF 不适用"（不再整表 `--`）；`/stock/600389` → "净负债无法确定"（不再显示 3.72）；`/stock/600519` → 650.39 / 967.80 / 1523.60 不变。新口径 959 只：可估值 **650（67.8%）**、负 FCF 201、缺 FCF 84、缺净负债 23、缺股本 1。
+- **门禁**：生产 worktree gate **650 passed**（下限 644→650）；服务 active、`/` 200。vendor 218 通过（记录值 219，非阻塞，差 1 待核）。
+- **未修（下一步 A2–A8，已入 tasklist Phase 6）**：29 只缺口 + partial 语义、进度表与 batch_save、mainfin 年报过滤与 2016–2018 深回填、价格域扩全市场 + 回测有效域、估值分位去前视、门禁 live 网络用例打桩、文档数字校正。
+
 ### 2026-10-24（P5-1 补充字段全量回填：代码 + 慢速灌数）
 - **目标**：把 `cash / interest_bearing_debt / goodwill / total_assets / total_equity / capex / net_operate_cashflow / notice_date` 从"只覆盖候选池 36 只"扩到**所有已有年报的 959 只**（`financial_history` 年报股票总数就是 959，其余 ~4500 只从未采集历史财务——那是下一步 P5-2）。
 - **代码**（`4b77e64` + `de17456` + `9913128` + `d41aaeb`，gate 641）：

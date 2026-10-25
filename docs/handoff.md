@@ -3,66 +3,46 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-24 P5-1 补充字段回填进行中：已 70/959 只；基线：母项目 641 / vendor 219）
+## 最后状态（2026-10-25 全量审计完成 + 估值 fail-closed 上线；基线：母项目 650 / vendor 218）
 
-> **长线主线**：`docs/value-investing-methodology.md`（完善方案）+ `docs/tasklist.md`（TODO 进度）。P0 十项全部落地；**Phase 5 可信度收口 4 项完成，P5-1 回填进行中**。
-> **阶段判断**：功能层已齐；数据层正在补覆盖。**关键事实**：`financial_history` 只有 **959 只**股票有年报（全市场 5527），本轮先把这 959 只的补充字段填满，全市场历史财务是下一步 P5-2。
-- **P5-1 补充字段回填（持续跑中）**：新增 `scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连，不依赖 akshare）+ `FinancialHistoryDAO.update_extra_fields`（只填 NULL/白名单/只动年报行）+ `backfill_progress` 进度表（断点续跑，修"老年份永远 NULL 无限重跑"）+ **单实例锁**（防与夜间 cron 重叠）。**2026-10-24 16:08 起 `--until-done` 常驻持续跑**：实测 ≈7.5s/只、Pi 负载 0.4；当前 done=115 / 3547 行，剩余 844，预计 ~1h45m 跑完。（实时进度：`scripts/backfill_financial_extra.py --status`）
-- **夜间慢速任务**：Pi crontab `30 2 * * *` 每晚 250 只（sleep 1s / 上限 90min），日志 `logs/backfill_extra.log`；预计 4 晚跑完，跑完自动空转。查看进度：`.venv/bin/python scripts/backfill_financial_extra.py --status`。
-- **门禁**：母项目 **641** / vendor 219；回填脚本有 9 个单测（含 `main()` 路径，修过 `args.dry-run` 拼写崩溃）。
-- **① MOS 分层静默丢弃修复**（`fc1ef06`，gate 626）：`summarize_by_mos` 旧区间 `(-100,100)` 与 MOS 实际 `-523.7~74.8` 不匹配，**静默丢 180 行/24%**（被丢样本 20 日胜率 37.9%，系统性高估正档）。改默认覆盖全区间 + 区间外显式"未分层"。**生产实测 750/750 全覆盖**；≥40 档 60 日胜率 80.0% / 超额 **+8.9pp**（旧文档 +17.2pp 有误，已更正）。
-- **② 门禁超时保护**（`8ece7a3`，gate 626）：`timeout` 包裹 pytest（母 900s/vendor 600s）+ 通过数无法解析即 fail-closed。**实证**：`GATE_TIMEOUT_MOTHER=2` → `exit 124`，挂死用例不再无限阻塞部署。
-- **③ 详情页展示系统模型估值**（`227fafb` + `bd740e1`，gate 629）：新增"系统模型估值（可复现）"章节（三档+当前价+安全边际+净负债+假设+数据来源），无数据 fail-closed。**生产实测 600519 = 650.39 / 967.80 / 1523.60、安全边际 -29.6%；605099 = "数据不足"**。`valuation.py` 加统一入口 `intrinsic_value_for_code`（AI prompt 复用）。
-- **④ 回测 fail-closed**（`6cc6fd3`，gate 630）：无 `notice_date` 不入选（不回退 `report_date`，消除约 3 个月前视）；输出 `fundamental_codes`/`eligible_max` 透明化。**生产实测**：域 37 只有披露日 / 35 只有价格；2024-01~2026-10 = **-16.66%**（旧 -36.79% 含泄漏），2016~2026 = +45.0%。
-- **排查结论（数据侧，重要）**：`financial_history` 69066 行中 `cash` 785 / `total_equity` 824 / `capex` 762 / `notice_date` 261 行——**覆盖仅 36–37 只股票**。故 P0-3/4/6/8/10 的"生产实测正确"只在候选池成立，**不能当作全市场能力**。
-- **候选卡展示股息率/连分年数**（`0aba4ca` 起，gate 843→630 期间）：首页候选卡新增股息率/连分年数两列；生产首页 35 处股息率（含实际值）+ 35 处连分年数；详情页 600398 = 7.16% / 10 年。
-- **候选股颜色表达统一走红绿开关**：候选卡指标 `good/bad`、评分条/贡献/总分、`signal-avoid`，详情页评分贡献与信号/评级/镜子底色，观察池详情页在池状态/评分贡献/信号买入，全部由 `--green/--red`（及硬编码 rgba）改走 `--color-up / --color-down(-bg)`；中性档（AVOID 灰、HOLD 金）与状态类 UI（流水线状态、AI 消息 ok/err）保持不动。+5 回归用例。
-- **CI 动作升级**：`actions/checkout@v6` / `actions/setup-python@v6`（清 Node20 废弃警告；v7 为最新主版，本次保守停在 v6）。
-- **生产残留清理**：`/home/pi/sd-nightly` worktree（`nightly/20261021`）已删，Pi 上只剩 `main` + `sd-verify`；本地 Pi 侧仍有大量旧 nightly 分支（无害）。
-- **下一步规划入档**：`docs/roadmap.md` 新增「下一阶段规划（2026-10-23 起）」，分 P1 验证收口 / P2 数据正确性 / P3 体验（须拍板），逐项带验收判据。
-- **验证**：生产 worktree gate **773 passed**（基线 768→773，含新增 5 例；模板改动正确触发主服务重启）→ 合 main → 生产同步 → 健康检查第 1 轮 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 773。
-- **修手动钉选卡信号文字恒黑**（`bf82acc` + `869fbf5`，基线 773→774）：信号值带 `value signal-*` 类，`.metric-cell .value`（0,2,0）压过 `.signal-*`（0,1,0）→ 买入/回避/持有/无 永远黑。规则提到 0,3,0；无信号改用 `signal-none`（中性灰）不再借用金色 HOLD；升 `watchlist.js` 缓存戳 `20260928c→20261023a`（否则浏览器缓存旧 JS 不生效）。生产浏览器实测：7 张钉选卡信号文字均为 `signal-none` 中性灰，BUY/AVOID 合成元素随开关翻色。
-- **手动钉选卡指标同口径上色**（`03c995c` + `efb2641`，基线 774→777）：按好/中/差 → 红/金/绿（随涨跌开关）给指标上色，与候选卡同口径；`/api/watchlist` 从 `screening_result` 补全毛利率/净利率/OCF（这三列不在 `stock_snapshot`，缺失时保留快照值）；卡片补这三列让"差"档绿色出现；升缓存戳 `20261023b`。生产浏览器实测：7 张卡指标均带 good/warn 类并随开关翻色（CN good=红、US good=绿；合成 `bad` 档 CN=绿/US=红），新增三列已在 5 张卡出现。
-- **个股详情页细节优化**（`9d827e7`，基线 777→783）：四项——(1) 快照条指标按好/中/差上红/金/绿（主详情 + 钉选股分析两页，随开关）；(2) 空值占位统一为 `--`（去掉 `--%` / `--亿`）；(3) 硬编码颜色主题化（grade-b 金底金字、signal-hold、K线/SVG 灰、提问按钮白字）；(4) 间距线框统一（区块间距 40→32px；六关卡片去外框线改浅灰底色块；行分隔虚线改实线浅灰）。浏览器实测：CN good=红 / US good=绿，缺失值 `--`，六关 `border 0px + bg #f0f1f3`，行线 solid。
-- **验证**：生产 worktree gate **777 passed**（774 +3）；routes/JS/模板改动正确触发主服务重启；生产 4 路 200、双服务 active；CI 绿。
-- **验证（详情页）**：生产 worktree gate **783 passed**（777 +6）；模板改动正确触发主服务重启；浏览器实测四项全部生效；`scripts/gate-baseline.txt` 已更新为 783。
-- **vendor v0.6.7 暂缓**：已尝试 `subtree pull v0.6.7`，但 v0.6.7 的 `run()` 类用例不隔离新闻抓取（`llm_context` → `fetch_market_news` 打真实 akshare），在 Pi 上网络 stall 无超时 → 母门禁挂死。已回退 vendor 到 v0.6.5，并提 Issue [#1](https://github.com/oldfunk/paper-trading/issues/1)（域内 bug，母方不修）；等子方 tag 修复后再 vendor 验收。
-- **DB 锁修复**（`95e42e7`）：`get_connection()` 加 `busy_timeout=5000` + 仅非 WAL 时设置 `journal_mode`；消除 `/api/indices` 轮询撞调度器写库时的 `database is locked`（近 2h 出现 2 次）。
-- **vendor v0.6.7 修复版已合并**（`f8fa260`，tag 重指 `a0dd2ec`）：`fetch_market_news` 加硬超时（守护线程 + `agent.news_timeout_sec` 默认 15s）+ `tests/conftest.py` 全局离线打桩（Issue #1 已闭环）。因先前 revert 造成合并基线错位，改用 `read-tree --prefix=paper_trading/` 整树重读为 v0.6.7；契约核对通过（integration 零写母库、engine 默认关、CLI 兼容）。**gate 810 passed**（785 +25 vendor 用例）；`NEED_PARENT=1` 正确重启纸盘面板。
-- **P0-1 股息率回填**（`8257887`，gate 814）：`backfill_snapshot_dividends`（用最新年报分红 × 现价重算）+ 独立脚本 + 挂进每日流水线。**生产实测 `stock_snapshot.dividend_yield` 783 → 3384（61%）**、payout 3520、yield≥4 有 187 只——此前红利池为空主要是回填缺口，非阈值太严。
-- **P0-2 分红历史**（`c896efe`，gate 819）：`refresh_dividend_history`（10 年年报分红）+ `compute_dividend_years`（从最新年倒推连续分红）+ `backfill_dividend_years`（回填 `stock_snapshot.dividend_years`）+ 详情页"连分年数"。**生产实测 10/10 年成功、31513 条；3620 只有连续分红年数（10 年 1003 只 / ≥5 年 2217 只）**；周六自动刷新历史。
-- **P0-3 资产负债表关键字段**（`46689b4` + `9dfc1ec`，gate 824）：akshare 的 `stock_balance_sheet_by_report_em` 在 Pi 上因 HTML 抓 `company_type` 失败，改为**直连东财 F10** `zcfzbDateAjaxNew` / `zcfzbAjaxNew`（代码格式 `SH600519`，company_type 缺省 4 且空则回退 1/2/3）。落 `financial_history` 新列 `cash / interest_bearing_debt / goodwill / total_assets / total_equity`（有息负债 = 短借 + 一年内到期非流动负债 + 长借 + 应付债券 + 短期应付债券），采集合并进 `collect_historical_financial_data`。**生产实测茅台现金 516.9 亿 / 平安总资产 59257.8 亿 / 平安银行有息负债 5445.3 亿**，落库正确。
-- **P0-4 现金流 + P0-10 披露日期**（`df3afd5`，gate 828）：新增 `src/collector/cashflow_fetcher.py`（直连东财 F10 `xjllbDateAjaxNew` / `xjllbAjaxNew`，`capex = CONSTRUCT_LONG_ASSET`、`net_operate_cashflow = NETCASH_OPERATE`）；`_fetch_eastmoney_roic_fcf` 扩展返回 `notice_date`（披露日期）。落 `financial_history` 新列 `capex / net_operate_cashflow / notice_date`。**生产实测茅台 capex 31.3 亿 / 经营现金流 615.2 亿 / 披露 2026-04-17**；银行/保险 FCFF 缺失（不回填，fail-closed）。
-- **P0-5 历史价格 + 估值分位**（`0da72af` + `44ee328`，gate 831）：`scripts/backfill_price_history.py`（10 年前复权，候选+观察池+钉选）+ `src/analyzer/valuation_percentile.py`（PE = price/EPS、PB = price/BVPS、股息率 = 每股分红/price；每交易日取 `notice_date <= 当日` 的最新年报防前视）。**生产实测 49 只 65652 条（2016–2026，后续回填已扩）；海澜之家 5 年 PE 分位 11.8% / 10 年 6.0%、股息率分位 50.5%**；PB 因缺 total_equity/total_shares 暂 NULL（fail-closed）。
-- **P0-6 可复现估值模型**（`5c4fcf2` + `5b82a83` + `71c7a22`，gate 837）：`src/analyzer/valuation.py`（FCFF 两阶段折现，三档 = 增长率/折现率假设不同；`net_debt = 有息负债 − 现金`；`MOS = 1 − price / base`）+ `_model_valuation_line` 接入 AI prompt（LLM 改为校验/解释偏离，不再主观给估值）。修复：F10 响应 gzip、C2.5 补 `TOTAL_SHARE`。**生产实测茅台 保守 650.39 / 基准 967.80 / 乐观 1523.60，当前价 1253.80 → 安全边际 -29.6%**。
-- **P0-7 同业估值分位**（`4c1df09` + `798364a`，gate 840）：`get_sector_averages` 扩展为均值+中位数（pe/pb/roe）；新增 `get_sector_percentile`（个股在行业内的分位）；详情页/候选卡展示"本股 PE 分位"。**生产实测行业均值+中位数、个股分位（电子信息 PE=20 → 10.3% / PE=200 → 79.3%）**。
-- **P0-8 look-ahead-safe 回测**（`eb291d5` + `23fa5b7`，gate 842）：重写 `scripts/backtest_topk.py`——基本面源改 `financial_history`（年报 + `notice_date`），每个再平衡日只取 `notice_date <= 当日` 的最新年报（防前视）；费用口径（佣金 0.025%、印花税 0.05%）；买入不超现金。**生产实测 TopK20 月调仓 2024-01~2026-10：初版 -36.79%（含约 3 个月前视泄漏）；2026-10-24 fail-closed 后 -16.66%（域 35 只，指示性）**。
-- **P0-9 买入安全边际记录与预测力验证**（`63e95ac` + `ab041ab`，gate 844）：`analysis_outcome` 加 `mos_at_entry`（买入时模型 MOS，用 `notice_date <= 分析日` 的最新年报 + 入场价）；`summarize_by_mos` 按 MOS 分层统计。**生产实测**：深折让档（MOS ≥40%）20 日胜率 68.2% / 60 日胜率 **80.0%**、超额 **+8.9pp**；中档（20–40%）60 日胜率仅 12.5%——**安全边际越大，胜率越高，支持价值投资命题**（2026-10-24 修分层丢弃后覆盖 750/750，结论不变）。
-- **候选卡展示股息率/连分年数**（`0aba4ca`，gate 843 临时）：首页候选卡新增股息率/连分年数两列；生产首页候选卡 35 处股息率（含实际值）+ 35 处连分年数；详情页 600398 = 7.16% / 10 年。
-- **门禁分层修复**（`5197420` + `75b0406`）：母项目用例权威强制（基线 624），vendor 用例单独记录（基线 219）、**域内失败不阻塞母项目**；已知问题列 `scripts/gate-exclusions.txt`（Issue #2）。实证：无排除清单时 vendor flaky 失败，gate 仍 exit=0（母项目 624 passed）。规则入 `docs/subproject-protocol.md` §6 + AGENTS.md。
-- **验证（本批）**：生产 worktree gate **785 passed**（783 +2 DB 用例）；`src/`（DB 修复）改动正确触发主服务重启；健康检查 `active http:200 / active http:200`；`scripts/gate-baseline.txt` 已更新为 785。
-- **母项目 v2.0.0 已发布**：tag `v2.0.0`（annotated）+ GitHub Release（功能盘点：AI 分析复活 / 纸盘合流 / 专业化三件套 / UI 净化 / 流程自动化 / 数据与修复；门禁 785；部署三行；已知限制；MIT）。
+- **P5-1 回填已完成**：生产 `done=959 / no_data=0 / updated_rows=19771 / remaining=0`，进程正常退出。覆盖：年报 959 只 / 19964 行；`cash` 18471、`capex` 18228、`notice_date` 6886、`fcf` 6312。
+- **全量审计（生产实证）确认 13 项缺陷**：4 项正在对外输出错误数字，3 项会在下个年报季静默失效。完整清单见 `docs/iteration-log.md` 2026-10-25 条目与 `docs/tasklist.md` Phase 6。
+- **A1 已修并上线（`367a75a`，gate 644→650）**：估值 fail-closed——`net_debt` 任一侧缺失不再当 0、`equity_per_share` 缺净负债返回 None、`sufficient` 以 `base_case` 非空为准；返回 `insufficient_reason` / `insufficient_text`；详情页显示具体原因（FCF 为负 / 缺净负债 / 缺股本），AI prompt 明确"不可用 + 原因 + 禁止编造 DCF"。
+  - **生产实测**：`/stock/001332` 由整表 `--` 改为"最新年报自由现金流为负（FCF ≤ 0），两阶段 DCF 不适用"；`/stock/600389` 不再显示错误基准估值 3.72，改为"净负债无法确定"；`/stock/600519` 仍为 650.39 / 967.80 / 1523.60。
+  - **新口径分布（959 只）**：可估值 **650（67.8%）**；不可估值 309 = 负 FCF 201 / 缺 FCF 84 / 缺净负债 23 / 缺股本 1。
+- **回测现状（不可对外声称市场级）**：`kline_daily` 仅 49 只、2026-10-23 有价 24 只；2016–2019 可选域 = 0；`--start 2016` 与 `--start 2020` 输出同为 **−6.5%**。旧 "+45%" 已失效。
+- **门禁**：生产 worktree gate **650 passed**（下限已更新为 650）；vendor 218 通过（记录值 219，非阻塞，差 1 待核）。
+- **服务**：`stock-dashboard.service` / `paper-trading-parent.service` 均 active，`/` 200；Pi 负载 0.13–0.23，内存 569/954MB，磁盘 25%。
 
-## 下一步方向
-1. **（进行中）P5-1 回填跑完**：等 Pi 夜间任务把 959 只填满（约 4 晚），再复查可估值股票数/披露日覆盖；中途可用 `--status` 看进度
-2. **P5-2 年报历史扩到全市场**：`financial_history` 仅 959 只有年报（全市场 5527）——需要更重的慢速回填（akshare 同花顺摘要 + F10），先小批量测速再定夜间切片
-3. （Phase 4，择要）E1 财务同环比高亮 / E2 搜索排序
-4. （协同）对齐子项目 M2（量化可信度）；Issue #1 修复已并入 v0.6.7，但 GitHub 上仍 **OPEN**；Issue #2（nav:close 幂等跨日 flaky）仍 OPEN
-5. （可选）P0-5 的 PB 分位补 `total_equity/total_shares` 覆盖（本轮回填后已具备数据条件）；P0-9 扩大样本（120 日窗口 2027-01 起有数据）
-6. （可选）模型三档假设标定：当前折现 9%/增长 3% 对多数股票偏保守，MOS 深度为负者众，区分度不足
+## 下一步方向（按此顺序，一次一步，每步带生产证据）
+
+1. **A2 修数据缺口**：29 只 `done` 但净负债/现金缺失（上游 29/29 可补）+ `603165` 披露日；回填在任一源失败或关键字段仍空时记 `partial` 而非 `done`，加 `--retry-partial`。影响：6 只估值偏差 ≥5%（600389 −94.5%、600350 −84.8%、600064 −22.9%、688036 +30.4%、600461 −15.1%、002404 +9.4%）。
+2. **A3 修机制**：`backfill_progress` 改按 `(task, code, report_date)`（现在插入 2026 年报后 `remaining=[]`，未来年报永久漏采）；`batch_save` 改 upsert 保留 `cash/capex/notice_date`（现在重采集会清空）。两项必须同批上线。
+3. **A4 加深历史**：mainfin 加 `REPORT_TYPE="年报"` 过滤（`ps=30` 混季报只有 7 年；加过滤后 600519 返回 28 年 1998–2025），深回填 2016–2018（现在 notice 仅 43/2714）。
+4. **A5 扩价格域**：`backfill_price_history.target_codes()` 现在只取最新 25 条筛选 + watchlist + pinned；扩到全市场后回测输出 `first_eligible_date` / `effective_years` / CAGR。
+5. **A6 估值分位**：`valuation_percentile._report_at` 去掉 `notice_date → report_date` 回退（前视）；历史 BVPS 用当年股本；接入 UI 或从 P0-5 交付声明中撤回。
+6. **A7 门禁**：`tests/collector/test_akshare_fetcher.py` 3 个 live 网络用例打桩，另设 opt-in 集成检查。
+7. **P5-2 全市场年报**：959 → 5527 只是另一条重活，等 A2–A4 稳定后再定切片。
+8. **A8 文档校正**：P0-5 "已交付"、回测 "+45%"、"全市场估值"等表述逐条对齐实测。
 
 ## 已知隐患
-- **生产 SSH 对连续建连敏感**（新版 OpenSSH per-source penalty）：批量脚本必须限速；deploy.sh 已加 `ssh_do` 1s 间隔 + 健康检查单连接，但同类自建脚本仍需遵守，否则会复现「Connection reset」误报
-- **CI 环境非生产等同**：ubuntu runner 与生产 Pi 不完全等同——CI 是记录与信号，权威门禁仍是生产 gate，CI 红不等于生产坏；本轮动作升到 v6 后需观察 CI 是否仍绿
-- **回填任务与业务表共用同一 SQLite（WAL）**：夜间回填（02:30）与纸盘 cron/定时器可能重叠；已用 `busy_timeout=5000`，但若出现 `database is locked` 应把回填改到更晚或降 `--limit`
-- **`financial_history` 只有 959 只有年报**：全市场 5527 只中约 4500 只从未采集历史财务；估值/回测/分位的"全市场"结论在 P5-2 完成前仍不成立
-- **回测域仍小**：`scripts/backtest_topk.py` 已 fail-closed（无 `notice_date` 不入选），但披露日目前只有 103 只（回填前 37 只）→ 结果是"指示性"而非组合级，随 P5-1 完成会自然改善
-- **静态 JS 改后必须升版本戳**：`/static/watchlist.js` 在 `index.html` 用 `?v=YYYYMMDDx` 引用；改了 JS 不升戳，浏览器缓存旧文件、修复不生效（2026-10-23 signal-none 实证）。同理 `news.js`
-- （继承）交易日历缓存新接缝：母树 `paper_trading/var/trading_calendar.json` 由 cron 每周一刷新，失效则回退"周末+硬编码"判断
-- （继承）v0.6.5 弃用旧 schedule gate（部分入口 410）；`engine.enabled: false` 是安全线；独立克隆 `/home/pi/paper-trading` 两套 cron 并存（单交易员原则）
-- （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据
+
+- **净负债/FCF 覆盖是估值最大瓶颈**：23 只缺净负债一侧、84 只缺 FCF、201 只 FCF ≤ 0；650 只可估值中仍有部分依赖单一数据源。
+- **进度表与 `batch_save` 的组合风险**：即使 A2 补齐，下一次夜间重采集仍可能清空扩展字段，且进度表阻止重跑——A3 必须与 A2 同批上线。
+- **最新年 `capex` 缺失 13 只**、`notice_date` 整体仅 34.5% —— 回测与历史分位能力受限于此。
+- **`total_shares` 是当前股本盖到所有年份**（815/958 只年际不变；300750 2020 年库值 4.627bn vs 净利/EPS 反推 2.242bn）→ 历史 PB/BVPS 不可信。
+- **MOS 证据仍是一个 cohort**：750 行集中在 2026-07-08~09-29，60 日窗口重叠；MOS=0 的 2 行落入 `0~20` 档但标签写 `≤0`。
+- **vendor 通过数 218 < 记录下限 219**（非阻塞）：差 1 需核实是跳过还是失败。
+- **生产 SSH 对连续建连敏感**（per-source penalty）：批量脚本必须限速；deploy.sh 已有 1s 间隔。
+- **CI 非生产等同**：权威门禁仍是生产 gate，CI 红不等于生产坏。
+- **回填与业务共用 SQLite（WAL）**：已 `busy_timeout=5000`，若出现 `database is locked` 应降 `--limit` 或错峰。
+- **静态 JS 改后必须升版本戳**（`/static/*.js?v=YYYYMMDDx`），否则浏览器缓存旧文件。
+- （继承）交易日历缓存接缝：`paper_trading/var/trading_calendar.json` 每周一 cron 刷新，失效则回退"周末+硬编码"。
+- （继承）v0.6.5 旧 schedule gate 部分入口 410；`engine.enabled: false` 是安全线。
+- （继承）股息/收益口径三条：个股 qfq 含分红 vs 基准价格指数不含分红（超额略偏乐观）；重叠窗口非独立样本；120 日窗口 2027-01 起才有数据。
 
 ## 历史交接区（追加，不删）
+- 2026-10-25 全量审计（13 项缺陷）+ A1 估值 fail-closed 上线（`367a75a`；gate 644→650；生产 001332/600389/600519 实测）
 - 2026-10-23 vendor v0.6.7 修复版合并（Issue #1 闭环；整树重读；gate 785→810；NEED_PARENT 验证）+ 价值投资方法论完善方案/TODO List 入档
 - 2026-10-23 母项目 v2.0.0 发布（tag + GitHub Release）；vendor v0.6.7 暂缓 + DB 锁修复
 - 2026-10-23 vendor v0.6.7 暂缓（run() 用例打真实 akshare 挂死 gate，回退 v0.6.5 + 提子项目 Issue #1）+ DB 锁修复；发版 v2.0.0

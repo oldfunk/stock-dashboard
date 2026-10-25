@@ -42,8 +42,21 @@
 - [x] 门禁超时保护：GNU `timeout` 包裹 pytest（母 900s / vendor 600s）+ 通过数无法解析即 fail-closed → 强制 2s 超时实测 `exit 124`
 - [x] 详情页展示系统模型估值（可复现 FCFF 三档 + 当前价 + 安全边际 + 假设 + 数据来源）；无数据 fail-closed 显示"数据不足" → 生产 600519 = 650.39 / 967.80 / 1523.60、安全边际 -29.6%；605099 fail-closed
 - [x] 回测 fail-closed（无 `notice_date` 不入选）+ 可用域透明化（`fundamental_codes`/`eligible_max`）
-- [ ] **P5-1 补充字段全量回填（持续跑中）**：`scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连；限速/限量/软预算/**进度表断点续跑**/**单实例锁**）。目标 = 有年报的 959 只；**已完成 115 只 / 3547 行**（cash 785→3623+、capex 762→3281+、notice 261→912+；可估值股票 36→122+）。**2026-10-24 16:08 起以 `--until-done` 常驻持续跑**（limit 25 / sleep 0.8 / 批间 2s），实测 ≈7.5s/只、负载 0.4，预计 ~1h45m 跑完；夜间 cron 保留为兜底（锁保证不重叠）
-- [ ] **P5-2 年报历史扩到全市场**：`financial_history` 目前仅 959 只有年报（其余 ~4500 只从未采集历史财务）——需要另一条更重的慢速回填（akshare 同花顺摘要 + F10），待 P5-1 完成后再评估
+- [x] **P5-1 补充字段全量回填（2026-10-25 完成）**：`scripts/backfill_financial_extra.py`（东财 F10 资产负债表/现金流 + 主要财务指标直连；限速/限量/软预算/进度表断点续跑/单实例锁）。**生产实测 `done=959 / no_data=0 / updated_rows=19771 / remaining=0`**；覆盖 cash 18471、capex 18228、notice_date 6886、fcf 6312；可估值股票 36→**650（新 fail-closed 口径，67.8%）**。**但审计发现 29 只标 done 仍有字段缺口、进度表锁死未来年报（见 Phase 6 A2/A3）**
+- [ ] **P5-2 年报历史扩到全市场**：`financial_history` 目前仅 959 只有年报（其余 ~4500 只从未采集历史财务）——需要另一条更重的慢速回填（akshare 同花顺摘要 + F10），待 A2–A4 稳定后再评估
+
+## Phase 6 — 审计整改（2026-10-25 全量审计后）
+
+> 审计结论：功能层齐、数据层"表面齐"，但估值链路上有 4 项正在输出错误数字、3 项会在下个年报季静默失效。逐项修，一次一步。
+
+- [x] **A1 估值 fail-closed**（`367a75a`，gate 644→650）：`net_debt` 任一侧缺失返回 None（不再当 0）；`equity_per_share` 缺净负债返回 None；`sufficient` 以 `base_case` 非空为准；返回 `insufficient_reason/insufficient_text/inputs`；详情页显示具体原因（FCF 为负 / 缺净负债 / 缺股本），AI prompt 明确"不可用+原因+禁止编造 DCF"。**生产实测**：001332 由整表 `--` 改为"自由现金流为负"；600389 不再显示错误基准 3.72；600519 仍为 650.39/967.80/1523.60；959 只中可估值 650、负 FCF 201、缺 FCF 84、缺净负债 23、缺股本 1
+- [ ] **A2 修 29 只数据缺口 + 回填状态语义**：按上游补 29 只（现金/有息负债）与 `603165` 披露日；回填在任一源失败或关键字段仍 NULL 时记 `partial`，加 `--retry-partial`（现在全标 `done`，`--retry-no-data` 不会重访）。影响 6 只估值偏差 ≥5%（600389 −94.5%、600350 −84.8%、600064 −22.9%、688036 +30.4%、600461 −15.1%、002404 +9.4%）
+- [ ] **A3 修进度表与 batch_save**：`backfill_progress` 改按 `(task, code, report_date)`（临时库实证：标记 done 后插入 2026 年报仍 `remaining=[]`）；`batch_save` 改 upsert 保留扩展字段（临时库实证：只带 `roe` 重存会清空 `cash/capex/notice_date`）。两者必须同批上线
+- [ ] **A4 加深历史覆盖**：mainfin 加 `REPORT_TYPE="年报"` 过滤（`ps=30` 混季报只有 7 年；加过滤 600519 返回 28 年 1998–2025），深回填 2016–2018（现在 notice 仅 43/2714）
+- [ ] **A5 价格域扩到全市场 + 回测有效域**：`kline_daily` 现仅 49 只（2026-10-23 有价 24 只），2016–2019 可选域 = 0，2016/2020 起跑均 −6.5%；`backfill_price_history.target_codes()` 需去掉"只取 25 候选+观察池+钉选"；回测输出 `first_eligible_date`/`effective_years`/CAGR
+- [ ] **A6 估值分位去前视**：`valuation_percentile._report_at` 去掉 `notice_date → report_date` 回退；历史 BVPS 用当年股本；接入 UI 或从 P0-5 交付声明中撤回
+- [ ] **A7 门禁离线化**：`tests/collector/test_akshare_fetcher.py` 3 个 live 网络用例打桩，另设 opt-in 集成检查
+- [ ] **A8 文档数字校正**：P0-5 "已交付"、回测 "+45%"、"全市场估值"等表述逐条对齐实测
 
 ## 已完成（本文件历史）
 
