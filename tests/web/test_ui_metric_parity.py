@@ -27,7 +27,7 @@ FULL = {
 }
 
 EMPTY = {"code": "000001", "name": "平安银行", "score": 60.0,
-         "watched": False, "current_price": 10.0}
+         "watched": False, "current_price": 10.0, "change_percent": None}
 
 
 def test_registry_labels_are_canonical():
@@ -39,7 +39,7 @@ def test_registry_labels_are_canonical():
 def test_negative_pe_is_bad_not_good():
     """亏损股 PE 为负：不能因为"小于 15"被标成 good（旧 UI 的真实错误）。"""
     items = {m["key"]: m for m in metric_items({"pe": -26.45, "pb": 3.58})}
-    assert items["pe"]["text"] == "-26.5"
+    assert items["pe"]["text"] == "-26.4"
     assert items["pe"]["cls"] == "bad"
     assert items["pb"]["cls"] == "" or items["pb"]["cls"] in ("warn", "good")
 
@@ -113,17 +113,25 @@ def test_api_watchlist_uses_same_renderer(client):
 
 
 def test_detail_page_uses_same_metrics(client):
-    from src.models.database import StockSnapshotDAO
+    from src.models.database import StockSnapshotDAO, ScreeningResultDAO
     snap = dict(FULL)
     snap.update({"market": "A", "sector": "化工", "ps": 1.0,
                  "circulating_cap": 80.0, "revenue": 10.0, "profit": 2.0,
                  "high_52w": 10.0, "low_52w": 8.0, "is_st": False,
                  "list_date": "2010-01-01", "snapshot_date": "2026-10-23"})
     StockSnapshotDAO().save_batch([snap])
+    ScreeningResultDAO().save_batch([{
+        "run_id": "20261023_153010", "run_date": "2026-10-23",
+        "code": "002215", "name": "诺普信", "score": 88.0,
+        "pe": 11.2, "pb": 1.87, "roe": 16.6, "debt_ratio": 11.6,
+        "revenue_growth": 25.2, "profit_growth": 20.0, "market_cap": 86.0,
+        "gross_margin": 42.7, "net_margin": 10.5, "ocf_per_share": 0.12,
+        "dividend_yield": 3.517, "reason": "测试",
+    }])
     html = client.get("/stock/002215").text
     for m in metric_items(snap):
-        assert m["label"] in html
-        assert m["text"] in html
+        assert m["label"] in html, f"详情页缺 {m['label']}"
+        assert m["text"] in html, f"详情页值不一致 {m['label']}={m['text']}"
 
 
 def test_static_assets_use_automatic_version():

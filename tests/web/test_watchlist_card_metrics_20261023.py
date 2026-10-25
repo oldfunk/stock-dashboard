@@ -84,14 +84,18 @@ def test_api_watchlist_falls_back_to_snapshot(client):
     assert item.get("gross_margin") is None  # snapshot 无此列，保持 None
 
 
-def test_watchlist_js_renders_metric_color_classes():
-    """watchlist.js 指标值必须带 good/warn/bad 类（与候选卡同口径）"""
-    js = (TPL_DIR / "static" / "watchlist.js").read_text(encoding="utf-8")
-    assert "s.gross_margin >= 30 ? 'good' : (s.gross_margin >= 15 ? 'warn' : 'bad')" in js
-    assert "s.net_margin >= 15 ? 'good' : (s.net_margin >= 5 ? 'warn' : 'bad')" in js
-    assert "s.ocf_per_share > 0 ? 'good' : 'bad'" in js
-    assert "s.roe >= 15 ? 'good' : 'warn'" in js
-    assert "s.pe < 15 ? 'good' : (s.pe < 20 ? 'warn' : '')" in js
+def test_metric_thresholds_live_in_registry():
+    """好/中/差阈值只在 stock_metrics；模板与 JS 不再各写一套。"""
+    from src.web.stock_metrics import spec_for, tone_for
+    assert tone_for(spec_for("gross_margin"), 31) == "good"
+    assert tone_for(spec_for("gross_margin"), 16) == "warn"
+    assert tone_for(spec_for("gross_margin"), 5) == "bad"
+    assert tone_for(spec_for("net_margin"), 16) == "good"
+    assert tone_for(spec_for("net_margin"), 6) == "warn"
+    assert tone_for(spec_for("ocf_per_share"), 0.1) == "good"
+    assert tone_for(spec_for("roe"), 16) == "good"
+    assert tone_for(spec_for("pe"), 11) == "good"
+    assert tone_for(spec_for("pe"), -1) == "bad"
 
 
 def test_watchlist_js_uses_server_rendered_metrics():

@@ -633,6 +633,12 @@ async def stock_detail(request: Request, code: str):
         model_valuation = None
 
     # 指标单元格统一由 stock_metrics 生成（与卡片同一口径）
+    # 毛利率/净利率/OCF 只在 screening_result 里，详情页也必须补全，不能比卡片少指标
+    if sr_latest:
+        for k in ("gross_margin", "net_margin", "ocf_per_share",
+                  "dividend_yield", "dividend_years", "dividend_year"):
+            if snapshot.get(k) is None and sr_latest.get(k) is not None:
+                snapshot[k] = sr_latest[k]
     snapshot["metrics"] = metric_items(snapshot)
 
     # 9b. 历史估值分位（P0-5）：无 K 线/无披露日时返回 {}，页面不显示该段
@@ -1899,6 +1905,11 @@ async def watchlist_detail(request: Request, code: str):
                     _sector, snapshot["pe"], "pe")
 
     page_title = f"{snapshot.get('name', code)} {code} - 钉选股分析"
+    if sr_latest:
+        for k in ("gross_margin", "net_margin", "ocf_per_share",
+                  "dividend_yield", "dividend_years", "dividend_year"):
+            if snapshot.get(k) is None and sr_latest.get(k) is not None:
+                snapshot[k] = sr_latest[k]
     snapshot["metrics"] = metric_items(snapshot)
 
     return templates.TemplateResponse(request, "watchlist_detail.html", {
