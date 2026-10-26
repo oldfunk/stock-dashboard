@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.5,<3",
     "sse-starlette>=2.0,<3",
     "markdown>=3.5",
+    "duckdb>=1.1,<2",
 ]
 
 [project.scripts]
