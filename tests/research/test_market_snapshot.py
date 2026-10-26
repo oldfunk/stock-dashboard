@@ -21,7 +21,8 @@ def _seed_kline(days):
     for day in days:
         dao.upsert_many("600519", [{
             "trade_date": day, "open": 1.0, "close": 1.0, "high": 1.0,
-            "low": 1.0, "volume": 1.0, "amount": 1e8, "turnover": 0.1}])
+            "low": 1.0, "volume": 1.0, "amount": 1e8, "turnover": 0.1,
+            "close_adj": 1.0}])
 
 
 def test_snapshot_range_writes_five_days(db):
@@ -94,3 +95,43 @@ def test_dry_run_does_not_write(db):
     assert result["dry_run"] is True
     assert result["dates"] == 5
     assert get_vector(DAYS[0]) is None
+
+
+def test_low_coverage_marks_invalid_and_records_quality(db):
+    """R1-5：覆盖率不足 -> invalid + 写质量记录 + 不生成叙事。"""
+    from src.research.llm.narrative import should_generate_narrative
+    from src.research.market_state import get_vector, snapshot_range
+    _seed_kline(["2026-10-26"])
+    snapshot_range("2026-10-26", "2026-10-26")
+    vector = get_vector("2026-10-26")
+    assert vector.status == "invalid"
+    assert vector.coverage < 0.8
+    assert not should_generate_narrative(vector)
+    with db_mod.db_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM data_quality_daily "
+            "WHERE dataset = 'market_state_daily' AND trade_date = '2026-10-26'"
+        ).fetchone()
+    assert row is not None and row["status"] == "invalid"
+
+
+def test_high_coverage_generates_narrative(db):
+    from src.research.llm.narrative import should_generate_narrative
+    from src.research.market_state import get_vector, snapshot_range
+
+    def snap(code, pe):
+        return {"code": code, "name": "X", "market": "A", "sector": "s", "pe": pe,
+                "pb": 1.0, "ps": 1.0, "market_cap": 1.0, "circulating_cap": 1.0,
+                "roe": 10.0, "revenue": 1.0, "revenue_growth": 5.0,
+                "profit": 1.0, "profit_growth": 5.0, "debt_ratio": 30.0,
+                "current_price": 1.0, "high_52w": 1.0, "low_52w": 1.0,
+                "is_st": False, "list_date": "2010-01-01",
+                "snapshot_date": "2026-10-26"}
+
+    db_mod.StockSnapshotDAO().save_batch([snap("600519", 20.0), snap("000001", 10.0)])
+    _seed_kline(["2026-10-23", "2026-10-26"])
+    snapshot_range("2026-10-26", "2026-10-26")
+    vector = get_vector("2026-10-26")
+    assert vector.status == "pass"
+    assert vector.coverage >= 0.8
+    assert should_generate_narrative(vector)

@@ -34,6 +34,7 @@ class StateField:
     missing_policy: str = "null"
     unit: str = ""
     direction: str = "neutral"
+    implemented: bool = True   # False = 已注册但尚未实现（不计入覆盖率分母）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -75,7 +76,7 @@ def default_fields() -> list[StateField]:
                    "stock_snapshot.pb", "null", "x", "lower_better"),
         StateField("pe_percentile_5y", "valuation",
                    "当前 PE 在过去 5 年的分位", "kline_daily.close_raw + financial_history",
-                   "null", "%", "lower_better"),
+                   "null", "%", "lower_better", implemented=False),
         # 基本面
         StateField("roe_median", "fundamentals", "全市场 ROE 中位数",
                    "stock_snapshot.roe", "null", "%", "higher_better"),
@@ -222,9 +223,50 @@ def compute_vector(trade_date: str,
             (trade_date,)).fetchone()
         _set("total_turnover_yi",
              round(row["s"] / 1e8, 4) if row["s"] is not None else None)
+        row20 = conn.execute(
+            "SELECT AVG(s) AS a FROM (SELECT SUM(amount) AS s FROM kline_daily "
+            "WHERE trade_date <= ? GROUP BY trade_date "
+            "ORDER BY trade_date DESC LIMIT 20)", (trade_date,)).fetchone()
+        _set("avg_turnover_20d_yi",
+             round(row20["a"] / 1e8, 4) if row20["a"] is not None else None)
 
-    total = len(schema.names())
-    coverage = round((total - len(missing)) / total, 4) if total else 0.0
+    # 广度：MA20/MA60 占比、涨跌比（窗口 61 个交易日）
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT code, trade_date, close_adj FROM ("
+            "  SELECT code, trade_date, close_adj, ROW_NUMBER() OVER "
+            "    (PARTITION BY code ORDER BY trade_date DESC) AS rn "
+            "  FROM kline_daily WHERE close_adj IS NOT NULL AND trade_date <= ?"
+            ") WHERE rn <= 61", (trade_date,)).fetchall()
+    series: dict[str, list[tuple[str, float]]] = {}
+    for r in rows:
+        series.setdefault(r["code"], []).append((r["trade_date"], r["close_adj"]))
+    above20 = above60 = adv = dec = total = 0
+    for pts in series.values():
+        pts.sort()   # 窗口查询是 DESC，这里升序以便取最新
+        if len(pts) < 2 or pts[-1][0] != trade_date:
+            continue
+        total += 1
+        last = pts[-1][1]
+        ma20 = sum(p[1] for p in pts[-20:]) / min(20, len(pts))
+        ma60 = sum(p[1] for p in pts[-60:]) / min(60, len(pts))
+        if last > ma20:
+            above20 += 1
+        if last > ma60:
+            above60 += 1
+        if last > pts[-2][1]:
+            adv += 1
+        elif last < pts[-2][1]:
+            dec += 1
+    _set("pct_above_ma20", round(100.0 * above20 / total, 4) if total else None)
+    _set("pct_above_ma60", round(100.0 * above60 / total, 4) if total else None)
+    _set("adv_dec_ratio", round(adv / dec, 4) if dec else None)
+
+    # 覆盖率：只算"已实现"字段（未实现的不计入分母）
+    implemented = [n for n in schema.names()
+                   if schema.get(n) and schema.get(n).implemented]
+    present = [n for n in implemented if n in metrics]
+    coverage = round(len(present) / len(implemented), 4) if implemented else 0.0
     status = "invalid" if fail_closed_missing else "pass"
     return MarketStateVector(
         trade_date=trade_date, metrics=metrics, missing=missing,
@@ -234,6 +276,32 @@ def compute_vector(trade_date: str,
 
 
 # ── 快照持久化（R1-2） ──────────────────────────────────────────────────────
+
+COVERAGE_MIN = 0.8   # 状态向量覆盖率下限（低于则 invalid，不生成叙事）
+
+
+def assess_vector(vector: MarketStateVector,
+                  coverage_min: float = COVERAGE_MIN) -> MarketStateVector:
+    """按覆盖率判定状态：不足则 invalid（fail-closed，不生成叙事）。"""
+    vector.quality["coverage_min"] = coverage_min
+    if vector.coverage < coverage_min:
+        vector.status = "invalid"
+        vector.quality["fail_closed_missing"] = vector.fail_closed_missing
+    return vector
+
+
+def record_state_quality(vector: MarketStateVector,
+                         dao: ResearchDAO | None = None) -> None:
+    """把状态向量质量写 data_quality_daily（供 R0-5 质量门复用）。"""
+    dao = dao or ResearchDAO()
+    dao.insert_quality({
+        "dataset": "market_state_daily", "trade_date": vector.trade_date,
+        "coverage": vector.coverage,
+        "missing_rate": round(1.0 - vector.coverage, 4),
+        "outliers": 0, "pit_violations": 0,
+        "status": vector.status, "details": {"missing": vector.missing},
+    })
+
 
 def save_vector(vector: MarketStateVector, dao: ResearchDAO | None = None) -> None:
     dao = dao or ResearchDAO()
@@ -276,7 +344,8 @@ def snapshot_range(start: str, end: str, dry_run: bool = False,
     dates = trading_dates(start, end, dao)
     written = 0
     for day in dates:
-        vector = compute_vector(day)
+        vector = assess_vector(compute_vector(day))
+        record_state_quality(vector, dao)
         if not dry_run:
             save_vector(vector, dao)
         written += 1

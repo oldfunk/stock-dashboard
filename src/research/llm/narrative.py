@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.research.llm.validate import validate_output
-from src.research.market_state import MarketStateVector
+from src.research.market_state import COVERAGE_MIN, MarketStateVector
 from src.research.regime import RegimeResult
 
 TASK_ID = "market_summary"
@@ -39,6 +39,13 @@ class NarrativeResult:
     coverage: float = 0.0
     facts: dict[str, Any] = field(default_factory=dict)
     output: dict | None = None
+
+
+def should_generate_narrative(vector: MarketStateVector,
+                              coverage_min: float = COVERAGE_MIN) -> bool:
+    """覆盖率不足 / invalid / 无有效字段 -> 不生成叙事（R1-5 质量门接入）。"""
+    return (bool(vector.metrics) and vector.coverage >= coverage_min
+            and vector.status != "invalid")
 
 
 def build_facts(vector: MarketStateVector,
