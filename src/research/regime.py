@@ -20,6 +20,9 @@ class RegimeError(ValueError):
     """规则非法。"""
 
 
+MIN_RULES = 2   # 至少 2 条规则有数据才给结论
+
+
 @dataclass
 class RegimeRule:
     name: str
@@ -115,6 +118,9 @@ def classify_regime(vector: MarketStateVector,
                         "field": rule.field, "value": value,
                         "signal": signal})
     if evaluated == 0:
+        return RegimeResult(vector.trade_date, "unknown", 0.0, drivers, missing)
+    # 证据不足（<2 条规则）不给结论，避免单票高置信误导
+    if evaluated < MIN_RULES:
         return RegimeResult(vector.trade_date, "unknown", 0.0, drivers, missing)
     regime = "risk_on" if score >= 1 else ("risk_off" if score <= -1 else "neutral")
     return RegimeResult(vector.trade_date, regime,

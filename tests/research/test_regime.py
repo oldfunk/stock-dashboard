@@ -55,10 +55,19 @@ def test_classify_neutral_on_mixed_signals():
 
 def test_missing_fields_are_not_guessed():
     result = classify_regime(_vector({"pct_above_ma60": 0.8}))
-    assert result.regime == "risk_on"
+    # 仅 1 条规则有数据 -> 证据不足，不给结论（不猜）
+    assert result.regime == "unknown"
+    assert result.confidence == 0.0
     assert set(result.missing_fields) == {
         "pe_percentile_5y", "volatility_20d", "value_vs_growth"}
     assert len(result.drivers) == 1
+
+
+def test_two_rules_suffice():
+    result = classify_regime(_vector({
+        "pct_above_ma60": 0.8, "pe_percentile_5y": 0.1}))
+    assert result.regime == "risk_on"
+    assert result.confidence == 1.0
 
 
 def test_all_missing_is_unknown():
