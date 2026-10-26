@@ -107,9 +107,9 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `news_digest` | 新闻摘要 | 笔记页 | 每日 AI 日报，与复盘分开 |
 | `news_fetch_log` | 新闻采集 | 调度冷却 | 抓取尝试记录（含市场级伪代码 `__market__`） |
 | `watchlist` | 用户钉选 | 钉选 tab | 用户手工池 |
-| `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；三列价格 `close_raw`（估值）/`close_adj`（回测）/`close`（展示）+ `shares`（每日流通股本） |
+| `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；四列价格 `close_raw`（不复权，估值）/`close_adj`（后复权，回测）/`close_qfq`（前复权，子项目契约）/`close`（展示，= `close_qfq`）+ `shares`（每日流通股本） |
 | `backfill_progress` | 回填脚本 | 回填脚本 | `(task, code)` 进度 + `covered_report_date`；断点续跑/重试 |
-| `benchmark_daily` | 收益维护 | `/outcomes` | 基准指数日线（sh000300/sh000922），价格指数 |
+| `benchmark_daily` | 收益维护 | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数 |
 | `dividend_annual` | 股息维护 | 筛选/快照/AI prompt | 年报现金分红；每股/股息率/分红率，缺数据 NULL |
 | `analysis_outcome` | 收益维护 | `/outcomes` | 每条有 Signal 分析 × 基准 × horizon 的前向收益；非空后冻结 |
 | `run_log` | 编排 | 状态栏 | 每轮运行状态 |
@@ -204,3 +204,50 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 - **静态资源**：`static_url()` 按文件 mtime 自动加 `?v=`，禁止手写日期戳。
 - **防回潮**：`tests/web/test_ui_metric_parity.py` 强制三卡标签/值/缺值一致、详情页同口径、模板禁止再手写指标标签、静态版本自动生成。
 - **数据/运行源**：`RunLogDAO.get_latest_run()` 排除 `_review`，首页"上次运行/候选数"不再被周六复盘轮顶掉。
+
+## 9. 价格模型 / 主键 / 子项目数据契约（2026-10-27）
+
+> 背景：子项目 `paper-trading`（tag v0.7.2）执行侧已切"母库优先"（`config.data.daily_source=auto`），
+> 只读母库 SQLite（`mode=ro`），缺标的回退本地 akshare 前复权日线。以下契约来自子项目 Issue #4–#8。
+
+### 9.1 复权口径（`kline_daily`）
+
+| 列 | 口径 | 用途 |
+|---|---|---|
+| `close_raw` | 不复权收盘 | 估值（PE/PB 与当期 EPS/BVPS 同口径） |
+| `close_adj` | **后复权**收盘（恒正） | 回测总收益 |
+| `close_qfq` | **前复权**收盘 | 子项目契约（与其本地 akshare qfq 同口径） |
+| `close` | 展示列 = `close_qfq` | 页面展示 |
+
+- 换算：`close_qfq = close_adj × (close_raw_last / close_adj_last)`（每股一个常数缩放）。
+- 源：Sina `stock_zh_a_daily`（不复权 + 后复权各一次）；东财/腾讯为备选。
+- **契约保证**：`close_adj` 非空（stub 行已重抓补齐）；`close_qfq` 非空。
+
+### 9.2 主键与 instrument 约定
+
+- `kline_daily` 主键仍为 `(code, trade_date)`（**不改**，避免 215 万行重建）。
+- `market`（`CN`/`HK`/`US`）+ `instrument_id`（`CN:600519`）为多市场维度，索引 `(instrument_id, trade_date)`。
+- 子项目按 `code` 查询继续可用；新市场用 `instrument_id`。
+
+### 9.3 基准指数代码
+
+- `benchmark_daily.code`：`sh000300`/`sh000922`（收益验证）+ `000001`/`399001`/`399006`（子项目约定：上证综指/深证成指/创业板指）。
+- `market_index.index_code` 同时存在 `sh/sz` 前缀与纯数字两种写法。
+
+### 9.4 交易日历
+
+- `trading_calendar(market_id, trade_date, is_open)`：由 `kline_daily` 交易日回填（`is_open=1`），其余自然日 `is_open=0`。
+
+### 9.5 覆盖度
+
+- `GET /api/data/coverage`：`kline_codes / instruments / price_done / coverage` + `codes_with_null_close_adj`。
+- 回填进度见 `backfill_progress`（`task=price_history`）。
+
+### 9.6 子项目调阅接口（只读）
+
+- `/api/data/screening` `/watchlist` `/stock/{code}` `/universe/search` `/universe/size`
+- `/api/data/market_state` `/market_index` `/outcomes`
+- `/api/data/benchmark` `/benchmark/{code}` `/calendar` `/coverage`
+- `/api/data/research/hypotheses|experiments|decisions|market_states`
+- 原则：只读、稳定 JSON 契约、缺失不抛错（子项目可静默回退）。
+
