@@ -10,8 +10,15 @@ import pandas as pd
 
 from paper_trading.models import Bar
 from paper_trading.utils import get_logger
+from paper_trading.utils.timeout import call_with_timeout
 
 logger = get_logger(__name__)
+
+#: 单次 akshare 调用的硬超时（秒）。网络 stall 时宁可失败，也不能挂住
+#: cron 进程并长期持有 run_lock（止损会一起被拖死）。
+DEFAULT_CALL_TIMEOUT_SEC = 30.0
+#: 名称/日历等辅助查询可以更短：拿不到就跳过，不影响主流程。
+AUX_CALL_TIMEOUT_SEC = 20.0
 
 
 class AkshareFetcher:
@@ -53,6 +60,7 @@ class AkshareFetcher:
         adjust: str = "qfq",
         max_retries: int = 3,
         retry_delay: float = 2.0,
+        timeout_sec: float = DEFAULT_CALL_TIMEOUT_SEC,
     ) -> list[Bar]:
         """
         获取单只股票日线数据（前复权），带重试机制。
@@ -81,13 +89,22 @@ class AkshareFetcher:
                 # 1) 新浪源（稳定优先），2) 东财源 fallback
                 sina_symbol = AkshareFetcher._sina_symbol(symbol)
                 try:
-                    df = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_date,
-                                            end_date=end_date, adjust=adjust)
+                    df = call_with_timeout(
+                        lambda: ak.stock_zh_a_daily(
+                            symbol=sina_symbol, start_date=start_date,
+                            end_date=end_date, adjust=adjust),
+                        timeout_sec)
+                except TimeoutError:
+                    # 网络 stall 时换源/重试只会把持锁时间成倍拉长，直接失败
+                    raise
                 except Exception as e:
                     last_err = e
                     logger.warning(f"Sina source failed for {symbol}: {e}, fallback to eastmoney")
-                    df = ak.stock_zh_a_hist(symbol=symbol, start_date=start_date,
-                                           end_date=end_date, adjust=adjust)
+                    df = call_with_timeout(
+                        lambda: ak.stock_zh_a_hist(
+                            symbol=symbol, start_date=start_date,
+                            end_date=end_date, adjust=adjust),
+                        timeout_sec)
                 if df is None or (hasattr(df, "empty") and df.empty):
                     logger.warning(f"No data returned for {symbol}")
                     return []
@@ -101,6 +118,10 @@ class AkshareFetcher:
                 bars = AkshareFetcher._rows_to_bars(symbol, df)
                 logger.info(f"Fetched {len(bars)} bars for {symbol}")
                 return bars
+            except TimeoutError as e:
+                # 硬超时不重试：stall 的网络重试只会延长持锁时间
+                logger.error(f"Fetch {symbol} timed out after {timeout_sec:g}s: {e}")
+                raise
             except Exception as e:
                 last_err = e
                 if attempt < max_retries:
@@ -124,7 +145,7 @@ class AkshareFetcher:
 
         want = set(symbols)
         try:
-            df = ak.stock_info_a_code_name()
+            df = call_with_timeout(ak.stock_info_a_code_name, AUX_CALL_TIMEOUT_SEC)
             code_col = "code" if "code" in df.columns else df.columns[0]
             name_col = "name" if "name" in df.columns else df.columns[1]
             for _, row in df.iterrows():
@@ -137,7 +158,9 @@ class AkshareFetcher:
             if sym in out:
                 continue
             try:
-                info = ak.stock_individual_info_em(symbol=sym)
+                info = call_with_timeout(
+                    lambda s=sym: ak.stock_individual_info_em(symbol=s),
+                    AUX_CALL_TIMEOUT_SEC)
                 d = dict(zip(info["item"], info["value"]))
                 nm = d.get("股票简称")
                 if nm:

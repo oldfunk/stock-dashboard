@@ -86,5 +86,6 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
             "event_max_conditions": int(agent.get("event_max_conditions", 3)),
             "news_enabled": bool(agent.get("news_enabled", True)),
             "news_limit": int(agent.get("news_limit", 12)),
+            "news_timeout_sec": float(agent.get("news_timeout_sec", 15.0)),
         },
     }

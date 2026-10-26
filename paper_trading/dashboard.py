@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import sqlite3
 import sys
@@ -947,6 +948,21 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请求体必须是 JSON 对象")
         return data
 
+    def _same_origin(self) -> bool:
+        """写请求来源校验：浏览器跨站 POST（CSRF）默认拒绝。
+
+        同源 POST 会带 `Origin` 且 host == `Host`；非浏览器客户端
+        （curl / CLI）不带 `Origin`，放行（本机与局域网运维不受影响）。
+        """
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True
+        try:
+            host = (self.headers.get("Host") or "").split(":")[0]
+            return (urlparse(origin).hostname or "").lower() == host.lower()
+        except Exception:                       # noqa: BLE001
+            return False
+
     def _admin_ok(self, body: dict) -> bool:
         """写操作口令校验（头 X-Admin-Token 或 body.admin_token）。"""
         from paper_trading.llm import load_secrets
@@ -955,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
         if not want:
             return False  # 未配置过=未设口令，拒绝写操作，引导先保存配置
         got = (self.headers.get("X-Admin-Token") or "") or str(body.get("admin_token") or "")
-        return bool(got) and got == want
+        return bool(got) and hmac.compare_digest(got, want)
 
     def do_GET(self) -> None:  # noqa: N802
         u = urlparse(self.path)
@@ -1093,6 +1109,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         u = urlparse(self.path)
         try:
+            if not self._same_origin():
+                self._json({"ok": False, "error": "跨站请求被拒绝（Origin 与 Host 不一致）"},
+                           code=403)
+                return
             body = self._read_json()
             if u.path == "/api/schemes/active":
                 _tok_out = ""
@@ -1117,27 +1137,53 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/llm/config":
                 st0 = self._bridge().llm_status()
                 # 门禁只护「接口地址」：base_url 决定已存 Key 会被发去哪里，
-                # 换成攻击者地址 = Key 外泄，所以改地址必须口令（或凭**已存** Key 接管）。
+                # 换成攻击者地址 = Key 外泄，所以改地址必须口令，或凭**与已存一致**的
+                # API Key 接管（证明知道当前密钥，v0.6.9 起收紧）。
                 # 改模型名/厂商/Key 是低风险写操作，直接放行——面板对用户的承诺是
-                # "换模型不用重填/不用口令"，且换浏览器后第一次改模型即可领回口令
-                # （成功响应里带 admin_token），不必重输一份已经存好的 Key。
+                # "换模型不用重填/不用口令"。但这类免口令保存**不回传** admin_token：
+                # 否则任何局域网客户端改一次模型就拿到全部写权限。
                 base_in = str(body.get("base_url") or "").strip()
                 key_in = str(body.get("api_key") or "").strip()
                 base_changed = bool(base_in) and base_in != str(st0.get("base_url") or "")
-                # 接管不做"必须与已存一致"的强校验：各家 API 的 Key 字段格式差异大，
-                # 以兼容性为重（只要能填出非空 Key 就放行改地址）。
-                if st0.get("configured") and base_changed and not self._admin_ok(body) \
-                        and not key_in:
+                authenticated = self._admin_ok(body)
+                # 接管改地址必须证明知道**当前已存**的 Key（v0.6.9 起强校验）：
+                # 否则局域网内任何人随便填一个 Key 就能改地址并领走写入口令。
+                takeover_ok = bool(base_changed and key_in
+                                   and _takeover_token(body, self.secrets_path))
+                if st0.get("configured") and base_changed and not authenticated \
+                        and not takeover_ok:
                     _msg = ("口令错误（换了浏览器？）。改接口地址需要口令，"
-                            "或填写 API Key 接管；只改模型名/厂商/Key 可直接保存，无需口令"
+                            "或填写当前已存 API Key 接管；只改模型名/厂商可直接保存，无需口令"
                             if st0.get("has_key") else
                             "口令错误：当前是本地/无令牌接口，没有 Key 可用来接管。"
                             "请在原浏览器继续修改，或删除 secrets.local.json 后重新配置")
                     self._json({"ok": False, "error": _msg}, code=403)
                     return
+                # 覆盖已存 Key 也必须鉴权：否则攻击者改一个 Key，再凭该 Key
+                # 走 `_takeover_token` 领走口令（等价于任意写权限）。
+                # 首次设置 Key / 切到免令牌本地预设（清空 Key）不在此列。
+                from paper_trading.llm import TOKENLESS_PRESETS, load_secrets
+
+                existing_key = str(
+                    (load_secrets(self.secrets_path).get("provider") or {})
+                    .get("api_key") or "")
+                key_changed = bool(key_in) and key_in != existing_key
+                tokenless_preset = str(body.get("preset") or "") in TOKENLESS_PRESETS
+                if st0.get("configured") and key_changed and not authenticated \
+                        and not tokenless_preset:
+                    self._json({"ok": False, "error": (
+                        "修改 API Key 需要口令（或删除 secrets.local.json 后重配）；"
+                        "只改模型名/厂商可直接保存")}, code=403)
+                    return
+                # 口令回传口径：只改模型/Key 仍免口令，但**不再**顺手回传口令——
+                # 否则局域网内任何人一次“换模型”就能拿到写权限。只在这三种
+                # 情况回传：首次配置、调用方已持有效口令、base_url 接管成功。
+                allow_token = ((not st0.get("configured")) or authenticated
+                               or takeover_ok)
                 r = self._bridge().llm_save(
                     body.get("preset", "custom"), base_in,
-                    body.get("model", ""), key_in)
+                    body.get("model", ""), key_in,
+                    issue_token=allow_token)
                 self._json(r, code=200 if r.get("ok") else 400)
             elif u.path == "/api/agent/fire":
                 # 手动触发：立即跑指定动作，不占队列名额（交易用 force，无视已决策闸；

@@ -107,6 +107,20 @@ def test_secrets_roundtrip_masked_and_mode(tmp_path):
         assert oct(os.stat(f).st_mode & 0o777) == "0o600"
 
 
+def test_llm_save_token_only_when_explicitly_requested(tmp_path):
+    """默认不回传 admin_token（fail-closed）；CLI 本地调用才显式要。"""
+    import paper_trading.cli as hb
+
+    b = hb.TradingBridge(data_db=str(tmp_path / "d.db"),
+                        account_db=str(tmp_path / "a.db"),
+                        config_path="/nonexistent.yaml",
+                        secrets_path=str(tmp_path / "s.json"))
+    r = b.llm_save("deepseek", "https://api.deepseek.com/v1", "m", "sk-x")
+    assert r["ok"] and "admin_token" not in r
+    r2 = b.llm_save("deepseek", "", "", "", issue_token=True)
+    assert r2["ok"] and r2["admin_token"]
+
+
 def test_llm_save_merge_keeps_key(tmp_path):
     """换模型不重填 Key：空 Key=沿用；没 Key 也能先存（带提示）；换 Key 生效。"""
     import paper_trading.cli as hb

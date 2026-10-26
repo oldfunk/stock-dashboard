@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -20,6 +21,13 @@ from typing import Optional
 # 主源 + 备源（接口名在 akshare 1.18.97 上实测存在；换版本时先跑单测）
 SOURCES = (("stock_info_global_cls", "财联社电报"),
            ("stock_info_global_ths", "同花顺快讯"))
+
+#: 单次抓取的硬超时（秒）。网络 stall 时按此返回，绝不无限挂死——
+#: 母项目 gate 与生产 tick 都不能被一个连不上的新闻源卡住。
+DEFAULT_TIMEOUT_SEC = 15.0
+
+#: 超时哨兵（与任何真实返回值区分）
+_TIMEOUT = object()
 
 #: 政策关键词（只标注排序、不做过滤）。宁可漏标也不误标：像“交易所”
 #: “发布”“会议”这类高频词会把普通公告全标成政策，反而毁掉“政策排前”。
@@ -96,8 +104,33 @@ def _stale_or_empty(err: str, limit: int) -> dict:
     return {"ok": False, "available": False, "error": str(err)[:300]}
 
 
-def fetch_market_news(limit: int = 12, force: bool = False) -> dict:
-    """抓最新要闻（政策类排前）。失败不抛错：回空/回旧缓存。"""
+def _call_with_timeout(fn, timeout_sec: float):
+    """在守护线程里跑抓取：连接 stall 时按超时返回 _TIMEOUT，绝不挂死。
+
+    akshare 底层是 requests，没有逐请求 timeout 参数；连不上的环境会
+    stall 而不是快速失败，所以用线程 + join(timeout) 兜底。
+    """
+    box: dict = {}
+
+    def _run():
+        try:
+            box["value"] = fn()
+        except BaseException as e:  # noqa: BLE001 - 线程内异常带回主线程
+            box["error"] = e
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(float(timeout_sec))
+    if t.is_alive():
+        return _TIMEOUT
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def fetch_market_news(limit: int = 12, force: bool = False,
+                      timeout_sec: float = DEFAULT_TIMEOUT_SEC) -> dict:
+    """抓最新要闻（政策类排前）。失败/超时都不抛错：回空/回旧缓存。"""
     now = time.time()
     if not force and isinstance(_CACHE.get("data"), dict) \
             and now - float(_CACHE.get("at") or 0) < CACHE_TTL_SEC:
@@ -115,7 +148,9 @@ def fetch_market_news(limit: int = 12, force: bool = False) -> dict:
             errs.append(f"{label}：接口不存在")
             continue
         try:
-            df = fn()
+            df = _call_with_timeout(fn, timeout_sec)
+            if df is _TIMEOUT:
+                raise TimeoutError(f"超时（>{timeout_sec:g}s 无响应）")
             items = _norm_records(df, limit)
             if not items:
                 errs.append(f"{label}：无数据")

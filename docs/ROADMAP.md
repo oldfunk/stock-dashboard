@@ -5,7 +5,7 @@
 > 迭代时不得遗忘这里的事项；未完成的 P0 不进入下一里程碑。
 
 - 当前里程碑：**M1 已验收（2026-10-23）**：观察日全绿后按门禁在 Pi 开启引擎（本机 `engine.local.yaml`，repo 默认保持 `false`）；下一步 M1.5 除权除息自动化
-- 当前版本：v0.6.7（观察日验收 + Pi 开启引擎；离场优先闸 + 每日收盘 NAV + 方向型规则合并；双端 217 项全绿）
+- 当前版本：v0.6.9（Issue #2 跨日幂等 + 时钟注入 + 残留锁接管 + 抓取硬超时 + 日历 horizon fail-closed + 事件/引擎锁分离 + 日志轮转 + 面板接管/改 Key/CSRF 收紧；本地 242 项全绿）
 - 纪律：**M1 已验收，Pi 于 2026-10-23 开启引擎**（本机 `engine.local.yaml`；发布版 `config.yaml` 保持 `enabled: false`，防止母项目/新克隆被自动开启）
 - 相关：`README.md`（用法）、`AGENTS.md`（Agent 硬约束）、`docs/`（本文档）
 
@@ -212,3 +212,7 @@
 | 2026-10-23 | 后手 | 面板/LLM 配置 | 修「已存 Key 仍反复要求重输」：旧逻辑任何 LLM 配置写入都要浏览器口令，而口令只存 localStorage（换浏览器/换访问地址/清站点数据即丢）→ 拉模型选完保存就 403 让重输 Key。改为：**只改接口地址 `base_url` 才需要口令**（它决定已存 Key 会被发去哪里，是唯一有外泄风险的写操作），改模型名/厂商/Key 直接放行；且接管必须填**与已存一致**的 Key（乱填不再覆盖真 Key）。新增 4 项面板测试，本地 221 全绿。 |
 | 2026-10-23 | 后手 | 面板/LLM 配置（修正） | 按用户反馈调整：① 接管改地址改为**兼容优先**——接受任意非空 Key，不做“与已存一致”的强校验（各家 API 的 Key 字段差异大）；② `glm-4.5-flash` 官方列表虽无但**仍可调用**，不换模型，“不在列表”提示改为“列表可能不全”的中性说法。本地 220 全绿，Pi 已部署验证。 |
 | 2026-10-23 | v0.6.7 | 发版口径 | 按用户要求**不新增版本号**：`v0.6.7` tag 重指到包含上述 LLM 配置修复的提交（母项目尚未拉取过 v0.6.7，force-move 安全）；版本号仍为 0.6.7，tag 与 main 顶端一致。 |
+| 2026-10-23 | v0.6.7（重指） | 修母项目 Issue #1 | 母项目 `subtree pull v0.6.7` 后 gate 挂死：`run()`→`llm_context`→`fetch_market_news` 打真实 akshare 且无超时，网络 stall 时无限挂死。修复：① 抓取走守护线程 + 硬超时（`agent.news_timeout_sec`，默认 15s），超时按“回空/stale”处理，不再挂死；② `tests/conftest.py` 全局打桩 `fetch_market_news`（`test_news.py` 自行还原真函数），单测在任何网络环境下确定、离线。新增 1 项超时测试，本地 221 全绿。 |
+| 2026-10-25 | 审计修复 | 暗病审计 | 修跨日测试与账本幂等（母项目 Issue #2）：`has_operation` 同时匹配写入时间戳与 `result.date`，显式业务日（补记/测试）不再重复记 NAV；收盘计划窗口「计划已存在」分支也补记 `nav:close`（上次快照失败不再留空洞）。修时钟依赖：`tick(now=...)` 把注入时刻传给 `run()`（计划日/日亏基线/幂等查日统一），`test_tick_open_executes_today_plan` 改固定交易日、不再周末 skip；expiry 顺延测试改相对日期。运维加固：`run_lock` 检查持有者 PID+启动标识，SIGKILL/断电残留锁自动接管（Windows 不用 `os.kill(pid,0)`，避免误杀）；akshare 日线/名称/日历同步加硬超时（`utils/timeout.py`），stall 不再长期持锁；日历超出缓存 horizon 时告警（2027 源未发布的静默回退可见化）。新增 10 项回归，本地 **233** 全绿。待用户拍板：面板 token 回传口径、Pi `ma_cross` 是否 `once: true`、母项目旧 cron/DB 清理。 |
+| 2026-10-25 | v0.6.8 | 发版/安全/运维 | 按用户决策收口：① **发 v0.6.8**（不重指 v0.6.7；母项目需重新 subtree pull 该 tag 解锁 gate）；② Pi `ma_cross` **保持 `once:false`**（用户选择，接受同日多次触发，由日内 6 笔/6 万上限兜底）；③ 面板 LLM 配置**收紧口令回传**：只改模型名/厂商/Key 仍免口令，但不再回传 `admin_token`，仅首次配置、已持有效口令、`base_url` 接管成功三种情况回传（`llm_save(issue_token=...)` fail-closed 默认 False）；④ **停掉母项目旧 cron**（`*/15 16-17` 只做计划不执行），保留其代码与历史 DB，避免双交易员与 LLM 浪费。新增 2 项回归，双端 **235** 全绿。 |
+| 2026-10-26 | v0.6.9 | 审计收口 | 按用户“解决所有问题”继续收口剩余项：① **交易日历未覆盖日 fail-closed**：`calendar_covers` + `market_time` 三个窗口函数/`due_action`/`tick`/`_plan` 全部跳过（面板阶段显示“日历未覆盖”），2027 源未发布期间不再静默把未知节假日当交易日成交；② **事件复盘与引擎锁分离**：`agent event` 改用独立 `paper_trading.event.lock`（上一轮没跑完跳过本轮），不再占全局 `paper_trading.lock`，止损不再被复盘 LLM 推迟 1–3 分钟；③ **Pi 日志轮转**：`deploy/logrotate.paper-trading`（daily+5M+14 份+`copytruncate`），已装 `/etc/logrotate.d`；④ **面板写操作收口**：`base_url` 接管必须与已存 Key 一致、**覆盖已存 API Key 也需口令**（否则改 Key→凭新 Key 接管=任意写权限）、`Origin` 与 `Host` 不一致拒绝（CSRF）、口令比较改 `hmac.compare_digest`。新增 7 项回归，本地 **242** 全绿。 |

@@ -594,14 +594,35 @@ class PaperBroker:
         return bool(row)
 
     def has_operation(self, action: str, day: str) -> bool:
-        """当日是否已记录某类操作（每日一次快照的幂等标记）。"""
+        """某业务日是否已记录某类操作（每日一次快照的幂等标记）。
+
+        `day` 是**业务日期**（例如补记历史日、单测显式指定），而 `timestamp`
+        永远是写入时刻的当前时间，两者可能不是同一天。所以幂等匹配取并集：
+
+        1. `timestamp` 的日期 == day（正常当天写入，兼容旧数据）；
+        2. `result` JSON 里的 `date` == day（跨日补记，`nav:close` 写的就是它）。
+
+        只按 `timestamp` 匹配会让“day 不是今天”的写入永远查不到，重复记 NAV
+        （Issue #2：跨日必现，还阻断母项目 gate）。
+        """
+        import json as _json
+
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM op_log WHERE action = ? "
-                "AND substr(timestamp, 1, 10) = ? LIMIT 1",
-                (action, day),
-            ).fetchone()
-        return bool(row)
+            rows = conn.execute(
+                "SELECT timestamp, result FROM op_log WHERE action = ?", (action,)
+            ).fetchall()
+        for ts, result in rows:
+            if str(ts or "")[:10] == day:
+                return True
+            if not result:
+                continue
+            try:
+                data = _json.loads(result)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict) and str(data.get("date") or "") == day:
+                return True
+        return False
 
     def log_operation(
         self,

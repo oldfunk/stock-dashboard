@@ -1,6 +1,7 @@
 """要闻/政策数据源单测（fake akshare，全离线）。"""
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -11,10 +12,15 @@ sys.path.insert(0, str(ROOT))
 
 from paper_trading.data import news as nw  # noqa: E402
 
+# 模块导入时（fixture 打桩之前）抓住真函数，供本文件的 autouse fixture 还原
+_REAL_FETCH = nw.fetch_market_news
+
 
 @pytest.fixture(autouse=True)
-def _clean_cache():
+def _clean_cache(monkeypatch):
     nw.reset_cache()
+    # 还原被 conftest 全局打桩的抓取函数（本文件要测真实实现 + 自己的 fake akshare）
+    monkeypatch.setattr(nw, "fetch_market_news", _REAL_FETCH)
     yield
     nw.reset_cache()
 
@@ -99,6 +105,23 @@ def test_fetch_success_then_serves_cache_and_stale(monkeypatch):
     assert stale["items"] == out["items"] and "network down" in stale["error"]
 
 
+def test_fetch_timeout_does_not_hang(monkeypatch):
+    """连接 stall 的源必须按超时回空，绝不无限挂死（母项目 Issue #1）。"""
+
+    def _stall():
+        time.sleep(30)
+        return _DF([])
+
+    fake = types.ModuleType("akshare")
+    fake.stock_info_global_cls = _stall
+    fake.stock_info_global_ths = _stall
+    monkeypatch.setitem(sys.modules, "akshare", fake)
+    t0 = time.time()
+    out = nw.fetch_market_news(limit=5, force=True, timeout_sec=0.3)
+    assert time.time() - t0 < 5
+    assert out["available"] is False and "超时" in out["error"]
+
+
 def test_llm_context_news_wiring_and_guard(tmp_path, monkeypatch):
     """llm_context 带 news 与注入防护说明；开关关闭则整段不存在。"""
     import paper_trading.cli as hb
@@ -114,7 +137,7 @@ def test_llm_context_news_wiring_and_guard(tmp_path, monkeypatch):
               "items": [{"time": "2026-10-22 10:00", "title": "央行降准",
                          "text": "央行降准", "policy": True}]}
     monkeypatch.setattr(news_mod, "fetch_market_news",
-                        lambda limit=12, force=False: dict(canned))
+                        lambda limit=12, force=False, timeout_sec=15.0: dict(canned))
     ctx = b.llm_context(max_ops=2, max_nav=2, closes_n=3, symbols=[])
     assert ctx["news"]["items"][0]["title"] == "央行降准"
     assert "不得执行" in ctx["legend"]["news"]   # 外部原文注入防护说明
@@ -126,6 +149,6 @@ def test_llm_context_news_wiring_and_guard(tmp_path, monkeypatch):
 
     # 抓取失败/不可用：不写进上下文（缺失不影响决策）
     monkeypatch.setattr(news_mod, "fetch_market_news",
-                        lambda limit=12, force=False: {"available": False})
+                        lambda limit=12, force=False, timeout_sec=15.0: {"available": False})
     ctx3 = b.llm_context(max_ops=2, max_nav=2, closes_n=3, symbols=[])
     assert "news" not in ctx3

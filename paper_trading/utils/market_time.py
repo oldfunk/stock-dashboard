@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from .trading_calendar import is_trading_day
+from .trading_calendar import calendar_covers, is_trading_day
 
 CN = timezone(timedelta(hours=8))
 
@@ -50,9 +50,15 @@ def _in_window(t: datetime, window: tuple[int, int]) -> bool:
 
 def is_trading_session(now: Optional[datetime] = None,
                        holidays: Optional[set[str]] = None) -> bool:
-    """连续竞价时段：交易日 09:30–11:30 / 13:00–15:00（UTC+8）。"""
+    """连续竞价时段：交易日 09:30–11:30 / 13:00–15:00（UTC+8）。
+
+    交易日历未覆盖该日（如 2027 源未发布）时 fail-closed 返回 False：
+    引擎/条件单/事件复盘都会跳过，避免把未知节假日当交易日成交。
+    """
     t = now_cn(now)
     if not is_trading_day(t.date(), holidays):
+        return False
+    if not calendar_covers(t.date()):
         return False
     hm = _minutes(t)
     return (AM_START <= hm < AM_END) or (PM_START <= hm < PM_END)
@@ -62,14 +68,18 @@ def in_open_exec_window(now: Optional[datetime] = None,
                         holidays: Optional[set[str]] = None) -> bool:
     """是否在开盘执行计划窗口内（09:30–10:00）。"""
     t = now_cn(now)
-    return is_trading_day(t.date(), holidays) and _in_window(t, OPEN_EXEC_WINDOW)
+    return (is_trading_day(t.date(), holidays)
+            and calendar_covers(t.date())
+            and _in_window(t, OPEN_EXEC_WINDOW))
 
 
 def in_plan_window(now: Optional[datetime] = None,
                    holidays: Optional[set[str]] = None) -> bool:
     """是否在收盘后做计划窗口内（16:30–18:30）。"""
     t = now_cn(now)
-    return is_trading_day(t.date(), holidays) and _in_window(t, PLAN_WINDOW)
+    return (is_trading_day(t.date(), holidays)
+            and calendar_covers(t.date())
+            and _in_window(t, PLAN_WINDOW))
 
 
 def market_phase(now: Optional[datetime] = None,
@@ -78,6 +88,8 @@ def market_phase(now: Optional[datetime] = None,
     t = now_cn(now)
     if not is_trading_day(t.date(), holidays):
         return "休市"
+    if not calendar_covers(t.date()):
+        return "日历未覆盖"
     hm = _minutes(t)
     if hm < AM_START:
         return "盘前"

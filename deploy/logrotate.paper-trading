@@ -1,0 +1,20 @@
+# paper-trading 日志轮转（Pi）
+# 安装：sudo cp deploy/logrotate.paper-trading /etc/logrotate.d/paper-trading
+# 校验：sudo logrotate -d /etc/logrotate.d/paper-trading   （dry-run，不切割）
+# cron 用 `>> file.log` 追加，进程一直持有 fd，所以必须 copytruncate：
+# 复制后清空原文件，进程继续写，不会因改名丢失输出。
+/home/pi/paper-trading/*.log {
+    # dashboard.log 由 root 身份的 systemd 服务直接写入，必须用 root 才能 copytruncate；
+    # agent/engine 是 pi 写入，root 也能安全复制清空。
+    su root root
+    daily
+    rotate 14
+    size 5M
+    compress
+    delaycompress
+    copytruncate
+    missingok
+    notifempty
+    dateext
+    dateformat -%Y%m%d
+}

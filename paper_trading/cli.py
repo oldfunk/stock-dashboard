@@ -607,11 +607,16 @@ class TradingBridge:
         return public_provider_view(self.secrets_path)
 
     def llm_save(self, preset: str = "custom", base_url: str = "",
-                 model: str = "", api_key: str = "") -> dict:
+                 model: str = "", api_key: str = "",
+                 issue_token: bool = False) -> dict:
         """保存厂商配置（合并语义：Key/地址留空=沿用已存值，不会被洗掉）。
 
         本地/局域网接口（Ollama、LM Studio、vLLM、自建网关）不需要令牌：
         这类预设允许空 Key，并且会清掉之前保存的云端 Key（不把旧 Key 发到别的机器）。
+
+        `issue_token`：是否在响应里回传面板口令。默认 **False**（fail-closed）：
+        HTTP 面板只改模型/Key 时不应顺手把口令发给可能未鉴权的调用方；
+        只有 CLI 本地调用、首次配置、已持有效口令、或 base_url 接管时才显式传 True。
         """
         from urllib.parse import urlparse
 
@@ -649,10 +654,10 @@ class TradingBridge:
         view = public_provider_view(self.secrets_path)
         self.broker.log_operation("llm:config", {"preset": preset, "model": view["model"]},
                                   True, {"base_url": base_url}, None, None)
-        # 口令仅在此处返回一次（落盘+本次回显），日志与常规回显均不含它
-        out = {"ok": True,
-               "admin_token": _load(self.secrets_path).get("admin_token", ""),
-               **view}
+        # 口令仅在显式允许时返回（首次配置/已鉴权/接管），日志与常规回显均不含它
+        out = {"ok": True, **view}
+        if issue_token:
+            out["admin_token"] = _load(self.secrets_path).get("admin_token", "")
         if warning:
             out["warning"] = warning
         return out
@@ -775,7 +780,9 @@ class TradingBridge:
                 from paper_trading.data.news import fetch_market_news
 
                 news = fetch_market_news(
-                    limit=int(getattr(ag, "news_limit", 12) or 12))
+                    limit=int(getattr(ag, "news_limit", 12) or 12),
+                    timeout_sec=float(getattr(ag, "news_timeout_sec", 15.0)
+                                      or 15.0))
                 if news.get("available"):
                     out["news"] = news
         except Exception:
@@ -900,6 +907,18 @@ def design_conditions(bridge, orders, *, pool_from: str = "auto",
                else "模型给的条件全部未通过校验（见 rejected）")
         return False, data, why
     return True, data, ""
+
+
+def _event_lock_path(lock_file: str) -> str:
+    """事件复盘专用锁：与全局下单锁分离。
+
+    复盘最长会调 LLM（默认 120s×重试），若与引擎共用 `run_lock`，
+    事件期间引擎每分钟拿不到锁 → 止损被推迟 1–3 分钟。复盘只写条件单、
+    不下单，因此给它一把独立锁；全局锁只保留给会下单的入口
+    （sync/run/buy/sell/tick 执行/面板 fire）。
+    """
+    p = Path(lock_file)
+    return str(p.with_name(p.stem + ".event.lock"))
 
 
 def main() -> None:
@@ -1376,7 +1395,8 @@ def main() -> None:
                 else:
                     if args.api_key:
                         logger.warning("Key 经命令行传入会留在 shell 历史里，敏感环境请改用面板设置页")
-                    r = bridge.llm_save(args.preset, args.base_url, args.model, args.api_key)
+                    r = bridge.llm_save(args.preset, args.base_url, args.model,
+                                        args.api_key, issue_token=True)
                     emit(r, ok=r.get("ok", False), error=r.get("error"))
                     if not r.get("ok"):
                         sys.exit(3)
@@ -1450,7 +1470,9 @@ def main() -> None:
                 from paper_trading.agent.events import run_event_review
 
                 syms, note, _cands, _picks_on = _resolve_syms(bridge, args)
-                with run_lock(args.lock_file):
+                # 独立事件锁：上一轮复盘（含 LLM）还在跑就跳过本轮，
+                # 不占全局下单锁——否则引擎每分钟都被挡在门外。
+                with run_lock(_event_lock_path(args.lock_file), timeout=5.0):
                     res = run_event_review(bridge, syms, dry_run=args.dry_run,
                                            force=args.force)
                 res["pool_source"] = note

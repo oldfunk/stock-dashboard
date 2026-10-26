@@ -22,7 +22,9 @@ if TYPE_CHECKING:
 from paper_trading.agent.prompts import TRADER_SYSTEM, USER_TMPL
 from paper_trading.agent.runtime import due_action
 from paper_trading.utils.market_time import in_open_exec_window
-from paper_trading.utils.trading_calendar import is_trading_day, next_trading_day
+from paper_trading.utils.trading_calendar import (
+    calendar_covers, is_trading_day, next_trading_day,
+)
 
 
 @dataclass
@@ -52,6 +54,7 @@ class AgentConfig:
     # 要闻/政策快讯：给模型判断“催化”用（外部原文，仅作信息；失败回空）
     news_enabled: bool = True
     news_limit: int = 12        # 进 prompt 的条数上限（政策类排前）
+    news_timeout_sec: float = 15.0  # 抓取硬超时：连不上的源按超时回空，不挂死
 
 
 def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
@@ -147,15 +150,16 @@ class AgentTrader:
         self.bridge = bridge
         self.cfg = cfg or AgentConfig()
 
-    def _today_ops(self) -> list[dict]:
+    def _today_ops(self, day: Optional[str] = None) -> list[dict]:
         """今日全量流水（按日期查，不用最近 N 条窗口——窗口会被面板问答挤爆）。"""
-        return self.bridge.broker.get_op_log_day(datetime.now().date().isoformat())
+        day = day or datetime.now().date().isoformat()
+        return self.bridge.broker.get_op_log_day(day)
 
-    def _live_runs_today(self) -> list[str]:
+    def _live_runs_today(self, day: Optional[str] = None) -> list[str]:
         """今日实盘实质决策时刻表（HH:MM；试运行/dry 不计入，不消耗定时次数）。"""
-        today = datetime.now().date().isoformat()
+        today = day or datetime.now().date().isoformat()
         out: list[str] = []
-        for o in self._today_ops():
+        for o in self._today_ops(today):
             if o["action"] != "ai:decide" or not o["ok"]:
                 continue
             if str(o["timestamp"])[:10] != today:
@@ -482,10 +486,22 @@ class AgentTrader:
         except Exception:                      # noqa: BLE001 - 日历不可用按周末跳过
             _holidays = set()
         plan_date = next_trading_day(base_now, _holidays).isoformat()
+        if not calendar_covers(plan_date):
+            return {"ok": False,
+                    "error": (f"交易日历未覆盖 {plan_date}（缓存 max_date），"
+                              "先运行 calendar sync；未覆盖日不做计划"),
+                    "timestamp": now, "symbols": symbols}
         if not force:
             existing = b.broker.get_pending_plan(plan_date)
             if existing:
                 logger.info(f"AI plan already exists for {plan_date}, skip")
+                # 计划已存在也要补记当日收盘 NAV：快照可能在上一次 tick 失败，
+                # 或计划由别的入口写入，否则早退会让 NAV 序列整天留空洞。
+                # 数据已在计划生成时定稿过，这里直接用最新收盘价即可。
+                if require_today:
+                    self._snapshot_close_nav(
+                        self._decision_symbols(symbols),
+                        base_now.date().isoformat())
                 return {"ok": True, "skipped": "plan-exists",
                         "plan_id": existing.get("id"), "plan_date": plan_date,
                         "timestamp": now, "symbols": symbols}
@@ -617,12 +633,18 @@ class AgentTrader:
         if not is_trading_day(t):
             return {"ok": True, "skipped": "not-trading-day",
                     "timestamp": t.isoformat(), "symbols": symbols}
+        if not calendar_covers(t.date()):
+            # 日历缓存覆盖不到（如 2027 源未发布）：宁可停一天，也不能
+            # 把未知节假日当交易日执行计划/触发引擎。
+            return {"ok": True, "skipped": "calendar-horizon",
+                    "timestamp": t.isoformat(), "symbols": symbols}
         pending = b.broker.get_pending_plan(today)
         action = due_action(t, pending_plan=bool(pending), force=force)
         if action == "execute_plan":
             logger.info(f"Runtime open execution: plan {pending['id']}")
             res = self.run(symbols, candidates=candidates,
-                           pool_source=pool_source, execute_only=True)
+                           pool_source=pool_source, execute_only=True,
+                           now=t)
             res["runtime_action"] = "open_exec"
             return res
         if action == "plan":
@@ -645,24 +667,30 @@ class AgentTrader:
             ignore_schedule: bool = False,
             sched_root=None,
             slot: Optional[str] = None,
-            execute_only: bool = False) -> dict:
+            execute_only: bool = False,
+            now: Optional[datetime] = None) -> dict:
         """三态：plan_only 只做计划；execute_only 只执行待执行计划；默认现决现执。
 
         旧 `ignore_schedule/sched_root` 参数保留只为 CLI 兼容，已不参与任何闸门。
         手动 run 不再被 strategy.local.yaml 的旧队列拦住；`execute_only` 给开盘
         tick 使用，没有当天计划时静默返回，不会临时问模型。
+
+        `now` 只给测试/补跑注入时钟：tick 判定用注入时刻后，内部执行也必须用
+        同一时刻，否则“窗口判定”和“计划日/日亏基线”会落在不同日期。
         """
         from paper_trading.utils import get_logger
 
         logger = get_logger(__name__)
         b = self.bridge
-        now = datetime.now().isoformat()
+        base_now = now or datetime.now()
+        now_iso = base_now.isoformat()
+        today_iso = base_now.date().isoformat()
         mode = "dry" if dry_run else "live"
-        today_iso = datetime.now().date().isoformat()
 
         if plan_only:
             return self._plan(symbols, candidates=candidates,
-                              pool_source=pool_source, force=force)
+                              pool_source=pool_source, force=force,
+                              now_dt=base_now)
 
         # 0. 待执行计划优先；手动 run 也可执行（不再看旧队列）。
         pending = None
@@ -670,14 +698,14 @@ class AgentTrader:
             pending = b.broker.get_executable_plan(today_iso)
         if execute_only and not pending:
             return {"ok": True, "skipped": "no-pending-plan",
-                    "timestamp": now, "symbols": symbols}
+                    "timestamp": now_iso, "symbols": symbols}
         # 现决现执的每日幂等：有计划可执行时不拦（计划本身是当天的决定）。
         if (not execute_only and not dry_run and not force and not pending
-                and self._live_runs_today()):
+                and self._live_runs_today(today_iso)):
             logger.warning("AI already decided today, skip (idempotency)")
             b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
                                    True, {"skipped": "already-decided"}, None, None)
-            return {"ok": True, "skipped": "already-decided", "timestamp": now,
+            return {"ok": True, "skipped": "already-decided", "timestamp": now_iso,
                     "symbols": symbols}
         _slot_s: Optional[str] = slot
 
@@ -709,8 +737,8 @@ class AgentTrader:
             b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
                                    False, {"skipped": "drawdown-halt",
                                            "drawdown": round(dd, 4)}, None, None)
-            return {"ok": False, "error": f"回撤熔断 {dd:.2%}", "timestamp": now}
-        dl_halt, dl = b.risk.check_daily_loss(nav.total_value, today_str(),
+            return {"ok": False, "error": f"回撤熔断 {dd:.2%}", "timestamp": now_iso}
+        dl_halt, dl = b.risk.check_daily_loss(nav.total_value, today_iso,
                                               halt_pct=self.cfg.daily_loss_halt_pct)
         if dl_halt:
             logger.error(f"Daily loss halt {dl:.2%}, AI skips")
@@ -718,19 +746,20 @@ class AgentTrader:
                                    False, {"skipped": "daily-loss-halt",
                                            "daily_loss": round(dl, 4)},
                                    None, None)
-            return {"ok": False, "error": f"日亏熔断 {dl:.2%}", "timestamp": now}
+            return {"ok": False, "error": f"日亏熔断 {dl:.2%}", "timestamp": now_iso}
 
         # 4.5 待执行计划优先（计划基于定稿数据，不受新鲜守卫限制）。
         #     pending 在第 0 步已经取好；dry-run 不消费计划。
         if not dry_run and pending:
             logger.info(f"Executing pending AI plan {pending['id']}")
-            return self._execute_plan(pending, all_bars, latest, slot=_slot_s)
+            return self._execute_plan(pending, all_bars, latest, slot=_slot_s,
+                                      exec_day=today_iso, now_iso=now_iso)
         if execute_only:
             return {"ok": True, "skipped": "no-pending-plan",
-                    "timestamp": now, "symbols": symbols}
+                    "timestamp": now_iso, "symbols": symbols}
 
         # 4.6 无新鲜数据守卫（只拦现决现执：节假日/源未更新时不问 LLM）
-        today = datetime.now().date()
+        today = base_now.date()
         if not any(bars and bars[-1].timestamp.date() >= today for bars in all_bars.values()):
             _asof = ""
             try:
@@ -743,7 +772,7 @@ class AgentTrader:
                                    True, {"skipped": "no-fresh-bars",
                                           "latest": _asof}, None, None)
             return {"ok": True, "skipped": "no-fresh-bars", "latest": _asof,
-                    "timestamp": now, "symbols": symbols}
+                    "timestamp": now_iso, "symbols": symbols}
 
         # 4.7 AI 自主提名（pass1）：候选之外允许它点名全市场任意 A 股。
         #     放在新鲜守卫之后——没新行情就不必白花一次 LLM 与补数。
@@ -795,7 +824,7 @@ class AgentTrader:
             b.broker.log_operation("ai:decide", {"symbols": symbols, "pool_source": pool_source,
                                                  "mode": mode, "n_picks": len(picks)},
                                    False, {"error": str(e)}, None, None)
-            return {"ok": False, "error": str(e), "timestamp": now}
+            return {"ok": False, "error": str(e), "timestamp": now_iso}
 
         # 6. 解析（坏 JSON 直接作废）
         plan = _extract_json(raw or "")
@@ -811,7 +840,7 @@ class AgentTrader:
             actions=actions, summary=summary, symbols=symbols,
             all_bars=all_bars, latest_prices=latest, cash=cash,
             positions=positions, nav_total=nav.total_value,
-            dry_run=dry_run, mode=mode, now=now, from_plan=False,
+            dry_run=dry_run, mode=mode, now=now_iso, from_plan=False,
             pool_source=pool_source, slot=_slot_s,
             picks=[{"symbol": p["symbol"], "name": p.get("name", "")}
                    for p in picks], conditions=conditions,
@@ -819,7 +848,8 @@ class AgentTrader:
 
     def _execute_plan(self, pending: dict, all_bars: dict,
                       latest: dict, slot: Optional[str] = None,
-                      exec_day: Optional[str] = None) -> dict:
+                      exec_day: Optional[str] = None,
+                      now_iso: Optional[str] = None) -> dict:
         """执行今日待执行计划（休盘计划开盘执行；计划标的自动补数，缺价 fail-closed）。"""
         from paper_trading.utils import get_logger
 
@@ -870,7 +900,8 @@ class AgentTrader:
             actions=actions, summary=summary, symbols=syms,
             all_bars=all_bars, latest_prices=latest, cash=cash,
             positions=positions, nav_total=nav.total_value,
-            dry_run=False, mode="live", now=datetime.now().isoformat(),
+            dry_run=False, mode="live",
+            now=now_iso or datetime.now().isoformat(),
             from_plan=True, pool_source=str(plan.get("pool_source", "config")),
             slot=slot, conditions=conditions,
             conditions_rejected=conditions_rejected)
