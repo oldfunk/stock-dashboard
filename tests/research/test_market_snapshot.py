@@ -37,11 +37,10 @@ def test_snapshot_is_reproducible(db):
     from src.research.market_state import get_vector, snapshot_range
     _seed_kline(DAYS)
     snapshot_range(DAYS[0], DAYS[-1])
-    first = get_vector(DAYS[0]).metrics
-    # 重跑覆盖（幂等），结果一致
+    first = {day: get_vector(day).metrics for day in DAYS}
+    # 重跑覆盖（幂等），每个交易日的结果一致
     snapshot_range(DAYS[0], DAYS[-1])
-    assert get_vector(DAYS[0]).metrics == first
-    assert get_vector(DAYS[-1]).metrics == first
+    assert {day: get_vector(day).metrics for day in DAYS} == first
 
 
 def test_missing_fields_are_explicit_null(db):
