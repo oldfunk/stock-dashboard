@@ -296,10 +296,27 @@ class OutcomeEventStudyRunner(ExperimentRunner):
             status=ExperimentStatus.DONE.value,
             started_at=started, finished_at=now_cn().isoformat(),
             results=results,
-            notes=("分域事件研究；样本为历史分析，**可能存在幸存者偏差**；"
-                   "CI 为按股票分块的 block bootstrap"))
+            notes=self._notes(plan, metrics))
         outcome.verdict = derive_verdict(plan, outcome)
         return outcome
+
+    @staticmethod
+    def _notes(plan: ExperimentPlan, metrics: list) -> str:
+        p = plan.params
+        with db_conn() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) AS n FROM instrument").fetchone()["n"]
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT stock_code) AS n FROM analysis_outcome "
+                "WHERE analysis_date BETWEEN ? AND ?",
+                (p.get("start_date"), p.get("end_date"))).fetchone()
+        stocks = row["n"] if row else 0
+        holdout = (f"；holdout 末尾 {p['holdout_days']} 自然日"
+                   if p.get("holdout_days") else "")
+        return (f"事件研究；样本 {stocks} 只股票 / 全市场 {total} 只"
+                f"（**可能存在幸存者偏差**：退市股无历史分析）；"
+                f"CI 为按股票分块的 block bootstrap；共 {len(metrics)} 个指标"
+                f"{holdout}；结论需按多重比较（R2-6 对照假设）解读")
 
     def _compute(self, plan: ExperimentPlan) -> list[tuple[str, float, dict]]:
         p = plan.params
@@ -316,6 +333,25 @@ class OutcomeEventStudyRunner(ExperimentRunner):
         if "sector" in splits or "size" in splits:
             _join_sector_size(rows)
 
+        # holdout：留出区间末尾 N 个自然日做样本外（预注册用）
+        holdout_days = int(p.get("holdout_days", 0))
+        est_rows = rows
+        hold_rows: list[dict] = []
+        if holdout_days > 0:
+            from datetime import date as _date, timedelta as _td
+            cutoff = (_date.fromisoformat(end) - _td(days=holdout_days)).isoformat()
+            est_rows = [r for r in rows if r["analysis_date"] <= cutoff]
+            hold_rows = [r for r in rows if r["analysis_date"] > cutoff]
+
+        out = self._tier_metrics(plan, est_rows, tiers, horizons, n_boot, splits)
+        if hold_rows:
+            out += [("holdout_" + m, v, s) for m, v, s in
+                    self._tier_metrics(plan, hold_rows, tiers, horizons, n_boot, [])]
+        return out
+
+    def _tier_metrics(self, plan: ExperimentPlan, rows: list[dict],
+                      tiers: list, horizons: list, n_boot: int,
+                      splits: list) -> list[tuple[str, float, dict]]:
         out: list[tuple[str, float, dict]] = []
         for horizon in horizons:
             suffix = f"excess_{horizon}"

@@ -105,3 +105,48 @@ def test_event_study_splits(db):
     splits = {r.metric: r for r in outcome.results}["excess_20_20~40"].splits
     assert set(splits["sector"]) == {"白酒", "银行"}
     assert set(splits["size"]) == {"large", "small"}
+
+
+def test_event_study_holdout(db):
+    from src.research.experiment import ExperimentPlan, OutcomeEventStudyRunner
+    from src.research.snapshot import create_snapshot
+    _insert([
+        {"stock": "A", "date": "2026-07-08", "mos": 30.0, "e20": 0.03, "e60": 0.05},
+        {"stock": "A", "date": "2026-09-20", "mos": 30.0, "e20": 0.10, "e60": 0.12},
+    ])
+    create_snapshot(["analysis_outcome"], snapshot_id="DS-H")
+    plan = ExperimentPlan(
+        experiment_id="E-H", hypothesis_id="H-1", data_snapshot_id="DS-H",
+        dataset="analysis_outcome", universe="A", benchmark="sh000300",
+        metric="excess_20_20~40", threshold=">0", horizon_days=20,
+        regimes=["all"], costs={}, random_seed=42, code_commit="c",
+        config_hash="h",
+        params={"start_date": "2026-07-08", "end_date": "2026-09-30",
+                "horizons": [20], "n_boot": 50, "splits": [],
+                "holdout_days": 30})
+    manifest = create_snapshot(["analysis_outcome"], snapshot_id="DS-H")
+    outcome = OutcomeEventStudyRunner().run(plan, manifest)
+    names = {r.metric for r in outcome.results}
+    assert "excess_20_20~40" in names
+    assert any(n.startswith("holdout_") for n in names)
+    assert "holdout" in outcome.notes
+
+
+def test_event_study_notes_flag_survivorship(db):
+    from src.research.experiment import ExperimentPlan, OutcomeEventStudyRunner
+    from src.research.snapshot import create_snapshot
+    _insert([{"stock": "A", "date": "2026-07-08", "mos": 30.0,
+              "e20": 0.03, "e60": 0.05}])
+    create_snapshot(["analysis_outcome"], snapshot_id="DS-N")
+    plan = ExperimentPlan(
+        experiment_id="E-N", hypothesis_id="H-1", data_snapshot_id="DS-N",
+        dataset="analysis_outcome", universe="A", benchmark="sh000300",
+        metric="excess_20_20~40", threshold=">0", horizon_days=20,
+        regimes=["all"], costs={}, random_seed=42, code_commit="c",
+        config_hash="h",
+        params={"start_date": "2026-07-08", "end_date": "2026-07-08",
+                "horizons": [20], "n_boot": 10, "splits": []})
+    manifest = create_snapshot(["analysis_outcome"], snapshot_id="DS-N")
+    outcome = OutcomeEventStudyRunner().run(plan, manifest)
+    assert "幸存者偏差" in outcome.notes
+    assert "block bootstrap" in outcome.notes
