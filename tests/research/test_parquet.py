@@ -59,7 +59,8 @@ def test_export_verify_and_query(db):
     with SnapshotReader(SNAPSHOT) as reader:
         rows = reader.query("SELECT COUNT(*) AS n FROM kline_daily")
         assert rows[0]["n"] == len(DATES) * len(TRENDS)
-        assert reader.query("SELECT DISTINCT market FROM kline_daily")[0]["market"] == "CN"
+        assert reader.query(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily")[0]["n"] == 3
 
 
 def test_verify_detects_tampering(db):
