@@ -172,6 +172,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
   - **D1**：`roe_improvement` 在 5y/10y 缺失时不再用 0 相减；0% ROE 保留为有效值（新增 2 单测）。
   - **D2**：K 线聚合/转换不再把缺失 OHLC 当 0（会画 0 元蜡烛/假跌幅）；缺 OHLC 跳过图表，缺量保持 None（新增 3 单测）。
   - **S1**：文档内网 IP 全部隐去；扫描确认无 Key/个人路径入库。
+  - **R5**：`get_connection()` 每次执行 `PRAGMA journal_mode`（需写锁、绕过 busy_timeout）导致全市场回填在 145 只处 `database is locked` 崩溃；WAL 改为只在 `init_database()` 设置一次，连接只设 busy_timeout/foreign_keys。修复后回填已续跑（150+）。
   - 其余（K 线量缺失、历史股本、金融股估值口径、enrichment 三处重复、时区、脚本 chdir）已入清单待逐项处理。
 - **文档**：README 更新项目结构/价格模型/数据源限速/脚本表/v0.6.9；architecture 新增 S11–S14、回填限速 §5.4、UI 单一事实源 §8；基线 701/242。
 - **数据任务**：价格 374/959、全市场年报 1084/5527（15:38），后台继续。

@@ -16,7 +16,7 @@
 - **B2 全市场年报（`2f3e860`，抓取中）**：mainfin 一次返回基础指标；新增 `backfill_financial_full.py`（进度/锁/限速）。目标 **4568 只**；万科 A 实测 34 年年报完整。**15:11 启动** `--until-done --sleep 0.4`，约 10s/只（约 12h）。
 - **B5 三视图统一（`58e4f74`…`15f3d7e`，gate 691）**：候选/AI 观察池/钉选共用 `_stock_card.html`；钉选由 `/api/watchlist/cards` 服务端渲染，JS 只注入；计数并入标签（候选 35 / 观察池 5 / 钉选 7）。浏览器实测三视图结构/指标/颜色一致。
 - **B4 子项目 v0.6.9（`d54d451`/`4164263`）**：Issue #2/NAV 幂等/锁隔离/面板认证/日历 fail-closed；移除 gate 临时排除，vendor **242 全绿**。
-- **B6 审计（进行中）**：新增 `docs/audit-20261026.md`；已修 D1（ROE 缺失不再用 0 造假趋势、0% 保留）、D2（K 线缺 OHLC 不再画 0 元蜡烛）、S1（文档内网 IP 隐去）；README/architecture 已更新价格模型/数据源/UI 单一事实源。
+- **B6 审计（进行中）**：新增 `docs/audit-20261026.md`；已修 D1（ROE 缺失不再用 0 造假趋势、0% 保留）、D2（K 线缺 OHLC 不再画 0 元蜡烛）、S1（文档内网 IP 隐去）、R5（WAL 只在 init 设置，修复并发回填 `database is locked`）；README/architecture 已更新价格模型/数据源/UI 单一事实源。
 - **门禁**：701 passed；vendor 242。
 - **服务**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 200；Pi 负载 <1，内存约 600/954MB，磁盘 25%。
 
