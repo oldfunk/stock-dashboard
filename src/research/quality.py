@@ -190,7 +190,11 @@ def assess_kline_daily(trade_date: str,
                     "pit_violations": 0, "details": {"codes": 0}}
         filled = conn.execute(
             "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
-            "WHERE trade_date = ? AND close_adj IS NOT NULL AND close_raw IS NOT NULL",
+            "WHERE trade_date = ? AND close_adj IS NOT NULL",
+            (trade_date,)).fetchone()["n"]
+        raw_missing = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
+            "WHERE trade_date = ? AND close_adj IS NOT NULL AND close_raw IS NULL",
             (trade_date,)).fetchone()["n"]
         outliers = conn.execute(
             "SELECT COUNT(*) AS n FROM kline_daily WHERE trade_date = ? "
@@ -198,7 +202,7 @@ def assess_kline_daily(trade_date: str,
     coverage = round(filled / total, 4)
     return {"coverage": coverage, "missing_rate": round(1 - coverage, 4),
             "outliers": outliers, "pit_violations": 0,
-            "details": {"codes": total}}
+            "details": {"codes": total, "close_raw_missing": raw_missing}}
 
 
 register_assessor("kline_daily", assess_kline_daily)
