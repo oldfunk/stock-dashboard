@@ -1001,10 +1001,12 @@ def rebuild_financial_summaries(stocks: list[dict]):
         # ROE 波动性（10年标准差，越小越稳）
         roe_volatility = _std(roe_vals_10)
 
-        # ROE 5年→10年趋势差（正值=改善）
-        roe_5y_avg = _avg(roe_vals_5) or 0
-        roe_10y_avg = _avg(roe_vals_10) or 0
-        roe_improvement = round(roe_5y_avg - roe_10y_avg, 2) if roe_10y_avg else None
+        # ROE 5年→10年趋势差（正值=改善；任一侧缺失则 None，不拿 0 冒充）
+        roe_5y_avg = _avg(roe_vals_5)
+        roe_10y_avg = _avg(roe_vals_10)
+        roe_improvement = (round(roe_5y_avg - roe_10y_avg, 2)
+                           if roe_5y_avg is not None and roe_10y_avg is not None
+                           else None)
 
         # FCF 一致性：10年中多少年年报FCF为正
         fcf_vals_10_annual = [r['fcf'] for r in reports if r.get('fcf') is not None and r['report_type'] == 'A']
@@ -1035,30 +1037,37 @@ def rebuild_financial_summaries(stocks: list[dict]):
             if earliest and earliest > 0:
                 share_dilution_10y = round((latest - earliest) / earliest * 100, 2)
 
+        gm_5 = _avg(gm_vals_5)
+        nm_5 = _avg(nm_vals_5)
+        intcov_5 = _avg(intcov_vals_5)
+        roic_5 = _avg(roic_vals_5)
+        nm_10 = _avg(nm_vals_10)
+        intcov_10 = _avg(intcov_vals_10)
+
         fs_dao.save(code, {
-            # 5年字段（不变）
-            'roe_5y_avg': round(roe_5y_avg, 2) if roe_5y_avg else None,
+            # 5年字段（不变；0 是有效值，只有 None 才写 NULL）
+            'roe_5y_avg': round(roe_5y_avg, 2) if roe_5y_avg is not None else None,
             'roe_5y_count': len(roe_vals_5),
-            'gross_margin_5y_avg': round(_avg(gm_vals_5), 2) if _avg(gm_vals_5) else None,
-            'net_margin_5y_avg': round(_avg(nm_vals_5), 2) if _avg(nm_vals_5) else None,
+            'gross_margin_5y_avg': round(gm_5, 2) if gm_5 is not None else None,
+            'net_margin_5y_avg': round(nm_5, 2) if nm_5 is not None else None,
             'ocf_5y_trend': ocf_trend,
             'ocf_latest': ocf_latest,
             'ocf_positive_years': ocf_positive,
             'debt_ratio_latest': reports[-1].get('debt_ratio') if reports else None,
             'net_profit_5y_sum': None,
-            'intcov_5y_avg': round(_avg(intcov_vals_5), 2) if _avg(intcov_vals_5) else None,
+            'intcov_5y_avg': round(intcov_5, 2) if intcov_5 is not None else None,
             'fcf_5y_sum': round(sum(fcf_vals_5), 2) if fcf_vals_5 else None,
             'share_dilution_5y': share_dilution_5y,
-            'roic_5y_avg': round(_avg(roic_vals_5), 2) if _avg(roic_vals_5) else None,
+            'roic_5y_avg': round(roic_5, 2) if roic_5 is not None else None,
 
             # 10年新增字段
-            'roe_10y_avg': round(roe_10y_avg, 2) if roe_10y_avg else None,
-            'net_margin_10y_avg': round(_avg(nm_vals_10), 2) if _avg(nm_vals_10) else None,
-            'intcov_10y_avg': round(_avg(intcov_vals_10), 2) if _avg(intcov_vals_10) else None,
+            'roe_10y_avg': round(roe_10y_avg, 2) if roe_10y_avg is not None else None,
+            'net_margin_10y_avg': round(nm_10, 2) if nm_10 is not None else None,
+            'intcov_10y_avg': round(intcov_10, 2) if intcov_10 is not None else None,
             'fcf_10y_sum': round(sum(fcf_vals_10), 2) if fcf_vals_10 else None,
             'share_dilution_10y': share_dilution_10y,
             'fcf_positive_years_10': fcf_positive_years_10,
-            'roe_volatility': round(roe_volatility, 2) if roe_volatility else None,
+            'roe_volatility': round(roe_volatility, 2) if roe_volatility is not None else None,
             'roe_improvement': roe_improvement,
             'roic_10y_avg': round(_avg(roic_vals_10), 2) if _avg(roic_vals_10) else None,
 
