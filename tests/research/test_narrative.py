@@ -68,3 +68,16 @@ def test_template_no_evidence_message():
     output = render_template_narrative(vector, _regime())
     assert output["summary"] == NO_EVIDENCE
     assert output["citations"] == []
+
+
+def test_market_summary_prompt_file_is_valid():
+    from pathlib import Path
+
+    from src.research.llm.prompts import read_prompt
+    root = Path(__file__).resolve().parents[2]
+    path = root / "research" / "prompts" / "market_summary" / "v1.md"
+    assert path.exists(), "market_summary 提示词文件缺失"
+    info = read_prompt(path)
+    assert info["task"] == "market_summary"
+    assert info["version"] == 1
+    assert info["schema"]["type"] == "object"
