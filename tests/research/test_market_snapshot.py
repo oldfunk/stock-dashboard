@@ -64,6 +64,29 @@ def test_get_and_list_vectors(db):
     assert rows[0]["trade_date"] == DAYS[-1]
 
 
+def test_no_lookahead_uses_snapshot_on_or_before_trade_date(db):
+    """前视防护：trade_date 之后快照的数据不得被使用。"""
+    from src.research.market_state import get_vector, snapshot_range
+
+    def snap(code, pe, day):
+        return {"code": code, "name": "X", "market": "A", "sector": "s", "pe": pe,
+                "pb": 1.0, "ps": 1.0, "market_cap": 1.0, "circulating_cap": 1.0,
+                "roe": 10.0, "revenue": 1.0, "revenue_growth": 5.0,
+                "profit": 1.0, "profit_growth": 5.0, "debt_ratio": 30.0,
+                "current_price": 1.0, "high_52w": 1.0, "low_52w": 1.0,
+                "is_st": False, "list_date": "2010-01-01", "snapshot_date": day}
+
+    db_mod.StockSnapshotDAO().save_batch([
+        snap("600519", 20.0, "2026-10-20"),
+        snap("000001", 99.0, "2026-10-26"),  # 晚于交易日 -> 不得用
+    ])
+    _seed_kline(["2026-10-20"])
+    snapshot_range("2026-10-20", "2026-10-20")
+    vector = get_vector("2026-10-20")
+    assert vector.quality["snapshot_date"] == "2026-10-20"
+    assert vector.metrics["pe_median"] == 20.0
+
+
 def test_dry_run_does_not_write(db):
     from src.research.market_state import get_vector, snapshot_range
     _seed_kline(DAYS)

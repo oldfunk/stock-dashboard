@@ -178,10 +178,11 @@ def compute_vector(trade_date: str,
             if name in missing:
                 missing.remove(name)
 
-    # 估值/基本面/质量：最新快照（缺失字段不补零）
+    # 估值/基本面/质量：trade_date 当日或之前最新快照（避免前视）
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot").fetchone()
+            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot "
+            "WHERE snapshot_date <= ?", (trade_date,)).fetchone()
         snapshot_date = row["d"] if row else None
         for name in ("pe_median", "pb_median", "roe_median",
                      "revenue_growth_median", "profit_growth_median",
