@@ -32,19 +32,21 @@ STANDARD_INDEXES = ("000001", "399001", "399006")
 
 
 def add_close_qfq(dry_run: bool = False) -> dict:
+    """``close_qfq`` = 前复权收盘（与 ``close`` 同口径）。
+
+    全量重写（非仅补 NULL）：重抓股票会更新 ``close``（新复权缩放），
+    ``close_qfq`` 必须同步，否则与 ``close`` 不一致。
+    """
     with db_conn() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(kline_daily)")}
         if "close_qfq" not in cols:
             if dry_run:
                 return {"would_add_column": True, "would_backfill": 0}
             conn.execute("ALTER TABLE kline_daily ADD COLUMN close_qfq REAL")
-        total = conn.execute(
-            "SELECT COUNT(*) AS n FROM kline_daily WHERE close_qfq IS NULL"
-        ).fetchone()["n"]
+        total = conn.execute("SELECT COUNT(*) AS n FROM kline_daily").fetchone()["n"]
         if dry_run:
             return {"would_add_column": False, "would_backfill": total}
-        cur = conn.execute(
-            "UPDATE kline_daily SET close_qfq = close WHERE close_qfq IS NULL")
+        cur = conn.execute("UPDATE kline_daily SET close_qfq = close")
         return {"added_column": True, "backfilled": cur.rowcount}
 
 
@@ -96,6 +98,32 @@ def backfill_benchmark(dry_run: bool = False) -> dict:
                     "VALUES (?, ?, ?)", (code, r["date"], r["current_value"]))
             inserted += len(rows)
     return {"backfilled": needed, "rows": inserted}
+
+
+def backfill_benchmark_from_source(dry_run: bool = False,
+                                   limit: int = 6000,
+                                   sleep: float = 0.5) -> dict:
+    """#5：从东财拉标准指数日线写入 benchmark_daily（000001/399001/399006）。
+
+    market_index 里这些代码只有零星几行，不够用；这里按子项目约定补全历史。
+    """
+    from src.collector.akshare_fetcher import fetch_index_kline_em
+    sources = {"000001": "sh000001", "399001": "sz399001", "399006": "sz399006"}
+    if dry_run:
+        return {"would_fetch": sources}
+    out: dict[str, int] = {}
+    for code, src in sources.items():
+        rows = fetch_index_kline_em(src, limit=limit)
+        with db_conn() as conn:
+            for r in rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO benchmark_daily "
+                    "(code, trade_date, close) VALUES (?, ?, ?)",
+                    (code, r["trade_date"], r["close"]))
+        out[code] = len(rows)
+        if sleep:
+            time.sleep(sleep)
+    return out
 
 
 def _market_index_code(code: str) -> str:
@@ -153,7 +181,7 @@ def main() -> int:
     print(json.dumps({
         "close_qfq": add_close_qfq(args.dry_run),
         "close_adj_nulls": fix_close_adj_nulls(args.dry_run, args.sleep),
-        "benchmark": backfill_benchmark(args.dry_run),
+        "benchmark": backfill_benchmark_from_source(args.dry_run),
         "trading_calendar": backfill_trading_calendar(args.dry_run),
         "coverage": coverage(),
     }, ensure_ascii=False))

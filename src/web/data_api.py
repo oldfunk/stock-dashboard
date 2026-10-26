@@ -255,6 +255,62 @@ def research_market_states(limit: int = Query(30, ge=1, le=500)) -> dict:
     return {"items": items}
 
 
+# ── 子项目数据契约（Issue #4–#8） ───────────────────────────────────────────
+
+@router.get("/benchmark")
+def benchmark_summary() -> dict:
+    """基准指数代码与覆盖（子项目按 000001/399001/399006 查询）。"""
+    rows = _rows(
+        "SELECT code, COUNT(*) AS rows, MIN(trade_date) AS first_date, "
+        "MAX(trade_date) AS last_date FROM benchmark_daily GROUP BY code "
+        "ORDER BY code")
+    return {"items": rows}
+
+
+@router.get("/benchmark/{code}")
+def benchmark_series(code: str, limit: int = Query(250, ge=1, le=6000)) -> dict:
+    rows = _rows(
+        "SELECT trade_date, close FROM benchmark_daily WHERE code = ? "
+        "ORDER BY trade_date DESC LIMIT ?", (code, limit))
+    return {"code": code, "items": rows}
+
+
+@router.get("/calendar")
+def calendar_summary() -> dict:
+    """交易日历覆盖（market_id/trade_date/is_open）。"""
+    row = _one("SELECT COUNT(*) AS rows, SUM(is_open) AS trading_days, "
+               "MIN(trade_date) AS first_date, MAX(trade_date) AS last_date "
+               "FROM trading_calendar")
+    recent = _rows(
+        "SELECT trade_date, is_open FROM trading_calendar "
+        "ORDER BY trade_date DESC LIMIT 10")
+    return {"summary": row, "recent": recent}
+
+
+@router.get("/coverage")
+def coverage() -> dict:
+    """回填覆盖度（子项目判断哪些标的可用母库）。"""
+    with db_conn() as conn:
+        codes = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily").fetchone()["n"]
+        instruments = conn.execute(
+            "SELECT COUNT(*) AS n FROM instrument").fetchone()["n"]
+        done = conn.execute(
+            "SELECT COUNT(*) AS n FROM backfill_progress "
+            "WHERE task = 'price_history' AND status = 'done'").fetchone()["n"]
+        missing_codes = conn.execute(
+            "SELECT code, COUNT(*) AS n FROM kline_daily "
+            "WHERE close_adj IS NULL GROUP BY code LIMIT 20").fetchall()
+    return {
+        "kline_codes": codes,
+        "instruments": instruments,
+        "price_done": done,
+        "coverage": round(codes / instruments, 4) if instruments else 0.0,
+        "codes_with_null_close_adj": [
+            {"code": r["code"], "rows": r["n"]} for r in missing_codes],
+    }
+
+
 def register_data_api(app) -> None:
     """把只读数据 API 挂到 FastAPI app。"""
     app.include_router(router)
