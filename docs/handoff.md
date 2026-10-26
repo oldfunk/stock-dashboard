@@ -3,10 +3,11 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-27 Research OS R1 市场状态切片完成；基线：母项目 826 / vendor 242）
+## 最后状态（2026-10-27 R1 完成 + R2-0 漏洞修补；基线：母项目 835 / vendor 242）
 
 - **Research OS R0 全部完成**（`src/research/`）：R0-1…R0-7 + R0-2a/2b/2c + R0-8…R0-13。含领域对象/状态机、15+ 研究表、注册表、快照 manifest、质量门、实验接口/回测、决策账本、Parquet+DuckDB、Repository、LLM 任务注册表、Prompt 框架、工具网关、输出校验、离线夹具、Universe/退市名单。
-- **Research OS R1 市场状态切片完成**（2026-10-27）：状态向量五块 14 字段（`market_state.py`）、`market_state_daily` 快照（`scripts/research/snapshot_market.py`）、透明 Regime 规则（`regime.py`）、市场叙事任务（`llm/narrative.py` + `research/prompts/market_summary/v1.md`）、数据质量门接入（覆盖率 <0.8 -> invalid，不生成叙事）。
+- **Research OS R1 市场状态切片完成**：状态向量五块 14 字段、`market_state_daily` 快照、透明 Regime 规则、市场叙事任务、数据质量门接入。
+- **R2-0 漏洞修补**（R2 前置）：质量门不再阻断事件研究（数据集评估器）；`OutcomeEventStudyRunner`（MOS 分档 + **block bootstrap CI** + regime/sector/size 分域）；幸存者偏差量化；holdout 样本外。R2 现已具备可执行、统计站得住的闭环前提。
 - **审理 + 5 批修复**（gate 751→758）：D1 `_quality_date` 防崩、D2 质量门改精确查询、D3 `next_id` 日期归一化、G1 空值注册拒绝、G2 Repository 写边界守卫、结果 ID 可解析 + 死代码清理。复审 13/13 通过。
 - **门禁基础设施修复**：`/tmp` 是 478M tmpfs，pytest 临时目录堆积撑爆 → 母套件全 ERROR；已加 basetemp trap 清理 + 遗留目录清理。
 - **生产迁移完成**：`kline_daily.instrument_id` 空值 **0/2,150,145**，`instrument` **5,527**（SSE 2,633 / SZSE 2,894）。
@@ -42,6 +43,7 @@
 - （继承）交易日历缓存接缝、v0.6.5 旧 schedule gate、股息/收益口径三条。
 
 ## 历史交接区（追加，不删）
+- 2026-10-27 R2-0 漏洞修补（D-QG 质量门阻断 / G1 block bootstrap / G3 事件研究 runner / G4 分域 / G2 幸存者偏差 / G5 holdout；gate 826→835）
 - 2026-10-27 Research OS R1 市场状态切片完成（R1-1…R1-5；gate 794→826；每项完成均审查）
 - 2026-10-26 Research OS R0 收尾（R0-8…R0-13：LLM 任务/Prompt/工具网关/输出校验/夹具/Universe；gate 758→794；修 /tmp tmpfs 撑爆致门禁全 ERROR）
 - 2026-10-26 Research OS R0 审理 + 5 批修复（D1/D2/D3/G1/G2 + 一致性清理；gate 751→758；复审 13/13）

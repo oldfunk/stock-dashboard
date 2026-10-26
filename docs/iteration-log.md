@@ -165,6 +165,16 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-27（R2-0 漏洞修补：质量门阻断/事件研究 runner/统计严谨性；gate 826 → 835）
+
+- **D-QG 质量门阻断**（`162948a`/`f5eddad`）：新增数据集质量评估器（`quality.ASSESSORS`）+ `assess_analysis_outcome`/`assess_kline_daily`；`run_experiment` 对已知数据集**仅补写缺失**质量记录（不覆盖预注册），未注册评估器仍 fail-closed。H-001 不再被阻断。
+- **G3 事件研究 runner**（`de495d5`）：`OutcomeEventStudyRunner`（MOS 分档 + horizons + 分域）；`market_state_daily` 增 `regime`/`regime_confidence` 并由 `snapshot_range` 写入。
+- **G1 统计严谨性**（`de495d5`）：`block_bootstrap_ci` 按**股票分组**重抽样（60/120 日窗口重叠 + 同股多次分析，按行重抽样会高估显著性）。
+- **G4 分域**（`de495d5`）：regime（join `market_state_daily`）/ sector / size（join `stock_snapshot`）。
+- **G2 幸存者偏差**（`941343f`）：notes 量化"样本 N 只 / 全市场 M 只"，显式标注幸存者偏差。
+- **G5 holdout**（`941343f`）：`holdout_days` 留出样本外，单独出指标；notes 提示多重比较。
+- **门禁**：826 → 835；vendor 242。
+
 ### 2026-10-27（Research OS R1 市场状态切片完成；gate 794 → 826）
 
 - **R1-1 状态向量定义**（`4d2297c`/`add31cd`）：`src/research/market_state.py` 五块（估值/基本面/广度/流动性/质量）14 字段注册表 + 缺失策略（null/fail_closed）+ 纯计算；未注册字段不进向量；未实现字段不计入覆盖率分母。
