@@ -24,17 +24,17 @@
   - 验收：固定小样本跑通并复现（两次指标一致）；快照缺失/质量 invalid 拒绝；接口不绑死单一回测器。
 - [x] **R0-7 决策账本**：`decision_log` DAO + CLI：改什么/为什么/证据 ID/预期/复核日。
   - 验收：策略/假设状态变更必须带决策记录（`DecisionService.require` 守卫）；关闭时写结果（`close`）。
-- [ ] **R0-8 LLM 任务注册表**：`src/research/llm/tasks.py`（任务/模型档/工具白名单/输出 schema/token 预算）。
-  - 验收：未注册任务不可调用；schema 缺失拒绝。
-- [ ] **R0-9 Prompt 框架**：`research/prompts/<task>/vN.md` + `prompt_registry`（hash/版本）；统一 system/context/task/schema 结构。
-  - 验收：prompt 变更生成新版本；旧版本可回放。
-- [ ] **R0-10 工具网关**：只读工具（market_state/features/financials/valuation/outcomes/hypothesis/experiment）、草案写工具；白名单/超时/行数上限/审计。
+- [x] **R0-8 LLM 任务注册表**：`src/research/llm/tasks.py`（任务/模型档/工具白名单/输出 schema/token 预算）+ `llm_task` 表。
+  - 验收：未注册任务不可调用；schema/工具白名单缺失拒绝；重复版本拒绝。
+- [x] **R0-9 Prompt 框架**：`research/prompts/<task>/vN.md` + `prompt_registry`（hash/版本）；统一 system/context/task/schema 结构。
+  - 验收：prompt 变更生成新版本（`save` 写 v(N+1)）；旧版本可回放（`replay`）。
+- [x] **R0-10 工具网关**：只读工具（market_state/features/financials/valuation/outcomes/hypothesis/experiment）、草案写工具；白名单/超时/行数上限/审计。
   - 验收：越权工具被拒绝；每次调用写 `llm_run`；写操作需批准 token。
-- [ ] **R0-11 输出校验**：JSON schema + fact ID 引用 + 数字一致性 + 缺证据拒绝。
+- [x] **R0-11 输出校验**：JSON schema + fact ID 引用 + 数字一致性 + 缺证据拒绝。
   - 验收：编造数字/无引用/schema 错 → 拒绝；golden cases 通过。
-- [ ] **R0-12 测试夹具**：fake LLM、固定时钟、最小数据集、实验 fixture；离线可跑。
+- [x] **R0-12 测试夹具**：fake LLM、固定时钟、最小数据集、实验 fixture；离线可跑。
   - 验收：CI/gate 不依赖外网/真实 Key；新增测试纳入基线。
-- [ ] **R0-13 Universe/退市名单**：导入 AKShare SH/SZ 退市名单（161+211）、BaoStock 交叉验证；建 `universe_membership`；每日记录全市场状态/上市退市/ST。
+- [x] **R0-13 Universe/退市名单**：导入 AKShare SH/SZ 退市名单（161+211）、BaoStock 交叉验证；建 `universe_membership`；每日记录全市场状态/上市退市/ST。
   - 验收：退市股可查；历史成分缺失标记 `coverage=current_only`；不宣称无幸存者偏差。
 
 ## R1 — 市场状态（框架内第一个垂直切片）

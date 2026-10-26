@@ -165,6 +165,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-26（Research OS R0 收尾：LLM 任务/Prompt/工具网关/输出校验/夹具/Universe；gate 758 → 794）
+
+- **R0-8 LLM 任务注册表**（`ace979f`）：`llm_task` 表 + `src/research/llm/tasks.py`；未注册/schema 缺失/非 active/重复版本拒绝。
+- **R0-9 Prompt 框架**（`2aed30a`）：`research/prompts/<task>/vN.md` + `prompt_registry`；统一四段结构；变更生成新版本、旧版本可回放。
+- **R0-10 工具网关**（`c777d0c`）：只读 7 工具 + 草案写 2 工具；白名单/超时/行数上限/审计（写 `llm_run`）；草案写需批准 token。
+- **R0-11 输出校验**（`bb4c582`）：JSON schema + fact ID 引用 + 数字一致性 + 缺证据拒绝（fail-closed）。
+- **R0-12 测试夹具**（`0677374`/`c522af9`）：`FakeClock`/`FakeLLM`/`FakeToolGateway` + `tests/research/conftest.py` 最小数据集/实验 fixture；全离线。
+- **R0-13 Universe/退市名单**（`bbcafbb`）：`src/research/universe.py` + `scripts/research/{import_delisted,record_universe}.py`；AKShare SH/SZ 退市归一化落库 + 每日记录 + `coverage=current_only`。
+- **门禁基础设施修复**（`3409ae8`）：门禁失败/中断也清理 basetemp + 清理遗留 pytest 临时目录——`/tmp` 是 478M tmpfs，历史遗留撑爆导致母套件全 ERROR（实测）。
+- **门禁**：758 → 794；vendor 242。R0 全部完成。
+
 ### 2026-10-26（Research OS R0 审理 + 5 批修复；gate 751 → 758）
 
 - **审理**：通读 `src/research/` 全部模块 + 实证脚本。确认 3 个缺陷（D1 `_quality_date` 崩溃 / D2 质量门漏判旧日期 / D3 `next_id` ISO 日期碰撞）、2 个语义缺口（G1 空值过松 / G2 Repository 不强制写边界）、若干一致性/死代码项。
