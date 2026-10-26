@@ -90,7 +90,7 @@ def test_fetch_kline_tencent_qfq_paginates(monkeypatch):
     assert [r["trade_date"] for r in rows] == ["2023-12-01", "2024-03-04",
                                                "2024-03-05"]
     assert len(calls) == 2
-    assert "end=2024-03-03" in calls[1]
+    assert ",2024-03-03," in calls[1]
 
 
 def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsys):
