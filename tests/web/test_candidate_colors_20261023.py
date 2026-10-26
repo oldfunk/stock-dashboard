@@ -80,10 +80,9 @@ def test_manual_watchlist_signal_text_not_black():
     css = _read("index.html")
     assert ".metric-cell .value.signal-buy { color: var(--color-up);" in css
     assert ".metric-cell .value.signal-avoid { color: var(--color-down);" in css
-    assert ".metric-cell .value.signal-none { color: var(--text-tertiary);" in css
-    js = (TPL_DIR.parent / "static" / "watchlist.js").read_text(encoding="utf-8")
-    assert "signal-none" in js
-    assert "'signal-hold' : 'signal-none'" in js
+    # 2026-10-26：三视图统一后，信号是共享卡里的 signal-badge（不是 JS 拼的 metric-cell）
+    tpl = _read("_stock_card.html")
+    assert "signal-badge signal-{{ _sig|lower }}" in tpl
 
 
 def test_candidate_card_price_change_is_inline_scheme(client):
