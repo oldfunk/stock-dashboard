@@ -235,13 +235,14 @@ def compute_vector(trade_date: str,
              round(row20["a"] / 1e8, 4) if row20["a"] is not None else None)
 
     # 广度：MA20/MA60 占比、涨跌比（窗口 61 个交易日）
+    # 优化：先取最近 61 个交易日，只扫这些行（避免全表窗口函数）
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT code, trade_date, close_adj FROM ("
-            "  SELECT code, trade_date, close_adj, ROW_NUMBER() OVER "
-            "    (PARTITION BY code ORDER BY trade_date DESC) AS rn "
-            "  FROM kline_daily WHERE close_adj IS NOT NULL AND trade_date <= ?"
-            ") WHERE rn <= 61", (trade_date,)).fetchall()
+            "SELECT code, trade_date, close_adj FROM kline_daily "
+            "WHERE close_adj IS NOT NULL AND trade_date IN ("
+            "  SELECT DISTINCT trade_date FROM kline_daily "
+            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 61)",
+            (trade_date,)).fetchall()
     series: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
         series.setdefault(r["code"], []).append((r["trade_date"], r["close_adj"]))
@@ -265,6 +266,28 @@ def compute_vector(trade_date: str,
     _set("pct_above_ma20", round(100.0 * above20 / total, 4) if total else None)
     _set("pct_above_ma60", round(100.0 * above60 / total, 4) if total else None)
     _set("adv_dec_ratio", round(adv / dec, 4) if dec else None)
+
+    # 波动率：近 20 个交易日**等权日收益**的年化波动（regime 的波动规则用）
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT trade_date, AVG(close_adj) AS avg_close FROM kline_daily "
+            "WHERE close_adj IS NOT NULL AND trade_date IN ("
+            "  SELECT DISTINCT trade_date FROM kline_daily "
+            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21) "
+            "GROUP BY trade_date ORDER BY trade_date DESC LIMIT 21",
+            (trade_date,)).fetchall()
+    if len(rows) >= 2:
+        closes = [r["avg_close"] for r in rows][::-1]
+        rets = [closes[i] / closes[i - 1] - 1.0
+                for i in range(1, len(closes)) if closes[i - 1]]
+        if len(rets) >= 2:
+            import statistics
+            vol = statistics.pstdev(rets) * (252 ** 0.5)
+            _set("volatility_20d", round(vol, 4))
+        else:
+            _set("volatility_20d", None)
+    else:
+        _set("volatility_20d", None)
 
     # 覆盖率：只算"已实现"字段（未实现的不计入分母）
     implemented = [n for n in schema.names()

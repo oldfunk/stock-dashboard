@@ -94,3 +94,25 @@ def test_compute_vector_uses_latest_snapshot_date(db):
     vector = compute_vector("2026-10-26")
     assert vector.quality["snapshot_date"] == "2026-10-26"
     assert vector.metrics["pe_median"] == 12.0
+
+
+def test_volatility_and_regime(db):
+    from datetime import date, timedelta
+
+    from src.research.market_state import compute_vector
+    from src.research.regime import classify_regime
+    day = date(2026, 8, 3)
+    days = []
+    while len(days) < 65:
+        if day.weekday() < 5:
+            days.append(day.isoformat())
+        day += timedelta(days=1)
+    dao = db_mod.KlineDAO()
+    for d in days:
+        dao.upsert_many("600519", [{
+            "trade_date": d, "open": 1.0, "close": 1.0, "high": 1.0,
+            "low": 1.0, "volume": 1.0, "amount": 1e8, "turnover": 0.1,
+            "close_adj": 1.0}])
+    vector = compute_vector(days[-1])
+    assert "volatility_20d" not in vector.missing
+    assert classify_regime(vector).regime != "unknown"
