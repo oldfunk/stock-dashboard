@@ -49,13 +49,19 @@ _floor() {  # $1=基线文件
 
 _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
     local label="$1" limit="$2"; shift 2
-    local out rc
+    local rc outfile
+    outfile="$BASETEMP/$label.out"
     local cmd=("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" "$@")
     if [ -n "$TIMEOUT_BIN" ]; then cmd=("$TIMEOUT_BIN" "$limit" "${cmd[@]}"); fi
-    if out=$("${cmd[@]}" 2>&1); then rc=0; else rc=$?; fi
+    # 2026-10-26：不要用 $(...) 收集输出——pytest 被 timeout 杀掉后，遗留子进程
+    # 可能仍持有管道写端，命令替换永远等不到 EOF，整个 deploy 挂死（已实测 25min+）。
+    # 重定向到文件则父进程退出即可返回。
+    "${cmd[@]}" > "$outfile" 2>&1
+    rc=$?
+    out=$(cat "$outfile")
     # 保留完整输出，失败时可追溯（2026-10-25：偶发 ERROR 因只留 tail -3 无法定位）
     GATE_LOG="${TMPDIR:-/tmp}/gate-${label}-last.log"
-    printf '%s\n' "$out" > "$GATE_LOG"
+    cp "$outfile" "$GATE_LOG" 2>/dev/null || true
     if [ "$rc" = "124" ]; then
         echo "!!! $label 套件超时（>${limit}s，timeout 终止）——视为失败"
     fi
