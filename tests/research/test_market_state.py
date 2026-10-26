@@ -76,6 +76,15 @@ def test_fail_closed_field_makes_vector_invalid(db):
     assert vector.fail_closed_missing == ["pe_median"]
 
 
+def test_kline_trade_date_index(db):
+    """市场状态快照按 trade_date 取近窗口，依赖此索引避免全表扫描。"""
+    with db_mod.db_conn() as conn:
+        idx = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND tbl_name='kline_daily'")}
+    assert "idx_kline_trade_date" in idx
+
+
 def test_compute_vector_uses_latest_snapshot_date(db):
     from src.research.market_state import compute_vector
 

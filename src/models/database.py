@@ -518,6 +518,12 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
             'ON kline_daily(code, trade_date)'
         )
+        # 2026-10-27：市场状态快照按 trade_date 取近窗口（广度/波动率），
+        # 无此索引会全表扫描 215 万行/次 → 快照极慢。
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_kline_trade_date '
+            'ON kline_daily(trade_date)'
+        )
         # 回填进度表（2026-10-24）：全市场回填的断点续跑标记。
         # 动机：老股票有 20 年年报、上游只回 10 年，未填的老年份会让"按 NULL 判定"
         # 的目标集永远不缩小 → 无限重复处理。进度表让每只股票只处理一次。
