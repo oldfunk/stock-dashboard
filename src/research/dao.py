@@ -397,7 +397,7 @@ class ResearchDAO:
             """, (
                 d["dataset"], d.get("trade_date"), d.get("coverage"),
                 d.get("missing_rate"), d.get("outliers"), d.get("pit_violations"),
-                d.get("status"), _dumps(d.get("details")),
+                d.get("status") or "recorded", _dumps(d.get("details")),
             ))
 
     def list_quality(self, dataset: str, limit: int = 30) -> list[dict]:
