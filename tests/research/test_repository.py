@@ -46,8 +46,7 @@ def _export():
 
 def test_sqlite_repository_query_and_execute(db):
     from src.research.repository import (
-        ParquetResearchRepository, RepositoryError, SqliteResearchRepository,
-        get_features, get_prices,
+        SqliteResearchRepository, get_features, get_prices,
     )
     _seed()
     repo = SqliteResearchRepository()
@@ -60,8 +59,6 @@ def test_sqlite_repository_query_and_execute(db):
     assert prices[0]["iid"] == "CN:A"
     features = get_features(repo, "F-TREND", DATES[0])
     assert len(features) == 2
-    with pytest.raises(RepositoryError):
-        ParquetResearchRepository("DS-NOPE").execute("DELETE FROM x")
 
 
 def test_parquet_repository_is_readonly(db):
