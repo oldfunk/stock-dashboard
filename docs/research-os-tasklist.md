@@ -39,14 +39,16 @@
 
 ## R1 — 市场状态（框架内第一个垂直切片）
 
-- [ ] **R1-1 状态向量定义**：估值/基本面/广度/流动性/质量五块，字段/公式/来源/缺失策略注册。
-- [ ] **R1-2 `market_state_daily` 快照**：`scripts/research/snapshot_market.py`，纯计算、可重跑。
-  - 验收：连续 5 个交易日快照可复现；缺失字段显式 NULL/quality。
-- [ ] **R1-3 Regime 规则**：趋势/估值/波动/风格，透明规则 + confidence/drivers。
-  - 验收：规则单测覆盖边界；不引入黑箱模型。
-- [ ] **R1-4 市场叙事任务**：`market_summary` prompt + 校验；只解释向量，不引入新数字。
-  - 验收：golden case 引用覆盖率 100%；无证据时输出数据不足。
-- [ ] **R1-5 数据质量门接入**：状态向量覆盖率不足时标记 `invalid`，不生成叙事。
+- [x] **R1-1 状态向量定义**：估值/基本面/广度/流动性/质量五块，字段/公式/来源/缺失策略注册。
+  - 验收：`src/research/market_state.py` 五块 14 字段；缺失策略 null/fail_closed；未注册字段不进向量。
+- [x] **R1-2 `market_state_daily` 快照**：`scripts/research/snapshot_market.py`，纯计算、可重跑。
+  - 验收：连续 5 个交易日快照可复现；缺失字段显式 NULL/quality；快照日取 `<= trade_date`（无前视）。
+- [x] **R1-3 Regime 规则**：趋势/估值/波动/风格，透明规则 + confidence/drivers。
+  - 验收：规则单测覆盖边界；不引入黑箱模型；证据不足（<2 规则）不给结论。
+- [x] **R1-4 市场叙事任务**：`market_summary` prompt + 校验；只解释向量，不引入新数字。
+  - 验收：golden case 引用覆盖率 100%；无证据时输出数据不足；文本内数字也溯源。
+- [x] **R1-5 数据质量门接入**：状态向量覆盖率不足时标记 `invalid`，不生成叙事。
+  - 验收：覆盖率 <0.8 -> invalid + 写 `data_quality_daily` + `should_generate_narrative=False`。
 
 ## R2 — 假设与实验（最小闭环核心）
 

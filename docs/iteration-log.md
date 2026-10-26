@@ -165,6 +165,15 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-27（Research OS R1 市场状态切片完成；gate 794 → 826）
+
+- **R1-1 状态向量定义**（`4d2297c`/`add31cd`）：`src/research/market_state.py` 五块（估值/基本面/广度/流动性/质量）14 字段注册表 + 缺失策略（null/fail_closed）+ 纯计算；未注册字段不进向量；未实现字段不计入覆盖率分母。
+- **R1-2 市场状态快照**（`497f214`/`fc0b53d`）：`market_state_daily` 表 + `scripts/research/snapshot_market.py`；纯计算/可重跑/幂等覆盖；缺失显式 NULL；快照日取 `<= trade_date`（消除前视偏差）。
+- **R1-3 Regime 规则**（`543fe09`/`d57bada`）：`src/research/regime.py` 透明阈值规则（趋势/估值/波动/风格）+ confidence/drivers；缺字段不猜；证据不足（<2 规则）不给结论。
+- **R1-4 市场叙事任务**（`be719dc`/`c9561f3`）：`src/research/llm/narrative.py` + `research/prompts/market_summary/v1.md` + 注册脚本；只解释向量/不引入新数字/引用覆盖率 100%/无证据拒绝；R0-11 增强：文本内数字也溯源。
+- **R1-5 数据质量门接入**（`09c0195`/`a0e3dbb`）：覆盖率 <0.8 -> `invalid` + 写 `data_quality_daily` + 不生成叙事；广度字段落地（MA20/MA60/涨跌比/20 日均量，要求满 60 日窗口）。
+- **门禁**：794 → 826；vendor 242。R1 完成。
+
 ### 2026-10-26（Research OS R0 收尾：LLM 任务/Prompt/工具网关/输出校验/夹具/Universe；gate 758 → 794）
 
 - **R0-8 LLM 任务注册表**（`ace979f`）：`llm_task` 表 + `src/research/llm/tasks.py`；未注册/schema 缺失/非 active/重复版本拒绝。
