@@ -34,6 +34,19 @@ def test_next_id_skips_existing():
     assert next_id("H", "20261027", used) == "H-20261027-001"
 
 
+def test_next_id_accepts_iso_string_without_collision():
+    """回归 D3：ISO 字符串日期必须与紧凑 ID 匹配，不得碰撞。"""
+    used = ["DL-20261026-001"]
+    assert next_id("DL", "2026-10-26", used) == "DL-20261026-002"
+    assert next_id("DL", date(2026, 10, 26), used) == "DL-20261026-002"
+
+
+def test_format_id_normalizes_iso_and_rejects_bad_date():
+    assert format_id("H", "2026-10-26", 1) == "H-20261026-001"
+    with pytest.raises(DomainError):
+        format_id("H", "2026/10/26", 1)
+
+
 def test_hypothesis_transition_valid_and_invalid():
     h = Hypothesis(
         id="H-20261026-001", version=1, prior="value",

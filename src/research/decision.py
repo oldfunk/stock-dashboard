@@ -61,9 +61,7 @@ class DecisionService:
         self.dao = dao or ResearchDAO()
 
     def _next_id(self, day: date | str) -> str:
-        # decision_date 是 ISO（2026-10-26），ID 用紧凑格式（20261026）
-        if isinstance(day, str):
-            day = date.fromisoformat(day)
+        # next_id 内部已归一化日期（date / YYYYMMDD / ISO 均可）
         with db_conn() as conn:
             existing = [r["id"] for r in conn.execute("SELECT id FROM decision_log")]
         return next_id("DL", day, existing)

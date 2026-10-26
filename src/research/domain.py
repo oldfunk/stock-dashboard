@@ -119,13 +119,29 @@ TRANSITIONS = {
 }
 
 
+def _compact_day(day: date | str) -> str:
+    """日期归一化为紧凑格式 YYYYMMDD。
+
+    接受 ``date`` 对象、``"20261026"`` 或 ISO ``"2026-10-26"``——
+    不归一化会让 ISO 字符串与已存在的紧凑 ID 不匹配，导致序列号碰撞。
+    """
+    if isinstance(day, date):
+        return day.strftime("%Y%m%d")
+    text = str(day)
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return text.replace("-", "")
+    return text
+
+
 def format_id(prefix: str, day: date | str, seq: int) -> str:
-    """生成可读 ID，如 H-20261026-001。"""
+    """生成可读 ID，如 H-20261026-001。day 可为 date / YYYYMMDD / ISO。"""
     if prefix not in PREFIXES:
         raise DomainError(f"未知 ID 前缀: {prefix}")
     if seq < 1:
         raise DomainError("seq 必须 >= 1")
-    day_str = day if isinstance(day, str) else day.strftime("%Y%m%d")
+    day_str = _compact_day(day)
+    if not re.fullmatch(r"\d{8}", day_str):
+        raise DomainError(f"非法日期: {day!r}")
     return f"{prefix}-{day_str}-{seq:03d}"
 
 
@@ -143,7 +159,7 @@ def parse_id(value: str) -> tuple[str, str, int]:
 def next_id(prefix: str, day: date | str, existing: list[str],
             start: int = 1) -> str:
     """在已有 ID 列表中生成下一个不冲突的 ID。"""
-    day_str = day if isinstance(day, str) else day.strftime("%Y%m%d")
+    day_str = _compact_day(day)
     used = set()
     for value in existing:
         try:
