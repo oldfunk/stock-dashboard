@@ -7,14 +7,14 @@
 
 ## R0 — 框架（先建地基，不跑策略）
 
-- [ ] **R0-1 领域对象与 ID**：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision 的 dataclass、状态枚举、ID 规则（H/E/S/D/MS）。
+- [x] **R0-1 领域对象与 ID**：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision 的 dataclass、状态枚举、ID 规则（H/E/S/D/MS）。
   - 验收：单测覆盖状态机合法/非法迁移；ID 可读且唯一。
-- [ ] **R0-2 数据库表与迁移**：新增 `market`、`instrument`、`trading_calendar`、`fx_rate_daily`、`feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
-  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 主键/查询兼容 `instrument_id`（迁移脚本）。
+- [x] **R0-2 数据库表与迁移**：新增 `market`、`instrument`、`trading_calendar`、`fx_rate_daily`、`feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
+  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 增加 `market`/`instrument_id`（不改旧主键）；生产迁移已启动（回填 `instrument_id` + 生成 instrument）。
 - [ ] **R0-2a Repository 接口**：SQLite 与 DuckDB 各实现只读/只写接口，研究查询不直接写业务库。
 - [ ] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
 - [ ] **R0-2c DuckDB 视图**：DuckDB 只读 Parquet；提供研究查询函数；单测覆盖一个回测扫描。
-- [ ] **R0-3 注册表**：`src/research/registry.py` 统一特征/假设/策略/提示词注册与校验（必填字段、版本、hash）。
+- [x] **R0-3 注册表**：`src/research/registry.py` 统一特征/假设/策略/提示词注册与校验（必填字段、版本、hash）。
   - 验收：重复 ID/缺字段/非法状态被拒绝；注册即写 DB。
 - [ ] **R0-4 版本与快照**：`data_snapshot_id`（表名/行数/最大日期/hash）、`code_commit`、`config_hash`、`random_seed` 的记录与校验。
   - 验收：同一快照重跑结果一致（容差内）；快照缺失实验拒绝。

@@ -26,6 +26,7 @@ PREFIXES = {
     "MS": "market_state",
     "A": "attribution",
     "DL": "decision",
+    "DS": "data_snapshot",
 }
 
 
