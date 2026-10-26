@@ -1,13 +1,13 @@
-# Stock Dashboard — A 股价值投资数据面板
+# Stock Dashboard — A 股价值投资研究工作台
 
 [![release](https://img.shields.io/github/v/release/oldfunk/stock-dashboard)](https://github.com/oldfunk/stock-dashboard/releases/latest)
 [![license](https://img.shields.io/github/license/oldfunk/stock-dashboard)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.10-blue)](pyproject.toml)
 
-> 全自动 · 量化筛选 + 数据展示 · 每日收盘后跑完全市场约 5500 只 → 候选池 ≤20 只
-> AI 分析用用户自带 Key（`/llm` 页配置模型，面板队列执行）；面板本身只展示数据，不再内联 AI 分析
-> 2026-10-21 起：信号前向收益验证（`/outcomes`）、真实年报股息（红利策略 fail-closed）、AI 新闻事件上下文
-> 当前状态：v2.0.0 已公开发布；日常维护 + 按需迭代（AI 分析/定时复盘/纸盘合流/专业化三件套已落地，P2 已冻结）
+> 全市场数据 → 7 条硬门规 + 五维评分 → 候选池 ≤20 只 · 可复现 FCFF 估值 / 回测 / 前向收益验证
+> AI 仅作可选分析/校验：用你自己的 Key，由面板队列触发；不代付 token、不荐股、不接实盘
+> 信号前向收益验证（`/outcomes`）、真实年报股息（红利策略 fail-closed）、AI 新闻事件上下文
+> 当前状态：v2.0.0 已公开发布；日常维护 + 按需迭代（P2 已冻结）
 
 ---
 
@@ -41,8 +41,8 @@ python -m src.main serve
 
 ### AI 配置（用户自带 Key）
 
-面板本身不跑 LLM、不展示内联 AI 分析。AI 分析用用户在 `/llm` 页配置的 Key
-（厂商预设 + 连接测试 + 模型列表），经面板队列触发执行（整轮/重试失败/单股/卡片直达/详情提问）；
+面板不内置模型、不代付 token；AI 分析用你在 `/llm` 配置的 Key，由面板队列触发执行
+（整轮/重试失败/单股/卡片直达/详情提问），结果写回笔记与时间线，不在卡片内联展示；
 外部程序经数据 API 读写保留兼容（见下）。
 
 ```env
@@ -52,8 +52,8 @@ STOCK_AI_API_BASE=https://api.deepseek.com/v1
 STOCK_AI_MODEL=deepseek-chat
 ```
 
-> 现状（2026-09-27）：OpenCode Zen 免费通道自 9/07 起服务端不可用（403）；
-> 免 Key 备用通道（Pollinations）9/18 起同样失败。自带 Key 分析已上线（`/llm` 配置 + 队列执行，首只真分析 09-27 跑通）；
+> 历史（2026-09-27）：免 Key 通道（OpenCode Zen / Pollinations）相继不可用；
+> 自带 Key 分析已上线（`/llm` 配置 + 队列执行，首只真分析 09-27 跑通）；
 > 外部程序经 API 读写保留兼容（见 `docs/agent-api.md`）。详见账本最新 Changelog。
 
 ### 生产部署（systemd）
@@ -77,7 +77,7 @@ stock-dashboard/
 │   └── strategies.yaml       # 多策略定义（成长/红利/困境反转阈值）
 ├── src/
 │   ├── collector/            # 数据采集层
-│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S10 注册表）
+│   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S14 注册表）
 │   │   ├── mainfin_fetcher.py  # 东财主要财务指标（年报一站式：ROE/EPS/FCF/披露日等）
 │   │   ├── balance_sheet_fetcher.py # 东财 F10 资产负债表（cash/有息负债/净资产）
 │   │   ├── cashflow_fetcher.py # 东财 F10 现金流量表（capex/经营现金流）
@@ -169,7 +169,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 
 ```
 1. 腾讯行情 → 全 A 股行情 → 初筛预过滤
-2. AKShare 财务采集（yjbb + 深度补充，含兜底链 C2/C2.5）
+2. 财务采集（yjbb 批量 + 东财 F10 直连补三表 + 兜底链 C2/C2.5）
 3. 历史财务采集 → financial_history → financial_summary（5y/10y 均值）
 4. 质量闸（ROE 覆盖 ≥50%）→ 7 条门规筛选 → 评分 → 候选池 ≤20 只
 5. K 线拉取（面板队列触发分析；`retry_ai.py` 等手动脚本需已配 Key）
@@ -205,7 +205,9 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 ```
 
 候选卡前置摘要已移除（2026-09-21 起列表不再内联 AI）。下述 JSON 仍是 AI 分析
-应输出/写回的数据契约（`ai_analysis` 落库格式以此为准）：
+应输出/写回的数据契约（`ai_analysis` 落库格式以此为准）。
+其中 `intrinsic_value` 只用于**校验/解释偏离**：系统模型估值（FCFF 两阶段折现）
+是权威锚，LLM 不应另给一套主观估值。
 
 ---
 
@@ -221,7 +223,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 ## 数据源架构
 
-10 个数据源 S1–S10 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
+14 个数据源 S1–S14 完整注册表见 `architecture.md` §5，含兜底链与契约单测要求：
 
 - **行情**：腾讯为主 S1，兜底新浪 → AKShare 自算
 - **财务**：AKShare `stock_yjbb_em` 为主 S2，兜底 C2 东财直连
@@ -277,12 +279,12 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 ## 技术栈
 
-- **数据采集** — httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情 API
+- **数据采集** — 腾讯/东财/新浪直连（curl/urllib/requests）+ AKShare（Sina 日线、分红、指数、业绩报表）
 - **存储** — SQLite（WAL 模式，`data/db/stock_dashboard.db`）
-- **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
+- **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。免 Key 通道已不可用。
 - **Web 看板** — FastAPI + Jinja2（候选/观察池/钉选共用 `_stock_card.html` + `stock_metrics.py` 单一指标源；只展示数据，不内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（母项目权威 + vendor 记录；基线 696 / 242，只升不降）
+- **验证** — `bash scripts/gate.sh`（母项目权威 + vendor 记录；基线 702 / 242，只升不降）
 
 ---
 
@@ -290,10 +292,10 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 价值投资门规与分析框架为本项目自有实现，方法论原则（能力圈、护城河、安全边际、一票否决纪律）源自公开价值投资常识。设计取舍：
 
-1. **自动化** — 全自动采集、筛选、复盘、报告，无需手动跑
+1. **自动化** — 采集/筛选/复盘可自动运行；AI 分析需用户 Key 触发
 2. **本地数据仓库** — 逐日累积历史财务数据
-3. **A 股适配** — 数据源 AKShare/腾讯，规则兼容 A 股特性
-4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用 AKShare 可获取字段
+3. **A 股适配** — 数据源腾讯/东财/新浪/AKShare，规则兼容 A 股特性
+4. **简化代理指标** — 利息覆盖/稀释率/FCF 使用可稳定获取的财报字段（不依赖单一上游）
 5. **结构化分析契约** — AI 分析应输出护城河/管理层/估值/策略 JSON（格式见上节；面板只展示数据与笔记，不内联分析）
 6. **落库追踪** — 论点/假设/红线/笔记全部落库跨期对照，不做事后一次性报告
 
@@ -320,7 +322,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 | 文档 | 定位 |
 |---|---|
-| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S10 |
+| `docs/architecture.md` | 架构真相源：结构图、流水线、模块边界、数据源 S1–S14 |
 | `docs/roadmap.md` | 总路线（P1 面板深化 → P2 体验优化） |
 | `docs/iteration-log.md` | 迭代进程账（含 backlog） |
 | `docs/handoff.md` | 班次交接速览（历史追加不删） |
