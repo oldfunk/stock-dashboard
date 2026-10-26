@@ -109,6 +109,9 @@ def default_fields() -> list[StateField]:
         StateField("avg_turnover_20d_yi", "liquidity",
                    "全市场 20 日均成交额（亿元）", "kline_daily.amount", "null", "亿元",
                    "neutral"),
+        StateField("volatility_20d", "liquidity",
+                   "近 20 交易日等权日收益的年化波动率（均值收盘代理）",
+                   "kline_daily.close_adj", "null", "x", "lower_better"),
         # 质量
         StateField("debt_ratio_median", "quality", "全市场资产负债率中位数",
                    "stock_snapshot.debt_ratio", "null", "%", "lower_better"),
