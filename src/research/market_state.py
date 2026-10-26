@@ -1,0 +1,240 @@
+"""市场状态向量定义（2026-10-27，R1-1）。
+
+五块：**估值 / 基本面 / 广度 / 流动性 / 质量**。
+- 字段注册表：``name / block / formula / source / missing_policy / unit / direction``。
+- 缺失策略：``null``（保留 NULL，不补零）或 ``fail_closed``（该字段缺失则向量 invalid）。
+- 计算：纯函数，从业务库读取；缺失显式 NULL，绝不补零/造数。
+
+字段新增须注册（未注册字段不进向量），便于审计"每个数字从哪来"。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, asdict
+from typing import Any, Iterable
+
+from src.models.database import db_conn
+from src.research.dao import ResearchDAO
+
+BLOCKS = ("valuation", "fundamentals", "breadth", "liquidity", "quality")
+MISSING_POLICIES = ("null", "fail_closed")
+DIRECTIONS = ("higher_better", "lower_better", "neutral")
+
+
+class StateError(ValueError):
+    """字段注册/校验失败。"""
+
+
+@dataclass
+class StateField:
+    name: str
+    block: str
+    formula: str
+    source: str
+    missing_policy: str = "null"
+    unit: str = ""
+    direction: str = "neutral"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class MarketStateVector:
+    trade_date: str
+    metrics: dict[str, float] = field(default_factory=dict)
+    missing: list[str] = field(default_factory=list)
+    quality: dict[str, Any] = field(default_factory=dict)
+    coverage: float = 0.0
+    status: str = "pass"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trade_date": self.trade_date,
+            "metrics": self.metrics,
+            "missing": self.missing,
+            "quality": self.quality,
+            "coverage": self.coverage,
+            "status": self.status,
+        }
+
+    @property
+    def fail_closed_missing(self) -> list[str]:
+        return self.quality.get("fail_closed_missing", [])
+
+
+# ── 字段注册 ────────────────────────────────────────────────────────────────
+
+def default_fields() -> list[StateField]:
+    """五块字段定义（公式/来源/缺失策略）。"""
+    return [
+        # 估值
+        StateField("pe_median", "valuation", "全市场 PE(TTM) 中位数",
+                   "stock_snapshot.pe", "null", "x", "lower_better"),
+        StateField("pb_median", "valuation", "全市场 PB 中位数",
+                   "stock_snapshot.pb", "null", "x", "lower_better"),
+        StateField("pe_percentile_5y", "valuation",
+                   "当前 PE 在过去 5 年的分位", "kline_daily.close_raw + financial_history",
+                   "null", "%", "lower_better"),
+        # 基本面
+        StateField("roe_median", "fundamentals", "全市场 ROE 中位数",
+                   "stock_snapshot.roe", "null", "%", "higher_better"),
+        StateField("revenue_growth_median", "fundamentals",
+                   "全市场营收增速中位数", "stock_snapshot.revenue_growth",
+                   "null", "%", "higher_better"),
+        StateField("profit_growth_median", "fundamentals",
+                   "全市场净利增速中位数", "stock_snapshot.profit_growth",
+                   "null", "%", "higher_better"),
+        StateField("gross_margin_median", "fundamentals",
+                   "全市场毛利率中位数（最新年报）",
+                   "financial_history.gross_margin", "null", "%", "higher_better"),
+        # 广度
+        StateField("pct_above_ma20", "breadth",
+                   "收盘价站上 20 日均线的股票占比", "kline_daily.close_adj",
+                   "null", "%", "higher_better"),
+        StateField("pct_above_ma60", "breadth",
+                   "收盘价站上 60 日均线的股票占比", "kline_daily.close_adj",
+                   "null", "%", "higher_better"),
+        StateField("adv_dec_ratio", "breadth", "上涨家数/下跌家数",
+                   "kline_daily.close_adj", "null", "x", "higher_better"),
+        # 流动性
+        StateField("total_turnover_yi", "liquidity",
+                   "全市场当日成交额（亿元）", "kline_daily.amount", "null", "亿元",
+                   "neutral"),
+        StateField("avg_turnover_20d_yi", "liquidity",
+                   "全市场 20 日均成交额（亿元）", "kline_daily.amount", "null", "亿元",
+                   "neutral"),
+        # 质量
+        StateField("debt_ratio_median", "quality", "全市场资产负债率中位数",
+                   "stock_snapshot.debt_ratio", "null", "%", "lower_better"),
+        StateField("st_ratio", "quality", "ST/*ST 占比",
+                   "stock_snapshot.is_st", "null", "%", "lower_better"),
+    ]
+
+
+class StateSchema:
+    """状态字段注册表。"""
+
+    def __init__(self, fields: Iterable[StateField] | None = None):
+        self._fields: dict[str, StateField] = {}
+        for f in (fields if fields is not None else default_fields()):
+            self.register(f)
+
+    def register(self, f: StateField) -> StateField:
+        if f.block not in BLOCKS:
+            raise StateError(f"非法分块: {f.block}")
+        if f.missing_policy not in MISSING_POLICIES:
+            raise StateError(f"非法缺失策略: {f.missing_policy}")
+        if f.direction not in DIRECTIONS:
+            raise StateError(f"非法方向: {f.direction}")
+        if f.name in self._fields:
+            raise StateError(f"字段已注册: {f.name}")
+        self._fields[f.name] = f
+        return f
+
+    def get(self, name: str) -> StateField | None:
+        return self._fields.get(name)
+
+    def list(self, block: str | None = None) -> list[StateField]:
+        fields = list(self._fields.values())
+        return [f for f in fields if block is None or f.block == block]
+
+    def names(self) -> list[str]:
+        return list(self._fields)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"fields": [f.to_dict() for f in self.list()],
+                "blocks": list(BLOCKS)}
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
+                   schema: StateSchema | None = None) -> MarketStateVector:
+    """计算某日状态向量（纯函数；缺失显式 NULL）。
+
+    R1-1 先落地估值/基本面/质量（来自最新快照）与流动性（当日成交额）；
+    广度（MA20/MA60、涨跌比）在 R1-2 快照中接入。
+    """
+    dao = dao or ResearchDAO()
+    schema = schema or StateSchema()
+    metrics: dict[str, float] = {}
+    missing: list[str] = []
+    fail_closed_missing: list[str] = []
+
+    # 估值/基本面/质量：最新快照（缺失字段不补零）
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM stock_snapshot LIMIT 1").fetchone()
+        snapshot_date = row["snapshot_date"] if row else None
+        for name in ("pe_median", "pb_median", "roe_median",
+                     "revenue_growth_median", "profit_growth_median",
+                     "debt_ratio_median"):
+            col = {
+                "pe_median": "pe", "pb_median": "pb", "roe_median": "roe",
+                "revenue_growth_median": "revenue_growth",
+                "profit_growth_median": "profit_growth",
+                "debt_ratio_median": "debt_ratio",
+            }[name]
+            values = [r[0] for r in conn.execute(
+                f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
+                "AND snapshot_date = ?", (snapshot_date,)).fetchall()] \
+                if snapshot_date else []
+            value = _median(values)
+            if value is None:
+                missing.append(name)
+                if schema.get(name) and schema.get(name).missing_policy == "fail_closed":
+                    fail_closed_missing.append(name)
+            else:
+                metrics[name] = value
+        # 毛利率：最新年报（financial_history）
+        gm = [r[0] for r in conn.execute(
+            "SELECT gross_margin FROM financial_history "
+            "WHERE report_type = 'A' AND gross_margin IS NOT NULL "
+            "AND report_date = (SELECT MAX(f2.report_date) FROM financial_history f2 "
+            "  WHERE f2.stock_code = financial_history.stock_code "
+            "  AND f2.report_type = 'A')").fetchall()]
+        gm_value = _median(gm)
+        if gm_value is None:
+            missing.append("gross_margin_median")
+            if schema.get("gross_margin_median") and \
+                    schema.get("gross_margin_median").missing_policy == "fail_closed":
+                fail_closed_missing.append("gross_margin_median")
+        else:
+            metrics["gross_margin_median"] = gm_value
+        st_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ?",
+            (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
+        st_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ? "
+            "AND is_st = 1", (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
+    if st_total:
+        metrics["st_ratio"] = round(100.0 * st_count / st_total, 4)
+    else:
+        missing.append("st_ratio")
+
+    # 流动性：当日成交额
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT SUM(amount) AS s FROM kline_daily WHERE trade_date = ?",
+            (trade_date,)).fetchone()
+        if row["s"] is not None:
+            metrics["total_turnover_yi"] = round(row["s"] / 1e8, 4)
+        else:
+            missing.append("total_turnover_yi")
+
+    total = len(schema.names())
+    coverage = round((total - len(missing)) / total, 4) if total else 0.0
+    status = "invalid" if fail_closed_missing else "pass"
+    return MarketStateVector(
+        trade_date=trade_date, metrics=metrics, missing=missing,
+        quality={"snapshot_date": snapshot_date,
+                 "fail_closed_missing": fail_closed_missing},
+        coverage=coverage, status=status)
