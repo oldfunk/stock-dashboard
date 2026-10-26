@@ -5,7 +5,7 @@
 > 不是进度真相源——进度看 `docs/ROADMAP.md`。
 
 - 最后更新：2026-10-23
-- 当前里程碑：M1 已验收（2026-10-23）；Pi 本机 `engine.local.yaml` 开启引擎；tag `v0.6.7` 已发布（发布版 `config.yaml` 默认仍 `enabled: false`）
+- 当前里程碑：M1 已验收（2026-10-23）；Pi 本机 `engine.local.yaml` 开启引擎；tag `v0.6.9` 已发布（发布版 `config.yaml` 默认仍 `enabled: false`）
 
 ---
 
@@ -16,6 +16,12 @@
 | 撮合口径只许有一份 | 断言代码 dataclass 默认值 == config.yaml，分叉即 CI 红 | `tests/test_caliber_consistency.py` |
 | 同标的止损后不当日回补（离场优先） | 单测锁定买入条件作废+拒因 | `tests/test_engine_cond.py` |
 | 每日收盘 NAV 一条（无交易也记） | 单测锁定 `nav:close` 幂等 | `tests/test_agent.py` |
+| 交易日历未覆盖即 fail-closed | 单测锁定 tick/引擎/事件全部跳过 | `tests/test_runtime.py` |
+| 事件复盘不占全局下单锁 | 源码/行为断言（止损不被复盘 LLM 推迟） | `tests/test_lock_isolation.py` |
+| 残留运行锁自动接管 | 单测锁定（SIGKILL/PID 复用） | `tests/test_run_lock.py` |
+| 第三方抓取硬超时 | 单测锁定（akshare 日线/日历 stall） | `tests/test_data_timeout.py` |
+| Pi 日志轮转 | logrotate 配置（daily+5M+14 份+copytruncate） | `deploy/logrotate.paper-trading` |
+| 面板写操作鉴权收口 | 改 Key/base_url 需口令；Origin 校验；口令常量时间比较 | `tests/test_dashboard.py` |
 | 回测-实盘口径一致 | 对照测试锁定成交/成交日/价/T+1 一致 | `tests/test_m1_correctness.py` |
 | Key 不进错误信息 / 掩码回显 | 单测锁定 | `tests/test_llm.py` |
 | 对外 JSON 严格合法（无 Infinity/NaN） | 单测锁定 | `tests/test_json_safety.py` |
@@ -40,6 +46,8 @@
   M1 门禁 / Pi 验收已过；自动打 tag 会把未验收的 commit 变成母项目可消费的接口。
   **2026-10-23**：M1 验收通过后已发 `v0.6.7`（观察日全绿 + Pi 217 项验收；开关走 Pi 本机
   `engine.local.yaml`，发布版 `config.yaml` 保持 `enabled: false`，母项目拉取不会自动开引擎）。
+  **2026-10-25/26**：Issue #2 修复 + 审计加固后发 `v0.6.8`（本地/Pi 235 项全绿），母项目需
+  `subtree pull v0.6.8` 解锁 gate；剩余审计项收口后发 `v0.6.9`（本地 242 项全绿）。
 
 ### 2.2 ROADMAP.md 勾选与进度记录
 - **现状**：每次迭代手工勾复选框 + 补一行「进度记录」。

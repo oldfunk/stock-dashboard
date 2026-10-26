@@ -181,11 +181,17 @@ def test_agent_plan_conditions_arm_on_execute(monkeypatch, tmp_path):
 
 
 def test_plan_condition_expiry_bumped_to_execution_day(monkeypatch, tmp_path):
-    """跨周计划：条件 expiry 落在执行日前（如周六）→ 顺延到执行日并留痕。"""
+    """跨周计划：条件 expiry 落在执行日前（如周六）→ 顺延到执行日并留痕。
+
+    日期全部相对今天构造，避免“运行日恰好在执行日”时不再触发顺延
+    （exp == exec_day 是合法的“覆盖到当天”，不该顺延——测试别赌运行日）。
+    """
     from paper_trading.engine.conditional import ConditionalOrders
     from paper_trading.llm import provider as prov
 
-    exp = (datetime.now() + timedelta(days=1)).date().isoformat()
+    today = datetime.now().date()
+    exp = (today + timedelta(days=1)).isoformat()
+    exec_day = (today + timedelta(days=3)).isoformat()
     plan = {"actions": [], "conditions": [{
         "symbol": "600519", "side": "buy",
         "cond": {"type": "price_below", "value": 10.5},
@@ -198,10 +204,10 @@ def test_plan_condition_expiry_bumped_to_execution_day(monkeypatch, tmp_path):
     pend = b.broker.get_pending_plan(r["plan_date"])
     assert pend["plan"]["conditions"][0]["expiry"] == exp  # 存档保留原始值
     res = t._execute_plan(pend, {"600519": b.data_db.get_bars("600519", limit=30)},
-                          b.price_map(["600519"]), exec_day="2026-10-26")
+                          b.price_map(["600519"]), exec_day=exec_day)
     assert res["conditions"]["n_created"] == 1
     o = ConditionalOrders(b.account_db_path).list_all(5)[0]
-    assert o["expiry"].startswith("2026-10-26")      # 顺延到执行日
+    assert o["expiry"].startswith(exec_day)         # 顺延到执行日
     assert "顺延" in (o["note"] or "")                # 调整留痕可审计
 
 
@@ -218,6 +224,40 @@ def test_close_nav_snapshot_once_per_day(tmp_path):
     ops = [o for o in b.broker.get_op_log(10) if o["action"] == "nav:close"]
     assert len(ops) == 1
     assert _json.loads(ops[0]["params"])["symbols"] == 1
+
+
+def test_nav_close_idempotent_for_explicit_past_day(tmp_path):
+    """幂等按业务日判断：day 不等于今天时也不能重复记（Issue #2 回归）。
+
+    写入时间戳永远是 today，只有 result.date 记住业务日；只按 timestamp
+    匹配会让补记历史日/次日重跑永远查不到，从而重复插 nav_history。
+    """
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    t._snapshot_close_nav(["600519"], "2020-01-02")
+    t._snapshot_close_nav(["600519"], "2020-01-02")
+    assert b.broker.has_operation("nav:close", "2020-01-02")
+    assert not b.broker.has_operation("nav:close", "2020-01-03")
+    assert len(b.get_nav_history()) == 1
+
+
+def test_plan_exists_still_snapshots_close_nav(tmp_path):
+    """计划已存在（其他入口写入/上次快照失败）时仍要补记当日 NAV。"""
+    from paper_trading.utils.trading_calendar import next_trading_day
+
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    plan_date = next_trading_day(datetime.now()).isoformat()
+    b.broker.save_plan(plan_date, ["600519"], {"actions": [], "summary": ""})
+    today = datetime.now().date().isoformat()
+
+    r = t._plan(["600519"], require_today=True)
+    assert r["skipped"] == "plan-exists"
+    assert b.broker.has_operation("nav:close", today)
+    assert len(b.get_nav_history()) == 1
+
+    t._plan(["600519"], require_today=True)             # 下一个 tick 不重复记
+    assert len(b.get_nav_history()) == 1
 
 
 def test_arm_rejects_sell_condition_without_holding(tmp_path):

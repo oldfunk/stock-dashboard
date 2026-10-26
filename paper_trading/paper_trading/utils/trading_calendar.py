@@ -17,6 +17,7 @@ T+1 解冻日、实时交易时段判断。历史交易日与这些判断无关�
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,8 @@ DEFAULT_CALENDAR_REL = Path("var") / "trading_calendar.json"
 #: 不是存历史档案；缓存主体是未来交易日（更早历史要查就查数据源，别信缓存）。
 HISTORY_TAIL_DAYS = 45
 _CACHE: dict = {"path": "", "mtime_ns": -1, "data": {}}
+_LOGGER = logging.getLogger(__name__)
+_HORIZON_WARNED: Set[str] = set()
 
 
 def as_date(d: date | datetime | str) -> date:
@@ -119,18 +122,24 @@ def save_calendar(dates: Iterable[str | date | datetime],
             "fetched_at": payload["fetched_at"]}
 
 
-def sync_calendar(path: Optional[str | Path] = None) -> dict:
+def sync_calendar(path: Optional[str | Path] = None,
+                  timeout_sec: float = 30.0) -> dict:
     """从 akshare（新浪交易日历）同步**未来**交易日并缓存；失败返回 ok=False。
 
     接口虽叫 hist，返回的是“历史 + 未来”的全量交易所日历；我们只留
     「最近 HISTORY_TAIL_DAYS 天 + 未来全部」，历史部分不入库。
+
+    `timeout_sec`：akshare 没有逐请求 timeout，连不上会 stall；超时按失败
+    返回，绝不挂住 cron（否则会长期持有 run_lock）。
     """
     try:
         import akshare as ak  # type: ignore
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"akshare 不可用：{type(e).__name__}: {e}"}
+    from .timeout import call_with_timeout
+
     try:
-        df = ak.tool_trade_date_hist_sina()
+        df = call_with_timeout(ak.tool_trade_date_hist_sina, timeout_sec)
         col = "trade_date" if "trade_date" in df.columns else df.columns[0]
         cutoff = (date.today() - timedelta(days=HISTORY_TAIL_DAYS)).isoformat()
         dates = [d for d in (str(x)[:10] for x in df[col].tolist()) if d >= cutoff]
@@ -177,10 +186,28 @@ def calendar_status(path: Optional[str | Path] = None) -> dict:
             "needs_sync": bool(needs_sync), "stale": bool(stale)}
 
 
+def calendar_covers(d: date | datetime | str,
+                    path: Optional[str | Path] = None) -> bool:
+    """交易日历缓存是否覆盖该日期（覆盖不到 = 无法确认交易日）。
+
+    - 缓存不存在：返回 True。首次部署/源不可用时维持“周末+holidays”回退，
+      否则系统会完全停摆（此时 `is_trading_day` 仍会给出保守判断）。
+    - 有缓存但日期晚于 `max_date`（如 2027 源尚未发布）：返回 False，
+      交易入口（tick/引擎/事件/实时报价）应 **fail-closed** 跳过，
+      并提示跑 `calendar sync`；禁止把“未知日”当交易日静默成交。
+    """
+    data = _read_calendar(path)
+    if not data:
+        return True
+    return _as_date(d).isoformat() <= str(data["max_date"])
+
+
 def is_trading_day(d: date | datetime | str, holidays: Optional[Set[str]] = None) -> bool:
     """是否为交易日。
 
     缓存覆盖该日期时以缓存为准（工作日节假日会被识别）；否则回退周末+holidays。
+    日期晚于缓存 `max_date`（如 2027 年源尚未发布）时按工作日回退，但会告警
+    一次，避免“假期被当交易日”完全无声（运维应尽快 `calendar sync`）。
     """
     dd = _as_date(d)
     if dd.weekday() >= 5:
@@ -189,8 +216,14 @@ def is_trading_day(d: date | datetime | str, holidays: Optional[Set[str]] = None
     if holidays and iso in holidays:
         return False
     data = _read_calendar()
-    if data and data["min_date"] <= iso <= data["max_date"]:
-        return iso in data["dates"]
+    if data and data["min_date"] <= iso:
+        if iso <= data["max_date"]:
+            return iso in data["dates"]
+        if iso not in _HORIZON_WARNED:
+            _HORIZON_WARNED.add(iso)
+            _LOGGER.warning(
+                "交易日历缓存只覆盖到 %s，%s 按工作日回退判断；请运行 calendar sync",
+                data["max_date"], iso)
     return True
 
 

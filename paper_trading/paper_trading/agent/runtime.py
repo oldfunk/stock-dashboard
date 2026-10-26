@@ -18,7 +18,7 @@ from typing import Optional
 
 from paper_trading.utils import market_time as mt
 from paper_trading.utils.trading_calendar import (
-    calendar_status, is_trading_day, next_trading_day,
+    calendar_covers, calendar_status, is_trading_day, next_trading_day,
 )
 
 
@@ -44,6 +44,8 @@ def due_action(now: Optional[datetime] = None, *,
     t = mt.now_cn(now)
     if not is_trading_day(t.date()):
         return None
+    if not calendar_covers(t.date()):
+        return None        # 日历未覆盖：未知日一律不动作（fail-closed）
     if (force or mt.in_open_exec_window(t)) and pending_plan:
         return "execute_plan"
     if force or mt.in_plan_window(t):
