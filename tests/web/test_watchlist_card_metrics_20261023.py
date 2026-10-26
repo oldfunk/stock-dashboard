@@ -87,6 +87,18 @@ def test_api_watchlist_falls_back_to_snapshot(client):
     assert item.get("gross_margin") is None  # snapshot 无此列，保持 None
 
 
+def test_watchlist_cards_endpoint_uses_shared_template(client):
+    """钉选视图由服务端返回同一张候选卡（data-view=pinned），不是 JS 另画。"""
+    _seed(client)
+    data = client.get("/api/watchlist/cards").json()
+    assert data["count"] == 1
+    html = data["html"]
+    assert 'data-view="pinned"' in html
+    assert 'class="stock-card' in html
+    assert "股息率" in html
+    assert "3.50%" in html
+
+
 def test_metric_thresholds_live_in_registry():
     """好/中/差阈值只在 stock_metrics；模板与 JS 不再各写一套。"""
     from src.web.stock_metrics import spec_for, tone_for
@@ -101,10 +113,11 @@ def test_metric_thresholds_live_in_registry():
     assert tone_for(spec_for("pe"), -1) == "bad"
 
 
-def test_watchlist_js_uses_server_rendered_metrics():
-    """钉选卡指标由服务端统一渲染；JS 不再手写标签/阈值（防再次漂移）。"""
+def test_watchlist_js_uses_server_rendered_cards():
+    """钉选卡由服务端同一模板渲染；JS 不再拼指标/卡片结构（防再次漂移）。"""
     js = (TPL_DIR / "static" / "watchlist.js").read_text(encoding="utf-8")
-    assert "s.metrics_html" in js
+    assert "/api/watchlist/cards" in js
+    assert "s.metrics_html" not in js
     assert "s.dividend_yield" not in js
     assert "s.dividend_years" not in js
     from src.web.stock_metrics import CARD_METRICS

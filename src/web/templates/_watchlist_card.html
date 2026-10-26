@@ -1,120 +1,11 @@
+{# AI 观察池：与候选卡同一模板（2026-10-26），不再单独一套 .wl-item 结构。 #}
 {% if watchlist %}
-<div class="wl-list">
-    {% for stock in watchlist %}
-    <div class="wl-item clickable" data-code="{{ stock.code }}"
-         onclick="location.href='/stock/{{ stock.code }}'">
-
-        {# ── 头部：代码 + 名称 + 评分 + 池信息（AI 信号徽标已移除；分析走自带 Key 队列，见账本 M5） ── #}
-        <div class="wl-item-header">
-            <div class="wl-item-left">
-                <span class="wl-code">{{ stock.code }}</span>
-                <span class="wl-name">{{ stock.name }}</span>
-                {% if stock.score is not none %}<span class="wl-score">Score {{ "%.0f"|format(stock.score) }}</span>{% endif %}
-            </div>
-            <div class="wl-item-right">
-                <span class="wl-tag">池{{ stock.review_count or 1 }}周</span>
-                <button class="ai-btn"
-                    onclick="event.stopPropagation(); analyzeOne('{{ stock.code }}', this)"
-                    title="用已配置模型分析这一只（once 模式）">AI 分析</button>
-            </div>
-        </div>
-
-        {# ── 指标行 ── #}
-        <div class="wl-metrics">
-            <div class="wl-m">
-                <span class="wl-m-label">现价</span>
-                <span class="wl-m-value" id="wl-price-{{ stock.code }}">
-                    {%- if stock.current_price is not none -%}{{ "%.2f"|format(stock.current_price) }}{%- else -%}--{%- endif -%}
-                </span>
-                {% if stock.change_percent is not none %}
-                <span class="wl-m-change" style="color:{{ 'var(--color-up)' if stock.change_percent >= 0 else 'var(--color-down)' }}">{{ "%+.2f"|format(stock.change_percent) }}%</span>
-                {% endif %}
-            </div>
-            {% set variant = 'wl' %}
-            {% with metrics = stock.metrics %}{% include '_metric_cells.html' %}{% endwith %}
-        </div>
-
-        {# ── 5y/10y 历史行 ── #}
-        {% if stock._summary and stock._summary.data_years %}
-        <div class="wl-summary">
-            <span class="wl-sum-badge">{{ stock._summary.data_years }}年数据</span>
-            {% if stock._summary.roe_5y_avg %}ROE 5y: {{ "%.1f"|format(stock._summary.roe_5y_avg) }}%{% endif %}
-            {% if stock._summary.roe_10y_avg %} / 10y: {{ "%.1f"|format(stock._summary.roe_10y_avg) }}%{% endif %}
-            {% if stock._summary.intcov_5y_avg %} | 利息覆盖: {{ "%.1f"|format(stock._summary.intcov_5y_avg) }}x{% endif %}
-            {% if stock._summary.fcf_5y_sum %} | FCF 5y: {{ "%.1f"|format(stock._summary.fcf_5y_sum / 1e8) }}亿{% endif %}
-            {% if stock._summary.fcf_positive_years_10 %} | FCF+: {{ stock._summary.fcf_positive_years_10 }}/10{% endif %}
-            {% if stock._summary.share_dilution_5y %} | 稀释: {{ "%.1f"|format(stock._summary.share_dilution_5y) }}%{% endif %}
-        </div>
-        {% endif %}
-
-        {# ── 入池原因 ── #}
-        {% if stock.reason %}
-        <div class="wl-reason">{{ stock.reason }}</div>
-        {% elif stock.added_reason %}
-        <div class="wl-reason">{{ stock.added_reason }}</div>
-        {% endif %}
-
-        {# ── 监控条件标签（人话文案优先，title 保留原始 JSON 备查） ── #}
-        {% if stock.monitor_condition %}
-        <div class="wl-monitor-tag" title="监控条件：{{ stock.monitor_condition }}">
-            <span class="wl-monitor-text">监控 → {{ stock.monitor_text or stock.monitor_condition }}</span>
-        </div>
-        {% endif %}
-
-        {# ── 评分拆解（与候选卡同结构，复用 toggleScoreDetail） ── #}
-        {% if stock.score_detail_parsed %}
-        <div class="score-detail">
-            <button class="score-detail-toggle" type="button" onclick="event.stopPropagation(); toggleScoreDetail('{{ stock.code }}')">
-                评分拆解 {{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}
-                <span class="caret" id="caret-{{ stock.code }}">↓</span>
-            </button>
-            <div id="sd-{{ stock.code }}" class="score-detail-body" style="display:none;" onclick="event.stopPropagation();">
-                {% set _w = {'roe': 'ROE', 'pe': '估值', 'growth': '增长', 'debt': '财务', 'margin': '毛利'} %}
-                {% for k, p in stock.score_detail_parsed.items() %}
-                    {% if k in ('roe', 'pe', 'growth', 'debt', 'margin') %}
-                    <div class="sd-row">
-                        <span class="sd-name">{{ _w[k] }}</span>
-                        <span class="sd-raw">{{ "%.1f"|format(p.raw) if p.raw is not none else '--' }}</span>
-                        <span class="sd-bar"><i style="width:{{ p.sub }}%;"></i></span>
-                        <span class="sd-sub">{{ p.sub }}</span>
-                        <span class="sd-w">{{ "%.2f"|format(p.weight) }}</span>
-                        <span class="sd-contrib">+{{ "%.2f"|format(p.contribution) }}</span>
-                    </div>
-                    {% endif %}
-                {% endfor %}
-                {% if stock.score_detail_parsed.consistency_bonus is not none %}
-                <div class="sd-row sd-consistency">
-                    <span class="sd-name">一致性加分</span>
-                    <span class="sd-raw"></span>
-                    <span class="sd-bar"></span>
-                    <span class="sd-sub"></span>
-                    <span class="sd-w"></span>
-                    <span class="sd-contrib">+{{ stock.score_detail_parsed.consistency_bonus }}</span>
-                </div>
-                {% endif %}
-                <div class="sd-row sd-total">
-                    <span class="sd-name">总分</span>
-                    <span class="sd-raw"></span>
-                    <span class="sd-bar"></span>
-                    <span class="sd-sub"></span>
-                    <span class="sd-w"></span>
-                    <span class="sd-contrib">{{ "%.1f"|format(stock.score_detail_parsed.total) if stock.score_detail_parsed.total is not none else '' }}</span>
-                </div>
-                {% set _sa = sector_avg.get(stock.sector) if (sector_avg is defined and sector_avg and stock.sector is defined and stock.sector) else none %}
-                {% if _sa %}
-                <div class="sd-row sd-sector">
-                    <span class="sd-name">行业均值（{{ stock.sector }}）</span>
-                    <span class="sd-detail">ROE {{ "%.2f"|format(_sa.avg_roe) if _sa.avg_roe is not none else '--' }}% · PE {{ "%.1f"|format(_sa.avg_pe) if _sa.avg_pe is not none else '--' }}（{{ _sa.n }}只）</span>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-        {% endif %}
-
-        {# AI 展示区已移除（2026-09-21；分析曾改走外部 API，同年 09-27 起改走自带 Key）；2026-09-27 起卡片头部带 AI 分析触发按钮（结果进详情时间线/用量表） #}
-
-    </div>
-    {% endfor %}
+{% set _view = view if view is defined else 'pool' %}
+<div class="stock-list">
+{% for stock in watchlist %}
+{% set view = _view %}
+{% include '_stock_card.html' %}
+{% endfor %}
 </div>
 {% else %}
 <div class="empty-state">
@@ -123,21 +14,3 @@
     <p>周六 00:00 AI 自动复盘后，将在此处展示 5 只观察股。</p>
 </div>
 {% endif %}
-<style>
-/* 观察池卡片独占样式（单消费者 index.html；AI 展示类已随 2026-09-21 方向移除） */
-
-/* 监控条件标签 */
-.wl-monitor-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin: 4px 0;
-    padding: 2px 8px;
-    background: #fff3cd;
-    border: 1px solid #ffc107;
-    border-radius: 4px;
-    font-size: 11px;
-    color: #856404;
-}
-.wl-monitor-text { font-family: monospace; }
-</style>

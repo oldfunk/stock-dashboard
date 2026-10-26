@@ -1551,9 +1551,12 @@ async def api_watchlist():
     使手动钉选卡与候选卡 / AI 观察池卡同口径上色（好/中/差 → 红/金/绿）。
     """
     items = WatchlistDAO().list_all()
+    from src.models.database import StockSnapshotDAO
     # 合并实时行情缓存；无实时行情时用 stock_snapshot 的价格作 fallback
     realtime = get_realtime_cache()
     sr_dao = ScreeningResultDAO()
+    fs_dao = FinancialSummaryDAO()
+    snap_dao = StockSnapshotDAO()
     for item in items:
         code = item['code']
         if code in realtime:
@@ -1570,12 +1573,50 @@ async def api_watchlist():
                 item[k] = sr[k]
             elif item.get(k) is None:
                 item[k] = None
+        # 统一卡片所需字段（板块/5y10y/评分拆解），与候选卡同结构
+        item['watched'] = True
+        snap = snap_dao.get_by_code(code)
+        item['sector'] = snap.get('sector') if snap else None
+        item['score_detail_parsed'] = None
+        if sr.get('score_detail'):
+            try:
+                item['score_detail_parsed'] = (
+                    json.loads(sr['score_detail'])
+                    if isinstance(sr['score_detail'], str) else sr['score_detail'])
+            except (json.JSONDecodeError, TypeError):
+                item['score_detail_parsed'] = None
+        fs = fs_dao.get(code)
+        if fs:
+            item['_summary'] = {
+                'roe_5y_avg': fs.get('roe_5y_avg'),
+                'roe_10y_avg': fs.get('roe_10y_avg'),
+                'roe_improvement': fs.get('roe_improvement'),
+                'roe_volatility': fs.get('roe_volatility'),
+                'intcov_5y_avg': fs.get('intcov_5y_avg'),
+                'fcf_5y_sum': fs.get('fcf_5y_sum'),
+                'fcf_10y_sum': fs.get('fcf_10y_sum'),
+                'fcf_positive_years_10': fs.get('fcf_positive_years_10'),
+                'share_dilution_5y': fs.get('share_dilution_5y'),
+                'share_dilution_10y': fs.get('share_dilution_10y'),
+                'data_years': fs.get('data_years'),
+            }
     tpl = templates.env.get_template('_metric_cells.html')
     for item in items:
         item['metrics'] = metric_items(item)
         # 手动钉选卡与候选卡共用 .metric-cell 网格（不能用 wl 外壳，否则样式错位）
         item['metrics_html'] = tpl.render(metrics=item['metrics'], variant='card')
     return items
+
+
+@app.get("/api/watchlist/cards")
+async def api_watchlist_cards():
+    """钉选卡 HTML（与候选卡同一模板，2026-10-26 三视图统一）。"""
+    from src.models.database import StockSnapshotDAO
+    items = await api_watchlist()
+    sector_avg = StockSnapshotDAO.get_sector_averages()
+    html = templates.get_template('_stock_list.html').render(
+        stocks=items, view='pinned', sector_avg=sector_avg)
+    return {"count": len(items), "html": html}
 
 
 @app.post("/api/watchlist/{code}")

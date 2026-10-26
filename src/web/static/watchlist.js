@@ -51,57 +51,22 @@ function toggleWatch(code, btn) {
                 btn.textContent = '已钉';
             }
             updateWatchCount();
+            setTimeout(loadWatchlist, 300);
         })
         .catch(function(e) { console.error('toggleWatch error:', e); });
 }
 
-// 加载钉选列表
+// 加载钉选列表（2026-10-26：服务端渲染同一张候选卡模板，JS 不再拼卡片）
 function loadWatchlist() {
-    fetch('/api/watchlist')
+    fetch('/api/watchlist/cards')
         .then(function(r) { return r.json(); })
-        .then(function(items) {
+        .then(function(data) {
             var el = document.getElementById('watchlistContainer');
             if (!el) return;
-            updateWatchCount(items.length);
-            if (items.length === 0) {
-                el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary);">' +
-                    '还没有钉选的股票<br><small>搜索股票后点"钉选"即可加入跟踪</small></div>';
-                return;
-            }
-            el.innerHTML = items.map(function(s) {
-                var signal = s.last_signal || '';
-                var signalClass = signal === 'BUY' ? 'signal-buy' : (signal === 'AVOID' ? 'signal-avoid' : (signal === 'HOLD' ? 'signal-hold' : 'signal-none'));
-                var signalText = signal === 'BUY' ? '买入' : (signal === 'HOLD' ? '持有' : (signal === 'AVOID' ? '回避' : '无'));
-                var price = '--';
-                if (s.current_price != null) price = s.current_price.toFixed(2);
-                else if (s.latest_price != null) price = s.latest_price.toFixed(2);
-                var addedDate = (s.added_at || '').slice(0, 10);
-                // 指标单元格由服务端 _metric_cells.html 统一渲染（与候选卡/观察池同一口径，JS 不再手写标签与阈值）
-                var metricsHtml = s.metrics_html || '';
-                return '<div class="stock-card clickable" data-code="' + s.code + '"' +
-                    ' onclick="location.href=\'/stock/' + s.code + '\'" title="查看 ' + s.name + ' 详情">' +
-                    '<div class="stock-row">' +
-                    '<div class="stock-info">' +
-                    '<div class="stock-code">' + s.code + '</div>' +
-                    '<div class="stock-name">' + s.name + '</div>' +
-                    '<button class="watch-btn watched" data-wcode="' + s.code + '">已钉</button>' +
-                    '</div>' +
-                    '<div class="stock-metrics">' +
-                    '<div class="metric-cell"><div class="label">现价</div><div class="value" style="font-weight:500;">' + price + '</div></div>' +
-                    '<div class="metric-cell"><div class="label">信号</div><div class="value ' + signalClass + '">' + signalText + '</div></div>' +
-                    metricsHtml +
-                    '<div class="metric-cell"><div class="label">加入于</div><div class="value" style="font-size:11px;">' + addedDate + '</div></div>' +
-                    '</div></div>' +
-                    '</div>';
-            }).join('');
-            // 绑定取消钉选按钮（阻断冒泡，否则先触发卡片跳转）
-            el.querySelectorAll('[data-wcode]').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    toggleWatch(btn.getAttribute('data-wcode'), btn);
-                    setTimeout(loadWatchlist, 400);
-                });
-            });
+            updateWatchCount(data.count);
+            el.innerHTML = data.count ? data.html :
+                '<div style="padding:40px;text-align:center;color:var(--text-tertiary);">' +
+                '还没有钉选的股票<br><small>搜索股票后点"钉选"即可加入跟踪</small></div>';
         })
         .catch(function(e) { console.error('loadWatchlist error:', e); });
 }
