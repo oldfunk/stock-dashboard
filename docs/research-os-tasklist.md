@@ -12,8 +12,8 @@
 - [x] **R0-2 数据库表与迁移**：新增 `market`、`instrument`、`trading_calendar`、`fx_rate_daily`、`feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
   - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 增加 `market`/`instrument_id`（不改旧主键）；生产迁移完成：`instrument_id` 空值 0/2,150,145，`instrument` 5,527（SSE 2,633 / SZSE 2,894）。
 - [ ] **R0-2a Repository 接口**：SQLite 与 DuckDB 各实现只读/只写接口，研究查询不直接写业务库。
-- [ ] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
-- [ ] **R0-2c DuckDB 视图**：DuckDB 只读 Parquet；提供研究查询函数；单测覆盖一个回测扫描。
+- [x] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/parquet/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
+- [x] **R0-2c DuckDB 视图**：`SnapshotReader` DuckDB 只读 Parquet；`scan_forward_returns` 回测扫描；单测覆盖。
 - [x] **R0-3 注册表**：`src/research/registry.py` 统一特征/假设/策略/提示词注册与校验（必填字段、版本、hash）。
   - 验收：重复 ID/缺字段/非法状态被拒绝；注册即写 DB。
 - [x] **R0-4 版本与快照**：`data_snapshot_id`（表名/行数/最大日期/hash）、`code_commit`、`config_hash`、`random_seed` 的记录与校验。
