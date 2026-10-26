@@ -383,6 +383,53 @@ class ResearchDAO:
             out.append(d)
         return out
 
+    # ── LLM 任务注册（R0-8） ─────────────────────────────────────────────────
+    def insert_task(self, obj: Any) -> None:
+        d = _data(obj)
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO llm_task
+                (task_id, version, description, model_tier, tools_json,
+                 output_schema_json, max_tokens, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                d["task_id"], d.get("version", 1), d.get("description"),
+                d.get("model_tier"), _dumps(d.get("tools")),
+                _dumps(d.get("output_schema")), d.get("max_tokens"),
+                d.get("status", "active"),
+                d.get("created_at") or now_cn().isoformat(),
+            ))
+
+    def get_task(self, task_id: str, version: int | None = None) -> dict | None:
+        if version is None:
+            sql = "SELECT * FROM llm_task WHERE task_id = ? ORDER BY version DESC LIMIT 1"
+            params = [task_id]
+        else:
+            sql = "SELECT * FROM llm_task WHERE task_id = ? AND version = ?"
+            params = [task_id, version]
+        with db_conn() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return self._task_dict(row) if row else None
+
+    def list_tasks(self, status: str | None = None, limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM llm_task"
+        params: list = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY task_id, version DESC LIMIT ?"
+        params.append(limit)
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._task_dict(row) for row in rows]
+
+    @staticmethod
+    def _task_dict(row) -> dict:
+        d = dict(row)
+        d["tools"] = _loads(d.pop("tools_json"), [])
+        d["output_schema"] = _loads(d.pop("output_schema_json"), {})
+        return d
+
     # ── 特征 / 数据质量 ──────────────────────────────────────────────────────
     def insert_feature_definition(self, obj: Any) -> None:
         d = _data(obj)

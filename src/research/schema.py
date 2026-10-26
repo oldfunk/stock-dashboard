@@ -254,4 +254,19 @@ CREATE TABLE IF NOT EXISTS llm_run (
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_llm_run_task ON llm_run(task, created_at);
+
+-- LLM 任务注册（R0-8）：任务/模型档/工具白名单/输出 schema/token 预算
+CREATE TABLE IF NOT EXISTS llm_task (
+    task_id       TEXT NOT NULL,
+    version       INTEGER NOT NULL,
+    description   TEXT NOT NULL,
+    model_tier    TEXT NOT NULL,           -- fast / deep
+    tools_json    TEXT,
+    output_schema_json TEXT NOT NULL,      -- JSON schema（缺失即不可调用）
+    max_tokens    INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active',
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (task_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_llm_task_status ON llm_task(status);
 """
