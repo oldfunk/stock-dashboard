@@ -185,6 +185,175 @@ def _load_features(trade_date: str, feature_id: str,
     return {r["instrument_id"]: r["value"] for r in rows}
 
 
+# ── 事件研究：analysis_outcome 分层（R2-0 修 G1/G3/G4） ─────────────────────
+
+def block_bootstrap_ci(values: list[float], groups: list[str],
+                       n_boot: int = 1000, seed: int = 42,
+                       confidence: float = 0.95) -> tuple[float | None, float | None]:
+    """按**分组**（如股票）重抽样的 block bootstrap CI。
+
+    动机：60/120 日前向窗口相互重叠、同一股票被多次分析，按行重抽样会
+    高估显著性；按股票分块重抽样保留组内相关性。
+    """
+    if not values or not groups or len(values) != len(groups):
+        return None, None
+    import random
+    import statistics
+    by_group: dict[str, list[float]] = {}
+    for value, group in zip(values, groups):
+        by_group.setdefault(group, []).append(value)
+    names = list(by_group)
+    rng = random.Random(seed)
+    means = []
+    for _ in range(n_boot):
+        sample = [rng.choice(names) for _ in names]
+        pooled = [v for name in sample for v in by_group[name]]
+        if pooled:
+            means.append(sum(pooled) / len(pooled))
+    if not means:
+        return None, None
+    means.sort()
+    alpha = (1 - confidence) / 2
+    lo = means[int(alpha * len(means))]
+    hi = means[min(len(means) - 1, int((1 - alpha) * len(means)))]
+    return round(lo, 6), round(hi, 6)
+
+
+def _load_outcomes(start_date: str, end_date: str,
+                   benchmark: str | None = None) -> list[dict]:
+    sql = ("SELECT stock_code, analysis_date, signal, confidence, "
+           "mos_at_entry, ret_20, ret_60, excess_20, excess_60 "
+           "FROM analysis_outcome WHERE analysis_date BETWEEN ? AND ?")
+    params: list = [start_date, end_date]
+    if benchmark:
+        sql += " AND benchmark_code = ?"
+        params.append(benchmark)
+    sql += " ORDER BY analysis_date"
+    with db_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def _join_regime(rows: list[dict]) -> None:
+    """给每行补 regime（join market_state_daily）。"""
+    with db_conn() as conn:
+        for row in rows:
+            hit = conn.execute(
+                "SELECT regime FROM market_state_daily WHERE trade_date = ?",
+                (row["analysis_date"],)).fetchone()
+            row["regime"] = hit["regime"] if hit else None
+
+
+def _join_sector_size(rows: list[dict]) -> None:
+    """给每行补 sector / size（join stock_snapshot）。"""
+    with db_conn() as conn:
+        for row in rows:
+            hit = conn.execute(
+                "SELECT sector, market_cap FROM stock_snapshot WHERE code = ? "
+                "ORDER BY snapshot_date DESC LIMIT 1", (row["stock_code"],)).fetchone()
+            row["sector"] = hit["sector"] if hit else None
+            cap = hit["market_cap"] if hit else None
+            row["size"] = ("large" if (cap or 0) >= 1e10 else
+                           "mid" if (cap or 0) >= 1e9 else "small")
+
+
+class OutcomeEventStudyRunner(ExperimentRunner):
+    """对 ``analysis_outcome`` 做分层事件研究（默认 MOS 分档）。
+
+    计划参数（``plan.params``）：
+    - ``tiers``：``[[label, lo, hi], ...]``（MOS 百分数，None 表示无穷）
+    - ``horizons``：``[20, 60]``
+    - ``n_boot``（默认 1000）、``splits``（默认 ``["regime","sector","size"]``）
+    """
+
+    name = "outcome_event_study"
+
+    def run(self, plan: ExperimentPlan,
+            snapshot: SnapshotManifest) -> ExperimentOutcome:
+        started = now_cn().isoformat()
+        try:
+            metrics = self._compute(plan)
+        except Exception as exc:  # noqa: BLE001 - 运行失败转实验状态
+            return ExperimentOutcome(
+                experiment_id=plan.experiment_id,
+                status=ExperimentStatus.FAILED.value,
+                started_at=started, finished_at=now_cn().isoformat(),
+                error=f"{type(exc).__name__}: {exc}")
+        results = [
+            ExperimentResult(
+                id=rid, experiment_id=plan.experiment_id,
+                metric=metric, value=round(value, 6),
+                sample_size=metric_stats["n"],
+                ci_low=metric_stats.get("ci_low") or 0.0,
+                ci_high=metric_stats.get("ci_high") or 0.0,
+                splits=metric_stats.get("splits", {}),
+                notes="分域明细" if metric_stats.get("splits") else "",
+            )
+            for rid, (metric, value, metric_stats) in zip(
+                _result_ids(plan, len(metrics)), metrics)
+        ]
+        outcome = ExperimentOutcome(
+            experiment_id=plan.experiment_id,
+            status=ExperimentStatus.DONE.value,
+            started_at=started, finished_at=now_cn().isoformat(),
+            results=results,
+            notes=("分域事件研究；样本为历史分析，**可能存在幸存者偏差**；"
+                   "CI 为按股票分块的 block bootstrap"))
+        outcome.verdict = derive_verdict(plan, outcome)
+        return outcome
+
+    def _compute(self, plan: ExperimentPlan) -> list[tuple[str, float, dict]]:
+        p = plan.params
+        start, end = p["start_date"], p["end_date"]
+        tiers = p.get("tiers") or [
+            ["<=0", None, 0.0], ["0~20", 0.0, 20.0],
+            ["20~40", 20.0, 40.0], [">=40", 40.0, None]]
+        horizons = p.get("horizons") or [20, 60]
+        n_boot = int(p.get("n_boot", 1000))
+        splits = p.get("splits") or ["regime", "sector", "size"]
+        rows = _load_outcomes(start, end, plan.benchmark or None)
+        if "regime" in splits:
+            _join_regime(rows)
+        if "sector" in splits or "size" in splits:
+            _join_sector_size(rows)
+
+        out: list[tuple[str, float, dict]] = []
+        for horizon in horizons:
+            suffix = f"excess_{horizon}"
+            usable = [r for r in rows if r.get(suffix) is not None]
+            for label, lo, hi in tiers:
+                sel = [r for r in usable if _in_tier(r.get("mos_at_entry"), lo, hi)]
+                if not sel:
+                    continue
+                values = [r[suffix] for r in sel]
+                groups = [r["stock_code"] for r in sel]
+                mean = sum(values) / len(values)
+                ci_low, ci_high = block_bootstrap_ci(values, groups, n_boot,
+                                                     plan.random_seed)
+                split_stats = {}
+                for key in splits:
+                    bucket: dict[str, list[float]] = {}
+                    for r in sel:
+                        bucket.setdefault(str(r.get(key)), []).append(r[suffix])
+                    split_stats[key] = {
+                        k: round(sum(v) / len(v), 6) for k, v in bucket.items()}
+                out.append((
+                    f"excess_{horizon}_{label}", round(mean, 6),
+                    {"n": len(sel), "ci_low": ci_low, "ci_high": ci_high,
+                     "hit_rate": round(sum(1 for v in values if v > 0) / len(values), 4),
+                     "splits": split_stats}))
+        return out
+
+
+def _in_tier(value: float | None, lo: float | None, hi: float | None) -> bool:
+    if value is None:
+        return False
+    if lo is not None and value < lo:
+        return False
+    if hi is not None and value >= hi:
+        return False
+    return True
+
+
 class TopKBacktestRunner(ExperimentRunner):
     """最小 top-k 因子回测：按特征排序取前 k，持有 horizon_days 个交易日。
 

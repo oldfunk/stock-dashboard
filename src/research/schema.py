@@ -276,6 +276,8 @@ CREATE TABLE IF NOT EXISTS market_state_daily (
     missing_json TEXT,
     coverage    REAL,
     status      TEXT NOT NULL,
+    regime      TEXT,
+    regime_confidence REAL,
     quality_json TEXT,
     created_at  TEXT NOT NULL
 );

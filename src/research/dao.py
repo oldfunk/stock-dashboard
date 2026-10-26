@@ -477,11 +477,12 @@ class ResearchDAO:
             conn.execute("""
                 INSERT OR REPLACE INTO market_state_daily
                 (trade_date, metrics_json, missing_json, coverage, status,
-                 quality_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 regime, regime_confidence, quality_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 d["trade_date"], _dumps(d.get("metrics")), _dumps(d.get("missing")),
-                d.get("coverage"), d.get("status"), _dumps(d.get("quality")),
+                d.get("coverage"), d.get("status"), d.get("regime"),
+                d.get("regime_confidence"), _dumps(d.get("quality")),
                 d.get("created_at") or now_cn().isoformat(),
             ))
 

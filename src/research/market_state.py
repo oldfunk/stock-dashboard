@@ -48,6 +48,8 @@ class MarketStateVector:
     quality: dict[str, Any] = field(default_factory=dict)
     coverage: float = 0.0
     status: str = "pass"
+    regime: str = ""
+    regime_confidence: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +59,8 @@ class MarketStateVector:
             "quality": self.quality,
             "coverage": self.coverage,
             "status": self.status,
+            "regime": self.regime,
+            "regime_confidence": self.regime_confidence,
         }
 
     @property
@@ -317,7 +321,9 @@ def get_vector(trade_date: str,
     return MarketStateVector(
         trade_date=row["trade_date"], metrics=row["metrics"],
         missing=row["missing"], quality=row["quality"],
-        coverage=row["coverage"], status=row["status"])
+        coverage=row["coverage"], status=row["status"],
+        regime=row.get("regime") or "",
+        regime_confidence=row.get("regime_confidence") or 0.0)
 
 
 def list_vectors(limit: int = 30,
@@ -345,6 +351,11 @@ def snapshot_range(start: str, end: str, dry_run: bool = False,
     written = 0
     for day in dates:
         vector = assess_vector(compute_vector(day))
+        # regime 由透明规则计算（本地导入避免与 regime.py 循环依赖）
+        from src.research.regime import classify_regime
+        regime = classify_regime(vector)
+        vector.regime = regime.regime
+        vector.regime_confidence = regime.confidence
         if not dry_run:
             record_state_quality(vector, dao)
             save_vector(vector, dao)
