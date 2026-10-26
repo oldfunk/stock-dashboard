@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import sqlite3
 import sys
 import time
 
@@ -61,6 +62,22 @@ def build_records(code: str, mainfin: dict | None, balance: dict | None,
         rec.update(vals)
         records.append(rec)
     return sorted(records, key=lambda r: r["report_date"])
+
+
+def _retry(fn, *args, attempts: int = 6, **kwargs):
+    """DB 操作重试：WAL 下仍可能撞上长写事务/checkpoint，不能一次锁就崩。"""
+    last = None
+    for i in range(attempts):
+        try:
+            return fn(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            last = e
+            if "locked" not in str(e).lower() or i == attempts - 1:
+                raise
+            wait = min(30, 2 ** (i + 1))
+            logger.warning(f"[full] DB 锁等待 {wait}s 后重试（{e}）")
+            time.sleep(wait)
+    raise last  # type: ignore[misc]
 
 
 def target_codes(all_codes: bool = False) -> list[str]:
@@ -127,7 +144,7 @@ def _process(dao: FinancialHistoryDAO, codes: list[str], args,
         records = build_records(code, mf, bs, cf)
         n = 0
         if records:
-            dao.batch_save(records)
+            _retry(dao.batch_save, records)
             n = len(records)
             totals["updated_rows"] += n
         if not records:
@@ -139,7 +156,7 @@ def _process(dao: FinancialHistoryDAO, codes: list[str], args,
             totals["partial"] += 1
         else:
             status = "done"
-        dao.mark_backfill_done(TASK, code, n, status)
+        _retry(dao.mark_backfill_done, TASK, code, n, status)
         totals["processed"] += 1
         if totals["processed"] % 20 == 0:
             logger.info(f"[full] 累计 {totals['processed']} 只"
@@ -173,10 +190,11 @@ def main() -> int:
         return 0
 
     explicit = [c.strip() for c in args.codes.split(",") if c.strip()]
+    all_targets = explicit or _retry(target_codes, args.all)
     if args.dry_run:
-        codes = explicit or target_codes(args.all)
+        codes = all_targets
         print(json.dumps({"target_codes": len(codes),
-                          "pending": len(pending_codes(codes))},
+                          "pending": len(_retry(pending_codes, codes))},
                          ensure_ascii=False))
         return 0
 
@@ -193,8 +211,9 @@ def main() -> int:
         if explicit and rounds == 0:
             codes = explicit
         else:
-            codes = pending_codes(target_codes(args.all),
-                                  retry_no_data=args.retry_no_data and rounds == 0)
+            codes = _retry(
+                pending_codes, all_targets,
+                retry_no_data=args.retry_no_data and rounds == 0)
             codes = codes[:args.limit] if args.limit else codes
         if not codes:
             break
@@ -204,7 +223,7 @@ def main() -> int:
             break
         if explicit or not args.until_done:
             break
-        remaining = len(pending_codes(target_codes(args.all)))
+        remaining = len(_retry(pending_codes, all_targets))
         if remaining == 0:
             break
         logger.info(f"[full] 批间停顿 {args.batch_sleep}s（剩余 {remaining}）")
@@ -216,7 +235,7 @@ def main() -> int:
         "rounds": rounds,
         "elapsed_sec": elapsed,
         "progress": dao.backfill_progress_summary(TASK),
-        "remaining": len(pending_codes(target_codes(args.all))),
+        "remaining": len(_retry(pending_codes, all_targets)),
     }, ensure_ascii=False))
     return 0
 

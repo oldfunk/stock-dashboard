@@ -84,3 +84,36 @@ def test_main_dry_run(db, monkeypatch, capsys):
     assert s.main() == 0
     out = capsys.readouterr().out
     assert '"target_codes": 2' in out
+
+
+def test_retry_locked_then_success(monkeypatch):
+    import sqlite3
+    from scripts import backfill_financial_full as s
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    monkeypatch.setattr(s.time, "sleep", lambda *_: None)
+    assert s._retry(flaky, attempts=4) == "ok"
+    assert len(calls) == 3
+
+
+def test_retry_non_lock_raises_immediately():
+    import sqlite3
+    from scripts import backfill_financial_full as s
+    calls = []
+
+    def broken():
+        calls.append(1)
+        raise sqlite3.OperationalError("no such table")
+
+    try:
+        s._retry(broken, attempts=4)
+        assert False
+    except sqlite3.OperationalError:
+        pass
+    assert len(calls) == 1
