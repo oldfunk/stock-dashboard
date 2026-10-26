@@ -256,8 +256,7 @@ CREATE TABLE IF NOT EXISTS llm_run (
 CREATE INDEX IF NOT EXISTS idx_llm_run_task ON llm_run(task, created_at);
 
 -- LLM 任务注册（R0-8）：任务/模型档/工具白名单/输出 schema/token 预算
-CREATE TABLE IF NOT EXISTS llm_task (
-    task_id       TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS llm_task (    task_id       TEXT NOT NULL,
     version       INTEGER NOT NULL,
     description   TEXT NOT NULL,
     model_tier    TEXT NOT NULL,           -- fast / deep
@@ -269,4 +268,15 @@ CREATE TABLE IF NOT EXISTS llm_task (
     PRIMARY KEY (task_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_llm_task_status ON llm_task(status);
+
+-- 市场状态快照（R1-2）：每个交易日一条，metrics 缺失显式 NULL
+CREATE TABLE IF NOT EXISTS market_state_daily (
+    trade_date  TEXT PRIMARY KEY,
+    metrics_json TEXT,
+    missing_json TEXT,
+    coverage    REAL,
+    status      TEXT NOT NULL,
+    quality_json TEXT,
+    created_at  TEXT NOT NULL
+);
 """

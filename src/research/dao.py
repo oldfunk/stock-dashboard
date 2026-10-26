@@ -470,6 +470,43 @@ class ResearchDAO:
         with db_conn() as conn:
             return conn.execute(sql, params).fetchone()["n"]
 
+    # ── 市场状态快照（R1-2） ─────────────────────────────────────────────────
+    def insert_market_state(self, obj: Any) -> None:
+        d = _data(obj)
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO market_state_daily
+                (trade_date, metrics_json, missing_json, coverage, status,
+                 quality_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                d["trade_date"], _dumps(d.get("metrics")), _dumps(d.get("missing")),
+                d.get("coverage"), d.get("status"), _dumps(d.get("quality")),
+                d.get("created_at") or now_cn().isoformat(),
+            ))
+
+    def get_market_state(self, trade_date: str) -> dict | None:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM market_state_daily WHERE trade_date = ?",
+                (trade_date,)).fetchone()
+        return self._state_dict(row) if row else None
+
+    def list_market_states(self, limit: int = 30) -> list[dict]:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM market_state_daily ORDER BY trade_date DESC LIMIT ?",
+                (limit,)).fetchall()
+        return [self._state_dict(r) for r in rows]
+
+    @staticmethod
+    def _state_dict(row) -> dict:
+        d = dict(row)
+        d["metrics"] = _loads(d.pop("metrics_json"), {})
+        d["missing"] = _loads(d.pop("missing_json"), [])
+        d["quality"] = _loads(d.pop("quality_json"), {})
+        return d
+
     # ── 特征 / 数据质量 ──────────────────────────────────────────────────────
     def insert_feature_definition(self, obj: Any) -> None:
         d = _data(obj)

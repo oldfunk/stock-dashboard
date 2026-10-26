@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable
 
 from src.models.database import db_conn
+from src.research.dao import ResearchDAO
 
 BLOCKS = ("valuation", "fundamentals", "breadth", "liquidity", "quality")
 MISSING_POLICIES = ("null", "fail_closed")
@@ -229,3 +230,54 @@ def compute_vector(trade_date: str,
         quality={"snapshot_date": snapshot_date,
                  "fail_closed_missing": fail_closed_missing},
         coverage=coverage, status=status)
+
+
+# ── 快照持久化（R1-2） ──────────────────────────────────────────────────────
+
+def save_vector(vector: MarketStateVector, dao: ResearchDAO | None = None) -> None:
+    dao = dao or ResearchDAO()
+    dao.insert_market_state(vector.to_dict())
+
+
+def get_vector(trade_date: str,
+               dao: ResearchDAO | None = None) -> MarketStateVector | None:
+    dao = dao or ResearchDAO()
+    row = dao.get_market_state(trade_date)
+    if row is None:
+        return None
+    return MarketStateVector(
+        trade_date=row["trade_date"], metrics=row["metrics"],
+        missing=row["missing"], quality=row["quality"],
+        coverage=row["coverage"], status=row["status"])
+
+
+def list_vectors(limit: int = 30,
+                 dao: ResearchDAO | None = None) -> list[dict]:
+    dao = dao or ResearchDAO()
+    return dao.list_market_states(limit)
+
+
+def trading_dates(start: str, end: str,
+                  dao: ResearchDAO | None = None) -> list[str]:
+    dao = dao or ResearchDAO()
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT trade_date FROM kline_daily "
+            "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            (start, end)).fetchall()
+    return [r["trade_date"] for r in rows]
+
+
+def snapshot_range(start: str, end: str, dry_run: bool = False,
+                   dao: ResearchDAO | None = None) -> dict:
+    """对 [start, end] 内每个交易日计算并落库状态向量（可重跑）。"""
+    dao = dao or ResearchDAO()
+    dates = trading_dates(start, end, dao)
+    written = 0
+    for day in dates:
+        vector = compute_vector(day)
+        if not dry_run:
+            save_vector(vector, dao)
+        written += 1
+    return {"start": start, "end": end, "dates": len(dates),
+            "written": written, "dry_run": dry_run}
