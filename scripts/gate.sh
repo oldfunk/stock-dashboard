@@ -50,7 +50,9 @@ _floor() {  # $1=基线文件
 _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
     local label="$1" limit="$2"; shift 2
     local rc outfile
-    outfile="$BASETEMP/$label.out"
+    # 注意：输出文件必须放在 BASETEMP 之外——pytest 启动时会清空 --basetemp 目录，
+    # 放在里面会被删掉（2026-10-26 实测 out.log 消失、gate 误判失败）。
+    outfile="${TMPDIR:-/tmp}/gate-${label}-$$.out"
     local cmd=("$PYBIN" -m pytest --tb=short -q --basetemp="$BASETEMP" "$@")
     if [ -n "$TIMEOUT_BIN" ]; then cmd=("$TIMEOUT_BIN" "$limit" "${cmd[@]}"); fi
     # 2026-10-26：不要用 $(...) 收集输出——pytest 被 timeout 杀掉后，遗留子进程
