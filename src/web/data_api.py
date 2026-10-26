@@ -93,8 +93,8 @@ def universe_search(query: str = Query("", min_length=1), limit: int = Query(3, 
     rows = _rows("SELECT code, name FROM stock_snapshot WHERE name LIKE ? "
                  "ORDER BY code LIMIT ?", (f"%{q}%", limit))
     if rows:
-        return {"items": [{"symbol": r["code"], "name": r["name"],
-                           "matched": "name~"}]}
+        return {"items": [{"symbol": row["code"], "name": row["name"],
+                           "matched": "name~"} for row in rows]}
     return {"items": []}
 
 
