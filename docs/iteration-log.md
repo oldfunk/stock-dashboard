@@ -165,6 +165,16 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-27（子项目数据契约 Issue #4–#8 落地；gate 849 → 856）
+
+- **#4 前复权口径**：`kline_daily` 新增 `close_qfq`（前复权，与 `close` 同口径）；`close_adj` 的 778 条 stub 行重抓补齐（现 0 NULL）。
+- **#5 基准代码**：`benchmark_daily` 补 `000001/399001/399006`（东财拉取，失败回退新浪；各 6000/6000/3981 行）。
+- **#6 交易日历**：回填 `trading_calendar`（3949 行 / 2624 交易日）；`market_state_daily` 快照 13 个交易日（regime 不再恒 unknown）。
+- **#7 覆盖度**：`GET /api/data/coverage`（kline_codes/instruments/coverage/null 代码）。
+- **#8 契约文档**：`docs/architecture.md` §9（价格模型/主键/instrument/基准代码/日历/覆盖度/调阅接口）。
+- **性能**：`kline_daily(trade_date)` 索引（近窗口查询不再全表扫描）；广度/波动率查询优化；`volatility_20d` 落地。
+- **门禁**：849 → 856；vendor 242。
+
 ### 2026-10-27（数据调阅 API + R2-1 假设卡；gate 835 → 849）
 
 - **数据调阅 API**（`20647b7`/`99a582e`）：新增 `/api/data/*` 只读接口（筛选候选/观察池/个股卡/全市场检索/市场状态/三大指数/收益验证/研究账本），供子项目 paper_trading 调阅（与直接读 SQLite 解耦，稳定 JSON 契约，缺失不抛错）。
