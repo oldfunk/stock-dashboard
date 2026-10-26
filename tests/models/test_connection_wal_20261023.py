@@ -1,8 +1,10 @@
-"""数据库连接 WAL / 锁竞争回归测试（2026-10-23）。
+"""数据库连接 WAL / 锁竞争回归测试（2026-10-23，2026-10-26 更新）。
 
 背景：``get_connection()`` 曾在每次连接时执行 ``PRAGMA journal_mode=WAL``（需写锁），
-调度器写库期间读连接（如首页轮询 ``/api/indices``）会抛 ``database is locked``。
-现改为 ``busy_timeout=5000`` 等待锁 + 仅在非 WAL 时才设置（读连接不再抢写锁）。
+调度器写库期间读连接会抛 ``database is locked``。2026-10-26 进一步发现：即使只
+查询 ``PRAGMA journal_mode`` 也会抢写锁，且不受 busy_timeout 保护——全市场回填
+在 145 只处被此打断。现在 WAL 只在 ``init_database()`` 设置一次，连接只设
+busy_timeout / foreign_keys。
 """
 
 import sqlite3
@@ -19,8 +21,9 @@ def db_path(tmp_path, monkeypatch):
 
 
 def test_connection_sets_busy_timeout_and_wal(db_path):
-    """连接必须设置 busy_timeout，且 WAL 生效"""
+    """初始化后 WAL 生效；连接只设 busy_timeout"""
     from src.models import database as db_mod
+    db_mod.init_database()
     conn = db_mod.get_connection()
     try:
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000

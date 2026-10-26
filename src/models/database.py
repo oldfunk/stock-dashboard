@@ -23,15 +23,14 @@ def get_connection() -> sqlite3.Connection:
 
     推荐改用 ``db_conn()`` 上下文管理器以避免连接泄漏。
 
-    2026-10-23：``PRAGMA journal_mode=WAL`` 需要写锁，调度器写库期间读连接
-    （如首页轮询 /api/indices）会抛 ``database is locked``。改为：
-    busy_timeout 等待锁 + 仅在非 WAL 时才设置（读连接不再抢写锁）。
+    2026-10-26：**不要在每个连接上执行 `PRAGMA journal_mode`**——该语句需要
+    写锁，且不受 busy_timeout 保护；回填与业务并发时会直接 `database is locked`
+    （实测全市场回填在 145 只处被此打断）。WAL 只在 `init_database()` 初始化
+    时设置一次；连接只设 busy_timeout / foreign_keys。
     """
     conn = sqlite3.connect(get_db_path(), timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
-    if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -417,6 +416,16 @@ CREATE INDEX IF NOT EXISTS idx_analysis_outcome_signal
 
 def init_database():
     """初始化数据库，创建表结构"""
+    # WAL 只需在这里设置一次（每个连接查/设 journal_mode 会抢写锁，见 get_connection）
+    try:
+        _c = sqlite3.connect(get_db_path(), timeout=10.0)
+        try:
+            _c.execute("PRAGMA busy_timeout=10000")
+            _c.execute("PRAGMA journal_mode=WAL")
+        finally:
+            _c.close()
+    except sqlite3.OperationalError as e:
+        print(f"[DB] WAL 设置跳过（可能已有写锁）: {e}")
     with db_conn() as conn:
         conn.executescript(SCHEMA_SQL)
         # 2026-07-18 新增：watchlist 钉选表（用户主动钉选的股票，不受 Top20 限制）
