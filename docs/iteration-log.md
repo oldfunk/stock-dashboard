@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-27（数据调阅 API + R2-1 假设卡；gate 835 → 849）
+
+- **数据调阅 API**（`20647b7`/`99a582e`）：新增 `/api/data/*` 只读接口（筛选候选/观察池/个股卡/全市场检索/市场状态/三大指数/收益验证/研究账本），供子项目 paper_trading 调阅（与直接读 SQLite 解耦，稳定 JSON 契约，缺失不抛错）。
+- **R2-1 假设卡 CLI**（`b6339b6`/`fb8597b`）：`src/research/hypothesis.py` create/lock/view/list；locked 及之后状态不可修改（预注册纪律）；update 校验必填字段非空。
+- **门禁**：835 → 849；vendor 242。
+
 ### 2026-10-27（R2-0 漏洞修补：质量门阻断/事件研究 runner/统计严谨性；gate 826 → 835）
 
 - **D-QG 质量门阻断**（`162948a`/`f5eddad`）：新增数据集质量评估器（`quality.ASSESSORS`）+ `assess_analysis_outcome`/`assess_kline_daily`；`run_experiment` 对已知数据集**仅补写缺失**质量记录（不覆盖预注册），未注册评估器仍 fail-closed。H-001 不再被阻断。
