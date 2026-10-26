@@ -165,6 +165,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-26（Research OS R0 审理 + 5 批修复；gate 751 → 758）
+
+- **审理**：通读 `src/research/` 全部模块 + 实证脚本。确认 3 个缺陷（D1 `_quality_date` 崩溃 / D2 质量门漏判旧日期 / D3 `next_id` ISO 日期碰撞）、2 个语义缺口（G1 空值过松 / G2 Repository 不强制写边界）、若干一致性/死代码项。
+- **修复 1/5（D2+D1）**：`ResearchDAO.get_quality` 按 `(dataset, trade_date)` 精确查；`_quality_date` 加 None 防护。
+- **修复 2/5（D3）**：`domain._compact_day` 归一化日期；`next_id`/`format_id` 接受 `date`/紧凑/ISO；非法日期拒绝。
+- **修复 3/5（G1）**：`_require(..., nonempty=...)`；空 `signal`/`regimes`/`kill_criteria`/`spec` 拒绝（空 `costs` 允许）。
+- **修复 4/5（G2）**：`SqliteResearchRepository._guard` 只写研究表白名单；业务表/不可识别 SQL 拒绝。
+- **修复 5/5（一致性）**：结果 ID 改 `R-YYYYMMDD-NNN`（可 `parse_id`）；docstring 修正；删未用导入（`dao.Iterable`/`decision.Any`/`experiment.re`/`snapshot.datetime`）；删 `export_snapshot(overwrite)` 死参；`ENTITY_TABLE` 去冗余枚举；`require` 改 `list_decisions_by_target` 精确查；快照 `db_size`/`schema_hash` 标注为信息性。
+- **复审**：13/13 实证检查通过；未用导入扫描干净。
+- **门禁**：751 → 758；vendor 242。
+
 ### 2026-10-26（Research OS R0 框架落地：领域对象/表/注册表/快照/质量门/实验/决策/Parquet/Repository）
 
 - **R0-1 领域对象与 ID**（`60aaa18`/`9604a1d`）：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision + 状态机（非法迁移抛 DomainError）+ ID 规则（H/E/S/D/MS/A/DL/DS/R）；`next_id(prefix, day, existing)`。

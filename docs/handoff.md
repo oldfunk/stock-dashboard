@@ -3,9 +3,10 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-26 Research OS R0 框架完成；基线：母项目 751 / vendor 242）
+## 最后状态（2026-10-26 Research OS R0 框架完成 + 审理修复；基线：母项目 758 / vendor 242）
 
 - **Research OS R0 框架落地**（`src/research/`，R0-1…R0-7 + R0-2a/2b/2c 全部入库）：领域对象与状态机（H/E/S/D/MS/A/DL/DS/R）、15 张研究表 + 多市场维度、注册表（特征/假设/策略/提示词）、快照 manifest（结构+统计指纹）、数据质量门（fail-closed）、`ExperimentRunner` + top-k 回测适配器、决策账本（状态变更强制带决策）、Parquet 快照 + DuckDB 只读分析、Repository 接口（SQLite 读写 / Parquet 只读）。
+- **审理 + 5 批修复**（gate 751→758）：D1 `_quality_date` 防崩、D2 质量门改精确查询（不再漏判旧日期）、D3 `next_id` 日期归一化、G1 空值注册拒绝、G2 Repository 写边界守卫、结果 ID 可解析 + 死代码清理。复审 13/13 通过。
 - **生产迁移完成**：`kline_daily.instrument_id` 空值 **0/2,150,145**，`instrument` **5,527**（SSE 2,633 / SZSE 2,894）。
 - **duckdb 1.5.6 已装生产**（aarch64，sqlite 扩展可直连业务库）；`pyproject.toml` 增 `duckdb>=1.1,<2`。
 - **全市场年报回填仍在跑**：annual codes 2723、`financial_history` 104,562 行、`notice_date` 51%、`fcf` 49%（新行拉低比例，待审计 D6）。
@@ -39,6 +40,7 @@
 - （继承）交易日历缓存接缝、v0.6.5 旧 schedule gate、股息/收益口径三条。
 
 ## 历史交接区（追加，不删）
+- 2026-10-26 Research OS R0 审理 + 5 批修复（D1/D2/D3/G1/G2 + 一致性清理；gate 751→758；复审 13/13）
 - 2026-10-26 Research OS R0 框架落地（R0-1…R0-7 + R0-2a/2b/2c；gate 704→751；生产迁移完成 `instrument_id` 0 空值 / `instrument` 5527；duckdb 1.5.6 入依赖；全市场年报回填仍在跑）
 - 2026-10-25 审计整改 A2–A4/A6/A7 上线（回填 partial/进度覆盖/年报过滤/估值分位上屏/门禁离线化；gate 669）；A5 价格域受 push2his 限流阻断（kline 仍 49 只，000001 历史误删待重抓）
 - 2026-10-25 全量审计（13 项缺陷）+ A1 估值 fail-closed 上线（`367a75a`；gate 644→650；生产 001332/600389/600519 实测）
