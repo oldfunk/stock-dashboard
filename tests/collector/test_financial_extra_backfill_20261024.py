@@ -277,7 +277,12 @@ def test_fetch_mainfin_annual_parses_annual_only(monkeypatch):
         return {"result": {"data": [
             {"REPORT_TYPE": "年报", "REPORT_DATE": "2025-12-31 00:00:00",
              "NOTICE_DATE": "2026-04-01 00:00:00", "FCFF_BACK": 100.0,
-             "ROIC": 0.18, "TOTAL_SHARE": 12.5},
+             "ROIC": 0.18, "TOTAL_SHARE": 12.5,
+             "ROEJQ": 32.5, "EPSJB": 65.66, "XSMLL": 91.2, "XSJLL": 50.5,
+             "TOTALOPERATEREVETZ": -1.2, "PARENTNETPROFITTZ": -4.5,
+             "PARENTNETPROFIT": 8.2e10, "ZCFZL": 16.4,
+             "INTSTCOVRATE": 3994.5, "TOTAL_ASSETS_PK": 3.0e11,
+             "TOTAL_EQUITY_PK": 2.5e11, "MGJYXJJE": 49.1},
             {"REPORT_TYPE": "三季报", "REPORT_DATE": "2025-09-30 00:00:00",
              "NOTICE_DATE": "2025-10-25 00:00:00", "FCFF_BACK": 50.0,
              "ROIC": 0.1, "TOTAL_SHARE": 12.5},
@@ -289,6 +294,13 @@ def test_fetch_mainfin_annual_parses_annual_only(monkeypatch):
     assert out["2025-12-31"]["notice_date"] == "2026-04-01"
     assert out["2025-12-31"]["fcf"] == 100.0
     assert out["2025-12-31"]["total_share"] == 12.5
+    # 2026-10-26：同一响应补全基础指标（全市场回填不再依赖 akshare 摘要）
+    assert out["2025-12-31"]["roe"] == 32.5
+    assert out["2025-12-31"]["eps"] == 65.66
+    assert out["2025-12-31"]["gross_margin"] == 91.2
+    assert out["2025-12-31"]["net_margin"] == 50.5
+    assert out["2025-12-31"]["debt_ratio"] == 16.4
+    assert out["2025-12-31"]["net_profit"] == 8.2e10
 
 
 def test_main_dry_run_reports_target_count(db, monkeypatch, capsys):

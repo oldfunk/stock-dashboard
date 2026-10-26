@@ -61,6 +61,19 @@ def fetch_mainfin_annual(code: str, timeout: int = 15) -> dict:
             "fcf": _num(r.get("FCFF_BACK")),
             "roic": _num(r.get("ROIC")),
             "total_share": _num(r.get("TOTAL_SHARE")),
+            # 2026-10-26：同一响应已含基础财务指标，全市场回填不再需要 akshare 摘要
+            "roe": _num(r.get("ROEJQ")),
+            "eps": _num(r.get("EPSJB")),
+            "gross_margin": _num(r.get("XSMLL")),
+            "net_margin": _num(r.get("XSJLL")),
+            "revenue_growth": _num(r.get("TOTALOPERATEREVETZ")),
+            "profit_growth": _num(r.get("PARENTNETPROFITTZ")),
+            "net_profit": _num(r.get("PARENTNETPROFIT")),
+            "debt_ratio": _num(r.get("ZCFZL")),
+            "interest_coverage": _num(r.get("INTSTCOVRATE")),
+            "total_assets": _num(r.get("TOTAL_ASSETS_PK")),
+            "total_equity": _num(r.get("TOTAL_EQUITY_PK")),
+            "ocf_per_share": _num(r.get("MGJYXJJE")),
         }
         if any(v is not None for v in rec.values()):
             out[rpt] = rec
