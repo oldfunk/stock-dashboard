@@ -9,14 +9,30 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
+from typing import Iterable
 
 from src.models.database import db_conn
 from src.research.parquet import SnapshotReader
 
 
 class RepositoryError(RuntimeError):
-    """仓储用法错误（如向只读快照写入）。"""
+    """仓储用法错误（如向只读快照写入、向业务表写入）。"""
+
+
+# 研究仓储只允许写这些表；其余（业务表）一律拒绝。
+RESEARCH_TABLES = frozenset({
+    "market", "instrument", "trading_calendar", "fx_rate_daily",
+    "feature_definition", "stock_feature_daily", "universe_membership",
+    "data_quality_daily", "research_hypothesis", "research_experiment",
+    "research_result", "strategy_version", "strategy_deployment",
+    "strategy_attribution", "decision_log", "prompt_registry", "llm_run",
+})
+
+_TABLE_RE = re.compile(
+    r"^\s*(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)"
+    r"\s+([`\"\[]?[\w.]+[`\"\]]?)", re.IGNORECASE)
 
 
 class ResearchRepository(ABC):
@@ -34,6 +50,9 @@ class ResearchRepository(ABC):
 class SqliteResearchRepository(ResearchRepository):
     name = "sqlite"
 
+    def __init__(self, allowed_tables: Iterable[str] | None = None):
+        self.allowed_tables = frozenset(allowed_tables or RESEARCH_TABLES)
+
     def query(self, sql: str, params: tuple | list | None = None) -> list[dict]:
         with db_conn() as conn:
             cursor = conn.execute(sql, params or [])
@@ -41,8 +60,18 @@ class SqliteResearchRepository(ResearchRepository):
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def execute(self, sql: str, params: tuple | list | None = None) -> int:
+        self._guard(sql)
         with db_conn() as conn:
             return conn.execute(sql, params or []).rowcount
+
+    def _guard(self, sql: str) -> None:
+        match = _TABLE_RE.match(sql)
+        if not match:
+            raise RepositoryError(f"无法识别写目标表，拒绝（fail-closed）: {sql[:60]!r}")
+        table = match.group(1).strip('`"[]')
+        if table not in self.allowed_tables:
+            raise RepositoryError(
+                f"研究仓储只写研究表，拒绝写业务表: {table}")
 
 
 class ParquetResearchRepository(ResearchRepository):

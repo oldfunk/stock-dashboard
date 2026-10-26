@@ -72,3 +72,25 @@ def test_parquet_repository_is_readonly(db):
     assert len(get_prices(repo, DATES[0], DATES[-1])) == len(DATES) * 2
     with pytest.raises(RepositoryError):
         repo.execute("DELETE FROM kline_daily")
+
+
+def test_sqlite_repository_blocks_business_writes(db):
+    """回归 G2：研究仓储只写研究表，业务表写入被拒绝。"""
+    from src.research.repository import (
+        RepositoryError, SqliteResearchRepository,
+    )
+    _seed()
+    repo = SqliteResearchRepository()
+    assert repo.execute(
+        "INSERT INTO research_hypothesis "
+        "(id, prior, statement, universe, status, created_at) "
+        "VALUES ('H-9', 'v', 's', 'u', 'draft', '2026-10-26T00:00:00')") == 1
+    with pytest.raises(RepositoryError):
+        repo.execute("DELETE FROM kline_daily")
+    with pytest.raises(RepositoryError):
+        repo.execute("UPDATE kline_daily SET close_adj = NULL")
+    with pytest.raises(RepositoryError):
+        repo.execute("INSERT INTO kline_daily (code, trade_date) "
+                     "VALUES ('1', '2026-01-01')")
+    with pytest.raises(RepositoryError):
+        repo.execute("PRAGMA table_info(kline_daily)")
