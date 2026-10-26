@@ -13,6 +13,12 @@ cd "$(dirname "$0")/.."
 BASETEMP="${LOCALAPPDATA:-/tmp}/pytest-gate-$$"
 rm -rf "$BASETEMP" 2>/dev/null || true
 mkdir -p "$BASETEMP"
+# 失败/中断也清理 basetemp：/tmp 是 478M tmpfs，历史遗留会撑爆磁盘
+#（2026-10-26 实测：门禁失败时提前 exit，BASETEMP 未清理，/tmp 98% 满导致后续门禁全 ERROR）
+cleanup_basetemp() { rm -rf "$BASETEMP" 2>/dev/null || true; }
+trap cleanup_basetemp EXIT INT TERM
+# 清理更早遗留的 pytest 临时目录（按 PID 命名，进程已死）
+rm -rf "${LOCALAPPDATA:-/tmp}"/pytest-gate-* 2>/dev/null || true
 
 # 优先用项目 venv（生产服务器），否则回退系统 python
 PYBIN="${PYTHON:-}"
