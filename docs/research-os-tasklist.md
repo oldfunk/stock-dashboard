@@ -22,8 +22,8 @@
   - 验收：不达标实验标记 `invalid`；单测覆盖 4 类失败（R0-6 已接入）。
 - [x] **R0-6 实验接口**：`src/research/experiment.py` `ExperimentRunner` 抽象 + `TopKBacktestRunner` 适配器；计划/结果/结论落库。
   - 验收：固定小样本跑通并复现（两次指标一致）；快照缺失/质量 invalid 拒绝；接口不绑死单一回测器。
-- [ ] **R0-7 决策账本**：`decision_log` DAO + CLI：改什么/为什么/证据 ID/预期/复核日。
-  - 验收：策略/假设状态变更必须带决策记录；关闭时写结果。
+- [x] **R0-7 决策账本**：`decision_log` DAO + CLI：改什么/为什么/证据 ID/预期/复核日。
+  - 验收：策略/假设状态变更必须带决策记录（`DecisionService.require` 守卫）；关闭时写结果（`close`）。
 - [ ] **R0-8 LLM 任务注册表**：`src/research/llm/tasks.py`（任务/模型档/工具白名单/输出 schema/token 预算）。
   - 验收：未注册任务不可调用；schema 缺失拒绝。
 - [ ] **R0-9 Prompt 框架**：`research/prompts/<task>/vN.md` + `prompt_registry`（hash/版本）；统一 system/context/task/schema 结构。
