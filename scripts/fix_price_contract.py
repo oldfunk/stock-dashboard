@@ -2,7 +2,7 @@
 
 - **#4 前复权口径**：新增 ``kline_daily.close_qfq``（前复权，与 ``close`` 同口径），
   并回填；对 ``close_adj`` 为 NULL 的 stub 行重新抓取（Sina raw+hfq）补齐。
-- **#5 基准代码**：``benchmark_daily`` 补 ``000001/399001/399006``（从 ``market_index`` 映射）。
+- **#5 基准代码**：``benchmark_daily`` 补 ``000001/399001/399006``（东财拉取，失败回退新浪）。
 - **#6 交易日历**：回填 ``trading_calendar``（market_id/trade_date/is_open）。
 - **#7 覆盖度**：输出 ``kline_daily`` 覆盖度（distinct code / instrument）。
 
@@ -23,11 +23,6 @@ sys.path.insert(0, PROJ)
 from src.models.database import db_conn, init_database, KlineDAO
 from scripts.backfill_price_history import fetch_kline_sina_adjusted
 
-# 子项目约定俗成的基准指数代码（Issue #5）
-BENCHMARK_MAP = {
-    "sh000300": "000300",   # 沪深300
-    "sh000922": "000922",   # 中证红利
-}
 STANDARD_INDEXES = ("000001", "399001", "399006")
 
 

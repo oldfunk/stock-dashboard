@@ -104,3 +104,20 @@ def test_watchlist_and_research(client):
     assert client.get("/api/data/research/hypotheses").json()["items"] == []
     assert client.get("/api/data/research/experiments").json()["items"] == []
     assert client.get("/api/data/research/decisions").json()["items"] == []
+
+
+def test_benchmark_calendar_coverage(client):
+    from src.models import database as db_mod
+    with db_mod.db_conn() as conn:
+        conn.execute("INSERT INTO benchmark_daily (code, trade_date, close) "
+                     "VALUES ('000001', '2026-10-26', 4000.0)")
+        conn.execute("INSERT INTO trading_calendar (market_id, trade_date, is_open) "
+                     "VALUES ('CN', '2026-10-26', 1)")
+    items = client.get("/api/data/benchmark").json()["items"]
+    assert items[0]["code"] == "000001"
+    series = client.get("/api/data/benchmark/000001").json()
+    assert series["items"][0]["close"] == 4000.0
+    assert client.get("/api/data/calendar").json()["summary"]["rows"] == 1
+    cov = client.get("/api/data/coverage").json()
+    assert cov["kline_codes"] == 0
+    assert cov["codes_with_null_close_adj"] == []
