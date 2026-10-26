@@ -13,6 +13,7 @@ def test_experiment_fixture_runs_offline(experiment_fixture):
 
 
 def test_fake_llm_records_calls_without_network(fake_llm):
+    fake_llm.responses.append({"summary": "x"})
     fake_llm.complete("market_summary", "prompt", tools=["get_market_state"])
     assert fake_llm.call_count == 1
     assert fake_llm.calls[0]["task"] == "market_summary"
