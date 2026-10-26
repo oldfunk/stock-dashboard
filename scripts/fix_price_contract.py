@@ -106,14 +106,19 @@ def backfill_benchmark_from_source(dry_run: bool = False,
     """#5：从东财拉标准指数日线写入 benchmark_daily（000001/399001/399006）。
 
     market_index 里这些代码只有零星几行，不够用；这里按子项目约定补全历史。
+    东财失败时回退新浪（``fetch_index_kline``）。
     """
-    from src.collector.akshare_fetcher import fetch_index_kline_em
+    from src.collector.akshare_fetcher import (
+        fetch_index_kline, fetch_index_kline_em,
+    )
     sources = {"000001": "sh000001", "399001": "sz399001", "399006": "sz399006"}
     if dry_run:
         return {"would_fetch": sources}
     out: dict[str, int] = {}
     for code, src in sources.items():
         rows = fetch_index_kline_em(src, limit=limit)
+        if not rows:
+            rows = fetch_index_kline(src, limit=limit)
         with db_conn() as conn:
             for r in rows:
                 conn.execute(
