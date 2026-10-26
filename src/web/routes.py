@@ -286,6 +286,10 @@ async def lifespan(app: FastAPI):
 # -------- 创建 FastAPI 应用 --------
 app = FastAPI(title="价值投资选股看板", lifespan=lifespan)
 
+# 只读数据 API（供子项目 paper_trading 等外部系统调阅；R5 数据面）
+from src.web.data_api import register_data_api
+register_data_api(app)
+
 
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
