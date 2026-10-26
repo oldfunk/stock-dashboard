@@ -374,7 +374,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **验证**：deploy.sh 实弹（Git Bash）：生产 worktree gate **768 passed / 150.49s**（新 gate.sh 含下限检查）→ 合 main `93b7346..91fdf94` → prod pull → 无 src 改动正确判定不重启 → 双服务 active、:9527/:8081 均 200；CI main push 绿（run 39784179188，768 passed/41.70s，输出同样含下限行）。
 
 ### 2026-10-22（流程自动化审计 + CI 落地：主项目首个机器门禁记录；范围收窄后本轮唯一实施项）
-- **审计**：新增 `docs/automation-audit.md`——15 项人工步骤逐项盘点（现在怎么做/出错后果/该不该自动化/理由）+ 收益/成本排序清单 + 明确不自动化项。核查修正两处实况：部署目标实为 ssh 别名 `pi`（`deploy.local.md` 记的 pi1/192.168.50.210 已失效，本地文件已修）；生产侧纸盘 tick/日历同步本就在 crontab，真正全手工的是合并-部署链路。
+- **审计**：新增 `docs/automation-audit.md`——15 项人工步骤逐项盘点（现在怎么做/出错后果/该不该自动化/理由）+ 收益/成本排序清单 + 明确不自动化项。核查修正两处实况：部署目标实为 ssh 别名 `pi`（`deploy.local.md` 记的旧别名/旧内网 IP 已失效，本地文件已修）；生产侧纸盘 tick/日历同步本就在 crontab，真正全手工的是合并-部署链路。
 - **CI（三方审计补救目标一，用户拍板采纳并收窄范围）**：新增 `.github/workflows/gate.yml`——`pull_request` + `push`（main）双触发，ubuntu / Python 3.13 / `TZ=Asia/Shanghai` 对齐生产，`pip install -e . pytest` 后原样调用 `scripts/gate.sh`（未改它；无矩阵/发布/打包）。2026-09-29 "母不上 CI" 决策同日翻转；权威门禁仍为生产 gate，开发/测试分离规则不变。
 - **红验证（方案 A，用户选定）**：一次性分支 `ci-verify-red` 加故意失败测试 → PR #2 → CI 红 **1 failed, 768 passed**（唯一失败即探针测试；768 与生产基线一致，旁证 CI 环境与生产对齐）→ 关 PR 删分支，main 零污染。证据：Actions run 39773737114。
 - **合并前门禁**：生产 worktree（detached @ `6c09978`）`gate.sh` **768 passed / Gate passed / 129.40s**（本批 = 审计文档 + workflow + 收尾文档，零运行时改动，无需重启）。
