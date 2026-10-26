@@ -221,6 +221,12 @@ class ResearchDAO:
             out.append(d)
         return out
 
+    def update_strategy_status(self, strategy_id: str, status: str) -> int:
+        with db_conn() as conn:
+            return conn.execute(
+                "UPDATE strategy_version SET status = ? WHERE id = ?",
+                (status, strategy_id)).rowcount
+
     # ── 部署 / 归因 ──────────────────────────────────────────────────────────
     def insert_deployment(self, obj: Any) -> None:
         d = _data(obj)
@@ -235,6 +241,12 @@ class ResearchDAO:
                 d.get("end_date"), d.get("capital"), d.get("broker"),
                 d.get("status"), d.get("created_at") or now_cn().isoformat(),
             ))
+
+    def update_deployment_status(self, deployment_id: str, status: str) -> int:
+        with db_conn() as conn:
+            return conn.execute(
+                "UPDATE strategy_deployment SET status = ? WHERE id = ?",
+                (status, deployment_id)).rowcount
 
     def insert_attribution(self, obj: Any) -> None:
         d = _data(obj)
@@ -285,6 +297,16 @@ class ResearchDAO:
             d["evidence"] = _loads(d.pop("evidence_json"), {})
             out.append(d)
         return out
+
+    def get_decision(self, decision_id: str) -> dict | None:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM decision_log WHERE id = ?", (decision_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["evidence"] = _loads(d.pop("evidence_json"), {})
+        return d
 
     # ── 提示词 / LLM 运行 ────────────────────────────────────────────────────
     def insert_prompt(self, obj: Any) -> None:
