@@ -66,6 +66,33 @@ def test_fetch_kline_curl_backs_off_then_succeeds(monkeypatch):
     assert sleeps == [15, 30]
 
 
+def test_fetch_kline_tencent_qfq_paginates(monkeypatch):
+    """腾讯 fqkline：每页 640 天，按最早日期向前翻页，合并去重。"""
+    from scripts import backfill_price_history as s
+    calls = []
+    pages = [
+        {"data": {"sh600519": {"qfqday": [
+            ["2024-03-04", "1", "2", "3", "0.5", "10"],
+            ["2024-03-05", "1", "2", "3", "0.5", "10"],
+        ]}}},
+        {"data": {"sh600519": {"qfqday": [
+            ["2023-12-01", "1", "2", "3", "0.5", "10"],
+        ]}}},
+    ]
+
+    def fake(url, timeout=15):
+        calls.append(url)
+        return pages.pop(0)
+
+    monkeypatch.setattr(s, "_tx_get_json", fake)
+    monkeypatch.setattr(s.time, "sleep", lambda *_: None)
+    rows = s.fetch_kline_tencent_qfq("600519", "2023-01-01", page=2)
+    assert [r["trade_date"] for r in rows] == ["2023-12-01", "2024-03-04",
+                                               "2024-03-05"]
+    assert len(calls) == 2
+    assert "end=2024-03-03" in calls[1]
+
+
 def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsys):
     from scripts import backfill_price_history as s
     _annual("600519")

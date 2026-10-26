@@ -9,7 +9,7 @@
 
 用法：
   python scripts/backfill_price_history.py                 # 候选池+观察池+钉选
-  python scripts/backfill_price_history.py --all --limit 100 --sleep 0.3
+  python scripts/backfill_price_history.py --all --source tencent --sleep 0.2
   python scripts/backfill_price_history.py --codes 600519,000001
   python scripts/backfill_price_history.py --start 2016-01-01
 """
@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import date, timedelta
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJ)
@@ -43,6 +44,9 @@ _KLINE_URL = ("https://push2his.eastmoney.com/api/qt/stock/kline/get"
               "&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
               "&klt=101&fqt=1&beg={beg}&end=20500101")
 
+_TX_KLINE_URL = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                 "?param={sym},day,{start},{end},{count},qfq")
+
 
 def _curl_json(url: str, timeout: int = 15):
     """curl 直连取 JSON（绕过 TUN 代理对 Python urllib/requests 的阻断）。
@@ -64,6 +68,70 @@ def _curl_json(url: str, timeout: int = 15):
         if attempt == 0:
             time.sleep(0.5)
     return None
+
+
+def _tx_symbol(code: str) -> str:
+    return f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}"
+
+
+def _tx_get_json(url: str, timeout: int = 15):
+    """腾讯行情 JSON（requests 可直连；curl 到该域名被拒，实测 2026-10-26）。"""
+    import requests
+    headers = {"User-Agent": "Mozilla/5.0",
+               "Referer": "https://gu.qq.com/"}
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"腾讯 K 线接口失败: {last}")
+
+
+def fetch_kline_tencent_qfq(code: str, start_date: str,
+                            page: int = 640) -> list[dict]:
+    """腾讯前复权日K，分页拉全历史（每页最多 640 个交易日）。
+
+    2026-10-26：东财 push2his 约 35 次请求后限流，改用腾讯 `fqkline`：
+    Python requests 可直连、返回前复权、无频率问题；10 年约 5 页/只。
+    """
+    sym = _tx_symbol(code)
+    start = start_date
+    end = date.today().isoformat()
+    out: dict[str, dict] = {}
+    for _ in range(12):
+        data = _tx_get_json(_TX_KLINE_URL.format(
+            sym=sym, start=start, end=end, count=page))
+        node = (data.get("data") or {}).get(sym) or {}
+        rows = node.get("qfqday") or node.get("day") or []
+        if not rows:
+            break
+        for r in rows:
+            if len(r) < 6:
+                continue
+            try:
+                out[r[0]] = {
+                    "trade_date": r[0],
+                    "open": float(r[1]),
+                    "close": float(r[2]),
+                    "high": float(r[3]),
+                    "low": float(r[4]),
+                    "volume": float(r[5]),
+                    "amount": None,
+                    "turnover": None,
+                }
+            except (TypeError, ValueError):
+                continue
+        first = rows[0][0]
+        if first <= start or len(rows) < page:
+            break
+        end = (date.fromisoformat(first) - timedelta(days=1)).isoformat()
+        time.sleep(0.15)
+    return [out[d] for d in sorted(out)]
 
 
 def fetch_kline_curl(code: str, start_date: str, retries: int = 3) -> list[dict]:
@@ -157,8 +225,9 @@ def main() -> int:
     parser.add_argument("--sleep", type=float, default=0.3, help="每只之间停顿秒数")
     parser.add_argument("--retry-no-data", action="store_true",
                         help="重试上次无数据的股票")
-    parser.add_argument("--source", default="curl", choices=["curl", "akshare"],
-                        help="价格源：curl=东财直连前复权（默认，快）；akshare=旧链路")
+    parser.add_argument("--source", default="curl",
+                        choices=["curl", "tencent", "akshare"],
+                        help="价格源：curl=东财直连；tencent=腾讯前复权（分页，推荐）；akshare=旧链路")
     parser.add_argument("--max-consecutive-failures", type=int, default=5,
                         help="连续失败达到 N 只即中止（防上游限流时把全市场标成失败）")
     args = parser.parse_args()
@@ -182,9 +251,13 @@ def main() -> int:
 
     dao = KlineDAO()
     progress = FinancialHistoryDAO()
-    fetch = fetch_kline_curl if args.source == "curl" else \
-        (lambda code, start_date: fetch_kline_data(code, start_date=start_date,
-                                                   adjust="qfq"))
+    if args.source == "curl":
+        fetch = fetch_kline_curl
+    elif args.source == "tencent":
+        fetch = fetch_kline_tencent_qfq
+    else:
+        fetch = (lambda code, start_date: fetch_kline_data(
+            code, start_date=start_date, adjust="qfq"))
     ok = 0
     total_rows = 0
     consecutive_failures = 0
