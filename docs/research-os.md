@@ -485,6 +485,34 @@ docs/research-os-tasklist.md
 - 若未来团队/多用户/高并发：评估 PostgreSQL + pgvector；研究层接口不变；
 - 禁止把研究查询直接写进 SQLite 业务库（长扫描影响页面）。
 
+### 19.5 市场拓展与实时性边界（2026-10-26 追加）
+
+用户曾考虑未来拓展港股/美股，且希望面板实时更新。结论：**选型不变，但边界写死**。
+
+#### 多市场
+
+- 日频规模估算：A 股 ~1,400 万行、港股 ~650 万、美股 ~2,000 万，合计 ~4,000 万行；SQLite 存元数据/日线，Parquet/DuckDB 做分析，足够。
+- **R0 就要加市场维度**：`market`、`instrument`、`trading_calendar`、`fx_rate_daily`；`kline_daily` 增加 `market`/`instrument_id`，主键改为 `(instrument_id, trade_date)` 或 `(market, code, trade_date)`。
+- 不假设 6 位数字代码；支持 `00700.HK`、`AAPL.US`；不同市场独立日历/币种/手数/最小变动价位。
+- 港股/美股行情源通过 provider 适配器接入（腾讯/东财/新浪/Yahoo/Polygon 等），不让采集层绑死单一市场。
+
+#### 实时性
+
+```
+行情源 → 内存缓存（最新价/涨跌） → SSE/WebSocket → 面板
+                     ↓ 低频落库（1 分钟/收盘快照）
+                 SQLite / Parquet
+```
+
+- **实时行情不进 SQLite 逐条写**：写放大/锁竞争/磁盘磨损，且不提升推送延迟。
+- 面板实时刷新由内存缓存 + SSE/WebSocket 负责；数据库只存低频快照/日线。
+- 历史分时研究存 1 分钟/5 分钟 bar 到 Parquet（按 market/date 分区），DuckDB 查询；不存逐笔 tick。
+- 未来 tick 级采集/执行再引入 ClickHouse/TimescaleDB/QuestDB，放在 Repository 接口后；不影响当前选型。
+
+#### 换库触发条件
+
+多用户/多机并发写、逐笔 tick 长期存储、日增上亿行、跨区域低延迟写入——出现任一项再评估 Postgres/时序库；多市场日频 + 实时面板本身不构成换库理由。
+
 ## 20. 上下文压缩与退市/历史成分决策（2026-10-26）
 
 ### 20.1 上下文压缩

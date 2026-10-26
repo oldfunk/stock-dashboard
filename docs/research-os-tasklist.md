@@ -9,8 +9,8 @@
 
 - [ ] **R0-1 领域对象与 ID**：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision 的 dataclass、状态枚举、ID 规则（H/E/S/D/MS）。
   - 验收：单测覆盖状态机合法/非法迁移；ID 可读且唯一。
-- [ ] **R0-2 数据库表与迁移**：新增 `feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
-  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测。
+- [ ] **R0-2 数据库表与迁移**：新增 `market`、`instrument`、`trading_calendar`、`fx_rate_daily`、`feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
+  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 主键/查询兼容 `instrument_id`（迁移脚本）。
 - [ ] **R0-2a Repository 接口**：SQLite 与 DuckDB 各实现只读/只写接口，研究查询不直接写业务库。
 - [ ] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
 - [ ] **R0-2c DuckDB 视图**：DuckDB 只读 Parquet；提供研究查询函数；单测覆盖一个回测扫描。

@@ -171,6 +171,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
   - **SQLite = 业务事实源（OLTP）**；**Parquet = 不可变研究快照**；**DuckDB = 嵌入式分析（只读 Parquet）**；不引入 Postgres/数据库服务；不双写。
   - 研究实验只读快照；结果写回 SQLite 并带 `snapshot_id`；Repository 接口隔离 SQL，未来团队化再评估 Postgres。
   - 备份 = SQLite 文件 + Parquet 目录；向量检索后期用 `sqlite-vec`/Chroma。
+  - **多市场/实时性边界**：R0 即加 `market`/`instrument`/`trading_calendar`/`fx_rate_daily`，`kline_daily` 主键按 `instrument_id` 设计；实时行情走内存缓存 + SSE/WebSocket，**不逐条写 SQLite**；历史分时存 Parquet，tick 级再评估时序库。多市场日频 + 实时面板不构成换库理由。
 - **上下文压缩**：当前 GLM-4.5-Flash 128K，单股 prompt 2–6K tokens，**现在不引入压缩库**；先做 Context Service（预算 + 事实选择 + 工具检索）。触发条件：单任务 >30% 窗口或 >20 篇长文且质量下降；届时用 **LLMLingua-2** + LangChain/LlamaIndex 压缩检索 + bge-reranker，不自研；数字表禁止压缩。
 - **退市/历史成分**：AKShare `stock_info_sh_delist`（161）+ `stock_info_sz_delist`（211）免费可用；退市股财务用 `stock_*_by_report_delisted_em`；BaoStock 状态交叉验证。历史指数成分免费源不完整（国证有 `index_detail_hist_cni`；中证仅当前，Tushare `index_weight` 需积分）；先标记 `current_only`，从今天起每日记录 `universe_membership`，不宣称无幸存者偏差。
 - **下一轮**：按 R0-1（领域对象/ID）→ R0-2/2a/2b/2c（表/Repository/Parquet 快照/DuckDB）→ R0-3（注册表）开始搭骨架；不跑策略。
