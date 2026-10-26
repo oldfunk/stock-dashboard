@@ -433,3 +433,16 @@ class ResearchDAO:
             d["details"] = _loads(d.pop("details_json"), {})
             out.append(d)
         return out
+
+    def get_quality(self, dataset: str, trade_date: str) -> dict | None:
+        """按 (dataset, trade_date) 精确取一条质量记录。"""
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM data_quality_daily "
+                "WHERE dataset = ? AND trade_date = ?",
+                (dataset, trade_date)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["details"] = _loads(d.pop("details_json"), {})
+        return d

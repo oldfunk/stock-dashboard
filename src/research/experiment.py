@@ -289,8 +289,10 @@ class TopKBacktestRunner(ExperimentRunner):
 # ── 编排：快照 -> 质量门 -> 运行 -> 落库 ────────────────────────────────────
 
 def _quality_date(plan: ExperimentPlan, manifest: SnapshotManifest) -> str:
+    """取质量门判定日期：计划 end_date > 快照最大日期 > 计划 start_date。"""
+    stat = manifest.tables.get(plan.dataset)
     return (plan.params.get("end_date")
-            or manifest.tables.get(plan.dataset).max_date
+            or (stat.max_date if stat else None)
             or plan.params.get("start_date") or "")
 
 

@@ -73,3 +73,21 @@ def test_record_quality_returns_verdict(db):
     from src.research.quality import record_quality
     result = record_quality("kline_daily", "2026-10-26", 0.99, 0.0, 0, 0)
     assert result.status == "pass"
+
+
+def test_old_date_is_looked_up_exactly_not_by_recent_window(db):
+    """回归 D2：早于最近 200 条的日期不得被误判为缺记录。"""
+    from src.research.dao import ResearchDAO
+    from src.research.quality import evaluate
+    dao = ResearchDAO()
+    for i in range(250):
+        dao.insert_quality({
+            "dataset": "kline_daily", "trade_date": f"2026-01-{i:02d}",
+            "coverage": 1.0, "missing_rate": 0.0, "outliers": 0,
+            "pit_violations": 0, "status": "recorded", "details": {}})
+    result = evaluate("kline_daily", "2026-01-05")
+    # 不得因"漏判"为 invalid（可能因陈旧为 warn）
+    assert "缺少质量记录" not in result.reasons[0]
+    assert result.status != "invalid"
+    assert dao.get_quality("kline_daily", "2026-01-05") is not None
+    assert dao.get_quality("kline_daily", "1999-01-01") is None

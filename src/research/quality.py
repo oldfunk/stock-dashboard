@@ -51,14 +51,16 @@ class QualityResult:
 def evaluate(dataset: str, trade_date: str,
              thresholds: dict[str, float] | None = None,
              dao: ResearchDAO | None = None) -> QualityResult:
-    """读取 data_quality_daily 并判定；无记录 = invalid（fail-closed）。"""
+    """读取 data_quality_daily 并判定；无记录 = invalid（fail-closed）。
+
+    按 (dataset, trade_date) 精确查询，不做"取最近 N 条再过滤"——后者会让
+    早于窗口的日期被误判为缺记录（静默错误）。
+    """
     dao = dao or ResearchDAO()
-    rows = [r for r in dao.list_quality(dataset, limit=200)
-            if r["trade_date"] == trade_date]
-    if not rows:
+    row = dao.get_quality(dataset, trade_date)
+    if row is None:
         return QualityResult(dataset, trade_date, "invalid",
                              ["缺少质量记录（fail-closed）"])
-    row = rows[0]
     t = {**DEFAULTS, **(thresholds or {})}
     reasons: list[str] = []
     invalid = False

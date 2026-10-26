@@ -171,3 +171,19 @@ def test_verdict_rejected_and_inconclusive(db):
     assert inconclusive.verdict == "inconclusive"
     empty = ExperimentOutcome(experiment_id=EXPERIMENT, status="done")
     assert derive_verdict(_plan(), empty) == "inconclusive"
+
+
+def test_quality_date_guards_missing_dataset_and_end_date(db):
+    """回归 D1：计划无 end_date 且数据集不在快照表中时不得崩溃。"""
+    from src.research.experiment import _quality_date
+    _seed()
+    _snapshot()
+    plan = _plan(params={"feature_id": "F-TREND", "start_date": DATES[0],
+                         "end_date": "", "topk": 1, "rebalance_days": 5})
+    plan.data_snapshot_id = SNAPSHOT
+    plan.dataset = "stock_feature_daily"
+    plan.params = {"feature_id": "F-TREND", "start_date": DATES[0],
+                   "topk": 1, "rebalance_days": 5}
+    from src.research.snapshot import verify_snapshot
+    manifest = verify_snapshot(SNAPSHOT)
+    assert _quality_date(plan, manifest) == DATES[0]
