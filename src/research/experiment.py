@@ -534,10 +534,12 @@ def run_experiment(runner: ExperimentRunner, plan: ExperimentPlan,
         raise ExperimentError(f"假设不存在: {plan.hypothesis_id}")
 
     qdate = _quality_date(plan, manifest)
-    # 已知数据集：运行时自动评估并写质量记录（未注册评估器 -> fail-closed）
-    stats = assess_dataset(plan.dataset, qdate, dao)
-    if stats is not None:
-        record_quality(plan.dataset, qdate, **stats, dao=dao)
+    # 已知数据集且无质量记录：运行时自动评估并补写（未注册评估器 -> fail-closed）。
+    # 已有记录（如预注册的坏数据）不被覆盖。
+    if dao.get_quality(plan.dataset, qdate) is None:
+        stats = assess_dataset(plan.dataset, qdate, dao)
+        if stats is not None:
+            record_quality(plan.dataset, qdate, **stats, dao=dao)
     quality = evaluate(plan.dataset, qdate, thresholds)
     if quality.status == "invalid":
         outcome = ExperimentOutcome(
