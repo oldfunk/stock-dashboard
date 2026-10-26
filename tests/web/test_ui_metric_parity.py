@@ -166,3 +166,15 @@ def test_template_partial_is_the_only_metric_markup():
         for bad in ("format(snapshot.pe)", "format(snapshot.roe)",
                     "format(snapshot.gross_margin)", "format(snapshot.dividend_yield)"):
             assert bad not in text, f"{name} 又手写了格式化 {bad}"
+
+
+def test_score_detail_toggle_ids_match_js():
+    """统一卡片后 ID 带 view 前缀；JS 必须用同一前缀，否则单击打不开。"""
+    from pathlib import Path
+    web = Path(__file__).resolve().parents[2] / "src" / "web"
+    card = (web / "templates" / "_stock_card.html").read_text(encoding="utf-8")
+    index = (web / "templates" / "index.html").read_text(encoding="utf-8")
+    assert 'id="sd-{{ _view }}-{{ stock.code }}"' in card
+    assert "toggleScoreDetail('{{ stock.code }}', '{{ _view }}')" in card
+    assert "'sd-' + prefix + '-' + code" in index
+    assert "'caret-' + prefix + '-' + code" in index

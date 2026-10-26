@@ -1485,9 +1485,10 @@
     setInterval(refreshQueue, 5000);
 
     // ========== Score Detail Toggle ==========
-    function toggleScoreDetail(code) {
-        var el = document.getElementById('sd-' + code);
-        var caret = document.getElementById('caret-' + code);
+    function toggleScoreDetail(code, view) {
+        var prefix = view || 'candidate';
+        var el = document.getElementById('sd-' + prefix + '-' + code);
+        var caret = document.getElementById('caret-' + prefix + '-' + code);
         if (el) {
             if (el.style.display === 'none') {
                 el.style.display = 'block';

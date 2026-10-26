@@ -70,7 +70,7 @@ class TestScoreToggleNoNavigate:
 
         resp = client.get("/")
         assert resp.status_code == 200
-        assert 'onclick="event.stopPropagation(); toggleScoreDetail(\'000792\')"' in resp.text
+        assert 'onclick="event.stopPropagation(); toggleScoreDetail(\'000792\', \'candidate\')"' in resp.text
 
     def test_watchcard_toggle_keeps_stop_propagation(self, client):
         """观察池卡同款按钮不得回退（原本就有 stopPropagation）
@@ -83,7 +83,8 @@ class TestScoreToggleNoNavigate:
 
         resp = client.get("/")
         assert resp.status_code == 200
-        assert resp.text.count("event.stopPropagation(); toggleScoreDetail('000792')") == 2
+        assert "toggleScoreDetail('000792', 'candidate')" in resp.text
+        assert "toggleScoreDetail('000792', 'pool')" in resp.text
 
 
 class TestJournalByDateRoute:
