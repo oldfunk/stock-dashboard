@@ -701,17 +701,25 @@ def _aggregate_kline(daily_records: list[dict], period: str) -> list[dict]:
     for key, group in groups.items():
         # 排序确保第一条是周/月第一天
         group.sort(key=lambda x: x["trade_date"])
-        first = group[0]
-        last = group[-1]
+        valid = [g for g in group if g.get("close") is not None]
+        if not valid:
+            continue
+        first = valid[0]
+        last = valid[-1]
+        highs = [g["high"] for g in valid if g.get("high") is not None]
+        lows = [g["low"] for g in valid if g.get("low") is not None]
+        vols = [g["volume"] for g in valid if g.get("volume") is not None]
+        amounts = [g["amount"] for g in valid if g.get("amount") is not None]
+        turnovers = [g["turnover"] for g in valid if g.get("turnover") is not None]
         result.append({
             "trade_date": first["trade_date"],
             "open": first.get("open"),
             "close": last.get("close"),
-            "high": max((g.get("high") or 0) for g in group),
-            "low": min((g.get("low") or 999999) for g in group),
-            "volume": sum((g.get("volume") or 0) for g in group),
-            "amount": sum((g.get("amount") or 0) for g in group),
-            "turnover": sum((g.get("turnover") or 0) for g in group),
+            "high": max(highs) if highs else None,
+            "low": min(lows) if lows else None,
+            "volume": sum(vols) if vols else None,
+            "amount": sum(amounts) if amounts else None,
+            "turnover": sum(turnovers) if turnovers else None,
         })
     return result
 
@@ -719,19 +727,21 @@ def _aggregate_kline(daily_records: list[dict], period: str) -> list[dict]:
 def _to_klinecharts(records: list[dict]) -> list[dict]:
     """DB 记录转 klinecharts 所需格式。
 
-    腾讯数据源无 volume/turnover，返回 None 会导致 klinecharts
-    VOL 指标渲染失败，这里统一转为 0。
+    2026-10-26：缺 OHLC 的记录直接跳过（旧实现用 0 兜底，会画出 0 元蜡烛/假跌幅）；
+    腾讯源无 volume/turnover 时仍转 0（klinecharts VOL 指标要求数值）。
     """
     from datetime import datetime
     result = []
     for r in records:
+        if any(r.get(k) is None for k in ("open", "close", "high", "low")):
+            continue
         dt = datetime.strptime(r["trade_date"], "%Y-%m-%d")
         result.append({
             "timestamp": int(dt.replace(hour=15).timestamp() * 1000),
-            "open": r.get("open") or 0,
-            "close": r.get("close") or 0,
-            "high": r.get("high") or 0,
-            "low": r.get("low") or 0,
+            "open": r["open"],
+            "close": r["close"],
+            "high": r["high"],
+            "low": r["low"],
             "volume": r.get("volume") or 0,
             "turnover": r.get("turnover") or 0,
         })
