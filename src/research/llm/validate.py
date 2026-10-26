@@ -12,10 +12,14 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_TOLERANCE = 1e-6
+
+# 从文本中抽数字（排除日期片段：前后不带数字/连字符）
+_NUMBER_RE = re.compile(r"(?<![\d-])-?\d+(?:\.\d+)?(?![\d-])")
 
 
 class ValidationError(ValueError):
@@ -77,6 +81,12 @@ def _collect_numbers(value: Any) -> list[float]:
         return out
     if isinstance(value, (int, float)):
         out.append(float(value))
+    elif isinstance(value, str):
+        for match in _NUMBER_RE.finditer(value):
+            try:
+                out.append(float(match.group(0)))
+            except ValueError:
+                pass
     elif isinstance(value, dict):
         for v in value.values():
             out += _collect_numbers(v)
