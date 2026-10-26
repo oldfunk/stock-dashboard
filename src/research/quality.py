@@ -175,3 +175,30 @@ def assess_analysis_outcome(trade_date: str,
 
 
 register_assessor("analysis_outcome", assess_analysis_outcome)
+
+
+def assess_kline_daily(trade_date: str,
+                       dao: ResearchDAO | None = None) -> dict[str, Any]:
+    """评估 kline_daily（某日）：覆盖/缺失/负价异常。"""
+    dao = dao or ResearchDAO()
+    with db_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily WHERE trade_date = ?",
+            (trade_date,)).fetchone()["n"]
+        if total == 0:
+            return {"coverage": 0.0, "missing_rate": 1.0, "outliers": 0,
+                    "pit_violations": 0, "details": {"codes": 0}}
+        filled = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
+            "WHERE trade_date = ? AND close_adj IS NOT NULL AND close_raw IS NOT NULL",
+            (trade_date,)).fetchone()["n"]
+        outliers = conn.execute(
+            "SELECT COUNT(*) AS n FROM kline_daily WHERE trade_date = ? "
+            "AND (close_raw < 0 OR close_adj < 0)", (trade_date,)).fetchone()["n"]
+    coverage = round(filled / total, 4)
+    return {"coverage": coverage, "missing_rate": round(1 - coverage, 4),
+            "outliers": outliers, "pit_violations": 0,
+            "details": {"codes": total}}
+
+
+register_assessor("kline_daily", assess_kline_daily)

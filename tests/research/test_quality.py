@@ -131,3 +131,18 @@ def test_record_quality_returns_verdict(db):
     from src.research.quality import record_quality
     result = record_quality("kline_daily", "2026-10-26", 0.99, 0.0, 0, 0)
     assert result.status == "pass"
+
+
+def test_assess_kline_daily(db):
+    from src.research.quality import assess_dataset
+    dao = db_mod.KlineDAO()
+    dao.upsert_many("600519", [{"trade_date": "2026-10-26", "open": 1.0,
+                                "close": 1.0, "high": 1.0, "low": 1.0,
+                                "volume": 1.0, "amount": 1.0, "turnover": 0.1,
+                                "close_raw": 1.0, "close_adj": 1.0}])
+    dao.upsert_many("000001", [{"trade_date": "2026-10-26", "open": 1.0,
+                                "close": 1.0, "high": 1.0, "low": 1.0,
+                                "volume": 1.0, "amount": 1.0, "turnover": 0.1}])
+    stats = assess_dataset("kline_daily", "2026-10-26")
+    assert stats["coverage"] == 0.5
+    assert stats["details"]["codes"] == 2
