@@ -93,6 +93,28 @@ def test_fetch_kline_tencent_qfq_paginates(monkeypatch):
     assert ",2024-03-03," in calls[1]
 
 
+def test_merge_price_model_builds_three_columns():
+    """raw + 后复权 → raw / adj / 展示 close（正数前复权，锚定最新价）。"""
+    from scripts.backfill_price_history import merge_price_model
+    raw = [
+        {"trade_date": "2020-01-02", "open": 10, "close": 10, "high": 11,
+         "low": 9, "volume": 1, "amount": 2, "turnover": 0.1, "shares": 100},
+        {"trade_date": "2020-01-03", "open": 11, "close": 11, "high": 12,
+         "low": 10, "volume": 1, "amount": 2, "turnover": 0.1, "shares": 100},
+    ]
+    adj = [
+        {"trade_date": "2020-01-02", "open": 100, "close": 100, "high": 110,
+         "low": 90},
+        {"trade_date": "2020-01-03", "open": 110, "close": 110, "high": 120,
+         "low": 100},
+    ]
+    rows = merge_price_model(raw, adj)
+    assert [r["close"] for r in rows] == [10.0, 11.0]
+    assert [r["close_raw"] for r in rows] == [10.0, 11.0]
+    assert [r["close_adj"] for r in rows] == [100.0, 110.0]
+    assert rows[0]["shares"] == 100
+
+
 def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsys):
     from scripts import backfill_price_history as s
     _annual("600519")
@@ -103,7 +125,7 @@ def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsy
         called.append(code)
         return [_row()]
 
-    monkeypatch.setattr(s, "fetch_kline_curl", fake)
+    monkeypatch.setattr(s, "fetch_kline_sina_adjusted", fake)
     # 600519 已完成：--all 不得重复抓取
     db_mod.FinancialHistoryDAO().mark_backfill_done(s.PROGRESS_TASK, "600519", 1, "done")
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
@@ -124,7 +146,7 @@ def test_no_data_is_skipped_unless_retry(db, monkeypatch, capsys):
         calls.append(code)
         return []
 
-    monkeypatch.setattr(s, "fetch_kline_curl", empty)
+    monkeypatch.setattr(s, "fetch_kline_sina_adjusted", empty)
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     assert calls == ["600519"]
@@ -153,7 +175,7 @@ def test_consecutive_failures_abort_and_mark_partial(db, monkeypatch, capsys):
         calls.append(code)
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(s, "fetch_kline_curl", boom)
+    monkeypatch.setattr(s, "fetch_kline_sina_adjusted", boom)
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     out = capsys.readouterr().out

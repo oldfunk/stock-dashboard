@@ -491,6 +491,10 @@ def init_database():
                 PRIMARY KEY (code, trade_date)
             )
         ''')
+        # 2026-10-26 价格模型：raw（估值）+ adj/后复权（回测）+ close（展示用正数前复权）
+        _add_column_if_not_exists(conn, 'kline_daily', 'close_raw', 'REAL')
+        _add_column_if_not_exists(conn, 'kline_daily', 'close_adj', 'REAL')
+        _add_column_if_not_exists(conn, 'kline_daily', 'shares', 'REAL')
         conn.execute(
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
             'ON kline_daily(code, trade_date)'
@@ -1412,24 +1416,39 @@ class KlineDAO:
     """K线日线数据 DAO（2026-09-28 从 WatchlistDAO 迁回：历史重构误删类，致 routes/scheduler ImportError）"""
 
     def upsert_many(self, code: str, records: list[dict]) -> int:
-        """批量写入日K（INSERT OR REPLACE）
+        """批量写入日K（UPSERT）
 
-        records 字段：trade_date, open, close, high, low, volume, amount, turnover
+        records 字段：trade_date, open, close, high, low, volume, amount,
+        turnover, close_raw, close_adj, shares。
+        2026-10-26 起：只带 close 的旧调用不会清空 raw/adj/shares（COALESCE）。
         """
         if not records:
             return 0
         with db_conn() as conn:
             for r in records:
                 conn.execute("""
-                    INSERT OR REPLACE INTO kline_daily
-                    (code, trade_date, open, close, high, low, volume, amount, turnover)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO kline_daily
+                    (code, trade_date, open, close, high, low, volume, amount,
+                     turnover, close_raw, close_adj, shares)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(code, trade_date) DO UPDATE SET
+                        open = excluded.open,
+                        close = excluded.close,
+                        high = excluded.high,
+                        low = excluded.low,
+                        volume = excluded.volume,
+                        amount = excluded.amount,
+                        turnover = COALESCE(excluded.turnover, turnover),
+                        close_raw = COALESCE(excluded.close_raw, close_raw),
+                        close_adj = COALESCE(excluded.close_adj, close_adj),
+                        shares = COALESCE(excluded.shares, shares)
                 """, (
                     code, r['trade_date'],
                     r.get('open'), r.get('close'),
                     r.get('high'), r.get('low'),
                     r.get('volume'), r.get('amount'),
                     r.get('turnover'),
+                    r.get('close_raw'), r.get('close_adj'), r.get('shares'),
                 ))
         return len(records)
 

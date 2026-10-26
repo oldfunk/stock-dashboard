@@ -5,7 +5,7 @@
   **fail-closed（2026-10-24）**：无 ``notice_date`` 的年报**不入选**，不回退
   ``report_date``（会计年末 vs 实际披露差约 3 个月，回退即前视泄漏）。
   因此回测域 = 有披露日的股票（输出 ``fundamental_codes``/``eligible_max`` 透明化）。
-- 价格源：``kline_daily``（前复权）。
+- 价格源：``kline_daily`` 后复权 ``close_adj``（总收益口径；旧数据回退 ``close``）。
 - 评分：简化五维（ROE / PE / PB / 净利率 / 负债率），与主筛选器口径方向一致。
 - 费用：佣金 0.025%（买卖双扣）、印花税 0.05%（卖出）。
 - 对照：等权买入持有全部合格标的（基准）。
@@ -69,13 +69,14 @@ def fundamentals_at(fund: dict, code: str, date: str) -> dict | None:
 
 
 def load_prices(conn) -> dict:
-    """{code: {trade_date: close}}（前复权）。"""
+    """{code: {trade_date: close}}（回测用后复权；旧数据回退 close）。"""
     rows = conn.execute(
-        "SELECT code, trade_date, close FROM kline_daily WHERE close IS NOT NULL"
+        "SELECT code, trade_date, COALESCE(close_adj, close) AS px "
+        "FROM kline_daily WHERE COALESCE(close_adj, close) IS NOT NULL"
     ).fetchall()
     out: dict[str, dict] = {}
     for r in rows:
-        out.setdefault(r["code"], {})[r["trade_date"]] = r["close"]
+        out.setdefault(r["code"], {})[r["trade_date"]] = r["px"]
     return out
 
 

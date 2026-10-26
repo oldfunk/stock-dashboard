@@ -1,17 +1,23 @@
-"""回填历史日K（前复权），供历史估值分位 / 回测（2026-10-23 P0-5）。
+"""回填历史日K（2026-10-26 三列价格模型）。
+
+**模型**（解决"前复权负价 / 不复权送转假跌 / 单列无法同时服务估值与回测"）：
+- ``close_raw``：不复权收盘（估值 PE/PB 用）
+- ``close_adj``：后复权收盘（回测总收益用，恒正）
+- ``close``：后复权按最新价缩放 = 正数前复权（展示用；今日价 = 真实价）
+
+**源**：Sina（akshare ``stock_zh_a_daily``）一次返回全历史 + 每日流通股本；
+不复权/后复权各一次调用（约 3–5s），无东财式 35 次限流。东财/腾讯保留为备选。
 
 默认拉取候选池 + 观察池 + 钉选；``--all`` 拉取所有有年报的股票（回测域）。
-起点 2016-01-01（覆盖 10 年）。幂等：INSERT OR REPLACE 按 (code, trade_date)。
+起点 2016-01-01。幂等：按 (code, trade_date) upsert，raw/adj 不会被旧调用清空。
 
-**断点续跑（2026-10-25）**：处理过的股票写入 ``backfill_progress``
-（task=``price_history``），失败/无数据可用 ``--retry-no-data`` 重试。
-审计实证：旧脚本只取候选 25 只，导致回测价格域仅 49 只、2016–2019 可选域为 0。
+**断点续跑**：处理过的股票写入 ``backfill_progress``（task=``price_history``）；
+失败/无数据可用 ``--retry-no-data`` 重试。
 
 用法：
-  python scripts/backfill_price_history.py                 # 候选池+观察池+钉选
-  python scripts/backfill_price_history.py --all --source tencent --sleep 0.2
+  python scripts/backfill_price_history.py --all --sleep 0.5
   python scripts/backfill_price_history.py --codes 600519,000001
-  python scripts/backfill_price_history.py --start 2016-01-01
+  python scripts/backfill_price_history.py --source tencent --all
 """
 
 import argparse
@@ -134,6 +140,109 @@ def fetch_kline_tencent_qfq(code: str, start_date: str,
     return [out[d] for d in sorted(out)]
 
 
+def _sina_symbol(code: str) -> str:
+    return f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}"
+
+
+def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01") -> list[dict]:
+    """Sina 日线（akshare 封装）：adjust='' 不复权 / 'hfq' 后复权。
+
+    Sina 同时返回每日 `outstanding_share`（流通股本），可用于历史每股指标。
+    """
+    import akshare as ak
+    from datetime import date as _date
+    df = ak.stock_zh_a_daily(
+        symbol=_sina_symbol(code),
+        start_date=start_date.replace("-", ""),
+        end_date=_date.today().strftime("%Y%m%d"),
+        adjust=adjust,
+    )
+    if df is None or len(df) == 0:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        d = str(r.get("date"))[:10]
+        if not d:
+            continue
+
+        def num(key):
+            v = r.get(key)
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return None
+            return None if v != v else v  # NaN
+
+        rows.append({
+            "trade_date": d,
+            "open": num("open"), "close": num("close"),
+            "high": num("high"), "low": num("low"),
+            "volume": num("volume"), "amount": num("amount"),
+            "turnover": num("turnover"), "shares": num("outstanding_share"),
+        })
+    return rows
+
+
+def merge_price_model(raw_rows: list[dict], adj_rows: list[dict]) -> list[dict]:
+    """合并不复权与后复权，生成三列价格。
+
+    - ``close_raw``：不复权（估值 PE/PB 用）
+    - ``close_adj``：后复权（回测总收益用，恒正）
+    - ``close``：后复权按最新价缩放（= 正数前复权，展示用；不再出现负价）
+    """
+    raw = {r["trade_date"]: r for r in raw_rows if r.get("close") is not None}
+    adj = {r["trade_date"]: r for r in adj_rows if r.get("close") is not None}
+    dates = sorted(set(raw) & set(adj))
+    if not dates:
+        return []
+    last = dates[-1]
+    if not adj[last]["close"]:
+        return []
+    scale = raw[last]["close"] / adj[last]["close"]
+    out = []
+    for d in dates:
+        a, r = adj[d], raw[d]
+        out.append({
+            "trade_date": d,
+            "open": a["open"] * scale if a.get("open") is not None else None,
+            "close": a["close"] * scale,
+            "high": a["high"] * scale if a.get("high") is not None else None,
+            "low": a["low"] * scale if a.get("low") is not None else None,
+            "volume": r.get("volume"),
+            "amount": r.get("amount"),
+            "turnover": r.get("turnover"),
+            "close_raw": r["close"],
+            "close_adj": a["close"],
+            "shares": r.get("shares"),
+        })
+    return out
+
+
+def fetch_kline_sina_adjusted(code: str, start_date: str,
+                              retries: int = 3) -> list[dict]:
+    """Sina 不复权 + 后复权 → 三列价格模型（2026-10-26）。
+
+    单只约 3–5s×2；无东财式限流。失败退避 5/10/20s 重试。
+    """
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            raw = _sina_daily(code, "", start_date)
+            time.sleep(0.2)
+            adj = _sina_daily(code, "hfq", start_date)
+            rows = merge_price_model(raw, adj)
+            if rows:
+                return rows
+            last_err = RuntimeError("Sina 返回空数据")
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+        if attempt < retries:
+            wait = 5 * (2 ** attempt)
+            logger.warning(f"[P0-5] {code} Sina 失败（{last_err}），退避 {wait}s")
+            time.sleep(wait)
+    raise RuntimeError(f"Sina 价格抓取失败: {last_err}")
+
+
 def fetch_kline_curl(code: str, start_date: str, retries: int = 3) -> list[dict]:
     """东财前复权日K（curl 直连），返回与 ``fetch_kline_data`` 同结构。
 
@@ -225,9 +334,9 @@ def main() -> int:
     parser.add_argument("--sleep", type=float, default=0.3, help="每只之间停顿秒数")
     parser.add_argument("--retry-no-data", action="store_true",
                         help="重试上次无数据的股票")
-    parser.add_argument("--source", default="curl",
-                        choices=["curl", "tencent", "akshare"],
-                        help="价格源：curl=东财直连；tencent=腾讯前复权（分页，推荐）；akshare=旧链路")
+    parser.add_argument("--source", default="sina",
+                        choices=["sina", "curl", "tencent", "akshare"],
+                        help="价格源：sina=不复权+后复权（推荐，含每日股本）；curl=东财；tencent=腾讯；akshare=旧链路")
     parser.add_argument("--max-consecutive-failures", type=int, default=5,
                         help="连续失败达到 N 只即中止（防上游限流时把全市场标成失败）")
     args = parser.parse_args()
@@ -251,7 +360,9 @@ def main() -> int:
 
     dao = KlineDAO()
     progress = FinancialHistoryDAO()
-    if args.source == "curl":
+    if args.source == "sina":
+        fetch = fetch_kline_sina_adjusted
+    elif args.source == "curl":
         fetch = fetch_kline_curl
     elif args.source == "tencent":
         fetch = fetch_kline_tencent_qfq

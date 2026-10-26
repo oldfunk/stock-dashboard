@@ -1,6 +1,6 @@
 """历史估值分位（2026-10-23 P0-5，2026-10-25 修前视与股本口径）。
 
-用 ``kline_daily``（前复权）+ ``financial_history``（eps / net_profit /
+用 ``kline_daily``（不复权 ``close_raw``，估值口径）+ ``financial_history``（eps / net_profit /
 total_shares / total_equity / notice_date）+ ``dividend_annual``（cash_per_share）
 计算 PE / PB / 股息率的 5 / 10 年分位。
 
@@ -21,13 +21,15 @@ logger = logging.getLogger(__name__)
 
 
 def _prices(code: str) -> list[tuple[str, float]]:
+    """估值分位用**不复权**价（与当期 EPS/BVPS 同口径；旧数据回退 close）。"""
     from src.models.database import db_conn
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT trade_date, close FROM kline_daily WHERE code=? "
+            "SELECT trade_date, COALESCE(close_raw, close) AS px "
+            "FROM kline_daily WHERE code=? "
             "ORDER BY trade_date ASC", (code,)
         ).fetchall()
-    return [(r["trade_date"], r["close"]) for r in rows if r["close"] is not None]
+    return [(r["trade_date"], r["px"]) for r in rows if r["px"] is not None]
 
 
 def _reports(code: str) -> list[dict]:

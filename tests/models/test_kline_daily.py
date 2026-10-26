@@ -46,3 +46,16 @@ class TestKlineDAO:
         rows = dao.get_daily("000792")
         assert len(rows) == 1
         assert rows[0]["close"] == 11.0
+
+    def test_upsert_preserves_raw_adj_shares(self, db):
+        """旧调用只带 close 时，不得清空 raw/adj/shares（三列价格模型）。"""
+        dao = db.KlineDAO()
+        r = _row("2026-09-25", 10.0)
+        r.update({"close_raw": 9.5, "close_adj": 100.0, "shares": 123.0})
+        dao.upsert_many("000792", [r])
+        dao.upsert_many("000792", [_row("2026-09-25", 11.0)])
+        row = dao.get_daily("000792")[0]
+        assert row["close"] == 11.0
+        assert row["close_raw"] == 9.5
+        assert row["close_adj"] == 100.0
+        assert row["shares"] == 123.0
