@@ -96,6 +96,9 @@ class HypothesisService:
             if key not in allowed:
                 raise HypothesisError(f"不可修改字段: {key}")
         merged = {**row, **changes, "status": "draft"}
+        for key in ("statement", "universe", "signal", "regimes", "kill_criteria"):
+            if not merged.get(key):
+                raise HypothesisError(f"假设字段不可为空: {key}")
         hypothesis = Hypothesis.from_dict(merged)
         self.dao.insert_hypothesis(hypothesis)
         return self.dao.get_hypothesis(hypothesis_id)

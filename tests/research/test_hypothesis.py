@@ -47,12 +47,14 @@ def test_locked_cannot_be_updated(db):
 
 
 def test_draft_can_be_updated(db):
-    from src.research.hypothesis import HypothesisService
+    from src.research.hypothesis import HypothesisError, HypothesisService
     service = HypothesisService()
     row = _create(service)
     updated = service.update(row["id"], statement="改后的陈述")
     assert updated["statement"] == "改后的陈述"
     assert updated["status"] == "draft"
+    with pytest.raises(HypothesisError):
+        service.update(row["id"], statement="")
 
 
 def test_lock_rejects_illegal_transition(db):
