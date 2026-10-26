@@ -428,6 +428,14 @@ def init_database():
         print(f"[DB] WAL 设置跳过（可能已有写锁）: {e}")
     with db_conn() as conn:
         conn.executescript(SCHEMA_SQL)
+        # Research OS 表（2026-10-26，R0-2）：独立 schema，幂等创建
+        from src.research.schema import RESEARCH_SCHEMA_SQL
+        conn.executescript(RESEARCH_SCHEMA_SQL)
+        conn.execute(
+            "INSERT OR IGNORE INTO market "
+            "(market_id, name, currency, timezone, calendar_id, status, created_at) "
+            "VALUES ('CN', 'A股', 'CNY', 'Asia/Shanghai', 'CN', 'active', ?)",
+            (now_cn().isoformat(),))
         # 2026-07-18 新增：watchlist 钉选表（用户主动钉选的股票，不受 Top20 限制）
         conn.execute('''
             CREATE TABLE IF NOT EXISTS watchlist (
@@ -531,6 +539,12 @@ def init_database():
                 WHERE f.stock_code = backfill_progress.code
             ) WHERE covered_report_date IS NULL
         ''')
+        # 多市场维度：kline 表已创建后补列 + 索引（不改旧主键）
+        _add_column_if_not_exists(conn, 'kline_daily', 'market', 'TEXT')
+        _add_column_if_not_exists(conn, 'kline_daily', 'instrument_id', 'TEXT')
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kline_instrument_date "
+            "ON kline_daily(instrument_id, trade_date)")
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
