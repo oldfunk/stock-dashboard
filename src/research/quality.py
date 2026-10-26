@@ -11,14 +11,18 @@
 - pass：全部通过
 - warn：仅缺失/覆盖轻微超标（仍可用于探索，但不晋升）
 - invalid：PIT 违规、异常值、或缺失严重；实验必须标记 invalid
+
+数据集评估器（R2-0 修）：实验运行时可对**已知数据集**自动评估并写质量记录；
+未注册评估器的数据集仍 fail-closed（无记录 -> invalid）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Callable
 
+from src.models.database import db_conn
 from src.research.dao import ResearchDAO
 
 
@@ -124,3 +128,50 @@ def record_quality(dataset: str, trade_date: str, coverage: float | None,
         "details": details or {},
     })
     return evaluate(dataset, trade_date, dao=dao)
+
+
+# ── 数据集评估器（R2-0 修 D-QG） ────────────────────────────────────────────
+
+Assessor = Callable[[str, ResearchDAO], dict[str, Any]]
+ASSESSORS: dict[str, Assessor] = {}
+
+
+def register_assessor(dataset: str, fn: Assessor) -> None:
+    ASSESSORS[dataset] = fn
+
+
+def assess_dataset(dataset: str, trade_date: str,
+                   dao: ResearchDAO | None = None) -> dict[str, Any] | None:
+    """按已注册评估器评估数据集质量；未注册返回 None（fail-closed）。"""
+    fn = ASSESSORS.get(dataset)
+    return fn(trade_date, dao) if fn else None
+
+
+def assess_analysis_outcome(trade_date: str,
+                            dao: ResearchDAO | None = None) -> dict[str, Any]:
+    """评估 analysis_outcome（截至 trade_date 的累积覆盖/缺失/异常/PIT）。"""
+    dao = dao or ResearchDAO()
+    with db_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM analysis_outcome WHERE analysis_date <= ?",
+            (trade_date,)).fetchone()["n"]
+        if total == 0:
+            return {"coverage": 0.0, "missing_rate": 1.0, "outliers": 0,
+                    "pit_violations": 0, "details": {"rows": 0}}
+        filled = conn.execute(
+            "SELECT COUNT(*) AS n FROM analysis_outcome "
+            "WHERE analysis_date <= ? AND ret_20 IS NOT NULL "
+            "AND excess_20 IS NOT NULL", (trade_date,)).fetchone()["n"]
+        outliers = conn.execute(
+            "SELECT COUNT(*) AS n FROM analysis_outcome "
+            "WHERE analysis_date <= ? AND ABS(excess_20) > 1.0",
+            (trade_date,)).fetchone()["n"]
+        # 注：analysis_outcome 无可判定的 PIT 违规（entry_date 本就是 T+1），
+        # 不编造检查项；pit_violations 恒为 0，由其它数据集（如特征）承担 PIT 检查。
+    coverage = round(filled / total, 4)
+    return {"coverage": coverage, "missing_rate": round(1 - coverage, 4),
+            "outliers": outliers, "pit_violations": 0,
+            "details": {"rows": total, "filled": filled}}
+
+
+register_assessor("analysis_outcome", assess_analysis_outcome)

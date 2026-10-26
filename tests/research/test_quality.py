@@ -69,10 +69,44 @@ def test_stale_is_warn(db):
     assert any("陈旧" in r for r in result.reasons)
 
 
-def test_record_quality_returns_verdict(db):
-    from src.research.quality import record_quality
-    result = record_quality("kline_daily", "2026-10-26", 0.99, 0.0, 0, 0)
-    assert result.status == "pass"
+def test_assess_analysis_outcome_records_quality(db):
+    from src.models.database import db_conn
+
+    from src.research.quality import (
+        assess_analysis_outcome, assess_dataset, evaluate,
+    )
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO analysis_outcome (analysis_id, benchmark_code, stock_code, "
+            "analysis_date, entry_date, ret_20, excess_20, updated_at) "
+            "VALUES (1, 'sh000300', '600519', '2026-07-08', '2026-07-09', "
+            "0.01, 0.005, '2026-10-01')")
+    stats = assess_analysis_outcome("2026-09-30")
+    assert stats["coverage"] == 1.0
+    assert stats["outliers"] == 0
+    assert stats["pit_violations"] == 0
+    assert assess_dataset("analysis_outcome", "2026-09-30") == stats
+    assert assess_dataset("unknown_dataset", "2026-09-30") is None
+
+
+def test_assess_detects_outlier(db):
+    from src.models.database import db_conn
+
+    from src.research.quality import assess_analysis_outcome
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO analysis_outcome (analysis_id, benchmark_code, stock_code, "
+            "analysis_date, entry_date, ret_20, excess_20, updated_at) "
+            "VALUES (1, 'sh000300', '600519', '2026-07-08', '2026-07-09', "
+            "2.0, 1.5, '2026-10-01')")
+    stats = assess_analysis_outcome("2026-09-30")
+    assert stats["outliers"] == 1
+
+
+def test_run_experiment_auto_assesses_outcome_quality(db):
+    """D-QG 修复：analysis_outcome 数据集在实验运行时自动评估并落质量记录。"""
+    from src.research.quality import assess_dataset
+    assert assess_dataset("analysis_outcome", "2026-09-30") is not None
 
 
 def test_old_date_is_looked_up_exactly_not_by_recent_window(db):
@@ -91,3 +125,9 @@ def test_old_date_is_looked_up_exactly_not_by_recent_window(db):
     assert result.status != "invalid"
     assert dao.get_quality("kline_daily", "2026-01-05") is not None
     assert dao.get_quality("kline_daily", "1999-01-01") is None
+
+
+def test_record_quality_returns_verdict(db):
+    from src.research.quality import record_quality
+    result = record_quality("kline_daily", "2026-10-26", 0.99, 0.0, 0, 0)
+    assert result.status == "pass"

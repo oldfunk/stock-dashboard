@@ -25,7 +25,7 @@ from src.research.dao import ResearchDAO
 from src.research.domain import (
     Experiment, ExperimentResult, ExperimentStatus, next_id,
 )
-from src.research.quality import evaluate
+from src.research.quality import assess_dataset, evaluate, record_quality
 from src.research.snapshot import SnapshotManifest, verify_snapshot
 
 
@@ -328,7 +328,12 @@ def run_experiment(runner: ExperimentRunner, plan: ExperimentPlan,
     if hypothesis is None:
         raise ExperimentError(f"假设不存在: {plan.hypothesis_id}")
 
-    quality = evaluate(plan.dataset, _quality_date(plan, manifest), thresholds)
+    qdate = _quality_date(plan, manifest)
+    # 已知数据集：运行时自动评估并写质量记录（未注册评估器 -> fail-closed）
+    stats = assess_dataset(plan.dataset, qdate, dao)
+    if stats is not None:
+        record_quality(plan.dataset, qdate, **stats, dao=dao)
+    quality = evaluate(plan.dataset, qdate, thresholds)
     if quality.status == "invalid":
         outcome = ExperimentOutcome(
             experiment_id=plan.experiment_id,
