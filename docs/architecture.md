@@ -1,6 +1,6 @@
 # Stock Dashboard — 系统架构
 
-> 创建：2026-09-12 · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
+> 创建：2026-09-12 · 更新：2026-10-26（价格三列 / 全市场年报回填 / UI 单一事实源） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
 > 改本系统前先读本文件。模块边界变更必须同步更新本文件 + 对应单测。
 
 ## 0. 术语表（开工前先读）
@@ -95,7 +95,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 |---|---|---|---|
 | `market_index` | 采集 | 首页 | 大盘指数，保留 30 天 |
 | `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据） |
-| `financial_history` | 采集 | 汇总重建/详情页 | 年报明细（摘要+利润+现金流合并） |
+| `financial_history` | 采集/回填 | 汇总重建/详情页/估值/回测 | 年报明细；全市场回填进行中（2026-10-26 起） |
 | `financial_summary` | 重建 | 筛选/详情页 | 5y/10y 均值（ROE/毛利/FCF/ROIC…） |
 | `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写 + 策略标签/股息字段 |
 | `stock_analysis_history` | 自带 Key 分析 + 外部写回兼容 | 时间线/复盘 | 每次 AI 分析快照 |
@@ -107,7 +107,8 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `news_digest` | 新闻摘要 | 笔记页 | 每日 AI 日报，与复盘分开 |
 | `news_fetch_log` | 新闻采集 | 调度冷却 | 抓取尝试记录（含市场级伪代码 `__market__`） |
 | `watchlist` | 用户钉选 | 钉选 tab | 用户手工池 |
-| `kline_daily` | 调度 | K 线图 | 日 K（池 + Top25） |
+| `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；三列价格 `close_raw`（估值）/`close_adj`（回测）/`close`（展示）+ `shares`（每日流通股本） |
+| `backfill_progress` | 回填脚本 | 回填脚本 | `(task, code)` 进度 + `covered_report_date`；断点续跑/重试 |
 | `benchmark_daily` | 收益维护 | `/outcomes` | 基准指数日线（sh000300/sh000922），价格指数 |
 | `dividend_annual` | 股息维护 | 筛选/快照/AI prompt | 年报现金分红；每股/股息率/分红率，缺数据 NULL |
 | `analysis_outcome` | 收益维护 | `/outcomes` | 每条有 Signal 分析 × 基准 × horizon 的前向收益；非空后冻结 |
@@ -134,6 +135,10 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | S8 | 行业分类（新浪 49 板块） | 新浪直连 `newSinaHy` + `getHQNodeData`（`_fetch_sector_map_impl`） | 主用 | 上次成功磁盘缓存 → `{}` 跳过回填（不清旧值） |
 | S9 | 年报分红 | `stock_fhps_em` 经 `dividend_fetcher.refresh_dividends` | 主用 | 无（失败保留旧数据；红利策略 fail-closed） |
 | S10 | 指数日线（基准） | `stock_zh_index_daily_em` 经 `fetch_index_kline_em` | 主用 | 新浪 `stock_zh_index_daily`（sh000922 只到 2019-01-30） |
+| S11 | 主要财务指标（年报） | `fetch_mainfin_annual`（东财 `RPT_F10_FINANCE_MAINFINADATA`） | 主用 | 无（失败保持 NULL；回填可重试） |
+| S12 | 资产负债表（年报） | `fetch_balance_sheet_annual`（东财 F10 `zcfzb*`） | 主用 | 无（BOM/HTML 已重试） |
+| S13 | 现金流量表（年报） | `fetch_cash_flow_annual`（东财 F10 `xjllb*`） | 主用 | 无（同上） |
+| S14 | 历史日线全量（回填） | `ak.stock_zh_a_daily`（Sina，不复权+后复权） | 回填主用 | 东财 `push2his`（约 35 次限流）→ 腾讯 `fqkline`（慢/负价） |
 
 > S9 在 `src/collector/dividend_fetcher.py`，S10 在 `src/collector/akshare_fetcher.py`；两者同受本节三条铁律约束。
 
@@ -145,10 +150,21 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；基线只升不降——下限记录 `scripts/gate-baseline.txt`，由 gate.sh 自动强制（2026-10-22 起；按测试规则本机不跑 pytest）。
+- 全仓 `pytest` 零失败；母项目基线 **696**、vendor **242**（2026-10-26），只升不降——下限记录 `scripts/gate-baseline*.txt`，由 gate.sh 自动强制（按测试规则本机不跑 pytest）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
+
+### 5.4 回填限速（2026-10-26 实测）
+
+| 源 | 实测限制 | 策略 |
+|---|---|---|
+| 东财 `push2his` | 单请求正常，约 **35 次快速请求后限流**（rc=56/000） | 历史价格回填不用它做主源；保留为备选，失败指数退避 |
+| 腾讯 `fqkline` | 无频率问题，但 **约 38s/只**（5 页×7s），高分红长历史为负价 | 仅备选 |
+| Sina `stock_zh_a_daily` | raw/hfq 各一次，3–5s，全历史+每日股本 | **历史价格回填主源**；`--sleep 0.5` |
+| 东财 F10（S11–S13） | 3 类请求/只，约 5–8s/只 | 年报回填 `--sleep 0.4`，单实例锁 |
+
+所有回填脚本共用规则：单实例锁、`backfill_progress` 断点续跑、失败记 `partial` 可重试、禁止并发多实例抢同一上游。
 
 ## 6. 架构演进方向
 
@@ -175,3 +191,15 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 8. prompt 每个关键输入附来源与 asof 日期，缺失/兜底字段显式标注（见 `_data_quality_*`），不得当精确值引用
 
 **已内化的对照能力**（均在本仓实现，无外部依赖）：门规+豁免+五维评分（`src/screener/value_screener.py`）、估值/终值验算闸（`scripts/verify_valuation.py` / `verify_intrinsic.py`）、双源误差标记进 AI 数据质量（`_attach_batch_context` + `_data_quality_text`）、六关 Checklist+镜子测试+否决红线+反面检验（`ANALYSIS_PROMPT`）、论文假设追踪与复盘写回（`watchlist_thesis` 表 + `WatchlistThesisDAO` + 复盘 `thesis_updates`）、周复盘三问（`_build_prompt`）。
+
+## 8. UI 指标与卡片单一事实源（2026-10-26）
+
+> 背景：同一组个股指标曾在 5 个表面各写一遍（候选卡模板、AI 观察池模板、手动钉选 JS、个股详情、观察池详情），标签/格式/阈值/缺值行为持续漂移；股息率只是最近一次暴露。
+
+- **指标定义**：`src/web/stock_metrics.py` 的 `CARD_METRICS` 是唯一来源（key/标签/格式/好中差阈值/tooltip）；负 PE/PB 判 bad，缺失统一 `--`。
+- **指标渲染**：`src/web/templates/_metric_cells.html` 是唯一片段，`variant=card|wl|sd|wd` 控制外壳。
+- **个股卡**：`src/web/templates/_stock_card.html` 是唯一模板；候选/AI 观察池/钉选三视图共用，只允许徽标（池 N 周/加入于/信号）与按钮状态不同。钉选卡由 `/api/watchlist/cards` 服务端渲染，JS 只注入 HTML。
+- **详情页**：`stock_detail.html` / `watchlist_detail.html` 也 include `_metric_cells.html`，并与卡片共用同一组指标。
+- **静态资源**：`static_url()` 按文件 mtime 自动加 `?v=`，禁止手写日期戳。
+- **防回潮**：`tests/web/test_ui_metric_parity.py` 强制三卡标签/值/缺值一致、详情页同口径、模板禁止再手写指标标签、静态版本自动生成。
+- **数据/运行源**：`RunLogDAO.get_latest_run()` 排除 `_review`，首页"上次运行/候选数"不再被周六复盘轮顶掉。

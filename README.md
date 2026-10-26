@@ -78,6 +78,9 @@ stock-dashboard/
 ├── src/
 │   ├── collector/            # 数据采集层
 │   │   ├── akshare_fetcher.py  # AKShare + 腾讯行情（S1–S10 注册表）
+│   │   ├── mainfin_fetcher.py  # 东财主要财务指标（年报一站式：ROE/EPS/FCF/披露日等）
+│   │   ├── balance_sheet_fetcher.py # 东财 F10 资产负债表（cash/有息负债/净资产）
+│   │   ├── cashflow_fetcher.py # 东财 F10 现金流量表（capex/经营现金流）
 │   │   ├── dividend_fetcher.py # 年报分红（股息率/分红率，fail-closed）
 │   │   └── onboard.py          # 新股上市检测
 │   ├── screener/
@@ -90,6 +93,7 @@ stock-dashboard/
 │   │   └── ai_watchlist.py     # 观察池 DAO
 │   ├── web/
 │   │   ├── routes.py           # FastAPI 路由
+│   │   ├── stock_metrics.py    # 个股指标单一事实源（标签/格式/好中差阈值）
 │   │   ├── templates/          # Jinja2 模板
 │   │   │   ├── index.html            # 首页（候选股总览 + AI 观察池 + 钉选 Tab）
 │   │   │   ├── stock_detail.html     # 详情页（数据 + 财务 + K 线 + AI 问答/分析触发/笔记时间线）
@@ -97,8 +101,10 @@ stock-dashboard/
 │   │   │   ├── journal.html          # 投资日记（AI 笔记展示）
 │   │   │   ├── journal_compare.html  # 日记对比
 │   │   │   ├── outcomes.html         # 信号前向收益验证
-│   │   │   ├── _stock_list.html      # 候选卡 partial（只展示数据，无 AI 内联）
-│   │   │   └── _watchlist_card.html  # 观察池卡 partial（只展示数据，无 AI 内联）
+│   │   │   ├── _stock_card.html      # 个股卡唯一模板（候选/观察池/钉选共用）
+│   │   │   ├── _metric_cells.html    # 指标单元格唯一渲染片段
+│   │   │   ├── _stock_list.html      # 候选卡列表 partial（薄循环）
+│   │   │   └── _watchlist_card.html  # 观察池卡列表 partial（薄循环）
 │   │   └── static/             # CSS/JS 静态资源
 │   ├── orchestrator.py         # 流水线编排（采集→筛选→入库→日志）
 │   ├── outcome_service.py      # 基准/前向收益维护（周六 09:00）
@@ -110,7 +116,11 @@ stock-dashboard/
 │   ├── run_pipeline.py         # 同上，Python 版
 │   ├── retry_ai.py             # 补跑失败 AI 分析（手动，需已配 Key）
 │   ├── run_ai_analysis.py      # 慢喂模式（每次 1 只，手动）
-│   ├── backtest_topk.py        # TopK 离线回测（历史归档产物，路线已砍）
+│   ├── backtest_topk.py        # TopK 离线回测（防前视；输出有效区间/CAGR）
+│   ├── backfill_price_history.py # 三列价格回填（raw/后复权/展示，Sina 源，限速）
+│   ├── backfill_financial_extra.py # 已有年报的补充字段回填（cash/capex/notice）
+│   ├── backfill_financial_full.py  # 全市场年报回填（约 4500 只，进度/锁/限速）
+│   ├── gate.sh                 # 分层门禁（母项目权威 + vendor 记录）
 │   ├── verify_valuation.py     # B1 估值验算闸
 │   ├── verify_intrinsic.py     # C1 终值验算闸
 │   ├── c25_bulk_fill.py        # C2.5 批量补 ROIC/FCF
@@ -124,9 +134,12 @@ stock-dashboard/
 ├── data/db/                    # SQLite 数据库（gitignore）
 ├── docs/
 │   ├── architecture.md         # 架构真相源
-│   ├── roadmap.md              # 总路线（P1 面板深化 → P2 体验优化）
+│   ├── roadmap.md              # 总路线
+│   ├── value-investing-methodology.md # 价值投资方法论与数据缺口
+│   ├── audit-20261026.md       # 全仓审计清单（数据语义/可靠性/架构/安全/门禁）
 │   ├── iteration-log.md        # 迭代进程账
 │   ├── handoff.md              # 班次交接速览
+│   ├── subproject-protocol.md  # 母子项目协作协议
 │   ├── agent-api.md            # 外部程序 API 参考（读数据/写分析/写笔记，保留兼容）
 │   ├── scheduled-tasks.md      # 定时任务参考设计（制度由使用者自定）
 │   ├── paper-trading.md        # 历史归档（M4a 设计过程保留；现行路线见 roadmap M6）
@@ -142,8 +155,15 @@ stock-dashboard/
 
 **不靠排名，只靠及格线。** 7 条硬性门规的指标过滤 + 本地五维评分，每只股票必须通过全部门规才能进入候选池。
 
-列表卡片（候选/观察池）只展示数据：指标、筛选原因、评分拆解（含行业均值参照）、财务历史、监控条件。
+列表卡片（候选/观察池/钉选）**共用同一张卡模板**（`_stock_card.html`）与同一套指标定义（`stock_metrics.py`）：标签、格式、好中差阈值、缺值 `--` 完全一致；三视图只允许徽标（池 N 周/加入于/信号）不同。
 AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不再内联展示**，由自带 Key 分析输出、写回笔记（2026-09-21 方向；2026-09-27 起面板队列可触发）。
+
+### 价格与财务数据模型（2026-10-26）
+
+- `kline_daily` 三列价格：`close_raw`（不复权，估值 PE/PB 用）、`close_adj`（后复权，回测总收益用）、`close`（后复权按最新价缩放 = 正数前复权，图表展示用）；另有 `shares`（每日流通股本）。
+- `financial_history`：全市场年报回填（目标 5527 只）与补充字段回填分开跑；`backfill_progress` 记录进度，支持断点续跑。
+- 估值 fail-closed：缺 FCF / 总股本 / 货币资金 / 有息负债，或 FCF ≤ 0 → 不出估值，页面明确写原因，不用 0 或占位值。
+
 
 ### 每日流水线（交易日 15:30，完整流程见 `architecture.md` §2）
 
@@ -194,7 +214,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 [Paper Trading Framework](https://github.com/oldfunk/paper-trading)（独立仓库，MIT）：
 A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交易员日内一次决策（三道闸），休盘做计划、开盘执行。
 
-- 本仓以 subtree 合流（`paper_trading/`，只跟上游 tag），`/paper` 直达面板（:8081）。
+- 本仓以 subtree 合流（`paper_trading/`，只跟上游 tag），当前 **v0.6.9**；`/paper` 直达面板（:8081）。
 - 母子协作协议见 `docs/subproject-protocol.md`（母整合/子施工/人包工头）。
 
 ---
@@ -205,9 +225,11 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 
 - **行情**：腾讯为主 S1，兜底新浪 → AKShare 自算
 - **财务**：AKShare `stock_yjbb_em` 为主 S2，兜底 C2 东财直连
-- **深度/历史**：AKShare 摘要/利润表/现金流表 S3–S5，S4/S5 已挂由 C2.5 东财直连永久兜底
-- **K 线 / tick**：AKShare S6–S7，东财 → 腾讯回退
+- **深度/历史**：东财 F10 三源（mainfin / 资产负债表 / 现金流表）为主，AKShare 摘要为补充；mainfin 一次返回 ROE/EPS/毛利率/净利率/增长/负债率/ROIC/FCF/披露日/净资产/总资产/总股本
+- **K 线 / tick**：历史全量回填用 Sina `stock_zh_a_daily`（不复权+后复权，3–5s/只，含每日股本）；东财 `push2his` 约 35 次快速请求后限流，腾讯 `fqkline` 约 38s/只且长历史负价，均保留为备选
 - **股息 / 基准**：东财年报分红 S9 + 东财指数日线 S10；新浪指数为兜底（sh000922 只到 2019）
+
+> 限速是硬约束：历史回填默认 `--sleep 0.4–0.5`，单实例锁 + 进度表；东财/腾讯失败指数退避，连续失败熔断。禁止并发多实例抢同一上游。
 
 > 事故教训已固化为三条铁律：删适配函数 = 删注册表行 + 删契约单测，三者同 commit（见 `architecture.md` §5.2）。
 
@@ -227,6 +249,11 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 | `python3 scripts/verify_valuation.py` | B1 估值验算闸 |
 | `python3 scripts/verify_intrinsic.py` | C1 终值验算闸 |
 | `python3 scripts/c25_bulk_fill.py` | C2.5 批量补 ROIC/FCF |
+| `python3 scripts/backfill_price_history.py --all --sleep 0.5` | 三列价格回填（Sina，959 只，断点续跑） |
+| `python3 scripts/backfill_financial_extra.py --until-done` | 已有年报的 cash/capex/notice 补充字段回填 |
+| `python3 scripts/backfill_financial_full.py --until-done --sleep 0.4` | 全市场年报回填（约 4500 只） |
+| `python3 scripts/backtest_topk.py --start 2016-01-01` | TopK 回测（后复权；输出有效区间/CAGR） |
+| `bash scripts/gate.sh` | 分层门禁（母项目权威 + vendor 记录） |
 
 ---
 
@@ -253,9 +280,9 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 - **数据采集** — httpx + AKShare（东方财富/同花顺底层）+ 腾讯行情 API
 - **存储** — SQLite（WAL 模式，`data/db/stock_dashboard.db`）
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。本地 Zen/Pollinations 通道 9/07 起相继不可用。
-- **Web 看板** — FastAPI + Jinja2（候选卡 / 观察池卡双 partial，均只展示数据；2026-09-21 起不再内联 AI 分析）
+- **Web 看板** — FastAPI + Jinja2（候选/观察池/钉选共用 `_stock_card.html` + `stock_metrics.py` 单一指标源；只展示数据，不内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（全仓 pytest，基线下限由 `scripts/gate-baseline.txt` 强制）
+- **验证** — `bash scripts/gate.sh`（母项目权威 + vendor 记录；基线 696 / 242，只升不降）
 
 ---
 
