@@ -47,6 +47,25 @@ def test_fetch_kline_curl_parses_eastmoney_klines(monkeypatch):
     assert "beg=20160101" in seen["url"]
 
 
+def test_fetch_kline_curl_backs_off_then_succeeds(monkeypatch):
+    """限流时指数退避重试，而不是直接放弃（2026-10-26 实测约 35 次后限流）。"""
+    from scripts import backfill_price_history as s
+    calls, sleeps = [], []
+
+    def fake_json(url, timeout=15):
+        calls.append(url)
+        if len(calls) < 3:
+            return None
+        return {"data": {"klines": ["2024-01-02,1,2,3,0.5,10,20,0"]}}
+
+    monkeypatch.setattr(s, "_curl_json", fake_json)
+    monkeypatch.setattr(s.time, "sleep", lambda sec: sleeps.append(sec))
+    rows = s.fetch_kline_curl("600519", "2016-01-01")
+    assert len(rows) == 1
+    assert calls == [calls[0]] * 3
+    assert sleeps == [15, 30]
+
+
 def test_all_mode_covers_fundamental_universe_and_resumes(db, monkeypatch, capsys):
     from scripts import backfill_price_history as s
     _annual("600519")

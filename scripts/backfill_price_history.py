@@ -66,18 +66,27 @@ def _curl_json(url: str, timeout: int = 15):
     return None
 
 
-def fetch_kline_curl(code: str, start_date: str) -> list[dict]:
+def fetch_kline_curl(code: str, start_date: str, retries: int = 3) -> list[dict]:
     """东财前复权日K（curl 直连），返回与 ``fetch_kline_data`` 同结构。
 
     akshare 的 ``stock_zh_a_hist`` 在 Pi 上走 requests，被代理阻断后回退腾讯
     （不复权、约 30s/只）。curl 直连 push2his 约 0.3s/只，口径仍是前复权。
 
-    网络失败（连不上/被限流）抛 ``RuntimeError``，与"上游确无数据"（返回 []）
-    区分开：前者记 partial 可重试，后者记 no_data。
+    2026-10-26 实测：接口不是永久封禁，而是**约 35 次快速请求后限流**。
+    因此失败时指数退避（15/30/45s）重试，而不是直接放弃；仍失败才抛
+    ``RuntimeError``（记 partial，可重试）。
     """
     secid = ("1." if code.startswith(("6", "9")) else "0.") + code
-    data = _curl_json(_KLINE_URL.format(secid=secid,
-                                        beg=start_date.replace("-", "")))
+    url = _KLINE_URL.format(secid=secid, beg=start_date.replace("-", ""))
+    data = None
+    for attempt in range(retries + 1):
+        data = _curl_json(url)
+        if data is not None:
+            break
+        if attempt < retries:
+            wait = 15 * (attempt + 1)
+            logger.warning(f"[P0-5] {code} 接口无响应（限流/网络），退避 {wait}s 重试")
+            time.sleep(wait)
     if data is None:
         raise RuntimeError("东财 K 线接口无响应（限流/网络）")
     klines = ((data or {}).get("data") or {}).get("klines") or []
