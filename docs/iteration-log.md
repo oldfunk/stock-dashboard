@@ -165,6 +165,20 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-26（Research OS R0 框架落地：领域对象/表/注册表/快照/质量门/实验/决策/Parquet/Repository）
+
+- **R0-1 领域对象与 ID**（`60aaa18`/`9604a1d`）：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision + 状态机（非法迁移抛 DomainError）+ ID 规则（H/E/S/D/MS/A/DL/DS/R）；`next_id(prefix, day, existing)`。
+- **R0-2 研究表 + 多市场维度**（`310c7ea`）：15 张研究表；`kline_daily` 加 `market`/`instrument_id`（不改旧主键）；`ResearchDAO` + `scripts/migrate_research_schema.py`。**生产迁移完成**：`instrument_id` 空值 0/2,150,145，`instrument` 5,527（SSE 2,633 / SZSE 2,894）。
+- **R0-3 注册表**（`d714975`）：特征/假设/策略/提示词注册与校验（必填/状态/重复）。
+- **R0-4 快照 manifest**（`d26cd64`）：`src/research/snapshot.py` 结构+统计指纹，可校验漂移。
+- **R0-5 数据质量门**（`52694a2`/`f4a9010`）：覆盖率/缺失/异常/PIT/陈旧；无记录 fail-closed。
+- **R0-6 实验接口**（`91ed037`）：`ExperimentRunner` + `TopKBacktestRunner`（确定性可复现）；快照校验 + 质量门 + 落库。
+- **R0-7 决策账本**（`c15d74f`）：`DecisionService` + CLI；状态变更强制带决策记录，关闭写结果。
+- **R0-2b/2c Parquet + DuckDB**（`bb9ab08`/`6fbc57c`）：`src/research/parquet.py` 导出/校验 Parquet 快照（sha256）+ `SnapshotReader` 只读分析 + `scan_forward_returns`；生产装 duckdb 1.5.6，`pyproject` 增依赖。
+- **R0-2a Repository**（`0851bc2`/`e10000c`）：`ResearchRepository` 抽象 + SQLite（读写）/ Parquet（只读）。
+- **门禁**：704 → 751；vendor 242。
+- **已知**：R0-8…R0-13（LLM 框架 + 退市名单）未完成；全市场年报回填仍在跑（annual codes 2723）。
+
 ### 2026-10-26（Research OS 存储/上下文/退市数据决策）
 
 - **数据库拍板**（用户回答：全市场日频 10 年 / 单用户 Pi / 单文件无服务 / 向量后期）：
