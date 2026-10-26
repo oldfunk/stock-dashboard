@@ -5,7 +5,7 @@
 - missing_rate <= 0.05
 - outliers == 0
 - pit_violations == 0
-- 记录不能早于 trade_date - max_age_days
+- 陈旧度：trade_date 早于今天 max_age_days 天 -> warn
 
 状态：
 - pass：全部通过

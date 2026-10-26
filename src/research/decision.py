@@ -20,13 +20,11 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-from typing import Any
 
 from src.models.database import db_conn, now_cn
 from src.research.dao import ResearchDAO
 from src.research.domain import (
-    Decision, DecisionStatus, DeploymentStatus, HypothesisStatus,
-    StrategyStatus, next_id, validate_transition,
+    Decision, DecisionStatus, next_id, validate_transition,
 )
 
 
@@ -34,11 +32,11 @@ class DecisionRequiredError(ValueError):
     """决策缺失或状态变更不受支持。"""
 
 
-# 实体 -> (表名, 状态枚举)
+# 实体 -> 研究账本表
 ENTITY_TABLE = {
-    "hypothesis": ("research_hypothesis", HypothesisStatus),
-    "strategy": ("strategy_version", StrategyStatus),
-    "deployment": ("strategy_deployment", DeploymentStatus),
+    "hypothesis": "research_hypothesis",
+    "strategy": "strategy_version",
+    "deployment": "strategy_deployment",
 }
 
 
@@ -100,10 +98,9 @@ class DecisionService:
         """校验该实体存在可引用的决策记录；缺失则拒绝。"""
         if entity_type not in ENTITY_TABLE:
             raise DecisionRequiredError(f"未知实体: {entity_type}")
-        decisions = [d for d in self.dao.list_decisions(limit=500)
-                     if d["target"] == entity_id
-                     and d["status"] in (DecisionStatus.OPEN.value,
-                                         DecisionStatus.REVIEWED.value)]
+        decisions = [d for d in self.dao.list_decisions_by_target(entity_id, limit=500)
+                     if d["status"] in (DecisionStatus.OPEN.value,
+                                        DecisionStatus.REVIEWED.value)]
         if decision_id:
             decisions = [d for d in decisions if d["id"] == decision_id]
         if not decisions:
@@ -116,7 +113,7 @@ class DecisionService:
         """带决策记录的状态变更：校验迁移合法 + 必须有决策 + 落库。"""
         if entity_type not in ENTITY_TABLE:
             raise DecisionRequiredError(f"未知实体: {entity_type}")
-        table, _status_cls = ENTITY_TABLE[entity_type]
+        table = ENTITY_TABLE[entity_type]
         with db_conn() as conn:
             row = conn.execute(
                 f"SELECT status FROM {table} WHERE id = ?",

@@ -173,6 +173,19 @@ def test_verdict_rejected_and_inconclusive(db):
     assert derive_verdict(_plan(), empty) == "inconclusive"
 
 
+def test_result_ids_are_parseable(db):
+    """结果 ID 必须符合实体 ID 规则（R-YYYYMMDD-NNN）。"""
+    from src.research.domain import parse_id
+    from src.research.experiment import TopKBacktestRunner, run_experiment
+    _ready()
+    outcome = run_experiment(TopKBacktestRunner(), _plan())
+    assert outcome.results
+    for result in outcome.results:
+        prefix, day, seq = parse_id(result.id)
+        assert prefix == "R"
+        assert len(day) == 8 and seq >= 1
+
+
 def test_quality_date_guards_missing_dataset_and_end_date(db):
     """回归 D1：计划无 end_date 且数据集不在快照表中时不得崩溃。"""
     from src.research.experiment import _quality_date

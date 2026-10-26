@@ -9,6 +9,9 @@
 说明：当前 SQLite 阶段不做全量数据 hash（大表代价高）；Parquet 阶段将改为
 逐文件 sha256。本 manifest 的 fingerprint 是"结构 + 关键统计"指纹，
 用于发现快照被改动；完整复现仍需数据文件/快照目录。
+
+注：``db_size``/``schema_hash`` 为**信息性**字段，不参与校验——DB 会因
+无关写入而变大，若参与校验会让快照平白失效。
 """
 
 from __future__ import annotations

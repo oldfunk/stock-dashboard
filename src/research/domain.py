@@ -1,7 +1,7 @@
 """Research OS 领域对象与状态机（2026-10-26，R0-1）。
 
 原则：
-- ID 可读、可排序、可解析；前缀固定（H/E/S/D/MS/A/DL）。
+- ID 可读、可排序、可解析；前缀固定（H/E/S/D/MS/A/DL/DS/R）。
 - 状态机显式：非法迁移直接抛 DomainError。
 - 领域对象可序列化（to_dict/from_dict），供 DAO 落库与 API 使用。
 - 不依赖 DB；ID 序列由注册表/DAO 分配（本模块只提供格式与校验）。

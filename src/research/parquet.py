@@ -113,9 +113,8 @@ def _max_date(con, dest: Path) -> str | None:
     return None
 
 
-def export_snapshot(snapshot_id: str, tables: Iterable[str],
-                   overwrite: bool = True) -> ParquetManifest:
-    """把 SQLite 表导出为 Parquet 快照并写 manifest（可重跑）。"""
+def export_snapshot(snapshot_id: str, tables: Iterable[str]) -> ParquetManifest:
+    """把 SQLite 表导出为 Parquet 快照并写 manifest（可重跑：覆盖重写）。"""
     _require_duckdb()
     out_dir = parquet_dir(snapshot_id)
     out_dir.mkdir(parents=True, exist_ok=True)

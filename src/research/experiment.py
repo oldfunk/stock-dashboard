@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import re
 import statistics
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
@@ -23,7 +22,9 @@ from typing import Any
 
 from src.models.database import db_conn, now_cn
 from src.research.dao import ResearchDAO
-from src.research.domain import Experiment, ExperimentResult, ExperimentStatus
+from src.research.domain import (
+    Experiment, ExperimentResult, ExperimentStatus, next_id,
+)
 from src.research.quality import evaluate
 from src.research.snapshot import SnapshotManifest, verify_snapshot
 
@@ -136,6 +137,20 @@ class ExperimentRunner(ABC):
 
 # ── top-k 因子回测适配器 ────────────────────────────────────────────────────
 
+def _result_ids(plan: ExperimentPlan, count: int) -> list[str]:
+    """生成可解析的结果 ID（R-YYYYMMDD-NNN），与实体 ID 同规则。"""
+    parts = plan.experiment_id.split("-")
+    day = (parts[1] if len(parts) >= 2 and len(parts[1]) == 8
+           else now_cn().strftime("%Y%m%d"))
+    with db_conn() as conn:
+        existing = [r["id"] for r in conn.execute("SELECT id FROM research_result")]
+    ids: list[str] = []
+    for _ in range(count):
+        rid = next_id("R", day, existing + ids)
+        ids.append(rid)
+    return ids
+
+
 def _load_close_series(start: str, end: str) -> tuple[dict[str, dict[str, float]], list[str]]:
     """读取 [start, end] 的前复权收盘（close_adj）。
 
@@ -195,16 +210,17 @@ class TopKBacktestRunner(ExperimentRunner):
                 started_at=started, finished_at=now_cn().isoformat(),
                 error=f"{type(exc).__name__}: {exc}")
 
+        result_ids = _result_ids(plan, len(summary["metrics"]))
         results = [
             ExperimentResult(
-                id=f"R-{plan.experiment_id}-{i:03d}",
+                id=rid,
                 experiment_id=plan.experiment_id,
                 metric=metric, value=round(value, 6),
                 sample_size=summary["n_rebalances"],
                 splits={"rebalances": rebalances} if metric == "mean_excess" else {},
                 notes=("分域明细" if metric == "mean_excess" else ""),
             )
-            for i, (metric, value) in enumerate(summary["metrics"].items(), start=1)
+            for rid, (metric, value) in zip(result_ids, summary["metrics"].items())
         ]
         outcome = ExperimentOutcome(
             experiment_id=plan.experiment_id,

@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from typing import Any
 
 from src.models.database import db_conn, now_cn
 
@@ -291,6 +291,19 @@ class ResearchDAO:
         params.append(limit)
         with db_conn() as conn:
             rows = conn.execute(sql, params).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            d["evidence"] = _loads(d.pop("evidence_json"), {})
+            out.append(d)
+        return out
+
+    def list_decisions_by_target(self, target: str, limit: int = 50) -> list[dict]:
+        """按 target 精确查决策（供状态变更守卫用，避免全表扫描）。"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM decision_log WHERE target = ? "
+                "ORDER BY decision_date DESC LIMIT ?", (target, limit)).fetchall()
         out = []
         for row in rows:
             d = dict(row)
