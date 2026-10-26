@@ -166,8 +166,17 @@ def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
     dao = dao or ResearchDAO()
     schema = schema or StateSchema()
     metrics: dict[str, float] = {}
-    missing: list[str] = []
+    # 初始：所有已注册字段都视为缺失；算出来的再移除（未实现字段也显式 missing）
+    missing: list[str] = list(schema.names())
     fail_closed_missing: list[str] = []
+
+    def _set(name: str, value: float | None) -> None:
+        if value is None:
+            if schema.get(name) and schema.get(name).missing_policy == "fail_closed":
+                fail_closed_missing.append(name)
+        else:
+            metrics[name] = value
+            missing.remove(name)
 
     # 估值/基本面/质量：最新快照（缺失字段不补零）
     with db_conn() as conn:
@@ -187,13 +196,7 @@ def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
                 f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
                 "AND snapshot_date = ?", (snapshot_date,)).fetchall()] \
                 if snapshot_date else []
-            value = _median(values)
-            if value is None:
-                missing.append(name)
-                if schema.get(name) and schema.get(name).missing_policy == "fail_closed":
-                    fail_closed_missing.append(name)
-            else:
-                metrics[name] = value
+            _set(name, _median(values))
         # 毛利率：最新年报（financial_history）
         gm = [r[0] for r in conn.execute(
             "SELECT gross_margin FROM financial_history "
@@ -201,34 +204,22 @@ def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
             "AND report_date = (SELECT MAX(f2.report_date) FROM financial_history f2 "
             "  WHERE f2.stock_code = financial_history.stock_code "
             "  AND f2.report_type = 'A')").fetchall()]
-        gm_value = _median(gm)
-        if gm_value is None:
-            missing.append("gross_margin_median")
-            if schema.get("gross_margin_median") and \
-                    schema.get("gross_margin_median").missing_policy == "fail_closed":
-                fail_closed_missing.append("gross_margin_median")
-        else:
-            metrics["gross_margin_median"] = gm_value
+        _set("gross_margin_median", _median(gm))
         st_total = conn.execute(
             "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ?",
             (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
         st_count = conn.execute(
             "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ? "
             "AND is_st = 1", (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
-    if st_total:
-        metrics["st_ratio"] = round(100.0 * st_count / st_total, 4)
-    else:
-        missing.append("st_ratio")
+    _set("st_ratio", round(100.0 * st_count / st_total, 4) if st_total else None)
 
     # 流动性：当日成交额
     with db_conn() as conn:
         row = conn.execute(
             "SELECT SUM(amount) AS s FROM kline_daily WHERE trade_date = ?",
             (trade_date,)).fetchone()
-        if row["s"] is not None:
-            metrics["total_turnover_yi"] = round(row["s"] / 1e8, 4)
-        else:
-            missing.append("total_turnover_yi")
+        _set("total_turnover_yi",
+             round(row["s"] / 1e8, 4) if row["s"] is not None else None)
 
     total = len(schema.names())
     coverage = round((total - len(missing)) / total, 4) if total else 0.0
