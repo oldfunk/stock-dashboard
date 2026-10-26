@@ -430,6 +430,46 @@ class ResearchDAO:
         d["output_schema"] = _loads(d.pop("output_schema_json"), {})
         return d
 
+    # ── 品种（多市场基础） ────────────────────────────────────────────────────
+    def upsert_instrument(self, obj: Any) -> None:
+        d = _data(obj)
+        with db_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO instrument
+                (instrument_id, market_id, symbol, exchange, name, currency,
+                 lot_size, tick_size, list_date, delist_date, status,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                d["instrument_id"], d.get("market_id", "CN"), d.get("symbol"),
+                d.get("exchange"), d.get("name"), d.get("currency"),
+                d.get("lot_size"), d.get("tick_size"), d.get("list_date"),
+                d.get("delist_date"), d.get("status", "active"),
+                d.get("created_at") or now_cn().isoformat(),
+                d.get("updated_at") or now_cn().isoformat(),
+            ))
+
+    def list_instruments(self, status: str | None = None,
+                         limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM instrument"
+        params: list = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY instrument_id LIMIT ?"
+        params.append(limit)
+        with db_conn() as conn:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    def count_instruments(self, status: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS n FROM instrument"
+        params: list = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        with db_conn() as conn:
+            return conn.execute(sql, params).fetchone()["n"]
+
     # ── 特征 / 数据质量 ──────────────────────────────────────────────────────
     def insert_feature_definition(self, obj: Any) -> None:
         d = _data(obj)
