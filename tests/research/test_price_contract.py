@@ -32,7 +32,7 @@ def test_backfill_benchmark_maps_standard_codes(db):
     from scripts.fix_price_contract import backfill_benchmark
     with db_mod.db_conn() as conn:
         conn.execute("INSERT INTO market_index (index_code, index_name, date, "
-                     "current_value) VALUES ('000001','上证指数','2026-10-26',4000.0)")
+                     "current_value, timestamp) VALUES ('000001','上证指数','2026-10-26',4000.0,'2026-10-26T15:00:00')")
     result = backfill_benchmark(dry_run=False)
     assert "000001" in result["backfilled"]
     with db_mod.db_conn() as conn:
@@ -45,7 +45,7 @@ def test_backfill_trading_calendar(db):
     db_mod.KlineDAO().upsert_many("600519", [
         {"trade_date": d, "open": 1.0, "close": 1.0, "high": 1.0, "low": 1.0,
          "volume": 1.0, "amount": 1.0, "turnover": 0.1}
-        for d in ("2026-10-26", "2026-10-27")])
+        for d in ("2026-10-23", "2026-10-26")])
     result = backfill_trading_calendar(dry_run=False)
     assert result["trading_days"] == 2
     with db_mod.db_conn() as conn:
@@ -53,6 +53,7 @@ def test_backfill_trading_calendar(db):
             "SELECT trade_date, is_open FROM trading_calendar ORDER BY trade_date"
         ).fetchall()
     assert rows[0]["is_open"] == 1
+    # 周末（10-24/25）不在 kline 中 -> is_open=0
     assert any(r["is_open"] == 0 for r in rows)
 
 
