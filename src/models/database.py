@@ -509,8 +509,10 @@ def init_database():
             )
         ''')
         # 2026-10-26 价格模型：raw（估值）+ adj/后复权（回测）+ close（展示用正数前复权）
+        # 2026-10-27 子项目契约（Issue #4）：显式 close_qfq 列（前复权，与 close 同口径）
         _add_column_if_not_exists(conn, 'kline_daily', 'close_raw', 'REAL')
         _add_column_if_not_exists(conn, 'kline_daily', 'close_adj', 'REAL')
+        _add_column_if_not_exists(conn, 'kline_daily', 'close_qfq', 'REAL')
         _add_column_if_not_exists(conn, 'kline_daily', 'shares', 'REAL')
         conn.execute(
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
