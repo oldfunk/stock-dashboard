@@ -138,7 +138,7 @@ def parse_id(value: str) -> tuple[str, str, int]:
     return prefix, match.group("date"), int(match.group("seq"))
 
 
-def next_id(prefix: str, existing: list[str], day: date | str,
+def next_id(prefix: str, day: date | str, existing: list[str],
             start: int = 1) -> str:
     """在已有 ID 列表中生成下一个不冲突的 ID。"""
     day_str = day if isinstance(day, str) else day.strftime("%Y%m%d")
