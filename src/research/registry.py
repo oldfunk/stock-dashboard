@@ -22,10 +22,18 @@ def _data(obj: Any) -> dict[str, Any]:
     return obj.to_dict() if hasattr(obj, "to_dict") else dict(obj)
 
 
-def _require(data: dict[str, Any], fields: Iterable[str], entity: str) -> None:
+def _require(data: dict[str, Any], fields: Iterable[str], entity: str,
+             nonempty: Iterable[str] = ()) -> None:
+    """校验必填字段。
+
+    - 缺失/空字符串一律拒绝；
+    - ``nonempty`` 中的字段额外要求"非空容器/非零"（空 signal/regimes 视为未定义）。
+    """
     missing = [
         f for f in fields
-        if data.get(f) is None or (isinstance(data.get(f), str) and data.get(f) == "")
+        if data.get(f) is None
+        or (isinstance(data.get(f), str) and data.get(f) == "")
+        or (f in nonempty and not data.get(f))
     ]
     if missing:
         raise RegistryError(f"{entity} 缺少必填字段: {', '.join(missing)}")
@@ -66,6 +74,8 @@ class HypothesisRegistry:
         "horizon_days", "benchmark", "metric", "threshold", "regimes",
         "costs", "kill_criteria", "status",
     )
+    # 空 signal/regimes/kill_criteria 视为未定义（空 costs 合理：无费用假设）
+    NONEMPTY = ("signal", "regimes", "kill_criteria")
     STATUS = tuple(s.value for s in HypothesisStatus)
 
     def __init__(self, dao: ResearchDAO | None = None):
@@ -73,7 +83,7 @@ class HypothesisRegistry:
 
     def register(self, obj: Any) -> None:
         d = _data(obj)
-        _require(d, self.REQUIRED, "hypothesis")
+        _require(d, self.REQUIRED, "hypothesis", self.NONEMPTY)
         _in(d.get("status"), self.STATUS, "hypothesis", "status")
         if self.get(d["id"]) is not None:
             raise RegistryError(f"hypothesis 已存在: {d['id']}")
@@ -85,6 +95,7 @@ class HypothesisRegistry:
 
 class StrategyRegistry:
     REQUIRED = ("id", "version", "spec", "status")
+    NONEMPTY = ("spec",)
     STATUS = tuple(s.value for s in StrategyStatus)
 
     def __init__(self, dao: ResearchDAO | None = None):
@@ -92,7 +103,7 @@ class StrategyRegistry:
 
     def register(self, obj: Any) -> None:
         d = _data(obj)
-        _require(d, self.REQUIRED, "strategy")
+        _require(d, self.REQUIRED, "strategy", self.NONEMPTY)
         _in(d.get("status"), self.STATUS, "strategy", "status")
         if self.get(d["id"]) is not None:
             raise RegistryError(f"strategy 已存在: {d['id']}")

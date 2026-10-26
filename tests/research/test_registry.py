@@ -91,7 +91,7 @@ def test_registries_bundle(db):
     regs = ResearchRegistries()
     regs.feature.register(_feature())
     regs.hypothesis.register(_hypothesis())
-    regs.strategy.register({"id": "S-1", "version": 1, "spec": {},
+    regs.strategy.register({"id": "S-1", "version": 1, "spec": {"topk": 20},
                             "status": "draft"})
     regs.prompt.register({"prompt_id": "p", "version": 1, "task": "t",
                           "template_hash": "h", "status": "active"})
@@ -99,3 +99,20 @@ def test_registries_bundle(db):
     assert regs.hypothesis.get("H-20261026-001")
     assert regs.strategy.get("S-1")
     assert regs.prompt.get("p", 1)
+
+
+def test_empty_required_collections_rejected(db):
+    """回归 G1：空 signal/regimes/kill_criteria/spec 视为未定义，必须拒绝。"""
+    from src.research.registry import (
+        HypothesisRegistry, RegistryError, StrategyRegistry,
+    )
+    hreg = HypothesisRegistry()
+    for over in ({"signal": {}}, {"regimes": []}, {"kill_criteria": []}):
+        with pytest.raises(RegistryError):
+            hreg.register(_hypothesis(id="H-20261026-009", **over))
+    # 空 costs 是合理的（无费用假设）
+    hreg.register(_hypothesis(id="H-20261026-012", costs={}))
+    sreg = StrategyRegistry()
+    with pytest.raises(RegistryError):
+        sreg.register({"id": "S-EMPTY", "version": 1, "spec": {},
+                       "status": "draft"})
