@@ -178,10 +178,8 @@ def test_quality_date_guards_missing_dataset_and_end_date(db):
     from src.research.experiment import _quality_date
     _seed()
     _snapshot()
-    plan = _plan(params={"feature_id": "F-TREND", "start_date": DATES[0],
-                         "end_date": "", "topk": 1, "rebalance_days": 5})
-    plan.data_snapshot_id = SNAPSHOT
-    plan.dataset = "stock_feature_daily"
+    plan = _plan()
+    plan.dataset = "not_in_snapshot"
     plan.params = {"feature_id": "F-TREND", "start_date": DATES[0],
                    "topk": 1, "rebalance_days": 5}
     from src.research.snapshot import verify_snapshot
