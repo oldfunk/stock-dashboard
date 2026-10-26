@@ -165,6 +165,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-26（Research OS 设计 + 价格回填完成 + R6 回填重试）
+
+- **Research OS 设计**（`551548b`）：新增 `docs/research-os.md`（444 行）+ `docs/research-os-tasklist.md`（R0–R6）。核心：市场状态向量 → 假设卡 → 预注册实验 → 策略版本 → 纸盘归因 → 决策账本；先建 R0 框架（领域对象/表/注册表/版本/质量门/LLM 契约）再跑最小闭环。LLM 只做研究助手：任务注册表、统一 prompt 结构、fact ID 引用、只读工具 + 草案写、模型 fast/deep 路由、离线 golden cases。
+- **B1 价格回填完成**：`956/959`（3 只 partial），**2,149,367 行**，`close_raw`/`close_adj` 全非空，负价 0；`000001` 2623 行（2016–2026）；耗时 8057s。
+- **R6 回填锁修复**：全市场年报在 445 只处因 `pending_codes` 读锁退出；改为目标集只算一次 + DB 操作指数重试（2/4/8/16/30s），已续跑。价格任务结束后无并发写，当前年报 445+。
+- **B6 审计**：R5/R6 入账；D1/D2/S1 已修；README/architecture 已更新；剩余项在 `audit-20261026.md`。
+- **门禁**：704/242。
+
 ### 2026-10-26（评分拆解单击修复 + README 定位校正）
 
 - **UI 修复**：统一卡片后评分拆解 ID 变成 `sd-{view}-{code}` / `caret-{view}-{code}`，JS 仍找旧 `sd-{code}`，导致单击打不开。模板 onclick 传 `view`，JS 按 `view` 前缀查找；新增 ID/JS 一致性测试。生产浏览器实测单击后 `display=block`、箭头 `↑`。
