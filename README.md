@@ -136,6 +136,8 @@ stock-dashboard/
 │   ├── architecture.md         # 架构真相源
 │   ├── roadmap.md              # 总路线
 │   ├── value-investing-methodology.md # 价值投资方法论与数据缺口
+│   ├── research-os.md          # 投资研究操作系统设计（市场状态/假设/实验/策略/LLM）
+│   ├── research-os-tasklist.md # Research OS 任务清单（R0–R6）
 │   ├── audit-20261026.md       # 全仓审计清单（数据语义/可靠性/架构/安全/门禁）
 │   ├── iteration-log.md        # 迭代进程账
 │   ├── handoff.md              # 班次交接速览
