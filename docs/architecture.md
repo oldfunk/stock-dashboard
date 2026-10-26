@@ -150,7 +150,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；母项目基线 **696**、vendor **242**（2026-10-26），只升不降——下限记录 `scripts/gate-baseline*.txt`，由 gate.sh 自动强制（按测试规则本机不跑 pytest）。
+- 全仓 `pytest` 零失败；母项目基线 **704**、vendor **242**（2026-10-26），只升不降——下限记录 `scripts/gate-baseline*.txt`，由 gate.sh 自动强制（按测试规则本机不跑 pytest）。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
@@ -173,6 +173,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 - **AI 分析**：用用户自带 Key（`/llm` 配置 + 队列执行），面板只负责展示数据与 AI 笔记
 - **已删除**：`src/analyzer/` 保留（本地触发已停用，仅手动脚本可用；原 `src/paper/` M4a 已删，见下）
 - **量化交易系统**：M4a/原生包已归档；2026-09-29 起由 M6 全量合并接替（顶层 `paper_trading/` + `/paper` 嵌原面板；Universe 走母筛选 + AI 用我们的 Key；:8081 面板独立服务）
+- **研究分析层（2026-10-26）**：SQLite 业务事实源 + Parquet 研究快照 + DuckDB 嵌入式分析；不引入数据库服务；向量检索后期用 `sqlite-vec`。详见 `docs/research-os.md` §19–20。
 
 ## 7. 方法论与内化避坑（2026-09-22 定稿）
 

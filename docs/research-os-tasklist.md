@@ -3,6 +3,7 @@
 > 创建：2026-10-26 · 上游：`docs/research-os.md` · 状态：进行中
 > 规则：先 R0 框架，后最小闭环；每个任务有明确验收，不跳步；完成即勾选并写验证命令/输出。
 > 数据缺口（价格/年报）在后台补，不阻塞 R0 设计/骨架；但 R2 实验必须通过数据质量门。
+> 2026-10-26 已拍板：SQLite（业务事实源）+ Parquet（研究快照）+ DuckDB（嵌入式分析）；单文件无服务；向量检索后期用 sqlite-vec。详见 `research-os.md` §19–20。
 
 ## R0 — 框架（先建地基，不跑策略）
 
@@ -10,6 +11,9 @@
   - 验收：单测覆盖状态机合法/非法迁移；ID 可读且唯一。
 - [ ] **R0-2 数据库表与迁移**：新增 `feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
   - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测。
+- [ ] **R0-2a Repository 接口**：SQLite 与 DuckDB 各实现只读/只写接口，研究查询不直接写业务库。
+- [ ] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
+- [ ] **R0-2c DuckDB 视图**：DuckDB 只读 Parquet；提供研究查询函数；单测覆盖一个回测扫描。
 - [ ] **R0-3 注册表**：`src/research/registry.py` 统一特征/假设/策略/提示词注册与校验（必填字段、版本、hash）。
   - 验收：重复 ID/缺字段/非法状态被拒绝；注册即写 DB。
 - [ ] **R0-4 版本与快照**：`data_snapshot_id`（表名/行数/最大日期/hash）、`code_commit`、`config_hash`、`random_seed` 的记录与校验。
@@ -30,6 +34,8 @@
   - 验收：编造数字/无引用/schema 错 → 拒绝；golden cases 通过。
 - [ ] **R0-12 测试夹具**：fake LLM、固定时钟、最小数据集、实验 fixture；离线可跑。
   - 验收：CI/gate 不依赖外网/真实 Key；新增测试纳入基线。
+- [ ] **R0-13 Universe/退市名单**：导入 AKShare SH/SZ 退市名单（161+211）、BaoStock 交叉验证；建 `universe_membership`；每日记录全市场状态/上市退市/ST。
+  - 验收：退市股可查；历史成分缺失标记 `coverage=current_only`；不宣称无幸存者偏差。
 
 ## R1 — 市场状态（框架内第一个垂直切片）
 
@@ -67,6 +73,8 @@
 - [ ] **R4-4 离线评估**：golden cases（schema/引用/数字/拒绝）；纳入 gate。
 - [ ] **R4-5 在线评估**：人工评分/修改幅度/采纳率/成本/延迟；提示词版本对比。
 - [ ] **R4-6 旧链路收敛**：`ai_analyzer` 的单体 prompt 逐步迁到任务注册表；保留兼容。
+- [ ] **R4-7 Context Service**：每任务 token 预算 + 结构化事实选择（SQL 聚合/top-k）+ 引用 ID；数字表禁止文本压缩。
+- [ ] **R4-8 压缩层（触发式）**：文本任务超阈值才接入 LLMLingua-2；检索压缩用 LangChain/LlamaIndex + bge-reranker；向量库 sqlite-vec/Chroma。必须过 golden cases。
 
 ## R5 — 研究界面/API
 

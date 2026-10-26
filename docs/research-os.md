@@ -97,11 +97,14 @@ missing_policy, lookback, source, owner, created_at, status
 
 禁止在模板/脚本里重复实现同一特征；新增特征先注册，再写代码，再补契约测试。
 
-### 5.3 存储策略
+### 5.3 存储策略（2026-10-26 已拍板）
 
-- 阶段 1（SQLite）：`stock_feature_daily` 宽表（code, trade_date, 核心 30–50 列）+ `market_state_daily`。
-- 阶段 2（研究量上来后）：Parquet/DuckDB 做离线实验，SQLite 只服务面板；接口不变。
-- 所有表带 `asof`/`data_snapshot_id`，实验只读快照。
+- **SQLite = 业务事实源（OLTP）**：采集、筛选、页面、调度、回填继续用现有 WAL 库。
+- **Parquet = 研究快照（不可变）**：每日/每月导出研究所需表，带 manifest（snapshot_id、schema 版本、行数、最大日期、hash）。
+- **DuckDB = 嵌入式分析引擎**：只读 Parquet，不写 SQLite；回测/特征/归因走 DuckDB。
+- **不双写**：SQLite 与 Parquet 不是双主；快照是单向导出，实验只读快照。
+- **向量检索后期**：`sqlite-vec`（嵌入式、单文件）或 Chroma；现在不引入。
+- **迁移路径**：DAO/Repository 接口隔离 SQL；未来团队/多用户再评估 PostgreSQL，不改研究层接口。
 
 ### 5.4 当前缺口（不阻塞框架，阻塞结论）
 
@@ -442,3 +445,64 @@ docs/research-os-tasklist.md
 - [ ] LLM 任务离线可跑（mock 模型），schema/引用校验失败即拒绝；线上调用全量审计。
 - [ ] `/research` 能展示完整证据链。
 - [ ] 所有变更进入 `decision_log`。
+
+## 19. 存储决策（2026-10-26 用户拍板）
+
+> 问题：数据库建树不足，需要用户判断。用户回答：全市场日频 10 年；单用户 Pi；单文件无服务；向量检索需要但可后期。
+
+### 19.1 决策
+
+| 层 | 技术 | 职责 |
+|---|---|---|
+| 业务/OLTP | SQLite（WAL，单文件） | 采集、筛选、面板、调度、回填；唯一写入入口 |
+| 研究快照 | Parquet（不可变） | 研究所需表的每日/每月导出；实验只读 |
+| 分析 | DuckDB（嵌入式，无服务） | 回测、特征计算、归因；只读 Parquet |
+| 向量/RAG | 后期 `sqlite-vec` / Chroma | 新闻/笔记检索；现在不实现 |
+
+### 19.2 为什么不是 PostgreSQL
+
+- 单用户 Pi（4 核 / 954MB）运行数据库服务：内存与运维成本高，收益主要是多用户并发；
+- 当前并发写主要是采集/调度/回填（1–2 个写者），SQLite WAL + busy_timeout 足够；
+- 用户明确偏好单文件无服务；研究分析用 DuckDB 已能获得列存/向量化收益。
+
+### 19.3 数据流
+
+```
+采集/回填 → SQLite（事实源） → 快照任务 → Parquet + manifest → DuckDB 分析 → 结果写 SQLite（带 snapshot_id）
+```
+
+规则：
+
+- DuckDB 只读 Parquet，不写 SQLite；
+- 实验结果必须记录 `snapshot_id`、`code_commit`、`config_hash`、`seed`；
+- 面板只读 SQLite；研究页可读 Parquet 快照（经 DuckDB）；
+- 快照保留策略：每日增量保留 14 天 + 每月基线保留 12 个月（可配）；磁盘紧张时先降增量；
+- 备份 = SQLite 文件 + Parquet 快照目录；可整体拷贝。
+
+### 19.4 迁移路径
+
+- 用 Repository 接口隔离 SQL（SQLite/DuckDB 各自实现）；
+- 若未来团队/多用户/高并发：评估 PostgreSQL + pgvector；研究层接口不变；
+- 禁止把研究查询直接写进 SQLite 业务库（长扫描影响页面）。
+
+## 20. 上下文压缩与退市/历史成分决策（2026-10-26）
+
+### 20.1 上下文压缩
+
+- 当前模型：GLM-4.5-Flash，128K 上下文；当前单股 prompt 约 2–6K tokens，市场状态 <2K tokens。
+- **结论：现在不引入压缩库**。需要的是 Context Service：token 预算 + 结构化事实选择 + 工具检索；数字表禁止文本压缩。
+- **触发条件**：单次任务选中上下文 >30% 窗口（约 38K tokens）或长文本 >20 篇且质量下降时，接入成熟库：
+  - 提示词/长文本压缩：**LLMLingua-2**（微软）
+  - 检索压缩：LangChain/LlamaIndex `ContextualCompressionRetriever` + bge-reranker
+  - 向量库：`sqlite-vec`（嵌入式）优先，Chroma 备选
+- 所有压缩必须过 golden cases：schema、引用覆盖率、数字一致性、缺数据拒绝。
+
+### 20.2 退市与历史成分
+
+- **退市名单（免费，现在用）**：AKShare `stock_info_sh_delist`（161 条）、`stock_info_sz_delist`（211 条）；BaoStock 状态/退市日交叉验证。
+- **退市股财务**：AKShare `stock_*_by_report_delisted_em` 补三表，用于 PIT 回测。
+- **历史指数成分**：
+  - 国证历史样本：AKShare `index_detail_hist_cni`（可用）；
+  - 中证历史成分：免费源只有当前成分；Tushare `index_weight` 月度历史需 2000 积分；付费源 Wind/Choice 最完整。
+  - **降级策略**：先标记 `coverage=current_only`，不宣称无幸存者偏差；从今天起每日记录 `universe_membership`（全市场状态/上市退市/ST），逐步积累历史近似。
+- **验收**：退市名单覆盖可核对；历史成分缺失时在 UI 明确标注，不进入"市场级结论"。

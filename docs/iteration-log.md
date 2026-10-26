@@ -165,6 +165,16 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-26（Research OS 存储/上下文/退市数据决策）
+
+- **数据库拍板**（用户回答：全市场日频 10 年 / 单用户 Pi / 单文件无服务 / 向量后期）：
+  - **SQLite = 业务事实源（OLTP）**；**Parquet = 不可变研究快照**；**DuckDB = 嵌入式分析（只读 Parquet）**；不引入 Postgres/数据库服务；不双写。
+  - 研究实验只读快照；结果写回 SQLite 并带 `snapshot_id`；Repository 接口隔离 SQL，未来团队化再评估 Postgres。
+  - 备份 = SQLite 文件 + Parquet 目录；向量检索后期用 `sqlite-vec`/Chroma。
+- **上下文压缩**：当前 GLM-4.5-Flash 128K，单股 prompt 2–6K tokens，**现在不引入压缩库**；先做 Context Service（预算 + 事实选择 + 工具检索）。触发条件：单任务 >30% 窗口或 >20 篇长文且质量下降；届时用 **LLMLingua-2** + LangChain/LlamaIndex 压缩检索 + bge-reranker，不自研；数字表禁止压缩。
+- **退市/历史成分**：AKShare `stock_info_sh_delist`（161）+ `stock_info_sz_delist`（211）免费可用；退市股财务用 `stock_*_by_report_delisted_em`；BaoStock 状态交叉验证。历史指数成分免费源不完整（国证有 `index_detail_hist_cni`；中证仅当前，Tushare `index_weight` 需积分）；先标记 `current_only`，从今天起每日记录 `universe_membership`，不宣称无幸存者偏差。
+- **下一轮**：按 R0-1（领域对象/ID）→ R0-2/2a/2b/2c（表/Repository/Parquet 快照/DuckDB）→ R0-3（注册表）开始搭骨架；不跑策略。
+
 ### 2026-10-26（Research OS 设计 + 价格回填完成 + R6 回填重试）
 
 - **Research OS 设计**（`551548b`）：新增 `docs/research-os.md`（444 行）+ `docs/research-os-tasklist.md`（R0–R6）。核心：市场状态向量 → 假设卡 → 预注册实验 → 策略版本 → 纸盘归因 → 决策账本；先建 R0 框架（领域对象/表/注册表/版本/质量门/LLM 契约）再跑最小闭环。LLM 只做研究助手：任务注册表、统一 prompt 结构、fact ID 引用、只读工具 + 草案写、模型 fast/deep 路由、离线 golden cases。
