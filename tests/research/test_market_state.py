@@ -74,3 +74,23 @@ def test_fail_closed_field_makes_vector_invalid(db):
     vector = compute_vector("2026-10-26", schema=schema)
     assert vector.status == "invalid"
     assert vector.fail_closed_missing == ["pe_median"]
+
+
+def test_compute_vector_uses_latest_snapshot_date(db):
+    from src.research.market_state import compute_vector
+
+    def snap(code, pe, day):
+        return {"code": code, "name": "X", "market": "A", "sector": "s", "pe": pe,
+                "pb": 1.0, "ps": 1.0, "market_cap": 1.0, "circulating_cap": 1.0,
+                "roe": 10.0, "revenue": 1.0, "revenue_growth": 5.0,
+                "profit": 1.0, "profit_growth": 5.0, "debt_ratio": 30.0,
+                "current_price": 1.0, "high_52w": 1.0, "low_52w": 1.0,
+                "is_st": False, "list_date": "2010-01-01", "snapshot_date": day}
+
+    db_mod.StockSnapshotDAO().save_batch([
+        snap("600519", 99.0, "2026-10-20"),
+        snap("000001", 12.0, "2026-10-26"),
+    ])
+    vector = compute_vector("2026-10-26")
+    assert vector.quality["snapshot_date"] == "2026-10-26"
+    assert vector.metrics["pe_median"] == 12.0

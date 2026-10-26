@@ -14,7 +14,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable
 
 from src.models.database import db_conn
-from src.research.dao import ResearchDAO
 
 BLOCKS = ("valuation", "fundamentals", "breadth", "liquidity", "quality")
 MISSING_POLICIES = ("null", "fail_closed")
@@ -156,14 +155,13 @@ def _median(values: list[float]) -> float | None:
     return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
 
 
-def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
+def compute_vector(trade_date: str,
                    schema: StateSchema | None = None) -> MarketStateVector:
     """计算某日状态向量（纯函数；缺失显式 NULL）。
 
     R1-1 先落地估值/基本面/质量（来自最新快照）与流动性（当日成交额）；
     广度（MA20/MA60、涨跌比）在 R1-2 快照中接入。
     """
-    dao = dao or ResearchDAO()
     schema = schema or StateSchema()
     metrics: dict[str, float] = {}
     # 初始：所有已注册字段都视为缺失；算出来的再移除（未实现字段也显式 missing）
@@ -176,13 +174,14 @@ def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
                 fail_closed_missing.append(name)
         else:
             metrics[name] = value
-            missing.remove(name)
+            if name in missing:
+                missing.remove(name)
 
     # 估值/基本面/质量：最新快照（缺失字段不补零）
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM stock_snapshot LIMIT 1").fetchone()
-        snapshot_date = row["snapshot_date"] if row else None
+            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot").fetchone()
+        snapshot_date = row["d"] if row else None
         for name in ("pe_median", "pb_median", "roe_median",
                      "revenue_growth_median", "profit_growth_median",
                      "debt_ratio_median"):
@@ -197,13 +196,14 @@ def compute_vector(trade_date: str, dao: ResearchDAO | None = None,
                 "AND snapshot_date = ?", (snapshot_date,)).fetchall()] \
                 if snapshot_date else []
             _set(name, _median(values))
-        # 毛利率：最新年报（financial_history）
+        # 毛利率：最新年报（financial_history，JOIN 取每只股票最新年报）
         gm = [r[0] for r in conn.execute(
-            "SELECT gross_margin FROM financial_history "
-            "WHERE report_type = 'A' AND gross_margin IS NOT NULL "
-            "AND report_date = (SELECT MAX(f2.report_date) FROM financial_history f2 "
-            "  WHERE f2.stock_code = financial_history.stock_code "
-            "  AND f2.report_type = 'A')").fetchall()]
+            "SELECT h.gross_margin FROM financial_history h "
+            "JOIN (SELECT stock_code, MAX(report_date) AS md "
+            "      FROM financial_history WHERE report_type = 'A' "
+            "      GROUP BY stock_code) m "
+            "  ON m.stock_code = h.stock_code AND m.md = h.report_date "
+            "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL").fetchall()]
         _set("gross_margin_median", _median(gm))
         st_total = conn.execute(
             "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ?",
