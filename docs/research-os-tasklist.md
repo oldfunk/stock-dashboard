@@ -10,18 +10,18 @@
 - [x] **R0-1 领域对象与 ID**：`src/research/domain.py` 定义 MarketState/Hypothesis/Experiment/Result/Strategy/Deployment/Decision 的 dataclass、状态枚举、ID 规则（H/E/S/D/MS）。
   - 验收：单测覆盖状态机合法/非法迁移；ID 可读且唯一。
 - [x] **R0-2 数据库表与迁移**：新增 `market`、`instrument`、`trading_calendar`、`fx_rate_daily`、`feature_definition`、`stock_feature_daily`、`universe_membership`、`data_quality_daily`、`research_hypothesis`、`research_experiment`、`research_result`、`strategy_version`、`decision_log`、`prompt_registry`、`llm_run`。
-  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 增加 `market`/`instrument_id`（不改旧主键）；生产迁移已启动（回填 `instrument_id` + 生成 instrument）。
+  - 验收：`init_database()` 幂等；旧库升级不破坏现有表；DAO 单测；`kline_daily` 增加 `market`/`instrument_id`（不改旧主键）；生产迁移完成：`instrument_id` 空值 0/2,150,145，`instrument` 5,527（SSE 2,633 / SZSE 2,894）。
 - [ ] **R0-2a Repository 接口**：SQLite 与 DuckDB 各实现只读/只写接口，研究查询不直接写业务库。
 - [ ] **R0-2b Parquet 快照与 manifest**：`data/snapshots/<snapshot_id>/` + manifest（表名/行数/最大日期/hash）；快照任务可重跑。
 - [ ] **R0-2c DuckDB 视图**：DuckDB 只读 Parquet；提供研究查询函数；单测覆盖一个回测扫描。
 - [x] **R0-3 注册表**：`src/research/registry.py` 统一特征/假设/策略/提示词注册与校验（必填字段、版本、hash）。
   - 验收：重复 ID/缺字段/非法状态被拒绝；注册即写 DB。
-- [ ] **R0-4 版本与快照**：`data_snapshot_id`（表名/行数/最大日期/hash）、`code_commit`、`config_hash`、`random_seed` 的记录与校验。
-  - 验收：同一快照重跑结果一致（容差内）；快照缺失实验拒绝。
-- [ ] **R0-5 数据质量门**：`data_quality_daily` + `quality_gate(dataset, date)`；覆盖率/PIT/异常/陈旧度。
-  - 验收：不达标实验标记 `invalid`；单测覆盖 4 类失败。
-- [ ] **R0-6 实验接口**：`ExperimentRunner` 抽象 + `backtest_topk` 适配器；计划/结果/结论落库。
-  - 验收：用固定小样本跑通一个实验并复现；接口不绑死单一回测器。
+- [x] **R0-4 版本与快照**：`data_snapshot_id`（表名/行数/最大日期/hash）、`code_commit`、`config_hash`、`random_seed` 的记录与校验。
+  - 验收：`src/research/snapshot.py` manifest 可校验漂移；快照缺失实验拒绝（R0-6 已接入）。
+- [x] **R0-5 数据质量门**：`data_quality_daily` + `evaluate/assert_quality(dataset, date)`；覆盖率/PIT/异常/陈旧度；无记录 fail-closed。
+  - 验收：不达标实验标记 `invalid`；单测覆盖 4 类失败（R0-6 已接入）。
+- [x] **R0-6 实验接口**：`src/research/experiment.py` `ExperimentRunner` 抽象 + `TopKBacktestRunner` 适配器；计划/结果/结论落库。
+  - 验收：固定小样本跑通并复现（两次指标一致）；快照缺失/质量 invalid 拒绝；接口不绑死单一回测器。
 - [ ] **R0-7 决策账本**：`decision_log` DAO + CLI：改什么/为什么/证据 ID/预期/复核日。
   - 验收：策略/假设状态变更必须带决策记录；关闭时写结果。
 - [ ] **R0-8 LLM 任务注册表**：`src/research/llm/tasks.py`（任务/模型档/工具白名单/输出 schema/token 预算）。
