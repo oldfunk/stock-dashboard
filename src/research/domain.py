@@ -27,6 +27,7 @@ PREFIXES = {
     "A": "attribution",
     "DL": "decision",
     "DS": "data_snapshot",
+    "R": "result",
 }
 
 

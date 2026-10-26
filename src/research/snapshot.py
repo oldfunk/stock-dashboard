@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from src.models.database import db_conn, get_db_path, init_database, now_cn
+from src.models import database as _db
+from src.models.database import db_conn, init_database, now_cn
 
 DATE_COLUMNS = (
     "trade_date", "report_date", "snapshot_date", "decision_date",
@@ -62,12 +62,13 @@ class SnapshotManifest:
 
 
 def _snapshots_dir() -> Path:
-    return Path(get_db_path()).parent.parent / "snapshots"
+    # 动态取路径（模块属性），保证测试 monkeypatch get_db_path 生效
+    return Path(_db.get_db_path()).parent.parent / "snapshots"
 
 
 def _repo_root() -> Path:
     # DB 路径: <repo>/data/db/stock_dashboard.db
-    return Path(get_db_path()).parent.parent.parent
+    return Path(_db.get_db_path()).parent.parent.parent
 
 
 def code_commit() -> str | None:
@@ -126,7 +127,7 @@ def create_snapshot(tables: Iterable[str], snapshot_id: str | None = None,
     schema_hash = hashlib.sha256(
         json.dumps({t: s.fingerprint for t, s in sorted(stats.items())},
                    sort_keys=True).encode()).hexdigest()
-    db_path = Path(get_db_path())
+    db_path = Path(_db.get_db_path())
     manifest = SnapshotManifest(
         snapshot_id=snapshot_id,
         created_at=now_cn().isoformat(),
