@@ -244,12 +244,12 @@ def compute_vector(trade_date: str,
     above20 = above60 = adv = dec = total = 0
     for pts in series.values():
         pts.sort()   # 窗口查询是 DESC，这里升序以便取最新
-        if len(pts) < 2 or pts[-1][0] != trade_date:
-            continue
+        if len(pts) < 60 or pts[-1][0] != trade_date:
+            continue   # 窗口不足 60 日 -> 不计算（不做过短均线的近似）
         total += 1
         last = pts[-1][1]
-        ma20 = sum(p[1] for p in pts[-20:]) / min(20, len(pts))
-        ma60 = sum(p[1] for p in pts[-60:]) / min(60, len(pts))
+        ma20 = sum(p[1] for p in pts[-20:]) / 20
+        ma60 = sum(p[1] for p in pts[-60:]) / 60
         if last > ma20:
             above20 += 1
         if last > ma60:
@@ -345,8 +345,8 @@ def snapshot_range(start: str, end: str, dry_run: bool = False,
     written = 0
     for day in dates:
         vector = assess_vector(compute_vector(day))
-        record_state_quality(vector, dao)
         if not dry_run:
+            record_state_quality(vector, dao)
             save_vector(vector, dao)
         written += 1
     return {"start": start, "end": end, "dates": len(dates),

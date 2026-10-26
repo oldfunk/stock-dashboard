@@ -16,6 +16,17 @@ def db(tmp_path, monkeypatch):
     return path
 
 
+def _weekdays(n, start):
+    from datetime import date, timedelta
+    day = date.fromisoformat(start)
+    out = []
+    while len(out) < n:
+        if day.weekday() < 5:
+            out.append(day.isoformat())
+        day += timedelta(days=1)
+    return out
+
+
 def _seed_kline(days):
     dao = db_mod.KlineDAO()
     for day in days:
@@ -94,6 +105,10 @@ def test_dry_run_does_not_write(db):
     assert result["dry_run"] is True
     assert result["dates"] == 5
     assert get_vector(DAYS[0]) is None
+    # dry-run 连质量记录也不写
+    with db_mod.db_conn() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM data_quality_daily").fetchone()[0] == 0
 
 
 def test_low_coverage_marks_invalid_and_records_quality(db):
@@ -128,9 +143,10 @@ def test_high_coverage_generates_narrative(db):
                 "snapshot_date": "2026-10-26"}
 
     db_mod.StockSnapshotDAO().save_batch([snap("600519", 20.0), snap("000001", 10.0)])
-    _seed_kline(["2026-10-23", "2026-10-26"])
-    snapshot_range("2026-10-26", "2026-10-26")
-    vector = get_vector("2026-10-26")
+    days = _weekdays(65, "2026-08-03")
+    _seed_kline(days)
+    snapshot_range(days[-1], days[-1])
+    vector = get_vector(days[-1])
     assert vector.status == "pass"
     assert vector.coverage >= 0.8
     assert should_generate_narrative(vector)
