@@ -3,7 +3,4 @@
 # 2026-10-24 门禁分层后：vendor 域内失败已不阻塞母项目（协议 §6），
 # 本清单仅用于让 vendor 套件计数稳定；子项目修复后移出并恢复 vendor 基线。
 #
-# 2026-10-24：vendor 日期相关 flaky —— test_close_nav_snapshot_once_per_day
-#   传入 day 与 log_operation 写入的当前时间戳口径不一致，跨日必挂（子项目 Issue #2）。
-#   仅测试问题（生产路径 day=today 时幂等正常），故临时排除，待子项目 tag 后恢复。
-paper_trading/tests/test_agent.py::test_close_nav_snapshot_once_per_day
+# 2026-10-26：v0.6.9 已修 Issue #2（NAV 幂等/跨日），移除临时排除。
