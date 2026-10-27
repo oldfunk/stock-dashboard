@@ -1116,6 +1116,35 @@ def run_collect_pipeline(config: dict) -> list[dict]:
     return candidates
 
 
+def fetch_trade_calendar() -> list[str]:
+    """拉取全市场交易日历（历史+未来，升序 ISO 日期，仅交易日）。
+
+    源：新浪 `tool_trade_date_hist_sina`（akshare 中唯一覆盖未来交易日的
+    接口；交易所年度休市安排发布后源才会延长，如 2027 年安排约 2026-12
+    才公布——源未覆盖的日期不臆造）。
+
+    失败返回 []（调用方 fail-closed：不写任何未来行）。
+    """
+    from datetime import date
+    try:
+        df = ak.tool_trade_date_hist_sina()
+    except Exception as e:
+        logger.warning(f"[交易日历] 拉取失败: {e}")
+        return []
+    if df is None or df.empty:
+        return []
+    col = "trade_date" if "trade_date" in df.columns else df.columns[0]
+    out = set()
+    for x in df[col]:
+        s = str(x)[:10]
+        try:
+            date.fromisoformat(s)
+        except ValueError:
+            continue
+        out.add(s)
+    return sorted(out)
+
+
 def fetch_index_kline(index_code: str, limit: int = 250) -> list[dict]:
     """拉取大盘指数日K线（实时，不缓存）。
 

@@ -139,8 +139,11 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | S12 | 资产负债表（年报） | `fetch_balance_sheet_annual`（东财 F10 `zcfzb*`） | 主用 | 无（BOM/HTML 已重试） |
 | S13 | 现金流量表（年报） | `fetch_cash_flow_annual`（东财 F10 `xjllb*`） | 主用 | 无（同上） |
 | S14 | 历史日线全量（回填） | `ak.stock_zh_a_daily`（Sina，不复权+后复权） | 回填主用 | 东财 `push2his`（约 35 次限流）→ 腾讯 `fqkline`（慢/负价） |
+| S15 | 交易日历（历史+未来） | `ak.tool_trade_date_hist_sina` 经 `fetch_trade_calendar` | 主用 | 无（失败回 `[]`，日历未来段不写行；覆盖末端之外不臆造日期） |
 
-> S9 在 `src/collector/dividend_fetcher.py`，S10 在 `src/collector/akshare_fetcher.py`；两者同受本节三条铁律约束。
+> S9 在 `src/collector/dividend_fetcher.py`，S10/S15 在 `src/collector/akshare_fetcher.py`；两者同受本节三条铁律约束。
+> S15 源覆盖有限（2026-10 实测到 2026-12-31；交易所年度休市安排发布后才延长，2027 年安排往年约 12-22 发布）——
+> `scripts/fix_price_contract.backfill_trading_calendar` 只写源覆盖范围内日期，调度器每周六重跑自动接上更远日期。
 
 ### 5.2 三条铁律
 
@@ -236,7 +239,11 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 9.4 交易日历
 
-- `trading_calendar(market_id, trade_date, is_open)`：由 `kline_daily` 交易日回填（`is_open=1`），其余自然日 `is_open=0`。
+- `trading_calendar(market_id, trade_date, is_open)`：
+  - 历史（≤ kline 最新日）：由 `kline_daily` 交易日回填（`is_open=1`，`source=kline_daily`），区间内其余自然日 `is_open=0`。
+  - 未来（kline 最新日之后）：按新浪交易日历源（S15）覆盖范围写入（`source=sina_trade_date_hist`）——源内交易日 `is_open=1`、覆盖区间内周末/休市 `is_open=0`；**源未覆盖的日期不写任何行**（fail-closed，不臆造；2027 年休市安排发布前覆盖到 2026-12-31）。
+  - 维护：`scripts/fix_price_contract.backfill_trading_calendar` 幂等，调度器每周六随周维护重跑；源延长（如 2027 安排发布）后下一次运行自动跟上。
+  - 子项目侧：`max(is_open=1 日期) >= 今天` 才采用母库日历，否则回退 akshare（v0.7.4 fail-closed 防护）。
 
 ### 9.5 覆盖度
 

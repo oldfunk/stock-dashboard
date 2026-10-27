@@ -342,6 +342,14 @@ class MarketScheduler:
                 ensure_dividend_data(cfg)
             except Exception as e:
                 logger.warning(f"[调度器] 股息刷新失败: {e}")
+            # 交易日历未来段（2026-10-27，Issue #8）：每周按新浪源延长
+            # （源覆盖到哪写到哪；2027 休市安排发布后下一次运行自动跟上）
+            try:
+                from scripts.fix_price_contract import backfill_trading_calendar
+                cal = backfill_trading_calendar()
+                logger.info(f"[调度器] 交易日历维护: {cal.get('future')}")
+            except Exception as e:
+                logger.warning(f"[调度器] 交易日历维护失败: {e}")
             if out_cfg.get('enabled', True):
                 try:
                     from src.outcome_service import refresh_benchmarks, refresh_outcomes
