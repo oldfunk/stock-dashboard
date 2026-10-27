@@ -360,6 +360,19 @@ def main() -> int:
 
     dao = KlineDAO()
     progress = FinancialHistoryDAO()
+
+    def _mark(code: str, n: int, status: str) -> None:
+        """标记进度；瞬时错误（如并发写锁）不杀长任务。
+
+        2026-10-27 事故：upsert 撞锁后，except 处理器里 mark 再撞锁，
+        未捕获 → 整个 15h 回填进程死。断点续跑会重试未标记的 code，
+        进度标记失败本身可容忍（宁可下轮重抓一只，不可全灭）。
+        """
+        try:
+            progress.mark_backfill_done(PROGRESS_TASK, code, n, status)
+        except Exception as mark_err:  # noqa: BLE001
+            logger.warning(f"[P0-5] 进度标记失败 {code}（下轮将重试）: {mark_err}")
+
     if args.source == "sina":
         fetch = fetch_kline_sina_adjusted
     elif args.source == "curl":
@@ -379,18 +392,18 @@ def main() -> int:
             records = fetch(code, args.start)
             if records:
                 n = dao.upsert_many(code, records)
-                progress.mark_backfill_done(PROGRESS_TASK, code, n, "done")
+                _mark(code, n, "done")
                 ok += 1
                 total_rows += n
                 consecutive_failures = 0
                 logger.info(f"[P0-5] {idx}/{len(codes)} {code}: {n} 条"
                             f"（{records[0]['trade_date']}~{records[-1]['trade_date']}）")
             else:
-                progress.mark_backfill_done(PROGRESS_TASK, code, 0, "no_data")
+                _mark(code, 0, "no_data")
                 consecutive_failures += 1
                 logger.warning(f"[P0-5] {code}: 无数据")
         except Exception as e:
-            progress.mark_backfill_done(PROGRESS_TASK, code, 0, "partial")
+            _mark(code, 0, "partial")
             consecutive_failures += 1
             logger.warning(f"[P0-5] {code} 失败（可重试）: {e}")
         if args.max_consecutive_failures and \
