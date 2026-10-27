@@ -85,7 +85,9 @@ def test_kline_trade_date_index(db):
     assert "idx_kline_trade_date" in idx
 
 
-def test_compute_vector_uses_latest_snapshot_date(db):
+def test_compute_vector_pit_per_code_latest_snapshot(db):
+    """审计 F6：PIT 按 code 取 ≤ trade_date 的最新行（样本=全量可用行），
+    不再只取全局 MAX 单日桶（旧语义：历史日只剩残余桶十几行）。"""
     from src.research.market_state import compute_vector
 
     def snap(code, pe, day):
@@ -96,13 +98,47 @@ def test_compute_vector_uses_latest_snapshot_date(db):
                 "current_price": 1.0, "high_52w": 1.0, "low_52w": 1.0,
                 "is_st": False, "list_date": "2010-01-01", "snapshot_date": day}
 
+    # 三行：10-20 残余行、10-26 新行、10-27 前视行（必须被排除）
     db_mod.StockSnapshotDAO().save_batch([
         snap("600519", 99.0, "2026-10-20"),
         snap("000001", 12.0, "2026-10-26"),
+        snap("300750", 5.0, "2026-10-27"),
     ])
     vector = compute_vector("2026-10-26")
-    assert vector.quality["snapshot_date"] == "2026-10-26"
-    assert vector.metrics["pe_median"] == 12.0
+    # 旧语义只取 10-26 桶 → 12.0；PIT 语义纳入 10-20 残余行 → median(99,12)
+    assert vector.metrics["pe_median"] == 55.5
+    assert vector.quality["snapshot_date"] == "2026-10-26"   # 样本内最新刷新日
+    assert vector.quality["snapshot_n"] == 2                  # 前视行被排除
+    assert "300750" not in str(vector.quality)                # 10-27 行不参与
+
+
+def test_volatility_immune_to_coverage_composition_shift(db):
+    """审计 F7：覆盖组成切换（如回填日 958 只 → 增量日 261 只）不得造伪波动。
+
+    旧实现对"每日 AVG(close_adj)"取收益：均价从 (10+1000)/2 跳到 10 会产出
+    ~98% 的伪日收益；逐票日收益下，价格未变的票收益为 0 → vol = 0。
+    """
+    from src.research.market_state import compute_vector
+    days = ["2026-10-22", "2026-10-23", "2026-10-26"]
+    dao = db_mod.KlineDAO()
+    # 稳定票：三天都在，价格不变
+    for d in days:
+        dao.upsert_many("600519", [{
+            "trade_date": d, "open": 10.0, "close": 10.0, "high": 10.0,
+            "low": 10.0, "volume": 1.0, "amount": 1e8, "turnover": 0.1,
+            "close_adj": 10.0}])
+    # 组成切换票：只有第一天，价格畸高（旧实现会把它算进当日均价）
+    dao.upsert_many("000858", [{
+        "trade_date": days[0], "open": 1000.0, "close": 1000.0, "high": 1000.0,
+        "low": 1000.0, "volume": 1.0, "amount": 1e8, "turnover": 0.1,
+        "close_adj": 1000.0}])
+    vector = compute_vector(days[-1])
+    assert "volatility_20d" in vector.metrics, "波动率字段应算出"
+    assert vector.metrics["volatility_20d"] == 0.0, (
+        f"组成切换不得造伪波动，得到 {vector.metrics['volatility_20d']}")
+    # 覆盖样本量入 quality，供审计追溯
+    assert vector.quality["kline_codes"] == 1   # 当日只有 600519 有行
+    assert vector.quality["breadth_n"] == 0     # 无票满足 60 日窗
 
 
 def test_volatility_and_regime(db):

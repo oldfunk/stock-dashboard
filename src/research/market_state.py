@@ -104,13 +104,13 @@ def default_fields() -> list[StateField]:
                    "kline_daily.close_adj", "null", "x", "higher_better"),
         # 流动性
         StateField("total_turnover_yi", "liquidity",
-                   "全市场当日成交额（亿元）", "kline_daily.amount", "null", "亿元",
+                   "kline 覆盖样本当日成交额（亿元）", "kline_daily.amount", "null", "亿元",
                    "neutral"),
         StateField("avg_turnover_20d_yi", "liquidity",
-                   "全市场 20 日均成交额（亿元）", "kline_daily.amount", "null", "亿元",
+                   "kline 覆盖样本 20 日均成交额（亿元）", "kline_daily.amount", "null", "亿元",
                    "neutral"),
         StateField("volatility_20d", "liquidity",
-                   "近 20 交易日等权日收益的年化波动率（均值收盘代理）",
+                   "近 20 交易日逐票日收益等权日均的年化波动率",
                    "kline_daily.close_adj", "null", "x", "lower_better"),
         # 质量
         StateField("debt_ratio_median", "quality", "全市场资产负债率中位数",
@@ -186,12 +186,13 @@ def compute_vector(trade_date: str,
             if name in missing:
                 missing.remove(name)
 
-    # 估值/基本面/质量：trade_date 当日或之前最新快照（避免前视）
+    # 估值/基本面/质量：每 code 取 snapshot_date <= trade_date 的最新已知行
+    # （PIT：不用未来数据；stock_snapshot 每 code 一行，该行日期即其最后刷新日）。
+    # 审计 F6（2026-10-27）：原实现取"全局 MAX(snapshot_date) 单一日期桶"——
+    # 每日管道只给**当日候选**盖当日戳，历史日该桶=被后续运行覆盖后的残余
+    # （生产实测 10-23 桶仅 15 行、10-21 仅 2 行），且 ~4600 只从未进入；
+    # 改为按 code PIT 取数，样本回到全市场覆盖且不前视。
     with db_conn() as conn:
-        row = conn.execute(
-            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot "
-            "WHERE snapshot_date <= ?", (trade_date,)).fetchone()
-        snapshot_date = row["d"] if row else None
         for name in ("pe_median", "pb_median", "roe_median",
                      "revenue_growth_median", "profit_growth_median",
                      "debt_ratio_median"):
@@ -203,8 +204,7 @@ def compute_vector(trade_date: str,
             }[name]
             values = [r[0] for r in conn.execute(
                 f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
-                "AND snapshot_date = ?", (snapshot_date,)).fetchall()] \
-                if snapshot_date else []
+                "AND snapshot_date <= ?", (trade_date,)).fetchall()]
             _set(name, _median(values))
         # 毛利率：最新年报（financial_history，JOIN 取每只股票最新年报）
         gm = [r[0] for r in conn.execute(
@@ -216,11 +216,16 @@ def compute_vector(trade_date: str,
             "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL").fetchall()]
         _set("gross_margin_median", _median(gm))
         st_total = conn.execute(
-            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ?",
-            (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
+            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ?",
+            (trade_date,)).fetchone()["n"]
         st_count = conn.execute(
-            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date = ? "
-            "AND is_st = 1", (snapshot_date,)).fetchone()["n"] if snapshot_date else 0
+            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ? "
+            "AND is_st = 1", (trade_date,)).fetchone()["n"]
+        # 取数审计字段：PIT 样本量 + 样本内最新刷新日（供 quality 追溯）
+        sample_n = st_total
+        snapshot_max = conn.execute(
+            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot "
+            "WHERE snapshot_date <= ?", (trade_date,)).fetchone()["d"]
     _set("st_ratio", round(100.0 * st_count / st_total, 4) if st_total else None)
 
     # 流动性：当日成交额
@@ -270,25 +275,40 @@ def compute_vector(trade_date: str,
     _set("pct_above_ma60", round(100.0 * above60 / total, 4) if total else None)
     _set("adv_dec_ratio", round(adv / dec, 4) if dec else None)
 
-    # 波动率：近 20 个交易日**等权日收益**的年化波动（regime 的波动规则用）
+    # 波动率：近 20 交易日**逐票日收益**的等权日均 → 年化波动（regime 波动规则用）
+    # 审计 F7（2026-10-27）：原实现先算"每日 AVG(close_adj)"再取收益——每日
+    # 覆盖的股票集不同（生产实测全量回填日 ~958 行 vs 日常增量日 ~261 行），
+    # 组成切换会造出伪收益污染波动率；改为每股对自身昨收算日收益（组成
+    # 切换不产生跳变），再按日等权平均。
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT trade_date, AVG(close_adj) AS avg_close FROM kline_daily "
+            "SELECT code, trade_date, close_adj FROM kline_daily "
             "WHERE close_adj IS NOT NULL AND trade_date IN ("
             "  SELECT DISTINCT trade_date FROM kline_daily "
-            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21) "
-            "GROUP BY trade_date ORDER BY trade_date DESC LIMIT 21",
+            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21)",
             (trade_date,)).fetchall()
-    if len(rows) >= 2:
-        closes = [r["avg_close"] for r in rows][::-1]
-        rets = [closes[i] / closes[i - 1] - 1.0
-                for i in range(1, len(closes)) if closes[i - 1]]
-        if len(rets) >= 2:
-            import statistics
-            vol = statistics.pstdev(rets) * (252 ** 0.5)
-            _set("volatility_20d", round(vol, 4))
-        else:
-            _set("volatility_20d", None)
+        kline_codes = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
+            "WHERE trade_date = ?", (trade_date,)).fetchone()["n"]
+    dates = sorted({r["trade_date"] for r in rows})
+    per_code: dict[str, dict[str, float]] = {}
+    for r in rows:
+        per_code.setdefault(r["code"], {})[r["trade_date"]] = r["close_adj"]
+    day_rets: dict[str, list[float]] = {}
+    for m in per_code.values():
+        for prev, cur in zip(dates, dates[1:]):
+            p, c = m.get(prev), m.get(cur)
+            if p and c:
+                day_rets.setdefault(cur, []).append(c / p - 1.0)
+    daily_means = []
+    for key in dates[1:]:
+        rets = day_rets.get(key)
+        if rets:
+            daily_means.append(sum(rets) / len(rets))
+    if len(daily_means) >= 2:
+        import statistics
+        vol = statistics.pstdev(daily_means) * (252 ** 0.5)
+        _set("volatility_20d", round(vol, 4))
     else:
         _set("volatility_20d", None)
 
@@ -300,7 +320,10 @@ def compute_vector(trade_date: str,
     status = "invalid" if fail_closed_missing else "pass"
     return MarketStateVector(
         trade_date=trade_date, metrics=metrics, missing=missing,
-        quality={"snapshot_date": snapshot_date,
+        quality={"snapshot_date": snapshot_max,
+                 "snapshot_n": sample_n,
+                 "kline_codes": kline_codes,
+                 "breadth_n": total,
                  "fail_closed_missing": fail_closed_missing},
         coverage=coverage, status=status)
 
