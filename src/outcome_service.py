@@ -38,22 +38,34 @@ def _horizons(config: dict | None) -> tuple[int, ...]:
 
 def refresh_benchmarks(config: dict | None = None,
                        limit: int = 6000) -> dict:
-    """拉取并落库基准指数日线（价格指数）。返回 {code: rows}。"""
+    """拉取并落库基准指数日线（价格指数）。返回 {code: rows}。
+
+    除 config ``outcomes.benchmarks``（收益验证用）外，**固定包含子项目契约
+    标准码**（Issue #5：000001/399001/399006）——它们是一次性脚本回填的，
+    不进周刷就会在数天内 stale（审计 F3，同"有回填无调度"类）。
+    """
     from src.collector.akshare_fetcher import (
         fetch_index_kline, fetch_index_kline_em,
     )
     from src.models.database import BenchmarkDailyDAO
 
+    # 契约标准码 → 东财/新浪指数符号（与 scripts/fix_price_contract.py 一致）
+    contract_sources = {"000001": "sh000001", "399001": "sz399001",
+                        "399006": "sz399006"}
     stats = {}
     dao = BenchmarkDailyDAO()
+    targets: dict[str, str] = {}   # 存储码 → 拉取符号
     for b in _benchmarks(config):
-        code = b["code"]
+        targets[b["code"]] = b["code"]
+    for code, src in contract_sources.items():
+        targets.setdefault(code, src)
+    for code, src in targets.items():
         try:
             # 东财优先：新浪的 sh000922 只更新到 2019 年，会导致超额全空
-            records = fetch_index_kline_em(code, limit=limit)
+            records = fetch_index_kline_em(src, limit=limit)
             if not records:
-                logger.warning(f"[收益验证] 东财无 {code} 日线，回退新浪")
-                records = fetch_index_kline(code, limit=limit)
+                logger.warning(f"[收益验证] 东财无 {src} 日线，回退新浪")
+                records = fetch_index_kline(src, limit=limit)
             saved = dao.upsert_many(code, records)
             stats[code] = saved
             logger.info(f"[收益验证] 基准 {code} 日线 {saved} 条")

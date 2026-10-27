@@ -1452,16 +1452,36 @@ class KlineDAO:
         records 字段：trade_date, open, close, high, low, volume, amount,
         turnover, close_raw, close_adj, shares。
         2026-10-26 起：只带 close 的旧调用不会清空 raw/adj/shares（COALESCE）。
+
+        **契约列写路径维护（2026-10-27，Issue #4/#8 审计 F1）**：
+        - ``close_qfq``：契约恒等于 ``close``（§9.1 close 展示列=close_qfq），
+          插入时缺省取 close，冲突更新时随 close 同步——否则日常增量写入
+          会持续产生 close_qfq NULL，一次性回填脚本追不上。
+        - ``market``/``instrument_id``：6 位数字代码推导 ``CN``/``CN:xxxxxx``
+          （§9.2 契约）；非 6 位数字（未来港股/美股）不推导，保持 NULL
+          （不臆造），由该市场接入时显式传入。
+        - 三列冲突更新均用 COALESCE：显式传入优先，其次推导，再缺则保留旧值。
         """
         if not records:
             return 0
         with db_conn() as conn:
             for r in records:
+                # 契约列推导（调用方显式传入优先；推导失败= NULL，不臆造）
+                qfq = r.get('close_qfq')
+                if qfq is None:
+                    qfq = r.get('close')
+                iid = r.get('instrument_id')
+                if iid is None and len(code) == 6 and code.isdigit():
+                    iid = f"CN:{code}"
+                mkt = r.get('market')
+                if mkt is None and iid and str(iid).startswith("CN:"):
+                    mkt = "CN"
                 conn.execute("""
                     INSERT INTO kline_daily
                     (code, trade_date, open, close, high, low, volume, amount,
-                     turnover, close_raw, close_adj, shares)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     turnover, close_raw, close_adj, shares,
+                     close_qfq, market, instrument_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(code, trade_date) DO UPDATE SET
                         open = excluded.open,
                         close = excluded.close,
@@ -1472,7 +1492,10 @@ class KlineDAO:
                         turnover = COALESCE(excluded.turnover, turnover),
                         close_raw = COALESCE(excluded.close_raw, close_raw),
                         close_adj = COALESCE(excluded.close_adj, close_adj),
-                        shares = COALESCE(excluded.shares, shares)
+                        shares = COALESCE(excluded.shares, shares),
+                        close_qfq = COALESCE(excluded.close_qfq, excluded.close, close_qfq),
+                        market = COALESCE(excluded.market, market),
+                        instrument_id = COALESCE(excluded.instrument_id, instrument_id)
                 """, (
                     code, r['trade_date'],
                     r.get('open'), r.get('close'),
@@ -1480,6 +1503,7 @@ class KlineDAO:
                     r.get('volume'), r.get('amount'),
                     r.get('turnover'),
                     r.get('close_raw'), r.get('close_adj'), r.get('shares'),
+                    qfq, mkt, iid,
                 ))
         return len(records)
 

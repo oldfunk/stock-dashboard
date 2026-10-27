@@ -59,3 +59,34 @@ class TestKlineDAO:
         assert row["close_raw"] == 9.5
         assert row["close_adj"] == 100.0
         assert row["shares"] == 123.0
+
+    def test_upsert_maintains_contract_columns(self, db):
+        """契约列写路径维护（Issue #4/#8 审计 F1）：新增行必须带
+        close_qfq/market/instrument_id，不得依赖一次性回填脚本。"""
+        dao = db.KlineDAO()
+        dao.upsert_many("000792", [_row("2026-10-27", 22.24)])
+        row = dao.get_daily("000792")[0]
+        assert row["close_qfq"] == 22.24      # close_qfq 恒等于 close
+        assert row["market"] == "CN"
+        assert row["instrument_id"] == "CN:000792"
+
+    def test_upsert_conflict_syncs_close_qfq(self, db):
+        """重抓改 close（复权缩放）时 close_qfq 必须同步，否则两列发散。"""
+        dao = db.KlineDAO()
+        r = _row("2026-10-27", 22.24)
+        r["close_qfq"] = 22.24
+        dao.upsert_many("000792", [r])
+        # 重抓后 close 因复权缩放变化，调用方只带 close
+        dao.upsert_many("000792", [_row("2026-10-27", 21.80)])
+        row = dao.get_daily("000792")[0]
+        assert row["close"] == 21.80
+        assert row["close_qfq"] == 21.80      # 随 close 同步，不残留旧值
+
+    def test_upsert_contract_derive_fail_is_null(self, db):
+        """非 6 位数字代码（未来港股/美股）不推导 instrument_id——不臆造。"""
+        dao = db.KlineDAO()
+        dao.upsert_many("AAPL", [_row("2026-10-27", 260.0)])
+        row = dao.get_daily("AAPL")[0]
+        assert row["instrument_id"] is None
+        assert row["market"] is None
+        assert row["close_qfq"] == 260.0      # close_qfq 与市场无关，恒维护

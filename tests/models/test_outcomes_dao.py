@@ -247,8 +247,32 @@ class TestRefreshBenchmarks:
         cfg = {"outcomes": {"benchmarks": [
             {"code": "sh000922", "name": "中证红利"}]}}
         stats = svc.refresh_benchmarks(cfg)
-        assert stats == {"sh000922": 1}
+        assert stats["sh000922"] == 1
         assert db.BenchmarkDailyDAO().get_series("sh000922")[0]["close"] == 100.0
+
+    def test_always_refreshes_contract_codes(self, db, monkeypatch):
+        """审计 F3：契约标准码（Issue #5）必须无条件进周刷，不依赖 config。"""
+        import src.outcome_service as svc
+        import src.collector.akshare_fetcher as fetcher
+
+        fetched = []
+
+        def _em(src, limit=6000):
+            fetched.append(src)
+            return [{"trade_date": "2026-10-27", "close": 3000.0}]
+
+        monkeypatch.setattr(fetcher, "fetch_index_kline_em", _em)
+        # config 只有 sh000300——契约三码仍应被拉取并落库
+        cfg = {"outcomes": {"benchmarks": [
+            {"code": "sh000300", "name": "沪深300"}]}}
+        stats = svc.refresh_benchmarks(cfg)
+        for code in ("000001", "399001", "399006"):
+            assert code in stats, f"契约码 {code} 未进周刷"
+            assert db.BenchmarkDailyDAO().get_series(code), \
+                f"契约码 {code} 未落库"
+        assert "sh000300" in stats
+        # 拉取符号带市场前缀（东财需要 sh000001 而非 000001）
+        assert "sh000001" in fetched
 
 
 class TestIsComplete:
