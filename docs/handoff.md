@@ -3,49 +3,43 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-27 子项目数据契约 Issue #4–#8 落地；基线：母项目 856 / vendor 242）
+## 最后状态（2026-10-27 子项目价格尺度事故触发全仓彻查：双 AI 审计 + 7 项修复合入；基线：母项目 867 / vendor 242）
 
-- **Research OS R0 全部完成**（`src/research/`）：R0-1…R0-7 + R0-2a/2b/2c + R0-8…R0-13。含领域对象/状态机、15+ 研究表、注册表、快照 manifest、质量门、实验接口/回测、决策账本、Parquet+DuckDB、Repository、LLM 任务注册表、Prompt 框架、工具网关、输出校验、离线夹具、Universe/退市名单。
-- **Research OS R1 市场状态切片完成**：状态向量五块 14 字段、`market_state_daily` 快照、透明 Regime 规则、市场叙事任务、数据质量门接入。
-- **R2-0 漏洞修补**：质量门不再阻断事件研究；`OutcomeEventStudyRunner`（MOS 分档 + block bootstrap CI + regime/sector/size 分域）；幸存者偏差量化；holdout 样本外。
-- **数据调阅 API**：`/api/data/*` 只读接口，供子项目 paper_trading 调阅（稳定 JSON 契约）。
-- **R2-1 假设卡 CLI**：create/lock/view/list；locked 后不可改（预注册纪律）。
-- **子项目数据契约（Issue #4–#8）**：`close_qfq` 列 + `close_adj` 补齐（0 NULL）；`benchmark_daily` 补 `000001/399001/399006`；`trading_calendar` 回填（3949 行）；`market_state_daily` 快照 13 日；`/api/data/coverage`；`docs/architecture.md` §9 契约文档。
-- **审理 + 5 批修复**（gate 751→758）：D1 `_quality_date` 防崩、D2 质量门改精确查询、D3 `next_id` 日期归一化、G1 空值注册拒绝、G2 Repository 写边界守卫、结果 ID 可解析 + 死代码清理。复审 13/13 通过。
-- **门禁基础设施修复**：`/tmp` 是 478M tmpfs，pytest 临时目录堆积撑爆 → 母套件全 ERROR；已加 basetemp trap 清理 + 遗留目录清理。
-- **生产迁移完成**：`kline_daily.instrument_id` 空值 **0/2,150,145**，`instrument` **5,527**（SSE 2,633 / SZSE 2,894）。
-- **duckdb 1.5.6 已装生产**（aarch64，sqlite 扩展可直连业务库）；`pyproject.toml` 增 `duckdb>=1.1,<2`。
-- **全市场年报回填仍在跑**：annual codes 2723、`financial_history` 104,562 行、`notice_date` 51%、`fcf` 49%（新行拉低比例，待审计 D6）。
-- **门禁**：751 passed；vendor 242。
-- **服务**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 200。
+- **事故背景**：子项目 paper-trading v0.7.5 报告价格尺度事故（执行侧 `price_map` 取母库 `close_adj` 后复权 175.96 买 000792 @175.97，真实 22.24，虚付 ~15,372，已冲正）。母方按"事故同类（口径混杂 / 一次性交付无维护路径 / fail-open）"彻查近一周全部交付。
+- **已合入部署（main=`5855b84`，生产门禁实测 867/242，双服务健康）**：
+  - `70983ea` 日历未来段（S15 新浪源 + 周六自动延长）+ **产线回填实跑：`max(is_open=1)=2026-12-31`，未来 47+1 交易日，`/api/data/calendar` 实测正常，Issue #8 partial pass 闭环回帖**。
+  - `30b244c` F1：`upsert_many` 写契约列 `close_qfq/market/instrument_id`（产线实证修复前 10-27 新 21 行三列全 NULL）；F3：契约基准码无条件进周刷。
+  - `b7b20ef` migrate 回填用例改存量旧行模拟（曾被 gate 拦下 2 failed）。
+  - `5e06f56` F6：market_state 估值块逐 code PIT（原单日桶实测历史日仅 15/2 行残余样本，"全市场中位数"名不符实）；F7：波动率逐票日收益（消除回填日 958→增量日 261 覆盖切换伪收益）；quality 增记 snapshot_n/kline_codes/breadth_n；liquidity 标签改"kline 覆盖样本"（kline 只覆盖 5,527 中的 959）。
+  - `5855b84` Hermes P0-1：`close_qfq` 强制镜像 close（忽略调用方分叉值、close 置空同步 NULL）；P0-2：毛利率中位数 PIT（`notice_date AND report_date <= trade_date`，产线 notice 年报覆盖 97.6%）。
+- **双 AI 协作（Issue #9 三帖为工单板）**：员工/Qoder 审计 `docs/audit-20261027.md`（N1–N22+U1–U9，review/20261027-audit 分支）——N3（质量门 excess 单位错→实验恒 invalid）、N4（regime 阈值 0.6/0.4 vs 0–100→恒 risk_on）主 AI 已核实成立；Hermes `docs/audit-20261027-hermes.md`（P0×3/P1×4/P2×3）——P0-1/P0-2 已修，P0-3 待拍板。分工：员工批1=N1→N2→N3→N4、批2=N19/N20/N21/N22、T1（=N6-②腾讯 adjust）、T3（年报覆盖出数）；主 AI 持有 market_state/scheduler/N5/N7/N8 口径决策/N9–N15。
+- **B2 年报回填终态（产线核对）**：`financial_history` 143,500 行 / 5,206 只（差 321 = no_data 全对账吻合）；年报 notice_date 覆盖 97.6%（全表 63.5%）；fcf 62.0%。
+- **Research OS 进度不变**：R0 全部、R1 市场状态、R2-0 漏洞修补、R2-1 假设卡已交付；R2-2 起未动。
+- **服务**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 与纸盘面板 http:200。
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **R2 假设/实验最小闭环**：H-001（MOS 预测力，用 `analysis_outcome`）→ 稳健性套件 → 结论冻结（R0 工具网关的 `market_state` 已可返回真实向量）。
-2. **R3 策略与归因**：`S-BASE-v0` 登记 → 策略版本 CLI → 纸盘部署 → 归因 → 漂移检测。
-3. **R4 LLM 助手**：模型路由 → 首批任务（market_summary/hypothesis_critic/...）→ 工具调用 → 离线评估。
-4. **R5 研究界面/API**：`/api/research/*` + `/research` 页面 + 证据链跳转。
-5. **R6 最小闭环**：MS → H → E → S → D → A → DL 一条完整链 + 复现验收。
-6. **监控 B2 年报回填**：完成后核对 5527 覆盖、notice/fcf 比例，再重跑回测（`close_adj`）与估值分位（`close_raw`）。
-7. **B3 数据意义校验**：负价/零价/重复行、估值输入完整性、金融股/负 FCF 口径、历史股本；不达标不对外宣称。
+1. **U9 → F2 解链**（事故彻查主线）：U9=增量 kline 行补 `close_adj`——方案 A `fetch_kline_data` 双拉 EM raw+hfq 走现有 `merge_price_model` / 方案 B qfq+hfq 两列（close_raw 容 NULL 记 quality）/ 方案 C Sina 双拉（每只 6–10s 拖慢收盘流水线）；**先出对比给用户拍板**，落地后重提 F2（market_state 每日调度，接线代码已备好）。
+2. **T1 腾讯 adjust 透传**（员工认领、生产进行时：每日东财限流回退腾讯在写不复权价进 close）——若员工批 1 未动，主 AI 顶上。
+3. **员工批 1（N1–N4）验收合并**：逐 SHA 排 gate；N3/N4 修完需按其文档同步改 test_quality/test_regime 夹具（防测试反向锁死 bug）。
+4. **待用户拍板的口径决策**（汇总后一次问）：Hermes P0-3（snapshot 是否版本化 vs 只支持当日）、N5（OCF/NI 门重建）、N6-②（腾讯口径标注方案）、N8（pe_ttm 落列 vs 删键）、U9 方案 A/B/C。
+5. **R2 假设/实验最小闭环**：H-001（MOS 预测力）→ 稳健性 → 结论冻结；注意 N7（mos_at_entry 前视）会降其覆盖率，先修 N7 再跑 H-001。
+6. **R3–R6** 照旧（S-BASE-v0 → 策略版本 CLI → 纸盘部署 → 归因 → 漂移 → LLM 助手 → 研究界面 → 最小闭环）。
+7. **B2 后续**：回填已终态（见状态段），重跑估值分位（close_raw）与回测（close_adj）的时机由 R2-3 需要驱动，不单列。
 
 ## 已知隐患
 
-- **R0-8…R0-13 未完成**：LLM 任务注册表/prompt/工具网关/输出校验/夹具/退市名单尚未落地；R4 LLM 助手未开始。
-- **全市场年报仍在抓取中**：`financial_history` 104,562 行、annual codes 2723（目标 5527）；`notice_date` 51% / `fcf` 49%（新行拉低，待审计 D6）。
-- **Parquet 快照 sqlite 扩展首次需联网**（生产已缓存）；离线环境相关用例会 skip 而非失败。
-- **价格回填 956/959**：3 只 partial 待 `--retry`；负价 0；全市场回测前仍需核对退市/历史成分（当前无退市样本）。
-- **`000001` 历史数据事故**：10 年前复权数据被清理误删，仅恢复 243 条近期数据；下次价格回填务必重抓。
-- **上游 push2his 限流**：约 35 次快速请求后拒连；腾讯 fqkline 可直连但 38s/只且长历史负价；Sina 只有不复权（送转会伪造 -50%），已拒绝入库。
-- **`total_shares` 上游当前值盖所有年份**（300750 各年均为 4,627,249,686）；历史 PB 只在 `净利润/EPS` 可反推时可用，否则 NULL。
-- **`batch_save` 保留旧值**：上游新值为空时不再清空（防丢回填），代价是上游"确实删除"的值会陈旧。
-- **`partial` 状态不会被默认重跑**：需要 `--retry-partial`；夜间 cron 不会自动补。
-- **生产 SSH 对连续建连敏感**：脚本必须限速；deploy.sh 已 1s 间隔。
-- **回填与业务共用 SQLite（WAL）**：已 `busy_timeout=5000`；出现 `database is locked` 应降 `--limit` 或错峰。
-- **静态 JS 改后必须升版本戳**（`/static/*.js?v=YYYYMMDDx`）。
-- （继承）交易日历缓存接缝、v0.6.5 旧 schedule gate、股息/收益口径三条。
+- **T1 生产进行时（最高优）**：每日东财 35 次限流 → 腾讯回退 → `_fetch_kline_tx` 丢 adjust → 不复权价混入 `close` 列；10-27 日志满屏回退为证，今日 21 行样本未测出断层但不构成清白（10 月末分红季）。修=透传 adjust+单测；口径语义改动（raw 进 close_raw）需用户拍板。
+- **U9 → F2 断链**：增量 kline 行 `close_adj` 全 NULL（10-27: 21/21）→ market_state 每日快照若现在接线恒 invalid；F2 代码已撤回，等 U9。
+- **close_adj/close_raw 的日常维护仍只靠手动跑 `fix_close_adj_nulls`**：Sina 回填是唯一三列补给，无调度（与日历同族"有回填无调度"，U9 方案落地时一并考虑）。
+- **P0-3 / N5 / N6-② / N8 / U9 方案未拍板**：不擅动，汇总在 Issue #9 与本文件"下一步 4"。
+- **员工/AI 协作纪律**：勿直接提交 `nightly/20261023`（部署分支，gate 窗口内提交会造成 push/gate 错位——已发生一次并在 push 前拦截）；独立分支 push + Issue #9 贴 SHA。gate 期间主 AI 同样只改工作区不 commit。
+- **3 只价格回填 partial 未清**（progress: partial 3）；kline 覆盖 959/5527（Issue #7 子项目判"watch 不行动"）。
+- **`000001` 历史数据事故**（10 年前复权被误删仅恢复 243 行）与 **push2his 35 次限流**（既有）不变。
+- **上游 `total_shares` 当前值盖所有年份**：历史 PB 只在净利/EPS 可反推时可用，否则 NULL（既有）。
 
 ## 历史交接区（追加，不删）
+- 2026-10-27 子项目价格尺度事故触发全仓彻查（双 AI 审计：主 AI F1–F7 + Hermes P0×3 修复、员工 N1–N22 工单入 Issue #9；日历未来段回填闭环 max is_open=2026-12-31；gate 856→867）
 - 2026-10-27 子项目数据契约 Issue #4–#8 落地（close_qfq/基准代码/交易日历/market_state 快照/覆盖度/契约文档；gate 849→856）
 - 2026-10-27 数据调阅 API（`/api/data/*` 供子项目调阅）+ R2-1 假设卡 CLI（gate 835→849）
 - 2026-10-27 R2-0 漏洞修补（D-QG 质量门阻断 / G1 block bootstrap / G3 事件研究 runner / G4 分域 / G2 幸存者偏差 / G5 holdout；gate 826→835）

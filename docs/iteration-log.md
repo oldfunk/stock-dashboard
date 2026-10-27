@@ -165,6 +165,22 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-27（子项目价格尺度事故触发全仓彻查：主 AI F1–F7 + Hermes P0×3；员工 AI N1–N22 工单）
+
+- **背景**：子项目 paper-trading 发生价格尺度事故（v0.7.5 报告：执行侧 `price_map` 取母库 `close_adj` 后复权 175.96 买入 000792 @175.97，真实价 22.24，虚付 ~15,372，已冲正 + 加偏离门禁）。母方按"事故同类"彻查近一周全部交付。
+- **F1（P0，契约列无维护路径）**：`KlineDAO.upsert_many` 原不写 `close_qfq`/`market`/`instrument_id`——一次性回填脚本追不上日常增量（实证：10-27 流水线新写 21 行三列全 NULL，子项目"近30天 close_qfq 非空"契约迟早在新增行上翻车）。修：三列进写路径（推导 + 冲突同步 + 单测 3 项）；migrate 回填用例改存量旧行模拟（gate 曾拦下 2 failed）。
+- **F3（P1，有回填无调度）**：契约基准码 000001/399001/399006 不在 `refresh_benchmarks` 周刷清单（只刷 config 的 sh000300/sh000922）→ 数天内 stale。修：契约码无条件进周刷（拉取符号带 sh/sz 前缀）+ 单测。
+- **F6（P0 研究层，生产取证）**：`compute_vector` 估值块取"全局 MAX(snapshot_date) 单日桶"——每日管道只给当日候选盖戳、后续覆盖前戳，实测历史日桶仅 15 行/2 行，~4600 只从未进入，"全市场中位数"实际是残余样本。修：逐 code PIT（snapshot_date <= trade_date），quality 增记 snapshot_n；`pe_median 13.8 vs 19.4` 的跳变一半是样本构成伪影。
+- **F7（P1 研究层）**：`volatility_20d` 原对"每日 AVG(close_adj)"取收益——每日覆盖集不同（回填日 958 行 vs 增量日 261 行），组成切换造伪收益。修：逐票日收益等权日均；quality 增记 kline_codes/breadth_n；liquidity 字段标签"全市场"→"kline 覆盖样本"（kline 只覆盖 959/5527）。
+- **Hermes P0×3（第三方只读审查 docs/audit-20261027-hermes.md，由另一审查 agent 提交 ccb9ab3）**：P0-1 `close_qfq` 契约不强制（调用方可传分叉值 / close 置 NULL 时 qfq 留旧值发散）→ 修：强制镜像 close + 发散消除单测；P0-2 毛利率中位数前视（全表最新年报未按 trade_date 截断）→ 修：`notice_date <= trade_date AND report_date <= trade_date`（仓内 valuation_percentile 既定口径；产线 notice 覆盖 97.6%）+ 前视/缺 notice 双单测；P0-3 `stock_snapshot` 覆盖写无法支撑历史状态向量 → **待用户拍板 schema**（版本化 vs 只支持当日）。
+- **员工 AI（Qoder 审查 agent）**：`docs/audit-20261027.md`（review/20261027-audit 分支）N1–N22 + U1–U9；主 AI 逐行核实 N3（质量门 excess 单位百分点 vs 阈值 1.0 → 实验恒 invalid）、N4（regime 阈值 0.6/0.4 vs 生产者 0–100 → 恒 risk_on）成立。分工工单 + 已知发现跟帖在 Issue #9；N6-①=F1 已修，N6-②（腾讯 adjust 丢参）归员工 T1。
+- **过程记录**：deploy 两次踩 WSL bash 无凭据坑（改 Git for Windows bash）；一次 gate 中途追加提交导致 `push HEAD` 与 gate 验证集错位——**在 push 前拦截成功（main 未动）**，纪律固化：gate 期间不 commit，验完整集合再推。
+- **F2 撤回（带病上线比不上线糟）**：market_state 每日调度接线代码已写又撤——产线实证增量 kline 行 `close_adj` 全 NULL（10-27 为 21/21），breadth 当日必缺 → 每日快照恒 invalid（coverage 0.77 < 0.8）污染 regime 上游。依赖链 **U9（增量路径补 close_adj）→ F2**，U9 取数方案（EM 三拉 / qfq+hfq / Sina 双拉）待用户拍板。
+- **T1 升级为生产进行时**：10-27 17:50 生产日志满屏"东财失败回退腾讯"（261 只快速调用触 35 次限流为常态），`_fetch_kline_tx` 丢 adjust → 腾讯不复权价正在混入 close 列；今日 21 行口径体检未见断层（0.85~1.15 阈内）但样本小+窗口无除权，不构成清白证明。
+- **B2 年报回填终态**（产线核对）：`financial_history` 143,500 行 / 5,206 只（instrument 5,527，差 321 = `no_data` 全量对账吻合）；年报行 notice_date 覆盖 **97.6%**（全表 63.5%）；fcf 全表 62.0%；progress: done 7290 / no_data 321 / partial 3（价格回填遗留）。
+- **Issue #8 partial pass 项闭环**：日历产线回填实跑——`max(trade_date)=max(is_open=1)=2026-12-31`，未来 47 交易日（+今日=48）+ 18 周末行，`/api/data/calendar` 实测 last_date=2026-12-31、周末正确标 0；子项目 v0.7.4 采用条件（max is_open >= today）满足。回帖带证据已发。
+- **门禁**：70983ea 实测 858 → 本批 5855b84 实测 **867**（下限 856→867 同步升基线）；vendor 242。
+
 ### 2026-10-27（子项目数据契约 Issue #4–#8 落地；gate 849 → 856）
 
 - **#4 前复权口径**：`kline_daily` 新增 `close_qfq`（前复权，与 `close` 同口径）；`close_adj` 的 778 条 stub 行重抓补齐（现 0 NULL）。
