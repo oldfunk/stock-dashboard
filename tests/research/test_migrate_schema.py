@@ -19,6 +19,18 @@ def _kline(code, day):
     }])
 
 
+def _legacy_kline(code, day):
+    """模拟迁移前的存量行（instrument_id IS NULL）。
+
+    upsert_many 自 2026-10-27 起写入即带契约列（审计 F1），migrate 回填
+    只应命中真正的旧行——用裸 SQL 造旧数据，不走 DAO。
+    """
+    with db_mod.db_conn() as conn:
+        conn.execute(
+            "INSERT INTO kline_daily (code, trade_date, close) VALUES (?, ?, ?)",
+            (code, day, 11.0))
+
+
 def _snap(code, name="测试"):
     db_mod.StockSnapshotDAO().save_batch([{
         "code": code, "name": name, "market": "A", "sector": "测试",
@@ -33,8 +45,8 @@ def _snap(code, name="测试"):
 
 def test_backfill_populates_instrument_id_and_seeds(db):
     from scripts.migrate_research_schema import migrate
-    _kline("600519", "2026-10-01")
-    _kline("000001", "2026-10-01")
+    _legacy_kline("600519", "2026-10-01")
+    _legacy_kline("000001", "2026-10-01")
     _snap("600519", "贵州茅台")
     _snap("000001", "平安银行")
     result = migrate(dry_run=False)
@@ -60,7 +72,7 @@ def test_backfill_populates_instrument_id_and_seeds(db):
 
 def test_dry_run_does_not_modify(db):
     from scripts.migrate_research_schema import migrate
-    _kline("600519", "2026-10-01")
+    _legacy_kline("600519", "2026-10-01")
     _snap("600519")
     result = migrate(dry_run=True)
     assert result["would_backfill"] == 1
@@ -71,3 +83,12 @@ def test_dry_run_does_not_modify(db):
             "WHERE instrument_id IS NULL").fetchone()["n"] == 1
         assert conn.execute(
             "SELECT COUNT(*) AS n FROM instrument").fetchone()["n"] == 0
+
+
+def test_upsert_written_rows_not_recounted_as_legacy(db):
+    """契约列进 upsert 后：新写入行不再是 migrate 回填目标（审计 F1 交互）。"""
+    from scripts.migrate_research_schema import migrate
+    _kline("600519", "2026-10-27")
+    result = migrate(dry_run=False)
+    assert result["backfilled"] == 0
+    assert result["remaining_null"] == 0
