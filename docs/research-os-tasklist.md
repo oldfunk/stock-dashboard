@@ -52,8 +52,10 @@
 
 ## R2 — 假设与实验（最小闭环核心）
 
-- [ ] **R2-1 假设卡 CLI**：注册/锁定/查看；锁定后不可改。
-- [ ] **R2-2 实验计划 CLI**：绑定假设、数据快照、参数、指标、分域、费用。
+- [x] **R2-1 假设卡 CLI**：注册/锁定/查看；锁定后不可改。（2026-10-27 完成，`b6339b6`/`fb8597b`；补勾于 R2-2 收尾）
+- [x] **R2-2 实验计划 CLI**：绑定假设、数据快照、参数、指标、分域、费用。
+  - 落地：`src/research/experiment.py` `main()`——`create`（预注册 planned）/`view`/`list`；注册时 fail-fast（假设存在、快照 verify、阈值可解析、horizon>0、regimes 非空）、同 ID 拒绝覆盖（预注册不可篡改）。
+  - 验收：`tests/research/test_experiment_cli.py` 6 用例（绑定字段/缺假设/缺快照/重复 ID/坏阈值/查看列表）。
 - [ ] **R2-3 首个真实假设 H-001**：MOS 预测力（用现有 `analysis_outcome`）；预注册后跑。
 - [ ] **R2-4 稳健性套件**：样本外/滚动、regime/行业/市值分域、bootstrap CI、参数敏感性。
 - [ ] **R2-5 结论与冻结**：supported/rejected/inconclusive/invalid；写清缺什么证据。

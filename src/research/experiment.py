@@ -1,20 +1,36 @@
-"""Research OS 实验接口（2026-10-26，R0-6）。
+"""Research OS 实验接口（2026-10-26，R0-6；2026-10-27 R2-2 增计划 CLI）。
 
 职责：
 - ``ExperimentPlan``：实验计划（绑定假设、数据快照、参数、费用）。
 - ``ExperimentRunner``：抽象接口，**不绑死单一回测器**。
 - ``TopKBacktestRunner``：最小可复现的 top-k 因子回测适配器（示例实现）。
 - ``run_experiment``：校验快照 -> 数据质量门 -> 运行 -> 落库。
+- ``main``：计划 CLI（R2-2）—— ``create`` 预注册（planned）/ ``view`` / ``list``。
 
 原则：
 - 快照缺失/漂移 -> 拒绝（``SnapshotError``）。
 - 质量门 ``invalid`` -> 实验直接 ``invalid``，不产出结论。
 - 结果全部落 ``research_result``，含分域（rebalance）明细，可复现。
 - 随机种子只影响需要随机性的实现；本适配器为确定性排序（并列按 ID）。
+- 预注册（R2-2）：``create`` 落 planned 状态即**绑定**假设/快照/指标/分域/
+  费用——同 ID 拒绝覆盖（预注册不可事后篡改），假设或快照在注册时即校验
+  （fail-fast，不留到运行时才爆）。
+
+用法（R2-2 计划 CLI）::
+
+    python -m src.research.experiment create \\
+        --hypothesis H-20261027-001 --snapshot DS-20261027 \\
+        --dataset analysis_outcome --metric excess --threshold ">0" \\
+        --horizon-days 60 --regimes all --costs '{"slippage": 0.001}' \\
+        --params '{"start_date": "2026-07-01", "end_date": "2026-09-30"}'
+    python -m src.research.experiment view E-20261027-001
+    python -m src.research.experiment list --status planned
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import statistics
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
@@ -574,3 +590,104 @@ def _persist(dao: ResearchDAO, plan: ExperimentPlan,
     ))
     for result in outcome.results:
         dao.insert_result(result)
+
+
+# ── 计划 CLI（R2-2 预注册）──────────────────────────────────────────────────
+
+def _parse_json_arg(text: str, name: str) -> dict:
+    try:
+        return json.loads(text or "{}")
+    except json.JSONDecodeError as exc:
+        raise ExperimentError(f"{name} JSON 非法: {exc}") from exc
+
+
+def main(argv: list[str] | None = None) -> int:
+    """实验计划 CLI：create（预注册 planned）/ view / list。
+
+    预注册纪律：create 即绑定假设+快照+指标+分域+费用并落 planned；
+    同 ID 拒绝覆盖（事后不可篡改）；假设不存在、快照缺失/漂移、阈值
+    无法解析一律注册时即拒绝（fail-fast，不留到运行时才爆）。
+    """
+    parser = argparse.ArgumentParser(prog="research.experiment",
+                                     description="Research OS 实验计划（R2-2）")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_create = sub.add_parser("create", help="预注册实验计划（planned）")
+    p_create.add_argument("--hypothesis", required=True, help="绑定的假设 ID")
+    p_create.add_argument("--snapshot", required=True, help="data_snapshot_id")
+    p_create.add_argument("--dataset", required=True, help="数据集（质量门对象）")
+    p_create.add_argument("--universe", default="A")
+    p_create.add_argument("--benchmark", default="sh000300")
+    p_create.add_argument("--metric", required=True, help="主指标名")
+    p_create.add_argument("--threshold", required=True, help='判定阈值，如 ">0"')
+    p_create.add_argument("--horizon-days", type=int, required=True)
+    p_create.add_argument("--regimes", default="all",
+                          help="分域，逗号分隔（如 risk_on,neutral）")
+    p_create.add_argument("--costs", default="{}", help='费用 JSON，如 {"slippage":0.001}')
+    p_create.add_argument("--params", default="{}",
+                          help='参数 JSON（含 start_date/end_date 等）')
+    p_create.add_argument("--seed", type=int, default=42)
+    p_create.add_argument("--code-commit", default="", help="代码版本（可复现锚点）")
+    p_create.add_argument("--config-hash", default="", help="配置哈希（可复现锚点）")
+    p_create.add_argument("--id", default=None, help="指定实验 ID（缺省自动编号）")
+
+    p_view = sub.add_parser("view", help="查看计划")
+    p_view.add_argument("experiment_id")
+
+    p_list = sub.add_parser("list", help="列出计划")
+    p_list.add_argument("--hypothesis", default=None)
+    p_list.add_argument("--status", default=None)
+
+    args = parser.parse_args(argv)
+    dao = ResearchDAO()
+
+    if args.cmd == "create":
+        # 注册时即校验（fail-fast）：假设存在、快照可验证、阈值可解析
+        if dao.get_hypothesis(args.hypothesis) is None:
+            raise ExperimentError(f"假设不存在: {args.hypothesis}")
+        verify_snapshot(args.snapshot)   # 缺失/漂移抛 SnapshotError
+        if _compare(0.0, args.threshold) is None:
+            raise ExperimentError(f"threshold 无法解析: {args.threshold}")
+        if args.horizon_days <= 0:
+            raise ExperimentError("horizon_days 必须 > 0")
+        regimes = [x.strip() for x in (args.regimes or "").split(",") if x.strip()]
+        if not regimes:
+            raise ExperimentError("regimes 不可为空")
+        with db_conn() as conn:
+            existing = [r["id"] for r in conn.execute(
+                "SELECT id FROM research_experiment")]
+        eid = args.id or next_id("E", now_cn().strftime("%Y-%m-%d"), existing)
+        if eid in existing:
+            raise ExperimentError(f"实验已存在（预注册不可覆盖）: {eid}")
+        plan = ExperimentPlan(
+            experiment_id=eid, hypothesis_id=args.hypothesis,
+            data_snapshot_id=args.snapshot, dataset=args.dataset,
+            universe=args.universe, benchmark=args.benchmark,
+            metric=args.metric, threshold=args.threshold,
+            horizon_days=args.horizon_days, regimes=regimes,
+            costs=_parse_json_arg(args.costs, "costs"),
+            random_seed=args.seed, code_commit=args.code_commit or None,
+            config_hash=args.config_hash or None,
+            params=_parse_json_arg(args.params, "params"),
+        )
+        dao.insert_experiment(Experiment(
+            id=eid, hypothesis_id=args.hypothesis, plan=plan.to_dict(),
+            data_snapshot_id=args.snapshot,
+            code_commit=plan.code_commit or "", config_hash=plan.config_hash or "",
+            random_seed=args.seed, status=ExperimentStatus.PLANNED.value,
+        ))
+        print(eid)
+    elif args.cmd == "view":
+        row = dao.get_experiment(args.experiment_id)
+        if row is None:
+            raise ExperimentError(f"实验不存在: {args.experiment_id}")
+        print(json.dumps(row, ensure_ascii=False, indent=2, default=str))
+    elif args.cmd == "list":
+        for row in dao.list_experiments(args.hypothesis, args.status):
+            print(f"{row['id']}\t{row['status']}\t"
+                  f"{row['hypothesis_id']}\t{row['data_snapshot_id']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
