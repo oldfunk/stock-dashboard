@@ -141,6 +141,45 @@ def test_volatility_immune_to_coverage_composition_shift(db):
     assert vector.quality["breadth_n"] == 0     # 无票满足 60 日窗
 
 
+def test_gross_margin_pit_no_lookahead(db):
+    """审计 Hermes P0-2：毛利率中位数只用 trade_date 前已披露的年报。
+
+    seed 两只票：
+    - 600519：2025 年报 notice=2026-03-20（trade_date 前已披露）gm=70
+    - 000001：2025 年报 notice=2026-11-30（trade_date **后**才披露）gm=10
+      同时有 2024 年报 notice=2025-04-10 gm=50（应被采用）
+    trade_date=2026-10-26 时，正确 PIT 取 70 与 50 → median=60；
+    若前视（取各自最新年报）会得 median(70,10)=40。
+    """
+    from src.research.market_state import compute_vector
+
+    def fh(code, report_date, gm, notice):
+        with db_mod.db_conn() as conn:
+            conn.execute(
+                "INSERT INTO financial_history (stock_code, report_date, "
+                "report_type, gross_margin, notice_date, created_at) "
+                "VALUES (?, ?, 'A', ?, ?, '2026-10-27')",
+                (code, report_date, gm, notice))
+
+    fh("600519", "2025-12-31", 70.0, "2026-03-20")
+    fh("000001", "2025-12-31", 10.0, "2026-11-30")   # 未来披露 -> 排除
+    fh("000001", "2024-12-31", 50.0, "2025-04-10")   # PIT 最新已披露
+    vector = compute_vector("2026-10-26")
+    assert vector.metrics["gross_margin_median"] == 60.0
+
+
+def test_gross_margin_excluded_without_notice_date(db):
+    """仓内口径：缺 notice_date 的年报不参与（不回退 report_date，防前视）。"""
+    from src.research.market_state import compute_vector
+    with db_mod.db_conn() as conn:
+        conn.execute(
+            "INSERT INTO financial_history (stock_code, report_date, "
+            "report_type, gross_margin, notice_date, created_at) "
+            "VALUES ('600519', '2025-12-31', 'A', 70.0, NULL, '2026-10-27')")
+    vector = compute_vector("2026-10-26")
+    assert "gross_margin_median" in vector.missing
+
+
 def test_volatility_and_regime(db):
     from datetime import date, timedelta
 

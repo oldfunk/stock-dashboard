@@ -206,14 +206,24 @@ def compute_vector(trade_date: str,
                 f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
                 "AND snapshot_date <= ?", (trade_date,)).fetchall()]
             _set(name, _median(values))
-        # 毛利率：最新年报（financial_history，JOIN 取每只股票最新年报）
+        # 毛利率：每只股票**已披露**的最新年报（PIT）。
+        # 审计 Hermes P0-2（2026-10-27）：原实现取全表最新年报、未按
+        # trade_date 截断 → 历史回算把未来年报毛利率灌进过去（前视）。
+        # 按仓内既定口径（valuation_percentile.py：notice_date 为披露时点、
+        # 缺 notice 不参与）：notice_date <= trade_date AND report_date <=
+        # trade_date（双条件，挡 notice_date=1900 占位假值配未来 report_date）。
         gm = [r[0] for r in conn.execute(
             "SELECT h.gross_margin FROM financial_history h "
             "JOIN (SELECT stock_code, MAX(report_date) AS md "
             "      FROM financial_history WHERE report_type = 'A' "
+            "        AND notice_date IS NOT NULL AND notice_date <= ? "
+            "        AND report_date <= ? "
             "      GROUP BY stock_code) m "
             "  ON m.stock_code = h.stock_code AND m.md = h.report_date "
-            "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL").fetchall()]
+            "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL "
+            "  AND h.notice_date IS NOT NULL AND h.notice_date <= ? "
+            "  AND h.report_date <= ?",
+            (trade_date, trade_date, trade_date, trade_date)).fetchall()]
         _set("gross_margin_median", _median(gm))
         st_total = conn.execute(
             "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ?",

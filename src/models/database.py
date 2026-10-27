@@ -1453,23 +1453,23 @@ class KlineDAO:
         turnover, close_raw, close_adj, shares。
         2026-10-26 起：只带 close 的旧调用不会清空 raw/adj/shares（COALESCE）。
 
-        **契约列写路径维护（2026-10-27，Issue #4/#8 审计 F1）**：
-        - ``close_qfq``：契约恒等于 ``close``（§9.1 close 展示列=close_qfq），
-          插入时缺省取 close，冲突更新时随 close 同步——否则日常增量写入
-          会持续产生 close_qfq NULL，一次性回填脚本追不上。
+        **契约列写路径维护（2026-10-27，Issue #4/#8 审计 F1；同日 Hermes P0-1 收口）**：
+        - ``close_qfq``：契约恒等于 ``close``（§9.1 close 展示列=close_qfq）。
+          **强制** close_qfq := close（忽略调用方传入的 close_qfq——调用方
+          分叉值会直接违反契约；冲突更新同样镜像 close，NULL close 则
+          close_qfq 同步 NULL，不留"close 空而 qfq 留旧值"的发散态）。
         - ``market``/``instrument_id``：6 位数字代码推导 ``CN``/``CN:xxxxxx``
           （§9.2 契约）；非 6 位数字（未来港股/美股）不推导，保持 NULL
           （不臆造），由该市场接入时显式传入。
-        - 三列冲突更新均用 COALESCE：显式传入优先，其次推导，再缺则保留旧值。
+        - 冲突更新均用 COALESCE 保留旧值（close_qfq 除外，见上）。
         """
         if not records:
             return 0
         with db_conn() as conn:
             for r in records:
-                # 契约列推导（调用方显式传入优先；推导失败= NULL，不臆造）
-                qfq = r.get('close_qfq')
-                if qfq is None:
-                    qfq = r.get('close')
+                # 契约列推导：close_qfq 强制镜像 close（P0-1）；
+                # market/instrument_id 由 code 推导（不臆造）
+                qfq = r.get('close')
                 iid = r.get('instrument_id')
                 if iid is None and len(code) == 6 and code.isdigit():
                     iid = f"CN:{code}"
@@ -1493,7 +1493,7 @@ class KlineDAO:
                         close_raw = COALESCE(excluded.close_raw, close_raw),
                         close_adj = COALESCE(excluded.close_adj, close_adj),
                         shares = COALESCE(excluded.shares, shares),
-                        close_qfq = COALESCE(excluded.close_qfq, excluded.close, close_qfq),
+                        close_qfq = excluded.close,
                         market = COALESCE(excluded.market, market),
                         instrument_id = COALESCE(excluded.instrument_id, instrument_id)
                 """, (

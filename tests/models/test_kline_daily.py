@@ -82,6 +82,24 @@ class TestKlineDAO:
         assert row["close"] == 21.80
         assert row["close_qfq"] == 21.80      # 随 close 同步，不残留旧值
 
+    def test_upsert_close_qfq_contract_enforced(self, db):
+        """Hermes P0-1：close_qfq 契约强制镜像 close——调用方分叉值被忽略。"""
+        dao = db.KlineDAO()
+        r = _row("2026-10-27", 22.24)
+        r["close_qfq"] = 999.99               # 分叉值直接违反 §9.1
+        dao.upsert_many("000792", [r])
+        row = dao.get_daily("000792")[0]
+        assert row["close"] == 22.24
+        assert row["close_qfq"] == 22.24      # 契约列镜像 close，不采纳分叉值
+        # 冲突更新：close 被清空时 close_qfq 同步 NULL（不留发散旧值）
+        dao.upsert_many("000792", [{
+            "trade_date": "2026-10-27", "open": None, "close": None,
+            "high": None, "low": None, "volume": 1.0, "amount": 1.0,
+            "turnover": 0.1}])
+        row = dao.get_daily("000792")[0]
+        assert row["close"] is None
+        assert row["close_qfq"] is None
+
     def test_upsert_contract_derive_fail_is_null(self, db):
         """非 6 位数字代码（未来港股/美股）不推导 instrument_id——不臆造。"""
         dao = db.KlineDAO()
