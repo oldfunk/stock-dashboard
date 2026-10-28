@@ -1,8 +1,9 @@
-"""财务汇总语义回归（2026-10-26，审计 D1；2026-10-28 追加 N1）。
+"""财务汇总语义回归（2026-10-26，审计 D1；2026-10-28 追加 N1、N20）。
 
 - 5y/10y ROE 任一侧缺失时，roe_improvement 必须为 None，不能拿 0 相减
 - 0.0 是有效值（0% ROE），不能因 truthiness 被写成 NULL
 - 股本稀释率方向必须正确：扩股为正、回购为负（门规 9 依赖此符号）
+- 重建范围必须跟随 stocks 入参：钉选 1 只不得重写全市场
 """
 
 import pytest
@@ -83,3 +84,67 @@ def test_dilution_5y_window_is_recent_years_only(db):
     s = db_mod.FinancialSummaryDAO().get("600036")
     assert s["share_dilution_5y"] == 0.0
     assert s["share_dilution_10y"] == 100.0
+
+
+# ── 重建范围（2026-10-28，审计 N20）────────────────────────────────────
+# 旧实现收下 stocks 却从不使用：钉选 1 只也会重写全市场 summary，
+# 且跑在 onboard 的请求线程里，与后台回填抢写锁。
+
+def test_rebuild_only_touches_requested_codes(db):
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_shares("600519", [100] * 9 + [200])
+    _seed_shares("000001", [100] * 9 + [200])
+    rebuild_financial_summaries([{"code": "600519"}])
+    assert db_mod.FinancialSummaryDAO().get("600519") is not None
+    assert db_mod.FinancialSummaryDAO().get("000001") is None, \
+        "未请求的代码不得被写入（旧实现会连它一起重建）"
+
+
+def test_rebuild_none_rebuilds_all(db):
+    """stocks=None 是显式全量入口，行为与旧版一致。"""
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_shares("600519", [100] * 9 + [200])
+    _seed_shares("000001", [100] * 9 + [200])
+    rebuild_financial_summaries(None)
+    assert db_mod.FinancialSummaryDAO().get("600519") is not None
+    assert db_mod.FinancialSummaryDAO().get("000001") is not None
+
+
+def test_rebuild_empty_list_is_noop(db):
+    """空列表＝无待重建代码，既不写库也不得退化成全量。"""
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_shares("600519", [100] * 9 + [200])
+    rebuild_financial_summaries([])
+    assert db_mod.FinancialSummaryDAO().get("600519") is None
+
+
+def test_scoped_rebuild_matches_full_rebuild(db):
+    """缩小扫描范围不能改变计算结果。"""
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_shares("600519", [100, 120, 140, 160, 180, 200, 220, 240, 260, 280])
+    _seed_shares("000001", [100] * 9 + [200])
+    rebuild_financial_summaries(None)
+    full = db_mod.FinancialSummaryDAO().get("600519")
+    with db_mod.db_conn() as conn:   # FinancialSummaryDAO 无 delete，直接清行
+        conn.execute("DELETE FROM financial_summary WHERE stock_code = ?",
+                     ("600519",))
+    assert db_mod.FinancialSummaryDAO().get("600519") is None
+    rebuild_financial_summaries([{"code": "600519"}])
+    scoped = db_mod.FinancialSummaryDAO().get("600519")
+    for k in ("roe_5y_avg", "roe_10y_avg", "share_dilution_5y",
+              "share_dilution_10y", "data_years"):
+        assert scoped[k] == full[k], f"{k} 口径漂移：{scoped[k]} != {full[k]}"
+
+
+def test_get_annual_by_codes_crosses_chunk_boundary(db):
+    """新 SQL 用 IN(...) 分块（450/块，SQLite 变量上限 999）——边界必须取全。"""
+    codes = [f"6{i:05d}" for i in range(451)]   # 450 + 1，逼出第二块
+    rows = [{"stock_code": c, "report_date": "2020-12-31", "roe": 10.0}
+            for c in codes]
+    db_mod.FinancialHistoryDAO().batch_save(rows)
+    got = db_mod.FinancialHistoryDAO().get_annual_by_codes(codes)
+    assert len(got) == 451, f"分块边界丢行：{len(got)}"
+    assert {r["stock_code"] for r in got} == set(codes)
+    # 未请求的代码不得混进来
+    assert db_mod.FinancialHistoryDAO().get_annual_by_codes(
+        [codes[0]]) [0]["stock_code"] == codes[0]

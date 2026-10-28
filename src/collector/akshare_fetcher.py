@@ -946,13 +946,26 @@ def collect_historical_financial_data(all_stocks: list[dict],
     return collected
 
 
-def rebuild_financial_summaries(stocks: list[dict]):
-    """从 financial_history 重建 financial_summary 表（5年 + 10年均值）。"""
+def rebuild_financial_summaries(stocks: list[dict] | None):
+    """从 financial_history 重建 financial_summary 表（5年 + 10年均值）。
+
+    `stocks` 传列表时**只**重建其中列出的代码；传 `None` 才是全量重建。
+    审计 N20：旧实现收下 `stocks` 却从不使用，钉选 1 只票（onboard.py）
+    也会重写全市场数千条 summary，而该调用跑在 `onboard_stock_async` 的
+    请求线程里，与后台回填抢 SQLite 写锁。
+    """
     from src.models.database import FinancialHistoryDAO, FinancialSummaryDAO
 
     fh_dao = FinancialHistoryDAO()
     fs_dao = FinancialSummaryDAO()
-    annual = fh_dao.get_all_annual()  # >= 2016, 覆盖10年
+    if stocks is None:
+        annual = fh_dao.get_all_annual()  # >= 2016, 覆盖10年
+    else:
+        codes = [s.get('code') for s in stocks if s.get('code')]
+        if not codes:
+            logger.info("[财务汇总] 无待重建代码，跳过")
+            return
+        annual = fh_dao.get_annual_by_codes(codes)
 
     # 按股票代码分组
     by_code = defaultdict(list)

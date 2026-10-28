@@ -1249,6 +1249,28 @@ class FinancialHistoryDAO:
             """, (str(min_year),)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_annual_by_codes(self, codes: list[str],
+                            min_year: int = 2016) -> list[dict]:
+        """按代码取年报（过滤条件与排序同 get_all_annual，只缩小扫描范围）。
+
+        审计 N20：钉选 1 只票的 summary 重建不该把 10 万+ 行全表读进内存。
+        """
+        uniq = [c for c in dict.fromkeys(codes) if c]
+        out: list[dict] = []
+        with db_conn() as conn:
+            for i in range(0, len(uniq), 450):  # SQLite 变量上限 999
+                chunk = uniq[i:i + 450]
+                marks = ','.join('?' * len(chunk))
+                rows = conn.execute(
+                    f"SELECT * FROM financial_history "
+                    f"WHERE report_type = 'A' "
+                    f"AND substr(report_date, 1, 4) >= ? "
+                    f"AND stock_code IN ({marks}) "
+                    f"ORDER BY stock_code, report_date",
+                    (str(min_year), *chunk)).fetchall()
+                out.extend(dict(r) for r in rows)
+        return out
+
     def count_stocks_with_data(self) -> int:
         """有历史数据的股票数量"""
         with db_conn() as conn:
