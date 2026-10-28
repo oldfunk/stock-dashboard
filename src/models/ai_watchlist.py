@@ -35,13 +35,25 @@ class AiWatchlistDAO:
 
     def add(self, code: str, name: str, added_reason: str = None,
             ai_confidence: str = None) -> bool:
-        """调入（重纳 dropped 时重置为 core，理由清空）。"""
+        """调入（重纳 dropped 时重置为 core，理由清空）。
+
+        只重置 docstring 声明要重置的列：旧实现用 ``INSERT OR REPLACE``，
+        它先删行再插，列清单里没写的 ``monitor_condition`` 会被一起抹掉
+        （审计 N19）——重钉一只票就静默清空用户/AI 设的监控条件。
+        """
         with db_conn() as conn:
             cur = conn.execute(
-                "INSERT OR REPLACE INTO ai_watchlist "
+                "INSERT INTO ai_watchlist "
                 "(code, name, added_at, added_reason, ai_confidence, last_reviewed, review_count, "
                 "status, status_reason, watch_until) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, 'core', NULL, NULL)",
+                "VALUES (?, ?, ?, ?, ?, ?, 1, 'core', NULL, NULL) "
+                "ON CONFLICT(code) DO UPDATE SET "
+                "name = excluded.name, added_at = excluded.added_at, "
+                "added_reason = excluded.added_reason, "
+                "ai_confidence = excluded.ai_confidence, "
+                "last_reviewed = excluded.last_reviewed, "
+                "review_count = 1, status = 'core', "
+                "status_reason = NULL, watch_until = NULL",
                 (code, name, now_cn().isoformat(), added_reason, ai_confidence,
                  now_cn().strftime("%Y-%m-%d"))
             )

@@ -56,6 +56,39 @@ class TestMonitorCondition:
         result = json.loads(dao.get_monitor_condition('600519'))
         assert result == cond
 
+    def test_re_add_preserves_monitor_condition(self, db):
+        """回归 N19：重纳不得抹掉已设的监控条件。
+
+        上面所有用例都是「先 add 再设条件」，从未覆盖「设完条件后再 add」，
+        而旧实现用 INSERT OR REPLACE（先删行再插），列清单里没有
+        monitor_condition → 重钉一只票就静默清空用户/AI 设的监控条件。
+        """
+        dao = AiWatchlistDAO()
+        dao.add('600519', '贵州茅台')
+        cond = json.dumps({'metric': 'pe', 'operator': 'lt', 'threshold': 10})
+        dao.update_monitor_condition('600519', cond)
+        assert dao.add('600519', '贵州茅台', added_reason='二次调入') is True
+        assert dao.get_monitor_condition('600519') == cond
+
+    def test_re_add_still_resets_declared_fields(self, db):
+        """add() 声明要重置的字段必须真重置——防止改成 upsert 时把语义一并改掉。"""
+        dao = AiWatchlistDAO()
+        dao.add('600519', '贵州茅台')
+        dao.remove('600519', reason='高估')
+        dao.set_status('600519', 'watch', reason='回调观察',
+                       watch_until='2026-12-31')
+        cond = json.dumps({'metric': 'roe', 'operator': 'gt', 'threshold': 15})
+        dao.update_monitor_condition('600519', cond)
+
+        assert dao.add('600519', '贵州茅台', added_reason='重新发现') is True
+        row = dao.get_by_code('600519')
+        assert row['status'] == 'core'
+        assert row['status_reason'] is None
+        assert row['watch_until'] is None
+        assert row['review_count'] == 1
+        assert row['added_reason'] == '重新发现'
+        assert row['monitor_condition'] == cond, '监控条件不在重置清单内'
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
