@@ -1243,9 +1243,9 @@ def fetch_kline_data(code: str, start_date: str | None = None,
     if records:
         return records
 
-    # 备用：腾讯数据源
+    # 备用：腾讯数据源（透传 adjust，避免回退时丢复权口径；Issue #9 T1/N6-②）
     logger.info(f"[K线] 东方财富失败，回退腾讯 {code}")
-    records = _fetch_kline_tx(code, start_str, end_str)
+    records = _fetch_kline_tx(code, start_str, end_str, adjust=adjust)
     return records
 
 
@@ -1280,13 +1280,19 @@ def _fetch_kline_em(code: str, start_str: str, end_str: str,
     return records
 
 
-def _fetch_kline_tx(code: str, start_str: str, end_str: str) -> list[dict]:
-    """腾讯数据源拉取日K（备用，无成交量和换手率）"""
+def _fetch_kline_tx(code: str, start_str: str, end_str: str,
+                    adjust: str = "qfq") -> list[dict]:
+    """腾讯数据源拉取日K（备用，无成交量和换手率）
+
+    adjust 透传给 akshare（Issue #9 T1/N6-②）：EM 失败回退时必须保持
+    与 EM qfq 同一口径，不能静默丢参写入不复权价。
+    """
     # 代码转腾讯格式：sz000792 / sh600519
     tx_code = f"sh{code}" if code.startswith(('6', '9')) else f"sz{code}"
     try:
         df = ak.stock_zh_a_hist_tx(
-            symbol=tx_code, start_date=start_str, end_date=end_str
+            symbol=tx_code, start_date=start_str, end_date=end_str,
+            adjust=adjust,
         )
     except Exception as e:
         logger.warning(f"[K线] 腾讯拉取失败 {code}: {e}")

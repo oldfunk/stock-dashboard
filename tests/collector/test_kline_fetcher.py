@@ -111,3 +111,21 @@ def test_fetch_kline_data_fallback_tx_sh_code():
     tx_call = mock_ak.stock_zh_a_hist_tx.call_args
     assert tx_call.kwargs.get("symbol") == "sh600519" or \
            tx_call[1].get("symbol") == "sh600519"
+
+
+def test_fetch_kline_data_fallback_tx_passes_adjust():
+    """Issue #9 T1：EM 失败回退腾讯时，adjust 必须透传（不能静默丢参）"""
+    fake_tx_df = pd.DataFrame([
+        {"date": "2025-07-21", "open": 18.0, "close": 18.5,
+         "high": 18.8, "low": 17.9, "amount": 282482.0},
+    ])
+
+    with patch("src.collector.akshare_fetcher.ak") as mock_ak:
+        mock_ak.stock_zh_a_hist.side_effect = Exception("Connection aborted")
+        mock_ak.stock_zh_a_hist_tx.return_value = fake_tx_df
+        from src.collector.akshare_fetcher import fetch_kline_data
+        fetch_kline_data("000792", adjust="qfq")
+
+    tx_call = mock_ak.stock_zh_a_hist_tx.call_args
+    kwargs = tx_call.kwargs if tx_call.kwargs else tx_call[1]
+    assert kwargs.get("adjust") == "qfq", f"adjust 未透传: {tx_call}"
