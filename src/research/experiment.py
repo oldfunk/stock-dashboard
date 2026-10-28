@@ -299,8 +299,8 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                 id=rid, experiment_id=plan.experiment_id,
                 metric=metric, value=round(value, 6),
                 sample_size=metric_stats["n"],
-                ci_low=metric_stats.get("ci_low") or 0.0,
-                ci_high=metric_stats.get("ci_high") or 0.0,
+                ci_low=metric_stats.get("ci_low"),
+                ci_high=metric_stats.get("ci_high"),
                 splits=metric_stats.get("splits", {}),
                 notes="分域明细" if metric_stats.get("splits") else "",
             )
@@ -466,6 +466,15 @@ class TopKBacktestRunner(ExperimentRunner):
         step = int(p.get("rebalance_days", 21))
         if topk < 1 or horizon < 1 or step < 1:
             raise ExperimentError("topk/horizon_days/rebalance_days 必须 >= 1")
+        if horizon > step:
+            # 窗口 [i+1, i+1+horizon] 以 step 为步长推进；horizon > step 时相邻窗口
+            # 持有期重叠，而 total_return 仍按复利累乘（下方 rets 逐窗连乘），
+            # 同一段行情的收益会被重复计入，累计收益虚高（审计 N18）。
+            # 修法取 fail-fast：重叠窗口的资金分配（分批建仓/仓位拆分）尚未实现，
+            # 与其静默产出高估数字，不如拒绝该配置。需要支持请先补实现，勿放宽本校验。
+            raise ExperimentError(
+                f"horizon_days({horizon}) 不可大于 rebalance_days({step})："
+                "调仓窗口重叠时的资金分配未实现，复利累乘会虚高累计收益")
         commission = float(plan.costs.get("commission", 0.0))
         slippage = float(plan.costs.get("slippage", 0.0))
 

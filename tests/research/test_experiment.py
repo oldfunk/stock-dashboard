@@ -186,6 +186,58 @@ def test_result_ids_are_parseable(db):
         assert len(day) == 8 and seq >= 1
 
 
+# ── N17：未计算的统计量必须存 NULL（2026-10-28）─────────────────────────
+
+def test_experiment_result_ci_and_p_defaults_are_none():
+    """回归 N17：数据类默认值不能再是 0。
+
+    回测路径（TopKBacktestRunner）不跑 bootstrap、不做检验，构造
+    ExperimentResult 时压根不传 ci_*/p_value——旧默认 0.0 给**每条**回测
+    结果盖上「CI 精确到 [0,0]」与「p=0 极显著」两个假象。
+    """
+    from src.research.domain import ExperimentResult
+    r = ExperimentResult(id="R-20261028-001", experiment_id="E-1",
+                         metric="mean_excess", value=1.0)
+    assert (r.ci_low, r.ci_high, r.p_value) == (None, None, None)
+
+
+def test_backtest_results_persist_null_ci_and_pvalue(db):
+    """落库同样必须是 NULL，不是 0.0。"""
+    from src.research.dao import ResearchDAO
+    from src.research.experiment import TopKBacktestRunner, run_experiment
+    _ready()
+    outcome = run_experiment(TopKBacktestRunner(), _plan())
+    assert outcome.status == "done" and outcome.results
+    for r in outcome.results:
+        assert r.ci_low is None and r.ci_high is None and r.p_value is None
+    for row in ResearchDAO().list_results(EXPERIMENT):
+        assert row["ci_low"] is None, f"{row['metric']} 的缺失 CI 被写成 0"
+        assert row["ci_high"] is None
+        assert row["p_value"] is None, "p=0.0 会被读成极显著"
+
+
+# ── N18：调仓窗口重叠不得复利累乘（2026-10-28）──────────────────────────
+
+def test_overlapping_rebalance_windows_rejected(db):
+    """horizon_days > rebalance_days 时相邻窗口持有期重叠。
+
+    旧实现仍逐窗 `total *= (1 + ret)`，同一段行情被重复计入 → 累计收益虚高。
+    修法取 fail-fast（重叠窗口的资金分配未实现），故该配置必须被拒绝并说清原因。
+    """
+    from src.research.experiment import TopKBacktestRunner, run_experiment
+    outcome = run_experiment(
+        TopKBacktestRunner(), _ready(horizon_days=10))   # rebalance_days 仍为 5
+    assert outcome.status == "failed"
+    assert "rebalance_days" in outcome.error, outcome.error
+
+
+def test_non_overlapping_rebalance_still_runs(db):
+    """正控：horizon == rebalance 的既有配置不受新校验影响。"""
+    from src.research.experiment import TopKBacktestRunner, run_experiment
+    outcome = run_experiment(TopKBacktestRunner(), _ready(horizon_days=5))
+    assert outcome.status == "done"
+
+
 def test_quality_date_guards_missing_dataset_and_end_date(db):
     """回归 D1：计划无 end_date 且数据集不在快照表中时不得崩溃。"""
     from src.research.experiment import _quality_date

@@ -69,6 +69,35 @@ def test_event_study_tiers_and_ci(db):
     assert metrics["excess_20_20~40"].sample_size == 2
 
 
+def test_event_study_missing_ci_persists_null(db, monkeypatch):
+    """回归 N17：bootstrap 算不出时落库必须是 NULL，不能退化成 0。
+
+    旧写法 `metric_stats.get("ci_low") or 0.0` 把"没算出来"渲染成零宽区间
+    [0,0]——读起来像"精确到分位"，是假阳性的一种。
+    """
+    import src.research.experiment as exp
+    from src.research.snapshot import create_snapshot
+    _insert([
+        {"stock": "A", "date": "2026-07-08", "mos": -5.0, "e20": -0.01, "e60": -0.02},
+        {"stock": "B", "date": "2026-07-09", "mos": 30.0, "e20": 0.03, "e60": 0.05},
+    ])
+    monkeypatch.setattr(exp, "block_bootstrap_ci", lambda *a, **k: (None, None))
+    plan = exp.ExperimentPlan(
+        experiment_id="E-20261028-001", hypothesis_id="H-1",
+        data_snapshot_id="DS-ES", dataset="analysis_outcome", universe="A",
+        benchmark="sh000300", metric="excess_20_20~40", threshold=">0",
+        horizon_days=20, regimes=["all"], costs={}, random_seed=42,
+        code_commit="c", config_hash="h",
+        params={"start_date": "2026-07-08", "end_date": "2026-07-09",
+                "horizons": [20], "n_boot": 100, "splits": []})
+    outcome = exp.OutcomeEventStudyRunner().run(
+        plan, create_snapshot(["analysis_outcome"], snapshot_id="DS-ES"))
+    assert outcome.status == "done" and outcome.results
+    for r in outcome.results:
+        assert r.ci_low is None, f"{r.metric} 的缺失 CI 被写成 {r.ci_low}"
+        assert r.ci_high is None
+
+
 def test_event_study_splits(db):
     from src.research.experiment import OutcomeEventStudyRunner
     from src.research.experiment import ExperimentPlan

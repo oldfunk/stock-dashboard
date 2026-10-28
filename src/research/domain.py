@@ -292,9 +292,12 @@ class ExperimentResult:
     experiment_id: str
     metric: str
     value: float
-    ci_low: float = 0.0
-    ci_high: float = 0.0
-    p_value: float = 0.0
+    # 未计算就是未计算：存 NULL，不能退化成 0。
+    # 零宽区间 [0,0] 读起来像"精确到分位"，p_value=0.0 读起来像"极显著"，
+    # 而回测路径根本不跑 bootstrap——旧默认值给每条回测结果都盖了这两个假象（审计 N17）。
+    ci_low: float | None = None
+    ci_high: float | None = None
+    p_value: float | None = None
     sample_size: int = 0
     splits: dict[str, Any] = field(default_factory=dict)
     verdict: str = ""
