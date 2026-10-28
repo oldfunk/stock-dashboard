@@ -77,17 +77,21 @@ def refresh_benchmarks(config: dict | None = None,
 
 def _mos_at_entry(fin_dao, code: str, analysis_date: str,
                   entry_price: float | None) -> float | None:
-    """买入时安全边际 %（P0-9）：用 notice_date <= 分析日 的最新年报 + 入场价算模型 MOS。"""
+    """买入时安全边际 %（P0-9）：用 notice_date <= 分析日 的最新年报 + 入场价算模型 MOS。
+
+    没有 ``notice_date`` 的年报不参与（**不回退 report_date**——会计年末与实际
+    披露差约 1-4 个月，回退即前视；2026-10-28 N7 修，口径同 valuation_percentile）。
+    """
     try:
         rows = fin_dao.get_annual_reports(code)
     except Exception:
         rows = []
     rec = None
+    best_notice = None
     for r in rows:  # 按 report_date 倒序
-        nd = r.get("notice_date") or r.get("report_date")
-        if nd and nd <= analysis_date:
-            rec = r
-            break
+        nd = r.get("notice_date")
+        if nd and nd <= analysis_date and (best_notice is None or nd > best_notice):
+            rec, best_notice = r, nd
     if rec is None or entry_price is None:
         return None
     from src.analyzer.valuation import intrinsic_value

@@ -31,6 +31,37 @@ def test_mos_at_entry_uses_notice_date(db):
     assert _mos_at_entry(fin, "600519", "2025-03-01", 12.0) is None
 
 
+def test_mos_at_entry_null_notice_date_is_unavailable(db):
+    """N7 前视修复（2026-10-28）：无 notice_date 的年报不参与，不回退 report_date。
+
+    旧实现 ``nd = notice_date or report_date`` 在披露日缺失时退化成
+    「会计年末即已知」，最长前视 4 个月；修后 fail-closed 返回 None。
+    """
+    from src.models.database import FinancialHistoryDAO
+    FinancialHistoryDAO().batch_save([{
+        "stock_code": "000001", "report_date": "2024-12-31",
+        "notice_date": None, "fcf": 100.0, "total_shares": 10.0,
+        "cash": 20.0, "interest_bearing_debt": 50.0,
+    }])
+    fin = FinancialHistoryDAO()
+    # 分析日晚于会计年末，但披露日缺失 → 不可用
+    assert _mos_at_entry(fin, "000001", "2025-05-01", 12.0) is None
+
+
+def test_mos_at_entry_skips_undated_newest_report(db):
+    """最新年报无 notice_date 时跳过，取更早但披露日有效的年报（同估值分位口径）。"""
+    from src.models.database import FinancialHistoryDAO
+    FinancialHistoryDAO().batch_save([
+        {"stock_code": "000002", "report_date": "2025-12-31", "notice_date": None,
+         "fcf": 100.0, "total_shares": 10.0, "cash": 20.0, "interest_bearing_debt": 50.0},
+        {"stock_code": "000002", "report_date": "2024-12-31", "notice_date": "2025-04-01",
+         "fcf": 80.0, "total_shares": 10.0, "cash": 20.0, "interest_bearing_debt": 50.0},
+    ])
+    fin = FinancialHistoryDAO()
+    mos = _mos_at_entry(fin, "000002", "2025-05-01", 12.0)
+    assert mos is not None  # 用了 2024 年报（披露日 2025-04-01 有效）
+
+
 def test_summarize_by_mos_tiers(db):
     from src.models.database import AnalysisOutcomeDAO
     rows = []
