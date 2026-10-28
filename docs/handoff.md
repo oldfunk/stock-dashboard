@@ -3,42 +3,45 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-10-27 子项目价格尺度事故触发全仓彻查：双 AI 审计 + 7 项修复合入；基线：母项目 867 / vendor 242）
+## 最后状态（2026-10-28 生产迁移 Pi→nec 完成部署面 + 全市场价格回填 9 成 + N7 修；基线：母项目 873 / vendor 242）
 
-- **事故背景**：子项目 paper-trading v0.7.5 报告价格尺度事故（执行侧 `price_map` 取母库 `close_adj` 后复权 175.96 买 000792 @175.97，真实 22.24，虚付 ~15,372，已冲正）。母方按"事故同类（口径混杂 / 一次性交付无维护路径 / fail-open）"彻查近一周全部交付。
-- **已合入部署（main=`5855b84`，生产门禁实测 867/242，双服务健康）**：
-  - `70983ea` 日历未来段（S15 新浪源 + 周六自动延长）+ **产线回填实跑：`max(is_open=1)=2026-12-31`，未来 47+1 交易日，`/api/data/calendar` 实测正常，Issue #8 partial pass 闭环回帖**。
-  - `30b244c` F1：`upsert_many` 写契约列 `close_qfq/market/instrument_id`（产线实证修复前 10-27 新 21 行三列全 NULL）；F3：契约基准码无条件进周刷。
-  - `b7b20ef` migrate 回填用例改存量旧行模拟（曾被 gate 拦下 2 failed）。
-  - `5e06f56` F6：market_state 估值块逐 code PIT（原单日桶实测历史日仅 15/2 行残余样本，"全市场中位数"名不符实）；F7：波动率逐票日收益（消除回填日 958→增量日 261 覆盖切换伪收益）；quality 增记 snapshot_n/kline_codes/breadth_n；liquidity 标签改"kline 覆盖样本"（kline 只覆盖 5,527 中的 959）。
-  - `5855b84` Hermes P0-1：`close_qfq` 强制镜像 close（忽略调用方分叉值、close 置空同步 NULL）；P0-2：毛利率中位数 PIT（`notice_date AND report_date <= trade_date`，产线 notice 年报覆盖 97.6%）。
-- **双 AI 协作（Issue #9 三帖为工单板）**：员工/Qoder 审计 `docs/audit-20261027.md`（N1–N22+U1–U9，review/20261027-audit 分支）——N3（质量门 excess 单位错→实验恒 invalid）、N4（regime 阈值 0.6/0.4 vs 0–100→恒 risk_on）主 AI 已核实成立；Hermes `docs/audit-20261027-hermes.md`（P0×3/P1×4/P2×3）——P0-1/P0-2 已修，P0-3 待拍板。分工：员工批1=N1→N2→N3→N4、批2=N19/N20/N21/N22、T1（=N6-②腾讯 adjust）、T3（年报覆盖出数）；主 AI 持有 market_state/scheduler/N5/N7/N8 口径决策/N9–N15。
-- **B2 年报回填终态（产线核对）**：`financial_history` 143,500 行 / 5,206 只（差 321 = no_data 全对账吻合）；年报 notice_date 覆盖 97.6%（全表 63.5%）；fcf 62.0%。
-- **Research OS 进度不变**：R0 全部、R1 市场状态、R2-0 漏洞修补、R2-1 假设卡已交付；R2-2 起未动。
-- **服务**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 与纸盘面板 http:200。
+- **生产迁移 Pi → nec（用户提议，拍板"现在就迁"）**：Pi 连续自重启、954M 内存多项目过劳；nec（x86_64 2C/5.8G/370G，idle 0.03）承接母项目全部生产面。
+  - DB：Pi `sqlite3 .backup` 一致快照（2.5G）→ nec gzip 压缩流拉取（688KB/s → 2.0MB/s）→ md5/integrity/行数比对（kline 10,075,767 / financial 143,500 / instrument 5,527 / snapshot 5,527 / progress 11,457）。
+  - nec venv 适配老 CPU：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2（新 wheel x86-64-v2 基线 illegal instruction）；**gate 1115 passed 与 Pi 等价**。
+  - systemd 两单元重建（User=nec）、02:30 年报 cron 迁移、`deploy.local.md` 已改 nec；nec 既有子项目旧 cron（/home/nec/paper-trading）按用户指示未动。
+  - Pi 收尾：两服务 stop+disable、母项目 cron 注释留痕、**母库冻结副本保留**——子项目独立版（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地母库。
+- **全市场价格回填（数据丰富主线）**：4,172 只（原覆盖 959/5527=17.4%，5 年深度仅 827 只），Sina raw+hfq 三列口径 + 断点续传；Pi 上跑到 3,757/4,172 随迁移中断，nec 续跑收尾（`--all` 自动跳已完成）。
+- **已合入（nightly/20261023 → 待 deploy 合 main）**：`165be68` 回填容锁（进度标记不再杀死 15h 长任务）；`7ab7e62` R2-2 实验计划 CLI（R2 完成 2/6）；`1b826c9` **N7 修**（`_mos_at_entry` 去 report_date 兜底，前视最长 4 个月；fail-closed，MOS 覆盖率下降是正确性代价）。
+- **契约列存量归零（迁移前产线实跑）**：close_qfq 21→0 / close_adj 21→0（Sina 重抓）/ instrument_id+market 7,089→0。
+- **B3 中期（只读）**：负价/零价/重复行=0；gm -5678% / roe -266264% 等异常值定性为真实财务事件；历史股本 4,759 只多年同值（已知上游盖值）。
+- **服务（nec）**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 与纸盘面板 http:200；回填续跑中。
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **U9 → F2 解链**（事故彻查主线）：U9=增量 kline 行补 `close_adj`——方案 A `fetch_kline_data` 双拉 EM raw+hfq 走现有 `merge_price_model` / 方案 B qfq+hfq 两列（close_raw 容 NULL 记 quality）/ 方案 C Sina 双拉（每只 6–10s 拖慢收盘流水线）；**先出对比给用户拍板**，落地后重提 F2（market_state 每日调度，接线代码已备好）。
-2. **T1 腾讯 adjust 透传**（员工认领、生产进行时：每日东财限流回退腾讯在写不复权价进 close）——若员工批 1 未动，主 AI 顶上。
-3. **员工批 1（N1–N4）验收合并**：逐 SHA 排 gate；N3/N4 修完需按其文档同步改 test_quality/test_regime 夹具（防测试反向锁死 bug）。
-4. **待用户拍板的口径决策**（汇总后一次问）：Hermes P0-3（snapshot 是否版本化 vs 只支持当日）、N5（OCF/NI 门重建）、N6-②（腾讯口径标注方案）、N8（pe_ttm 落列 vs 删键）、U9 方案 A/B/C。
-5. **R2 假设/实验最小闭环**：H-001（MOS 预测力）→ 稳健性 → 结论冻结；注意 N7（mos_at_entry 前视）会降其覆盖率，先修 N7 再跑 H-001。
-6. **R3–R6** 照旧（S-BASE-v0 → 策略版本 CLI → 纸盘部署 → 归因 → 漂移 → LLM 助手 → 研究界面 → 最小闭环）。
-7. **B2 后续**：回填已终态（见状态段），重跑估值分位（close_raw）与回测（close_adj）的时机由 R2-3 需要驱动，不单列。
+1. **回填收尾验收**（nec 上续跑 4172 只至完成）：B3 价格侧全市场复核（负价/零价/重复行全量）+ 5 年深度覆盖验收（827 → 预计 4000+）+ close_adj 全表 NULL 归零确认。
+2. **U9 → F2 解链**（等用户拍板方案 A/B/C，倾向 A=EM 双拉+merge_price_model，T1 先修）。
+3. **员工批 1（N1–N4）验收合并**：逐 SHA 排 gate；N3/N4 需同步改 test_quality/test_regime 夹具。协作纪律不变：独立分支 + Issue #9 贴 SHA。
+4. **待拍板口径**（汇总一次问）：Hermes P0-3 / N5 / N6-② / N8 / U9 方案。
+5. **R2-3 H-001（MOS 预测力）**：N7 已修（覆盖率副作用已披露）→ lock 假设 → create 计划（新 CLI）→ run；再稳健性 → 结论冻结。
+6. **迁移遗留小项**：Pi→nec 单向 SSH（pi key 未入 nec authorized_keys，暂不需要；需要反向推送时再打通）；nec 上如需 duckdb 新版本特性，注意 CPU 基线上限（当前 1.4.2）。
+7. **R3–R6** 照旧（S-BASE-v0 → 策略版本 CLI → 纸盘部署 → 归因 → 漂移 → LLM 助手 → 研究界面 → 最小闭环）。
 
 ## 已知隐患
 
-- **T1 生产进行时（最高优）**：每日东财 35 次限流 → 腾讯回退 → `_fetch_kline_tx` 丢 adjust → 不复权价混入 `close` 列；10-27 日志满屏回退为证，今日 21 行样本未测出断层但不构成清白（10 月末分红季）。修=透传 adjust+单测；口径语义改动（raw 进 close_raw）需用户拍板。
-- **U9 → F2 断链**：增量 kline 行 `close_adj` 全 NULL（10-27: 21/21）→ market_state 每日快照若现在接线恒 invalid；F2 代码已撤回，等 U9。
+- **子项目独立版读 Pi 冻结母库（迁移耦合，最高优）**：`mother_dir()` 默认 `~/stock-dashboard` → 子项目（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地母库快照，**数据自 2026-10-28 起冻结不再更新**。候选方案：nec 定时只读快照回推 Pi / 等子项目风暴结束一起迁 / 接受回退本地模式——等用户与子项目整改后拍板。
+- **nec CPU 老（无 sse4.2/popcnt，不支持 x86-64-v2）**：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 被钉住；`pip install -U` 任何含二进制的依赖前先验证 import（新 numpy/duckdb wheel 直接 illegal instruction core dump）。
+- **T1 生产进行时（最高优）**：每日东财 35 次限流 → 腾讯回退 → `_fetch_kline_tx` 丢 adjust → 不复权价混入 `close` 列（10-27 日志满屏回退为证）。修=透传 adjust+单测；口径语义改动（raw 进 close_raw）需用户拍板。
+- **U9 → F2 断链**：增量 kline 行 `close_adj` 全 NULL → market_state 每日快照接线恒 invalid；F2 代码已撤回，等 U9 方案拍板（倾向 A）。
 - **close_adj/close_raw 的日常维护仍只靠手动跑 `fix_close_adj_nulls`**：Sina 回填是唯一三列补给，无调度（与日历同族"有回填无调度"，U9 方案落地时一并考虑）。
-- **P0-3 / N5 / N6-② / N8 / U9 方案未拍板**：不擅动，汇总在 Issue #9 与本文件"下一步 4"。
+- **MOS 存量值是旧前视口径算的**：N7 修后只补空位不重算（仓内"冻结"约定）；H-001 若用存量 mos_at_entry 分层，旧值含前视污染——跑之前先决定是否重算存量（256 行有 ret_60）。
+- **P0-3 / N5 / N6-② / N8 / U9 方案未拍板**：不擅动，汇总在 Issue #9 与 handoff"下一步 4"。
 - **员工/AI 协作纪律**：勿直接提交 `nightly/20261023`（部署分支，gate 窗口内提交会造成 push/gate 错位——已发生一次并在 push 前拦截）；独立分支 push + Issue #9 贴 SHA。gate 期间主 AI 同样只改工作区不 commit。
-- **3 只价格回填 partial 未清**（progress: partial 3）；kline 覆盖 959/5527（Issue #7 子项目判"watch 不行动"）。
+- **pi→nec SSH 单向不通**（pi 的 key 未入 nec authorized_keys）：当前部署流 Windows→nec、数据流 nec 拉取，不需要反向；如需 Pi 主动推 nec 再打通。
 - **`000001` 历史数据事故**（10 年前复权被误删仅恢复 243 行）与 **push2his 35 次限流**（既有）不变。
 - **上游 `total_shares` 当前值盖所有年份**：历史 PB 只在净利/EPS 可反推时可用，否则 NULL（既有）。
 
 ## 历史交接区（追加，不删）
+- 2026-10-28 生产迁移 Pi→nec（gzip 压缩流搬 2.5G 库；nec venv 老 CPU 适配 gate 1115 等价；Pi 服务 stop+disable、母库冻结副本留子项目；gate 867→873）
 - 2026-10-27 子项目价格尺度事故触发全仓彻查（双 AI 审计：主 AI F1–F7 + Hermes P0×3 修复、员工 N1–N22 工单入 Issue #9；日历未来段回填闭环 max is_open=2026-12-31；gate 856→867）
 - 2026-10-27 子项目数据契约 Issue #4–#8 落地（close_qfq/基准代码/交易日历/market_state 快照/覆盖度/契约文档；gate 849→856）
 - 2026-10-27 数据调阅 API（`/api/data/*` 供子项目调阅）+ R2-1 假设卡 CLI（gate 835→849）

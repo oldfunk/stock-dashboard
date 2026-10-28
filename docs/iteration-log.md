@@ -165,6 +165,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-28（生产迁移 Pi→nec + 全市场价格回填 9 成 + N7 修；gate 867 → 873）
+
+- **生产迁移 Pi → nec（用户提议并拍板"现在就迁"）**：Pi 连续自重启、954M 内存多项目过劳（回填期间 load 3.9/295M 可用）；nec x86_64 2C/5.8G/370G、idle 0.03。**nec 环境**：venv 依赖适配老 CPU——新 wheel 基线 x86-64-v2 在 nec 上 illegal instruction，实测 numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 可用（akshare 1.20.1 / fastapi / pytest 原生 OK）；gate 1115 passed（873 母 + 242 vendor）与 Pi 等价。**DB 迁移**：Pi 停两服务+回填+冻结 cron → `sqlite3 .backup` 一致快照（2.5G）→ nec 侧 gzip -1 压缩流拉取（双机 WiFi 直传 scp 688KB/s → 压缩后 2.0MB/s，3.3 倍）→ md5 + integrity_check + 行数比对。**部署面**：systemd 两单元重建（User=nec）、02:30 年报补充回填 cron 迁移、`deploy.local.md` DEPLOY_SSH pi→nec；nec 既有子项目旧 cron（/home/nec/paper-trading）按用户指示未动。**Pi 侧收尾**：服务 stop+disable（防开机自启复活抢端口写库）、母项目 cron 注释留痕、母库冻结副本保留——子项目独立版（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地冻结母库。过程坑：`pkill -f` 自杀（远端 shell 命令行含匹配串，[b] 正则技巧规避）；PowerShell 引号转义两次毁掉远端命令（改脚本文件管道）。
+- **全市场价格回填（数据丰富主线）**：`--all` 4,172 只（959→全市场，5 年深度 827→预计 4000+），Sina raw+hfq 三列口径 + 断点续传。Pi 上跑到 3,757/4,172（13s/只）迁移中断，nec 续跑收尾。基线（中断时 Pi 实测）：kline 10,075,767 行 / financial 143,500 / instrument 5,527 / snapshot 5,527 / progress 11,457。
+- **回填容锁**（`165be68`）：产线事故实录——回填运行中另一进程并发写库 → upsert 撞锁 → except 处理器里 mark_backfill_done 再撞锁且未捕获 → 15h 长任务死于 77/4249。修：`_mark()` 包裹进度标记，瞬时锁失败只告警（断点续跑会重试未标记 code，宁可重抓一只不可全灭）。
+- **R2-2 实验计划 CLI**（`7ab7e62`，R2 完成 2/6）：create 预注册（planned 状态绑定假设/快照/指标/分域/费用，同 ID 拒覆盖、fail-fast 校验）/ view / list；单测 6 项。
+- **N7 修**（`1b826c9`）：`_mos_at_entry` 去掉 `report_date` 兜底——披露日缺失时退化成「会计年末即已知」，最长前视 4 个月，P0-9 研究以 MOS 分层恰用前视变量分组。照抄仓内既有口径（valuation_percentile，同族前视 10-25 已修过）：无 notice_date 年报不参与，取 notice_date <= 分析日 最大者，全不可用返回 None。补 NULL 分支 + 跳无日期年报用例；副作用如实披露：MOS 覆盖率下降（正确性代价，非回归）。
+- **契约列存量归零（产线实跑）**：close_qfq 21→0（锚点日恒等式 close_qfq=close_raw=close，不臆造）；close_adj 21→0（Sina 重抓三列补齐）；instrument_id/market 7,089→0（6 位代码推导）。235.5 万行（迁移前）全表干净。
+- **B3 中期（只读体检）**：负价/零价/重复行=0；异常值（gm -5678%、roe -266264%）抽样定性为真实财务事件（营收崩塌/资不抵债）非数据错误，不改数据；历史股本 4,759 只多年同值（已知 total_shares 上游盖值，A6 已用净利/EPS 反推绕过）。价格侧全市场复核等回填完成后做。
+- **门禁**：867 → **873**（母，下限同步升）；vendor 242 不变。
+
 ### 2026-10-27（子项目价格尺度事故触发全仓彻查：主 AI F1–F7 + Hermes P0×3；员工 AI N1–N22 工单）
 
 - **背景**：子项目 paper-trading 发生价格尺度事故（v0.7.5 报告：执行侧 `price_map` 取母库 `close_adj` 后复权 175.96 买入 000792 @175.97，真实价 22.24，虚付 ~15,372，已冲正 + 加偏离门禁）。母方按"事故同类"彻查近一周全部交付。
