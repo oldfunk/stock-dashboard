@@ -15,7 +15,8 @@
 - **已合入（nightly/20261023 → 待 deploy 合 main）**：`165be68` 回填容锁（进度标记不再杀死 15h 长任务）；`7ab7e62` R2-2 实验计划 CLI（R2 完成 2/6）；`1b826c9` **N7 修**（`_mos_at_entry` 去 report_date 兜底，前视最长 4 个月；fail-closed，MOS 覆盖率下降是正确性代价）。
 - **契约列存量归零（迁移前产线实跑）**：close_qfq 21→0 / close_adj 21→0（Sina 重抓）/ instrument_id+market 7,089→0。
 - **B3 中期（只读）**：负价/零价/重复行=0；gm -5678% / roe -266264% 等异常值定性为真实财务事件；历史股本 4,759 只多年同值（已知上游盖值）。
-- **服务（nec）**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 与纸盘面板 http:200；回填续跑中。
+- **服务（nec）**：`stock-dashboard.service` / `paper-trading-parent.service` active，`/` 与纸盘面板 http:200。
+- **10-28 日流水线补跑进行中（18:01 起，setsid 独立进程）**：迁移停机窗（Pi 15:27 停 / nec 16:24 起）漏掉当日 15:30 收盘选股（screening 最新仍 20261027），手动 `src.main run` 补跑；财务历史阶段=常规日任务（792 初筛候选中多数报告期>60 天——Q3 披露窗口 4786/5206 全市场超期的放大效应），~2.7 只/分 → 预计 **21:00-22:00 完成**产出今日筛选结果。若中断重跑同命令即可；价格面不受影响（backfill 已含今日 K，upsert COALESCE 保 `close_adj`，已核源码确认）。
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
