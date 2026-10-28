@@ -132,13 +132,16 @@ def summarize_news(analyzer, items: list, code_name: dict, digest_date: str,
         logger.warning("[新闻摘要] 判定调用失败: %s", e)
 
     # ② 正文（纯 Markdown，模型自由写）
+    # 注：判定列表为空时用「- （无）」兜底，该 or 必须只包住列表本身——
+    # 若留在整串拼接外层，`+` 优先于 `or` 会让左侧（开头提示词，必非空）短路掉
+    # 后面的【新闻条目】与写作要求，日报就变成凭一行 overall 自由发挥（审计 N2）。
     body_prompt = (
         "下面是某组 A 股标的的舆情判定结果与新闻条目。请写一篇当日舆情日报。" + NL +
         NL +
         "【判定汇总】" + NL +
         (overall or "（无）") + NL +
-        NL + NL.join(["- [" + j["sentiment"] + "] " + j["brief"] for j in judgments])
-        or "- （无）" + NL + NL +
+        (NL.join(["- [" + j["sentiment"] + "] " + j["brief"] for j in judgments])
+         or "- （无）") + NL + NL +
         "【新闻条目】" + NL + block + NL + NL +
         "要求（Markdown）：" + NL +
         "1. 开头一句话给当日市场情绪结论" + NL +

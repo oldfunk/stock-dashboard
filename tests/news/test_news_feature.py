@@ -195,6 +195,41 @@ def test_summarize_news_ok():
     assert "舆情日报" in az.prompts[1]
 
 
+def test_body_prompt_carries_news_block_and_requirements():
+    """回归 N2：正文调用必须真带上【新闻条目】与写作要求。
+
+    旧写法 `... + NL.join(...) or "- （无）" + ...` 因 `+` 优先于 `or`，
+    左侧（开头提示词，恒非空）短路掉右半段——新闻条目与 5 条要求从未送达，
+    日报只凭一行 overall 自由发挥。旧用例断言的「舆情日报」在截断后依然成立，
+    所以盲区一直没被发现。
+    """
+    from src.analyzer.news_summarizer import summarize_news
+    payload = json.dumps({
+        "judgments": [{"id": 1, "sentiment": "利好", "brief": "订单落地"}],
+        "overall": "整体偏正面",
+    })
+    az = _FakeAnalyzer(payload, "# 正文")
+    summarize_news(az, _items(), {"300390": "天华新能"}, "2026-10-19")
+    body_prompt = az.prompts[1]
+    assert "【判定汇总】" in body_prompt and "整体偏正面" in body_prompt
+    assert "- [利好] 订单落地" in body_prompt
+    assert "【新闻条目】" in body_prompt
+    assert "公司获海外大单" in body_prompt, "标题只出现在新闻条目块，能证明块真送到了"
+    assert "要求（Markdown）" in body_prompt
+    assert "5. 日期写 2026-10-19" in body_prompt, "要求清单末尾也必须完整"
+
+
+def test_body_prompt_falls_back_when_no_judgments():
+    """判定全部失败时：列表处退回「- （无）」，但新闻条目与要求仍要送达。"""
+    from src.analyzer.news_summarizer import summarize_news
+    az = _FakeAnalyzer("完全不是JSON", "# 正文")
+    res = summarize_news(az, _items(), {}, "2026-10-19")
+    assert res["judgments"] == []
+    body_prompt = az.prompts[1]
+    assert "- （无）" in body_prompt
+    assert "【新闻条目】" in body_prompt and "行业综述" in body_prompt
+
+
 def test_summarize_rejects_unknown_ids_and_bad_sentiment():
     from src.analyzer.news_summarizer import summarize_news
     payload = json.dumps({
