@@ -60,20 +60,27 @@ class RegimeResult:
 
 
 def default_rules() -> list[RegimeRule]:
-    """透明规则集（阈值可审计）。"""
+    """透明规则集（阈值可审计）。
+
+    阈值量纲必须与 `market_state.default_fields()` 里该字段的单位声明一致：
+    声明 "%" 的字段（占比、分位）生产者输出 0–100，阈值也写 0–100；
+    声明 "x" 的字段（比值、小数波动率）阈值写小数。历史上 trend/valuation
+    两条按小数写阈值，而生产者输出百分数，导致「0.6% 的股票站上 MA60」
+    即判看多、regime 长期 risk_on（审计 N4）。
+    """
     return [
         RegimeRule("trend", "breadth", "pct_above_ma60",
-                   risk_on_threshold=0.6, risk_off_threshold=0.4,
+                   risk_on_threshold=60.0, risk_off_threshold=40.0,
                    direction="higher_better",
                    description="站上 60 日均线占比 >=60% 看多，<=40% 看空"),
         RegimeRule("valuation", "valuation", "pe_percentile_5y",
-                   risk_on_threshold=0.2, risk_off_threshold=0.8,
+                   risk_on_threshold=20.0, risk_off_threshold=80.0,
                    direction="lower_better",
                    description="PE 5 年分位 <=20% 看多，>=80% 看空"),
         RegimeRule("volatility", "liquidity", "volatility_20d",
                    risk_on_threshold=0.15, risk_off_threshold=0.30,
                    direction="lower_better",
-                   description="20 日波动率 <=15% 看多，>=30% 看空"),
+                   description="20 日波动率 <=15% 看多，>=30% 看空（字段单位 x，阈值为小数）"),
         RegimeRule("style", "breadth", "value_vs_growth",
                    risk_on_threshold=0.02, risk_off_threshold=-0.02,
                    direction="higher_better",
