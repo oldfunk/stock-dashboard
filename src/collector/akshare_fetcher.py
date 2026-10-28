@@ -1024,16 +1024,18 @@ def rebuild_financial_summaries(stocks: list[dict]):
                 ocf_trend = -1
 
         # 股本稀释率
+        # shares_vals_* 跟随 reports 的 report_date **升序**（见上方 reports.sort），
+        # 故 [0] 是最早、[-1] 是最新；取反会让扩股算出负数、回购算出正数，门规 9 双向失效
         share_dilution_5y = None
         if len(shares_vals_5) >= 2:
-            earliest = shares_vals_5[-1]
-            latest = shares_vals_5[0]
+            earliest = shares_vals_5[0]
+            latest = shares_vals_5[-1]
             if earliest and earliest > 0:
                 share_dilution_5y = round((latest - earliest) / earliest * 100, 2)
         share_dilution_10y = None
         if len(shares_vals_10) >= 2:
-            earliest = shares_vals_10[-1]
-            latest = shares_vals_10[0]
+            earliest = shares_vals_10[0]
+            latest = shares_vals_10[-1]
             if earliest and earliest > 0:
                 share_dilution_10y = round((latest - earliest) / earliest * 100, 2)
 
