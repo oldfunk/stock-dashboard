@@ -30,13 +30,21 @@ def now_cn() -> datetime:
     return datetime.now()
 
 
-def safe_float(val) -> Optional[float]:
-    """安全浮点转换：过滤 None/NaN/Inf，保留两位小数"""
+def safe_float(val, nd: Optional[int] = 2) -> Optional[float]:
+    """安全浮点转换：过滤 None/NaN/Inf。
+
+    `nd` = 保留的小数位，默认 2（股价/金额类够用，A 股最小报价单位 0.01 元）；
+    **每股指标（EPS、每股现金流）必须传 `nd=None` 取全精度**——EPS 常在 0.0x 量级，
+    四舍五入到 2 位的相对误差可达两位数百分比，而下游要用 `净利润 / EPS` 反推
+    总股本、算 PE（审计 N22）。
+    """
     if val is None:
         return None
     try:
         v = float(val)
-        return None if (math.isnan(v) or math.isinf(v)) else round(v, 2)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v if nd is None else round(v, nd)
     except (ValueError, TypeError):
         return None
 

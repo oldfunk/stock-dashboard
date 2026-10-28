@@ -251,6 +251,25 @@ class TestSafeFloat:
         assert safe_float('1.235') == 1.24
         assert safe_float('1.236') == 1.24
 
+    def test_nd_none_keeps_full_precision(self):
+        """审计 N22：每股指标必须能取全精度。
+
+        EPS 常在 0.0x 量级，两位小数截断（0.0456 → 0.05）会让下游
+        `净利润 / EPS` 反推的总股本偏 ~10%，并连带 PE/PB。
+        """
+        assert safe_float('0.0456', nd=None) == 0.0456
+        assert safe_float(1.23456789, nd=None) == 1.23456789
+        assert safe_float('0.001', nd=None) == 0.001
+
+    def test_nd_other_digits_and_default_unchanged(self):
+        assert safe_float('1.23456', nd=4) == 1.2346
+        assert safe_float('1.23456') == 1.23       # 默认仍是 2 位（股价/金额口径）
+        # None/NaN/Inf 的过滤与 nd 无关
+        assert safe_float(None, nd=None) is None
+        assert safe_float('nan', nd=None) is None
+        assert safe_float('inf', nd=None) is None
+        assert safe_float('abc', nd=None) is None
+
 
 class TestParseCirculatingCap:
     """parse_tc_line 取 parts[44] 流通市值（V1b 数据源）。"""
@@ -387,6 +406,54 @@ class TestC2EastmoneyFallback:
         assert s['roe'] == 32.5
         assert s['gross_margin'] == 91.2
 
+    # ── 每股字段全精度（2026-10-28，审计 N22）───────────────────────────
+
+    def test_eastmoney_direct_per_share_full_precision(self):
+        """C2 兜底路径：EPSJB/BPS 是每股元值，不得被截成 2 位；百分比字段口径不变。"""
+        from unittest.mock import patch
+        import src.collector.akshare_fetcher as fetcher
+
+        payload = {"result": {"data": [{
+            "ROEJQ": 32.567, "XSMLL": 91.2, "EPSJB": 0.0456, "BPS": 1.2345,
+            "TOTALOPERATEREVETZ": 15.0, "PARENTNETPROFITTZ": 20.0,
+            "PARENTNETPROFIT": 800e8,
+        }]}}
+        with patch.object(fetcher, 'curl_get', return_value=json.dumps(payload)):
+            result = fetcher._fetch_eastmoney_direct('600519')
+        assert result['eps'] == 0.0456, "EPS 截断会污染 net_profit/eps 反推的股本"
+        assert result['bvps'] == 1.2345
+        assert result['roe'] == 32.57, "百分比类字段仍走默认 2 位"
+
+    def test_enrich_per_share_fields_full_precision(self):
+        """主路径 stock_yjbb_em：每股收益/每股净资产/每股经营现金流全精度。"""
+        import src.collector.akshare_fetcher as fetcher
+        from unittest.mock import MagicMock, patch
+        import pandas as pd
+
+        mock_ak = MagicMock()
+        mock_ak.stock_yjbb_em.return_value = pd.DataFrame([{
+            '股票代码': '600519',
+            '净资产收益率': 32.567,
+            '销售毛利率': 91.2,
+            '每股经营现金流量': 0.0123,
+            '每股收益': 0.0456,
+            '营业总收入-同比增长': 15.0,
+            '净利润-同比增长': 20.0,
+            '净利润-净利润': 800e8,
+            '每股净资产': 1.2345,
+        }])
+        mock_ak.stock_financial_abstract_ths.return_value = pd.DataFrame([{
+            '报告期': '2025-12-31', '销售净利率': '52.3%', '资产负债率': '20.1%',
+        }])
+        with patch.dict('sys.modules', {'akshare': mock_ak}):
+            with patch.object(fetcher, 'ak', mock_ak, create=True):
+                result = fetcher.enrich_financial_data(
+                    [{'code': '600519', 'name': '茅台'}])
+        s = result[0]
+        assert s['eps'] == 0.0456
+        assert s['bvps'] == 1.2345
+        assert s['ocf_per_share'] == 0.0123
+        assert s['roe'] == 32.57, "ROE 是百分数，2 位口径保持不变"
 
 
 class TestC2_5EastmoneyRoicFcf:

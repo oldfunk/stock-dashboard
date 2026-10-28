@@ -229,8 +229,8 @@ def _computed_fallback(codes: list[dict]) -> list[dict]:
                 if df is not None and len(df) > 1000:
                     for _, r in df.iterrows():
                         code = str(r.get('股票代码', '')).strip().zfill(6)
-                        eps = safe_float(r.get('每股收益'))
-                        bvps = safe_float(r.get('每股净资产'))
+                        eps = safe_float(r.get('每股收益'), nd=None)
+                        bvps = safe_float(r.get('每股净资产'), nd=None)
                         np_ = safe_float(r.get('净利润-净利润'))
                         if code not in fin_map and eps is not None:
                             fin_map[code] = {'eps': eps, 'bvps': bvps, 'net_profit': np_}
@@ -418,8 +418,8 @@ def _fetch_eastmoney_direct(code: str) -> dict | None:
         return {
             'roe': safe_float(r.get('ROEJQ')),
             'gross_margin': safe_float(r.get('XSMLL')),
-            'eps': safe_float(r.get('EPSJB')),
-            'bvps': safe_float(r.get('BPS')),
+            'eps': safe_float(r.get('EPSJB'), nd=None),
+            'bvps': safe_float(r.get('BPS'), nd=None),
             'revenue_growth': safe_float(r.get('TOTALOPERATEREVETZ')),
             'profit_growth': safe_float(r.get('PARENTNETPROFITTZ')),
             'net_profit': safe_float(r.get('PARENTNETPROFIT')),
@@ -604,12 +604,12 @@ def enrich_financial_data(stocks: list[dict], batch_size=200) -> list[dict]:
                 continue
             s['roe'] = safe_float(r.get('净资产收益率'))
             s['gross_margin'] = safe_float(r.get('销售毛利率'))
-            s['ocf_per_share'] = safe_float(r.get('每股经营现金流量'))
-            s['eps'] = safe_float(r.get('每股收益'))
+            s['ocf_per_share'] = safe_float(r.get('每股经营现金流量'), nd=None)
+            s['eps'] = safe_float(r.get('每股收益'), nd=None)
             s['revenue_growth'] = safe_float(r.get('营业总收入-同比增长'))
             s['profit_growth'] = safe_float(r.get('净利润-同比增长'))
             s['net_profit'] = safe_float(r.get('净利润-净利润'))
-            s['bvps'] = safe_float(r.get('每股净资产'))
+            s['bvps'] = safe_float(r.get('每股净资产'), nd=None)
 
         with_roe = sum(1 for s in stocks if s.get('roe') is not None)
         logger.info(f"[财务] stock_yjbb_em: {with_roe}/{total} 有ROE")
@@ -756,9 +756,9 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         'roe': _parse_pct(row.get('净资产收益率')),
                         'gross_margin': _parse_pct(row.get('销售毛利率')),
                         'net_margin': _parse_pct(row.get('销售净利率')),
-                        'ocf_per_share': safe_float(row.get('每股经营现金流')),
+                        'ocf_per_share': safe_float(row.get('每股经营现金流'), nd=None),
                         'debt_ratio': _parse_pct(row.get('资产负债率')),
-                        'eps': safe_float(row.get('基本每股收益')),
+                        'eps': safe_float(row.get('基本每股收益'), nd=None),
                         'net_profit': safe_float(row.get('净利润')),
                     }
                     # 解析净利润（可能带"亿"）
