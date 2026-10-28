@@ -402,8 +402,14 @@ def _score_breakdown(stock: dict) -> dict:
                     'contribution': round(roe_s * weights['roe'], 2)}
 
     # 2) PE（安全边际 — 越低越高分）
-    pe = stock.get('pe') or 20
-    if pe <= 5:
+    pe_raw = stock.get('pe')
+    pe = pe_raw or 20    # 缺失、或 0 这种无意义倍数，退回中性 20 档（沿用旧行为）
+    if pe_raw is not None and pe_raw < 0:
+        # 亏损股在行情源里是负 PE。负 PE 不是「极度便宜」，是没有意义的安全边际，
+        # 而旧写法一路掉进 `pe <= 5` 拿满分 100（fail-open，审计 N21 同族）→ 判 0 分。
+        # 「估值维度要不要支持不参与打分」属打分策略，留给主 AI/用户拍板，本次不擅自改。
+        pe_s = 0
+    elif pe <= 5:
         pe_s = 100
     elif pe <= 8:
         pe_s = 90
@@ -436,7 +442,12 @@ def _score_breakdown(stock: dict) -> dict:
                        'contribution': round(g_s * weights['growth'], 2)}
 
     # 4) 负债率（财务稳健）
-    debt = stock.get('debt_ratio') or 100
+    # 0% 负债是合法测量值、且本应是财务健康维度的最优档，不能用 `or` 把它
+    # 与"缺失"混为一谈按最差处理（审计 N21，同文件 collector 侧「0 是有效值」不变量）；
+    # 真缺失（None）才退回 100——无从判断稳健性时不给分，fail-closed。
+    debt = stock.get('debt_ratio')
+    if debt is None:
+        debt = 100
     if debt <= 20:
         d_s = 100
     elif debt <= 35:

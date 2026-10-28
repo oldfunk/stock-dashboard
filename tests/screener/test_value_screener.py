@@ -308,6 +308,33 @@ class TestCalculateMoatScore:
         score = _calculate_moat_score(s)
         assert score >= 15
 
+    # ── 合法 0 与 fail-open（2026-10-28，审计 N21）──────────────────────
+
+    def test_zero_debt_scores_best_not_worst(self):
+        """0% 负债是合法测量值：旧写法 `or 100` 把它当缺失，判成最差档 0 分。"""
+        bd = _score_breakdown(self._base_stock(debt_ratio=0.0))
+        assert bd['debt']['raw'] == 0.0
+        assert bd['debt']['sub'] == 100
+
+    def test_missing_debt_still_fails_closed(self):
+        """真缺失仍按无从判断处理：不给分（保持旧行为，别把修复变成放行）。"""
+        bd = _score_breakdown(self._base_stock(debt_ratio=None))
+        assert bd['debt']['raw'] == 100
+        assert bd['debt']['sub'] == 0
+
+    def test_negative_pe_no_longer_scores_max(self):
+        """负 PE（亏损股）不是「便宜到满分」：旧写法掉进 `pe <= 5` 给 100 分。"""
+        bd = _score_breakdown(self._base_stock(pe=-3.0))
+        assert bd['pe']['raw'] == -3.0
+        assert bd['pe']['sub'] == 0
+        # 对照：真实低 PE 仍是高分，本改动不影响正常口径
+        assert _score_breakdown(self._base_stock(pe=4.0))['pe']['sub'] == 100
+
+    def test_zero_or_missing_pe_stays_neutral(self):
+        """PE 为 0/缺失退回中性 20 档（35 分）——本次不改这条既有行为。"""
+        assert _score_breakdown(self._base_stock(pe=0.0))['pe']['sub'] == 35
+        assert _score_breakdown(self._base_stock(pe=None))['pe']['sub'] == 35
+
     def test_score_gm_tiers(self):
         s = self._base_stock(gross_margin=65.0, gross_margin_5y_avg=0)
         score = _calculate_moat_score(s)

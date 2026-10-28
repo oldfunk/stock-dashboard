@@ -1058,6 +1058,7 @@ def rebuild_financial_summaries(stocks: list[dict] | None):
         roic_5 = _avg(roic_vals_5)
         nm_10 = _avg(nm_vals_10)
         intcov_10 = _avg(intcov_vals_10)
+        roic_10 = _avg(roic_vals_10)
 
         fs_dao.save(code, {
             # 5年字段（不变；0 是有效值，只有 None 才写 NULL）
@@ -1084,7 +1085,7 @@ def rebuild_financial_summaries(stocks: list[dict] | None):
             'fcf_positive_years_10': fcf_positive_years_10,
             'roe_volatility': round(roe_volatility, 2) if roe_volatility is not None else None,
             'roe_improvement': roe_improvement,
-            'roic_10y_avg': round(_avg(roic_vals_10), 2) if _avg(roic_vals_10) else None,
+            'roic_10y_avg': round(roic_10, 2) if roic_10 is not None else None,
 
             'data_years': f"{reports[0]['report_date'][:4]}-{reports[-1]['report_date'][:4]}" if reports else None,
         })

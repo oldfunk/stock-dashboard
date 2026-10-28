@@ -1,7 +1,7 @@
-"""财务汇总语义回归（2026-10-26，审计 D1；2026-10-28 追加 N1、N20）。
+"""财务汇总语义回归（2026-10-26，审计 D1；2026-10-28 追加 N1、N20、N21）。
 
 - 5y/10y ROE 任一侧缺失时，roe_improvement 必须为 None，不能拿 0 相减
-- 0.0 是有效值（0% ROE），不能因 truthiness 被写成 NULL
+- 0.0 是有效值（0% ROE / 0% ROIC），不能因 truthiness 被写成 NULL
 - 股本稀释率方向必须正确：扩股为正、回购为负（门规 9 依赖此符号）
 - 重建范围必须跟随 stocks 入参：钉选 1 只不得重写全市场
 """
@@ -51,11 +51,14 @@ def test_zero_roe_is_preserved_not_null(db):
 # reports 按 report_date 升序，故 5y 窗口 = 最近 5 份年报，[-1] 是最新。
 # 旧实现把 earliest/latest 取反：扩股算出负数（门规 9 放行）、回购算出正数（被误杀）。
 
-def _seed_shares(code, shares_by_year):
-    rows = [{"stock_code": code, "report_date": f"{year}-12-31",
-              "total_shares": float(shares)}
-            for year, shares in enumerate(shares_by_year, start=2016)]
+def _seed_field(code, field, values):
+    rows = [{"stock_code": code, "report_date": f"{2016 + i}-12-31", field: v}
+            for i, v in enumerate(values)]
     db_mod.FinancialHistoryDAO().batch_save(rows)
+
+
+def _seed_shares(code, shares_by_year):
+    _seed_field(code, "total_shares", [float(s) for s in shares_by_year])
 
 
 def test_share_issuance_is_positive_dilution(db):
@@ -148,3 +151,18 @@ def test_get_annual_by_codes_crosses_chunk_boundary(db):
     # 未请求的代码不得混进来
     assert db_mod.FinancialHistoryDAO().get_annual_by_codes(
         [codes[0]]) [0]["stock_code"] == codes[0]
+
+
+def test_zero_roic_is_preserved_not_null(db):
+    """回归 N21：10 年均 ROIC 恰为 0 是合法测量值。
+
+    旧写法 `if _avg(roic_vals_10)` 走 truthiness，0.0 被判成"没有"写 NULL，
+    与本文件 test_zero_roe_is_preserved_not_null 主张的不变量（0 是有效值）冲突；
+    5y 那行用的是 `is not None`，10y 是同族的漏修。
+    """
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_field("601988", "roic", [0.0] * 10)
+    rebuild_financial_summaries([{"code": "601988"}])
+    s = db_mod.FinancialSummaryDAO().get("601988")
+    assert s["roic_10y_avg"] == 0.0
+    assert s["roic_5y_avg"] == 0.0
