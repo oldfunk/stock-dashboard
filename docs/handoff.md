@@ -9,7 +9,8 @@
   - DB：Pi `sqlite3 .backup` 一致快照（2.5G）→ nec gzip 压缩流拉取（688KB/s → 2.0MB/s）→ md5/integrity/行数比对（kline 10,075,767 / financial 143,500 / instrument 5,527 / snapshot 5,527 / progress 11,457）。
   - nec venv 适配老 CPU：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2（新 wheel x86-64-v2 基线 illegal instruction）；**gate 1115 passed 与 Pi 等价**。
   - systemd 两单元重建（User=nec）、02:30 年报 cron 迁移、`deploy.local.md` 已改 nec；nec 既有子项目旧 cron（/home/nec/paper-trading）按用户指示未动。
-  - Pi 收尾：两服务 stop+disable、母项目 cron 注释留痕、**母库冻结副本保留**——子项目独立版（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地母库。
+  - Pi 收尾：两服务 stop+disable、cron 整表清除（`crontab -r` 后 `no crontab for pi`）、无任何监听——**Pi 全面退役，不再投入生产**；母库冻结副本仅存档。
+  - **子项目同日迁移完成（用户主导，双方约定互不干扰）**：独立版落 nec（:8080 + 5 条 cron → `/home/nec/paper-trading`），`mother_dir()` 默认路径解析到 nec 合并树 = **活母库，冻结库耦合解除**。
 - **全市场价格回填（数据丰富主线）**：4,172 只（原覆盖 959/5527=17.4%，5 年深度仅 827 只），Sina raw+hfq 三列口径 + 断点续传；Pi 上跑到 3,757/4,172 随迁移中断，nec 续跑收尾（`--all` 自动跳已完成）。
 - **已合入（nightly/20261023 → 待 deploy 合 main）**：`165be68` 回填容锁（进度标记不再杀死 15h 长任务）；`7ab7e62` R2-2 实验计划 CLI（R2 完成 2/6）；`1b826c9` **N7 修**（`_mos_at_entry` 去 report_date 兜底，前视最长 4 个月；fail-closed，MOS 覆盖率下降是正确性代价）。
 - **契约列存量归零（迁移前产线实跑）**：close_qfq 21→0 / close_adj 21→0（Sina 重抓）/ instrument_id+market 7,089→0。
@@ -28,7 +29,7 @@
 
 ## 已知隐患
 
-- **子项目独立版读 Pi 冻结母库（迁移耦合，最高优）**：`mother_dir()` 默认 `~/stock-dashboard` → 子项目（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地母库快照，**数据自 2026-10-28 起冻结不再更新**。候选方案：nec 定时只读快照回推 Pi / 等子项目风暴结束一起迁 / 接受回退本地模式——等用户与子项目整改后拍板。
+- **nec 承载双项目（原迁移耦合已解除）**：子项目独立版（:8080 + 5 cron）与母项目同机，`mother_dir()` 默认解析到合并树活库；两项目互不干扰为用户约定——母方改动（重启/迁移/deploy）前须确认不碰 :8080 与 `/home/nec/paper-trading`。Pi 冻结副本仅存档，无读写方。
 - **nec CPU 老（无 sse4.2/popcnt，不支持 x86-64-v2）**：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 被钉住；`pip install -U` 任何含二进制的依赖前先验证 import（新 numpy/duckdb wheel 直接 illegal instruction core dump）。
 - **T1 生产进行时（最高优）**：每日东财 35 次限流 → 腾讯回退 → `_fetch_kline_tx` 丢 adjust → 不复权价混入 `close` 列（10-27 日志满屏回退为证）。修=透传 adjust+单测；口径语义改动（raw 进 close_raw）需用户拍板。
 - **U9 → F2 断链**：增量 kline 行 `close_adj` 全 NULL → market_state 每日快照接线恒 invalid；F2 代码已撤回，等 U9 方案拍板（倾向 A）。
