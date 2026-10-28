@@ -38,6 +38,13 @@ DEFAULTS = {
     "max_age_days": 3,
 }
 
+# 超额收益异常值阈值，单位**百分点**——`analysis_outcome.excess_20` 落库的就是
+# 「个股 - 基准（百分点）」（见 models/database.py 建表注释），不是小数比例。
+# outliers_max 默认 0（零容忍闸门），所以这里必须是「结构性不可能值」而非
+# 「可疑值」：20 日窗口内超额超 100 个百分点在 A 股不可能出现。
+# 若日后想加"异常但合法"的筛查，那属于阈值策略调整，需另行拍板，不改这里。
+EXCESS_OUTLIER_PP = 100.0
+
 
 @dataclass
 class QualityResult:
@@ -164,8 +171,8 @@ def assess_analysis_outcome(trade_date: str,
             "AND excess_20 IS NOT NULL", (trade_date,)).fetchone()["n"]
         outliers = conn.execute(
             "SELECT COUNT(*) AS n FROM analysis_outcome "
-            "WHERE analysis_date <= ? AND ABS(excess_20) > 1.0",
-            (trade_date,)).fetchone()["n"]
+            "WHERE analysis_date <= ? AND ABS(excess_20) > ?",
+            (trade_date, EXCESS_OUTLIER_PP)).fetchone()["n"]
         # 注：analysis_outcome 无可判定的 PIT 违规（entry_date 本就是 T+1），
         # 不编造检查项；pit_violations 恒为 0，由其它数据集（如特征）承担 PIT 检查。
     coverage = round(filled / total, 4)

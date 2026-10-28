@@ -69,18 +69,29 @@ def test_stale_is_warn(db):
     assert any("陈旧" in r for r in result.reasons)
 
 
-def test_assess_analysis_outcome_records_quality(db):
-    from src.models.database import db_conn
+def _seed_outcome(ret_20, excess_20, analysis_id=1, analysis_date="2026-07-08"):
+    """写一行 analysis_outcome。
 
-    from src.research.quality import (
-        assess_analysis_outcome, assess_dataset, evaluate,
-    )
+    单位口径（审计 N3）：``ret_20`` / ``excess_20`` 落库是**百分点**，不是小数比例——
+    与 ``models/database.py`` 建表注释「个股 - 基准（百分点）」一致，
+    也与 tests/analyzer/test_outcomes.py 的真实量级（6.0 / -2.0 / 5.0）一致。
+    """
+    from src.models.database import db_conn
     with db_conn() as conn:
         conn.execute(
             "INSERT INTO analysis_outcome (analysis_id, benchmark_code, stock_code, "
             "analysis_date, entry_date, ret_20, excess_20, updated_at) "
-            "VALUES (1, 'sh000300', '600519', '2026-07-08', '2026-07-09', "
-            "0.01, 0.005, '2026-10-01')")
+            "VALUES (?, 'sh000300', '600519', ?, '2026-07-09', ?, ?, '2026-10-01')",
+            (analysis_id, analysis_date, ret_20, excess_20))
+
+
+def test_assess_analysis_outcome_records_quality(db):
+    from src.research.quality import (
+        assess_analysis_outcome, assess_dataset, evaluate,
+    )
+    # 20 日超额 +5.0 个百分点：真实常见量级，不得算异常值
+    # （旧实现按小数比判 `> 1.0`，这一行会被误判为异常 → 实验恒 invalid）
+    _seed_outcome(6.0, 5.0)
     stats = assess_analysis_outcome("2026-09-30")
     assert stats["coverage"] == 1.0
     assert stats["outliers"] == 0
@@ -90,17 +101,22 @@ def test_assess_analysis_outcome_records_quality(db):
 
 
 def test_assess_detects_outlier(db):
-    from src.models.database import db_conn
-
     from src.research.quality import assess_analysis_outcome
-    with db_conn() as conn:
-        conn.execute(
-            "INSERT INTO analysis_outcome (analysis_id, benchmark_code, stock_code, "
-            "analysis_date, entry_date, ret_20, excess_20, updated_at) "
-            "VALUES (1, 'sh000300', '600519', '2026-07-08', '2026-07-09', "
-            "2.0, 1.5, '2026-10-01')")
+    # 20 日超额 400 个百分点：结构性不可能，才是异常值
+    _seed_outcome(400.0, 400.0)
     stats = assess_analysis_outcome("2026-09-30")
     assert stats["outliers"] == 1
+
+
+def test_outlier_threshold_boundary_is_percentage_points(db):
+    """阈值 100 个百分点为界：等于不算，超出才算；负向同口径。"""
+    from src.research.quality import assess_analysis_outcome
+    _seed_outcome(105.0, 100.0, analysis_id=1)    # 恰在阈值上 -> 不算
+    _seed_outcome(5.0, -150.0, analysis_id=2)     # 负向超阈值 -> 算
+    _seed_outcome(3.0, 100.5, analysis_id=3)      # 正向超阈值 -> 算
+    stats = assess_analysis_outcome("2026-09-30")
+    assert stats["outliers"] == 2
+    assert stats["coverage"] == 1.0
 
 
 def test_run_experiment_auto_assesses_outcome_quality(db):
