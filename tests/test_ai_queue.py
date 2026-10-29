@@ -117,6 +117,88 @@ class TestQueue:
         assert order == [["600519", "000858"]]
 
 
+    def test_execute_exception_keeps_thread_alive(self, db, monkeypatch):
+        """回归 N12：任务异常不得让队列线程静默死亡。
+
+        旧实现 `_execute` 的 import 与取字段在 try 之外、`_loop` 对 `_execute`
+        无兜底 → 一次异常就杀掉 "ai-queue" daemon 线程：`_loop` 只挑 queued，
+        队列从此不再工作，而任务状态停在 running，面板与 pipeline_progress
+        一起显示"永远在跑"。
+        """
+        from src import ai_queue
+        seen = []
+
+        def _batch(stocks, run_id, interval_seconds=60, max_workers=2,
+                   extra_instruction=None, on_progress=None):
+            seen.append(run_id)
+            if run_id == "boom":
+                raise RuntimeError("模拟分析炸线程")
+            return len(stocks), 0
+        monkeypatch.setattr(ai_queue, "analyze_batch_parallel", _batch)
+
+        q = ai_queue.AnalysisQueue()
+        t_bad = q.submit("坏任务", "all", [{"code": "600519"}], "boom", 0, 2)
+        t_ok = q.submit("好任务", "all", [{"code": "000858"}], "ok", 0, 2)
+        states = {}
+        for _ in range(200):
+            states = {t["id"]: t for t in q.snapshot()}
+            if (states.get(t_bad, {}).get("status") == "failed"
+                    and states.get(t_ok, {}).get("status") == "done"):
+                break
+            time.sleep(0.05)
+
+        assert states[t_bad]["status"] == "failed", "异常任务必须落 failed，不能永停 running"
+        assert states[t_bad]["error"].startswith("RuntimeError"), "死因要留在任务上"
+        assert states[t_ok]["status"] == "done", "线程必须活着并继续消费后续任务"
+        assert q._thread.is_alive()
+        assert seen == ["boom", "ok"]
+
+    def test_exception_escaping_execute_keeps_thread_alive(self, db, monkeypatch):
+        """N12 的主症状：异常发生在 `_execute` 的 try **之前**，只能由 `_loop` 兜住。
+
+        旧实现把 import 与取字段放在 try 外，且 `_loop` 没有兜底 → 这类异常
+        直接穿出线程。这里造一个缺 `run_id` 的任务：`_execute` 第一行就 KeyError，
+        修复后必须由 `_loop` 落成 failed、记死因、线程继续存活。
+        """
+        from src import ai_queue
+        q = ai_queue.AnalysisQueue(auto_start=False)
+        tid = "qbad"
+        with q._lock:
+            q._tasks[tid] = {"id": tid, "name": "坏任务", "mode": "all",
+                             "stocks": [], "interval": 0, "max_workers": 1,
+                             "extra": None, "total": 0, "done": 0, "failed": 0,
+                             "status": "queued", "created_at": ""}
+        q.start()
+        states = {}
+        for _ in range(100):
+            states = {t["id"]: t for t in q.snapshot()}
+            if states.get(tid, {}).get("status") == "failed":
+                break
+            time.sleep(0.05)
+        assert states[tid]["status"] == "failed", \
+            "try 之外抛异常时，任务不能永远停在 running"
+        assert "KeyError" in states[tid]["error"]
+        assert q._thread.is_alive()
+
+    def test_mark_failed_survives_progress_write_error(self, db, monkeypatch):
+        """状态回写本身失败时只记日志，不外抛——否则又回到静默死亡。"""
+        from src import ai_queue
+        from src.models import database as db_mod
+
+        class _BadProgress:
+            def update(self, *a, **k):
+                raise RuntimeError("database is locked")
+        monkeypatch.setattr(db_mod, "PipelineProgressDAO", _BadProgress)
+
+        q = ai_queue.AnalysisQueue(auto_start=False)
+        task = {"id": "q1", "name": "整轮", "run_id": "r1", "status": "running"}
+        q._mark_failed(task, ValueError("boom"))          # 不得外抛
+        assert task["status"] == "failed"
+        assert "boom" in task["error"]
+
+        q._mark_failed(None, ValueError("无任务"))         # 空任务也不得炸
+
+
 class TestPolishMarket:
     def test_polish_passthrough(self, monkeypatch):
         from src import ai_queue

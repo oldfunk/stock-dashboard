@@ -134,26 +134,55 @@ class AnalysisQueue:
             return False
 
     def _loop(self):
+        # 整个循环体包在 try 里：任何一次取任务/执行出错都只让**该任务**落 failed，
+        # 线程本身继续消费。旧实现里 `_execute` 抛到循环外（import、task 字段读取
+        # 都在 try 之外）会让 "ai-queue" daemon 线程静默死亡：`_loop` 只挑 queued，
+        # 队列从此不再工作，而任务状态还停在 running——面板与 pipeline_progress
+        # 一起显示"永远在跑"（审计 N12）。
         while True:
             task = None
-            with self._lock:
-                for tid in sorted(self._tasks):
-                    if self._tasks[tid]["status"] == "queued":
-                        task = self._tasks[tid]
-                        task["status"] = "running"
-                        break
+            try:
+                with self._lock:
+                    for tid in sorted(self._tasks):
+                        if self._tasks[tid]["status"] == "queued":
+                            task = self._tasks[tid]
+                            task["status"] = "running"
+                            break
+                    if task is None:
+                        self._event.clear()
                 if task is None:
-                    self._event.clear()
-            if task is None:
-                self._event.wait(timeout=2.0)
-                continue
-            self._execute(task)
+                    self._event.wait(timeout=2.0)
+                    continue
+                self._execute(task)
+            except Exception as e:
+                logger.exception("[AI队列] 工作线程一次轮次异常（线程继续存活）: %s", e)
+                self._mark_failed(task, e)
+
+    def _mark_failed(self, task, exc):
+        """把任务判失败并尽力回写进度；回写本身失败也只记日志，不外抛。"""
+        if task is None:
+            return
+        with self._lock:
+            task["status"] = "failed"
+            task["error"] = f"{type(exc).__name__}: {exc}"
+        try:
+            from src.models.database import PipelineProgressDAO
+            PipelineProgressDAO().update(
+                task.get("run_id"), 'done',
+                f'[{task.get("name")}] 分析异常：{exc}')
+        except Exception as e2:
+            logger.warning("[AI队列] 任务 %s 进度回写失败：%s",
+                           task.get("id"), e2)
 
     def _execute(self, task):
-        from src.models.database import RunLogDAO, PipelineProgressDAO
-        run_id, stocks, total = task["run_id"], task["stocks"], task["total"]
-        progress = PipelineProgressDAO()
+        run_id = task["run_id"]
+        progress = None
         try:
+            # import 与取字段必须在 try 内：旧实现放在 try 之前，一次 ImportError /
+            # KeyError 就绕过所有兜底直接杀线程（N12 的主症状）
+            from src.models.database import RunLogDAO, PipelineProgressDAO
+            stocks, total = task["stocks"], task["total"]
+            progress = PipelineProgressDAO()
             self._enrich(stocks)
             workers = self._workers_now()
             progress.init_run(run_id, 'analyzing',
@@ -177,12 +206,9 @@ class AnalysisQueue:
                             ai_done=ok, ai_failed=failed)
         except Exception as e:
             logger.warning("[AI队列] 任务 %s 异常：%s", task["id"], e)
-            with self._lock:
-                task["status"] = "failed"
-            try:
-                progress.update(run_id, 'done', f'[{task["name"]}] 分析异常：{e}')
-            except Exception:
-                pass
+            # 统一走 _mark_failed：进度回写用新建 DAO，使得 progress 尚未构造成功
+            # （例如 PipelineProgressDAO() 自己就抛）时也能把状态落下去
+            self._mark_failed(task, e)
 
     @staticmethod
     def _enrich(stocks):
