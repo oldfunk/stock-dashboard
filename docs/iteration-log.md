@@ -165,6 +165,18 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-10-29（员工批1-4 全量验收合入 + 用户拍板四决策落地：U9-A/N5①/N8①/P0-3b；gate 875 → 907）
+
+- **用户拍板**：U9=方案 A、P0-3=b（快照只支持当日）、N5=①（修活）、N8=①（落列）；分工=母方主干 + Qoder 独立工作树。
+- **员工批1（N1–N4）+ 批2（N19–N22）+ 批3（N17+N18）验收合入（9 commit，`f12f097`）**：逐 commit 审 src diff 393 行全过——N2 括号修法、N3"结构性不可能值"阈值框架、N4 连带修 valuation 量纲、N19 ON CONFLICT SET 清单精确、N20 顺手修 roic_10y 真值陷阱、N21 负 PE→0 分（裁定认可，不做权重归一）、N22 nd 参数 9 点位接线、N17 None 化（research_result 实查 0 行无存量）、N18 fail-fast。nec gate **907**（+31 全为员工新用例），主服务重启健康。**N6-②=T1 同日闭环**（`9c545d1`）。
+- **B3 复核（员工批4）裁定**：①21 行缺 raw/adj=U9 洞实锤（当日 coverage 距质量门阈值仅 0.002）——`fix_close_adj_nulls` 已补（nec 重抓 21 只全成，两列 NULL 归零）；②5 年深度 3,841（母方口径：窗口内行数≥250，估值分位用）vs 4,334（员工按派工帖字面：总行数≥250 且存在窗口前行）——判据语义差，两数并存带标签；③单调性检查诚实失败（舍入噪声量级），正面结论 adj/close 比值每票恒定；④qfq 锚点漂移记 backlog（周期性全量重写，随周六分红窗口）。
+- **U9 方案 A（`34a17ad`）**：`fetch_kline_data` qfq 口径改双拉（''+hfq）经 `merge_price_model` 合流三列（模块上移 `src/collector/price_model.py`）；东财失败回退腾讯双拉（T1 透传形参被 ''/hfq 真实使用）；两源全败返回 []（宁可不增量不写单列残行）；非 qfq 调用保持单拉。**U9→F2 解链完成**，F2（market_state 每日调度）待重提。
+- **N5①（`adcb85c`）**：OCF/NI 精确门修活——`ocf_5y_sum`/`net_profit_5y_sum` 同窗配对（共同年份<3 两侧同时 NULL；不用股本反推），门改同窗累计比、缺失回退代理路径。待生产全量 rebuild 后出真实理由。
+- **N8①（`e9c4312`）**：腾讯 `parts[52]`=TTM 市盈率实证落列（nec 实测 600519 动态 20.79/TTM 19.01/静态 20.56）；`stock_snapshot` 加 `pe_ttm`；门改 `_num('pe_ttm','pe')`。存量行随次日快照刷新补齐。
+- **假门清理（`0ad6ba5`）**：regime 移除 value_vs_growth 死规则（无生产者字段）；test_regime 量纲对齐用例收紧为"规则字段必须已注册"硬防线；architecture.md 注明 P0-3=b。
+- **协作事件**：共用工作树干扰（母方 deploy 中途被切分支）→ 新规程：Qoder 自建 worktree（Issue #9 已发指引），主工作树回归母方；验收部署在隔离克隆执行。
+- **门禁**：875 → **907**（母，下限同步升）；vendor 242。
+
 ### 2026-10-28（生产迁移 Pi→nec + 全市场价格回填 9 成 + N7 修；gate 867 → 873）
 
 - **生产迁移 Pi → nec（用户提议并拍板"现在就迁"）**：Pi 连续自重启、954M 内存多项目过劳（回填期间 load 3.9/295M 可用）；nec x86_64 2C/5.8G/370G、idle 0.03。**nec 环境**：venv 依赖适配老 CPU——新 wheel 基线 x86-64-v2 在 nec 上 illegal instruction，实测 numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 可用（akshare 1.20.1 / fastapi / pytest 原生 OK）；gate 1115 passed（873 母 + 242 vendor）与 Pi 等价。**DB 迁移**：Pi 停两服务+回填+冻结 cron → `sqlite3 .backup` 一致快照（2.5G）→ nec 侧 gzip -1 压缩流拉取（双机 WiFi 直传 scp 688KB/s → 压缩后 2.0MB/s，3.3 倍）→ md5 + integrity_check + 行数比对。**部署面**：systemd 两单元重建（User=nec）、02:30 年报补充回填 cron 迁移、`deploy.local.md` DEPLOY_SSH pi→nec；nec 既有子项目旧 cron（/home/nec/paper-trading）按用户指示未动。**Pi 侧收尾**：服务 stop+disable（防开机自启复活抢端口写库）、母项目 cron 注释留痕、母库冻结副本保留——子项目独立版（:8080 + 4 条 cron，风暴中不动）继续读 Pi 本地冻结母库。过程坑：`pkill -f` 自杀（远端 shell 命令行含匹配串，[b] 正则技巧规避）；PowerShell 引号转义两次毁掉远端命令（改脚本文件管道）。
