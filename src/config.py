@@ -9,6 +9,7 @@
 """
 
 from pathlib import Path
+import copy
 import yaml
 import threading
 import time
@@ -67,7 +68,10 @@ def load_config() -> dict:
             _config_mtime = current_mtime
             print(f"[Config] 热重载配置: {_CONFIG_PATH}")
 
-        return dict(_config_cache)  # 返回副本，防止外部修改
+        # 深拷贝：`dict(...)` 只复制顶层，嵌套段（ai/screening/outcomes…）
+        # 仍与进程级缓存同一对象——调度器 / AI 队列 / Web 三条线程共用同一份配置，
+        # 任一处就地改嵌套值会串改全局（审计 N15，注释承诺的是浅拷贝做不到的事）
+        return copy.deepcopy(_config_cache)
 
 
 def start_config_watcher(interval: float = 2.0) -> None:
