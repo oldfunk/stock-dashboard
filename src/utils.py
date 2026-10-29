@@ -10,6 +10,7 @@
 
 import logging
 import math
+import re
 import subprocess
 from datetime import datetime
 from typing import Optional
@@ -28,6 +29,40 @@ def now_cn() -> datetime:
     if _CN_TZ is not None:
         return datetime.now(_CN_TZ).replace(tzinfo=None)
     return datetime.now()
+
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# 列类型允许 `TEXT` / `REAL` / `VARCHAR(20)` / `INTEGER NOT NULL` 这类形态，
+# 但绝不允许引号、分号、注释符——它是 SQL 里第三个字面量插值位
+_COLTYPE_RE = re.compile(r"^[A-Za-z0-9_]+(\([0-9]+\))?( [A-Za-z0-9_]+)*$")
+
+
+def safe_identifier(name, what: str = "标识符") -> str:
+    """白名单校验 SQL 标识符（表名/列名）。
+
+    这些位置历史上用 f-string 直接拼进 SQL（审计 P1-2）。当前全部调用方传的都是
+    代码内常量，所以今天不是可利用漏洞；但 `PRAGMA table_info({table})` 一类
+    一旦有外部来源（例如 manifest / 配置文件里的表名）就是注入入口。
+    白名单优于转义：标识符不能加引号包起来安全化（PRAGMA 不接受带引号的表名）。
+    """
+    if not isinstance(name, str) or not _IDENT_RE.match(name):
+        raise ValueError(f"非法{what}: {name!r}")
+    return name
+
+
+def safe_col_type(col_type: str) -> str:
+    """白名单校验列类型串（同 P1-2，防 ALTER TABLE 拼接位被塞进分号/注释）。"""
+    if not isinstance(col_type, str) or not _COLTYPE_RE.match(col_type.strip()):
+        raise ValueError(f"非法列类型: {col_type!r}")
+    return col_type.strip()
+
+
+def sql_quote(value) -> str:
+    """SQL 单引号字面量转义（DuckDB/SQLite 同规则：' → ''）。
+
+    用于必须把路径当字面量塞进语句的场合，如 read_parquet('...')。
+    """
+    return str(value).replace("'", "''")
 
 
 def safe_float(val, nd: Optional[int] = 2) -> Optional[float]:

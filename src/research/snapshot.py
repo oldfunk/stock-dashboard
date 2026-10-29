@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Iterable
 
 from src.models import database as _db
+from src.utils import safe_identifier
 from src.models.database import db_conn, init_database, now_cn
 
 DATE_COLUMNS = (
@@ -98,6 +99,9 @@ def config_hash() -> str | None:
 
 
 def table_stat(table: str) -> TableStat:
+    """表级指纹。表名进 SQL 前先过白名单（审计 P1-2）——它会流进
+    `PRAGMA table_info(...)` / `SELECT COUNT(*) FROM ...` 两处 f-string。"""
+    table = safe_identifier(table, "表名")
     with db_conn() as conn:
         cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
         if not cols:

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterable
 
 from src.models import database as _db
+from src.utils import safe_identifier, sql_quote
 from src.models.database import now_cn
 
 try:
@@ -56,6 +57,11 @@ def _sha256(path: Path) -> str:
 
 def _posix(path: Path) -> str:
     return path.as_posix()
+
+
+def _lit(path: Path) -> str:
+    """路径作 SQL 字面量用（审计 P1-2：表名/路径来自 manifest 文件，可被篡改）。"""
+    return sql_quote(_posix(path))
 
 
 @dataclass
@@ -102,12 +108,13 @@ def _connect_source(con, db_path: str) -> None:
 
 def _max_date(con, dest: Path) -> str | None:
     columns = [d[0] for d in
-               con.execute(f"SELECT * FROM read_parquet('{_posix(dest)}') LIMIT 0")
+               con.execute(f"SELECT * FROM read_parquet('{_lit(dest)}') LIMIT 0")
                .description]
     for column in ("trade_date", "report_date", "snapshot_date", "date"):
         if column in columns:
             row = con.execute(
-                f"SELECT MAX({column}) FROM read_parquet('{_posix(dest)}')"
+                f"SELECT MAX({safe_identifier(column, '列名')}) "
+                f"FROM read_parquet('{_lit(dest)}')"
             ).fetchone()
             return row[0]
     return None
@@ -125,10 +132,10 @@ def export_snapshot(snapshot_id: str, tables: Iterable[str]) -> ParquetManifest:
         for table in dict.fromkeys(tables):
             dest = out_dir / f"{table}.parquet"
             con.execute(
-                f"COPY (SELECT * FROM _src.{table}) TO '{_posix(dest)}' "
-                f"(FORMAT PARQUET)")
+                f"COPY (SELECT * FROM _src.{safe_identifier(table, '表名')}) "
+                f"TO '{_lit(dest)}' (FORMAT PARQUET)")
             rows = con.execute(
-                f"SELECT COUNT(*) FROM read_parquet('{_posix(dest)}')"
+                f"SELECT COUNT(*) FROM read_parquet('{_lit(dest)}')"
             ).fetchone()[0]
             stats[table] = ParquetTable(
                 table=table, rows=int(rows), max_date=_max_date(con, dest),
@@ -171,8 +178,8 @@ class SnapshotReader:
         self._con = duckdb.connect()
         for table in self.manifest.tables:
             self._con.execute(
-                f"CREATE VIEW {table} AS SELECT * FROM "
-                f"read_parquet('{_posix(self.dir / (table + '.parquet'))}')")
+                f"CREATE VIEW {safe_identifier(table, '表名')} AS SELECT * FROM "
+                f"read_parquet('{_lit(self.dir / (table + '.parquet'))}')")
 
     def query(self, sql: str, params: tuple | list | None = None) -> list[dict]:
         cursor = self._con.execute(sql, params or [])

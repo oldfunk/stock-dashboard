@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from src.utils import now_cn
+from src.utils import now_cn, safe_col_type, safe_identifier
 
 # 非 6 位数字代码不推导 instrument_id/market（"不臆造"是既定语义，见
 # tests/models/test_kline_daily.py:104）。但"静默"会让上游漏规范化这件事
@@ -578,7 +578,16 @@ def init_database():
 
 
 def _add_column_if_not_exists(conn, table: str, column: str, col_type: str):
-    """安全添加列：检查是否存在，不存在则 ALTER TABLE ADD"""
+    """安全添加列：检查是否存在，不存在则 ALTER TABLE ADD。
+
+    三个插值位（表名/列名/类型）全部先过白名单（审计 P1-2）。本函数只在
+    `init_database()` 里被代码内常量调用，今天不构成漏洞；但它是 f-string 拼
+    SQL 的样板位——一旦有人把外部来源传进来，必须当场炸，而不是静默拼出
+    一条 `; DROP TABLE`。
+    """
+    safe_identifier(table, "表名")
+    safe_identifier(column, "列名")
+    col_type = safe_col_type(col_type)
     cursor = conn.execute(f"PRAGMA table_info({table})")
     existing = {row[1] for row in cursor.fetchall()}
     if column not in existing:
