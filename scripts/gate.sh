@@ -83,9 +83,16 @@ _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
     "${cmd[@]}" > "$outfile" 2>&1
     rc=$?
     out=$(cat "$outfile")
-    # 保留完整输出，失败时可追溯（2026-10-25：偶发 ERROR 因只留 tail -3 无法定位）
-    GATE_LOG="${TMPDIR:-/tmp}/gate-${label}-last.log"
-    cp "$outfile" "$GATE_LOG" 2>/dev/null || true
+    # 保留完整输出，失败时可追溯（2026-10-25：偶发 ERROR 因只留 tail -3 无法定位）。
+    # 文件名带 PID（批6-a N14b）：两条 gate 同机并发时（母方验收 + 员工自检）固定名
+    # `-last.log` 会被后写的那条覆掉，前一条的取证现场直接消失。
+    # 只在失败时保留、成功即删除——nec 的 /tmp 是 478M tmpfs，不能靠堆日志。
+    GATE_LOG="${TMPDIR:-/tmp}/gate-${label}-$$-last.log"
+    if [ "$rc" != "0" ]; then
+        cp "$outfile" "$GATE_LOG" 2>/dev/null || true
+    else
+        rm -f "$GATE_LOG" 2>/dev/null || true
+    fi
     if [ "$rc" = "124" ]; then
         echo "!!! $label 套件超时（>${limit}s，timeout 终止）——视为失败"
     fi
