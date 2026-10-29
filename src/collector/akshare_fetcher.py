@@ -15,6 +15,7 @@ import os
 import re
 import threading
 from collections import defaultdict
+from datetime import datetime
 
 import akshare as ak
 import pandas as pd
@@ -1530,3 +1531,201 @@ def fetch_sector_map(timeout: int = 420) -> dict:
     if cached:
         logger.warning(f"[S8] 使用磁盘行业缓存 {len(cached)} 只兜底")
     return cached
+
+
+# ── S8-b 申万一级行业全量映射（批9-b，2026-10-29） ──────────────────────────
+#
+# 派工单点名的是 `stock_board_industry_name_em` / `stock_board_industry_cons_em`
+# （东财行业板块）。在 nec 上立前实测（命令与输出见 Issue #9 交付帖）：
+# - 该 akshare 封装在产线**直接失败**：`ConnectionError: ('Connection aborted.',
+#   RemoteDisconnected('Remote end closed connection without response'))`，重跑仍失败；
+#   手拼同样参数直连第一次 HTTP 200、随后同样断连——它不能作为"每天都能批量打"的源。
+# - 而且它对到的"行业板块"有 **496 个、且分层**（名字带 Ⅱ/Ⅲ 后缀，如"航天装备Ⅱ/Ⅲ"），
+#   逐板块取成分 = 496 次 HTTP，正好撞在 N10 修的"东财快速请求被限流"上。
+# 因此本件改打**申万官方一级行业**（`sw_index_first_info` + `index_component_sw`）：
+# 31 次请求、一次拿到全市场划分、行业名就是业界通用口径——既满足派工单的字面
+# （"申万行业"），也比东财板块更满足目的（全量映射）。新浪 49 板块按派工单要求
+# 继续作回退源。
+
+SECTOR_SW_CACHE_FILE = os.path.join(
+    os.path.dirname(__file__), '../../data/cache/sector_map_sw.json')
+SW_SECTOR_MAP_MIN = 3000        # 一级行业应覆盖全市场；低于此判上游异常，不覆盖缓存
+SW_CACHE_MAX_AGE_DAYS = 30      # 行业分类变动很慢：缓存够新就不打网络
+SW_PAGE_SLEEP = 0.3             # 31 次请求之间的节奏（申万镜像无并发优待）
+
+
+def _load_map_cache(path: str) -> tuple[dict, str | None]:
+    """读行业映射缓存 -> (map, fetched 日期)；任何异常 -> ({}, None)。"""
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        m = data.get('map')
+        fetched = data.get('fetched')
+        mapping = ({str(k): str(v) for k, v in m.items()}
+                   if isinstance(m, dict) else {})
+        return mapping, (str(fetched) if fetched else None)
+    except Exception:
+        return {}, None
+
+
+def _save_map_cache(path: str, sector_map: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump({'fetched': now_cn().strftime('%Y-%m-%d'), 'map': sector_map},
+                      f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"[S8-b] 行业映射缓存写入失败: {e}")
+
+
+def _cache_age_ok(fetched: str | None, max_age_days: int) -> bool:
+    """缓存日期可解析且不晚于 `max_age_days` 前 -> True；坏日期一律 False（重新拉）。"""
+    if not fetched:
+        return False
+    try:
+        age = (now_cn().date() - datetime.strptime(fetched, '%Y-%m-%d').date()).days
+    except (TypeError, ValueError):
+        return False
+    return 0 <= age <= max_age_days
+
+
+def _guarded(impl, timeout: int) -> tuple[object, Exception | None]:
+    """在 daemon 线程里跑 `impl`，最多等 `timeout` 秒 -> (结果或 None, 异常或 None)。
+
+    上游镜像偶发不返回，必须有护栏才不会挂住调用方；超时后线程留在后台自生自灭
+    （daemon），与 `fetch_sector_map` 的既有做法一致。这里**没有**顺手把新浪那条
+    也改造过来：它在日管道路径上跑着，我不在扩图源这一件里改已上线路径的行为。
+    """
+    box: dict = {}
+
+    def _run():
+        try:
+            box['result'] = impl()
+        except Exception as e:            # noqa: BLE001 - 异常要交给调用方判定
+            box['error'] = e
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        return None, TimeoutError(f"取数超时 {timeout}s（线程留在后台，不影响本进程）")
+    if 'error' in box:
+        return None, box['error']
+    return box.get('result'), None
+
+
+def _sw_first_industries() -> list[tuple[str, str]]:
+    """申万一级行业 [(行业代码, 行业名称)]，如 ('801010', '农林牧渔')。"""
+    df = ak.sw_index_first_info()
+    cols = list(df.columns)
+    code_col = next((c for c in cols if '行业代码' in str(c)), cols[0])
+    name_col = next((c for c in cols if '行业名称' in str(c)), cols[1])
+    out: list[tuple[str, str]] = []
+    for rec in df.to_dict('records'):
+        code = str(rec.get(code_col) or '').split('.')[0].strip()
+        name = str(rec.get(name_col) or '').strip()
+        if code and name:
+            out.append((code, name))
+    return out
+
+
+def _sw_industry_members(code: str) -> list[str]:
+    """某一级行业的成分股 6 位代码（申万成分表按 `证券代码` 给）。"""
+    df = ak.index_component_sw(symbol=code)
+    cols = list(df.columns)
+    col = next((c for c in cols if '证券代码' in str(c) or str(c) == '代码'), None)
+    if col is None:
+        return []
+    codes = []
+    for value in df[col].tolist():
+        text = str(value or '').strip()
+        if re.fullmatch(r'\d{1,6}', text):     # 纯数字才认；None/空会被 zfill 成 '000000'
+            codes.append(text.zfill(6))
+    return codes
+
+
+def _fetch_sw_sector_map_impl(sleep: float = SW_PAGE_SLEEP) -> tuple[dict, dict]:
+    """逐行业取成分，建 {6位代码: 一级行业名} 全量映射。
+
+    返回 `(map, stats)`。stats 带 `industries / per_industry / errors / duplicates`
+    ——**部分失败要看得见**：某个行业成分拉不到只影响那些票留在 NULL，不静默当作
+    "这只票没有行业"；行业划分本应互斥，若同一 code 落进两个行业则计数并保留先归入
+    的那个（不静默改写，改写会让最后一次成功覆盖前一次，口径随抓取顺序漂移）。
+    """
+    industries = _sw_first_industries()
+    out: dict = {}
+    per: dict = {}
+    errors: list = []
+    duplicates = 0
+    for code, name in industries:
+        try:
+            members = _sw_industry_members(code)
+        except Exception as e:            # noqa: BLE001 - 单行业失败只记不抛
+            logger.warning(f"[S8-b] 申万行业「{name}」({code}) 成分拉取失败，跳过: {e}")
+            errors.append([name, f"{type(e).__name__}: {str(e)[:120]}"])
+            time.sleep(sleep)
+            continue
+        if not members:
+            logger.warning(f"[S8-b] 申万行业「{name}」({code}) 成分为空，跳过")
+            errors.append([name, "空成分"])
+        for member in members:
+            if member in out:
+                duplicates += 1
+                continue
+            out[member] = name
+        per[name] = len(members)
+        time.sleep(sleep)
+    return out, {'industries': len(industries), 'per_industry': per,
+                 'errors': errors, 'duplicates': duplicates}
+
+
+def fetch_sw_sector_map(timeout: int = 900, force: bool = False,
+                        sleep: float = SW_PAGE_SLEEP,
+                        max_age_days: int = SW_CACHE_MAX_AGE_DAYS) -> dict:
+    """S8-b 申万一级行业映射。返回 `{'map', 'source', 'stats'}`。
+
+    兜底链与 S8 同构：**缓存够新直接用**（31 次慢请求不该天天打）-> 实时拉取
+    （daemon 超时护栏）-> 上次成功的磁盘缓存 -> `{}`。
+    实时结果规模低于 `SW_SECTOR_MAP_MIN` 时照常返回，但**不覆盖缓存**（防半截映射
+    被后续运行当成"最新全量"）。
+    """
+    if not force:
+        cached, fetched = _load_map_cache(SECTOR_SW_CACHE_FILE)
+        if cached and _cache_age_ok(fetched, max_age_days):
+            return {'map': cached, 'source': 'cache',
+                    'stats': {'fetched': fetched, 'cached': True}}
+    result, stats, error = {}, {}, None
+    payload, err = _guarded(lambda: _fetch_sw_sector_map_impl(sleep=sleep), timeout)
+    if err is not None:
+        error = err
+    elif payload:
+        result, stats = payload
+    if error is None and result:
+        if len(result) >= SW_SECTOR_MAP_MIN:
+            _save_map_cache(SECTOR_SW_CACHE_FILE, result)
+        else:
+            logger.warning(
+                f"[S8-b] 申万映射仅 {len(result)} 只（<{SW_SECTOR_MAP_MIN}），不覆盖缓存")
+        return {'map': result, 'source': 'live', 'stats': stats, 'error': None}
+    if error is None:
+        error = ValueError('申万行业镜像返回空映射')
+    logger.warning(f"[S8-b] 申万行业实时拉取失败（{error}），尝试磁盘缓存兜底")
+    cached, fetched = _load_map_cache(SECTOR_SW_CACHE_FILE)
+    if cached:
+        logger.warning(f"[S8-b] 使用申万行业磁盘缓存 {len(cached)} 只兜底")
+    return {'map': cached, 'source': 'cache' if cached else 'empty',
+            'stats': dict(stats, fetched=fetched),
+            'error': f"{type(error).__name__}: {error}"}
+
+
+def merge_sector_maps(primary: dict, fallback: dict) -> dict:
+    """主映射优先、回退映射只补主映射没有的 code；两边都没有的 code **不进结果**。
+
+    "不进结果"是关键：`backfill_sectors` 只碰 map 里的 code，所以未收录的新股
+    保持 NULL——映射缺失不等于"无行业"，不拿猜值去覆盖空值。
+    """
+    out = dict(primary or {})
+    for code, name in (fallback or {}).items():
+        if code and name:
+            out.setdefault(code, name)
+    return out

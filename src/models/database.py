@@ -732,6 +732,17 @@ class StockSnapshotDAO:
             row = conn.execute("SELECT COUNT(*) as cnt FROM stock_snapshot").fetchone()
         return row['cnt']
 
+    def codes_missing_sector(self) -> list[str]:
+        """sector 为空/空白的 code（升序）——行业扩图的目标集。
+
+        dry-run 靠它预测"这次能补多少只"，实跑后再查一次即得预测 vs 实际。
+        """
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT code FROM stock_snapshot "
+                "WHERE sector IS NULL OR TRIM(sector) = '' ORDER BY code").fetchall()
+        return [r['code'] for r in rows]
+
     def get_by_code(self, code: str) -> Optional[dict]:
         """按股票代码查最新快照（单条）"""
         with db_conn() as conn:
