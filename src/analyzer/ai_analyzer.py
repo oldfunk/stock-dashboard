@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from typing import Optional, Callable
 
@@ -646,6 +647,9 @@ class FreeModelPool:
         self._dead_ttl = 1800             # 黑名单 TTL（秒），到期自动复活
         self._current = 0                 # 轮换游标
         self._last_refresh = 0.0
+        # 池内状态跨线程共享（分析 worker 最多 5 个 + 复盘/新闻线程），
+        # RLock 允许 _pick_alive -> score 这类内部再入（批6-d N16）
+        self._lock = threading.RLock()
         self._refresh_interval = 1800     # 30 秒刷新（首次会立即刷新）
         self._logger = logging.getLogger("FreeModelPool")
 
@@ -653,23 +657,40 @@ class FreeModelPool:
 
     def acquire(self) -> Optional[str]:
         """性能加权获取：存活模型中得分最高者；同分按游标轮转防饿死。
-        全部在黑名单则清空并强制刷新后重试。"""
-        now = time.time()
-        if now - self._last_refresh > self._refresh_interval or not self._pool:
+        全部在黑名单则清空并强制刷新后重试。
+
+        `_refresh()` 一律在锁外调用：它最长阻塞 15s 等 HTTP，持锁会把
+        所有 worker 的 record_result 一起卡住。
+        """
+        if self._needs_refresh(time.time()):
             self._refresh()
-        model = self._pick_alive(now)
+        model = self._pick()
         if model is not None:
             return model
         self._logger.warning("[FreeModelPool] 全部模型在黑名单内，清空并强制刷新")
-        self._dead.clear()
-        self._current = 0
+        self._reset_dead()
         self._refresh()
-        return self._pick_alive(time.time())
+        return self._pick()
+
+    def _needs_refresh(self, now: float) -> bool:
+        with self._lock:
+            return (now - self._last_refresh > self._refresh_interval
+                    or not self._pool)
+
+    def _pick(self) -> Optional[str]:
+        with self._lock:
+            return self._pick_alive()
+
+    def _reset_dead(self) -> None:
+        with self._lock:
+            self._dead.clear()
+            self._current = 0
 
     def _alive(self, now=None) -> list[str]:
-        """当前存活模型（黑名单未到期者）。"""
+        """当前存活模型（黑名单未到期者）。调用方须已持锁（RLock 再入安全）。"""
         now = now if now is not None else time.time()
-        return [m for m in self._pool if self._dead.get(m, 0.0) <= now]
+        with self._lock:
+            return [m for m in self._pool if self._dead.get(m, 0.0) <= now]
 
     def _pick_alive(self, now=None) -> Optional[str]:
         """存活者中选最高分；同分按游标起点先见者胜（同分轮转）。"""
@@ -693,8 +714,10 @@ class FreeModelPool:
     def mark_dead(self, model: str, ttl: float = None):
         """标记模型不可用至 now+ttl（默认 30 分钟），到期自动复活。
         反复触发会延长禁闭。"""
-        self._dead[model] = time.time() + (ttl if ttl is not None else self._dead_ttl)
-        alive = len(self._alive())
+        with self._lock:
+            self._dead[model] = (time.time() +
+                                 (ttl if ttl is not None else self._dead_ttl))
+            alive = len(self._alive())
         self._logger.warning(
             "[FreeModelPool] %s 下线 %.0f 分钟（剩余 %d 个候选）",
             model, (ttl if ttl is not None else self._dead_ttl) / 60, alive)
@@ -702,23 +725,26 @@ class FreeModelPool:
     def record_result(self, model: str, ok: bool, latency: float = None,
                       timeout: bool = False):
         """记录一次调用结局：成功（含延迟）/失败/超时，用于性能加权。"""
-        st = self._stats.setdefault(
-            model, {'ok': 0, 'fail': 0, 'timeouts': 0, 'lat_sum': 0.0, 'n_lat': 0})
-        if ok:
-            st['ok'] += 1
-            if latency is not None and latency >= 0:
-                st['lat_sum'] += float(latency)
-                st['n_lat'] += 1
-        else:
-            st['fail'] += 1
-        if timeout:
-            st['timeouts'] += 1
+        with self._lock:
+            st = self._stats.setdefault(
+                model, {'ok': 0, 'fail': 0, 'timeouts': 0, 'lat_sum': 0.0, 'n_lat': 0})
+        with self._lock:
+            if ok:
+                st['ok'] += 1
+                if latency is not None and latency >= 0:
+                    st['lat_sum'] += float(latency)
+                    st['n_lat'] += 1
+            else:
+                st['fail'] += 1
+            if timeout:
+                st['timeouts'] += 1
 
     def score(self, model: str) -> float:
         """总分：0.65 能力分（解析有效率+逻辑自洽率）+ 0.35 可用分 − 超时/延迟惩罚。
         无记录的新模型两项都是中性先验，保证试用机会。能力优先：秒回但废话的
         模型排在慢但高质量的后面；熔断（死亡名单）仍独立生效。"""
-        st = self._stats.get(model)
+        with self._lock:
+            st = self._stats.get(model)
         if st is None:
             avail, timeout_pen, lat_pen = 0.5, 0.0, 0.0
         else:
@@ -733,25 +759,29 @@ class FreeModelPool:
 
     def record_quality(self, model: str, ok: bool):
         """能力战绩：解析成功且逻辑自洽记 ok，反之记 fail。"""
-        q = self._quality.setdefault(model, {'ok': 0, 'fail': 0})
-        q['ok' if ok else 'fail'] += 1
+        with self._lock:
+            q = self._quality.setdefault(model, {'ok': 0, 'fail': 0})
+            q['ok' if ok else 'fail'] += 1
 
     def quality_score(self, model: str) -> float:
         """能力分：Laplace 平滑的能力成功率；无记录返回中性 0.5。"""
-        q = self._quality.get(model)
+        with self._lock:
+            q = self._quality.get(model)
         if q is None:
             return 0.5
         return (q['ok'] + 2) / (q['ok'] + q['fail'] + 4)
 
     def current_pool(self) -> list[str]:
         """返回当前模型池快照（用于日志/展示）。"""
-        return list(self._pool)
+        with self._lock:
+            return list(self._pool)
 
     # ── 内部 ──
 
     def _refresh(self):
-        """从 API 查询可用免费模型。"""
-        self._last_refresh = time.time()
+        """从 API 查询可用免费模型（HTTP 不在锁内，见 acquire 注释）。"""
+        with self._lock:
+            self._last_refresh = time.time()
         try:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
@@ -786,13 +816,14 @@ class FreeModelPool:
                     ordered.append(m)
                     seen.add(m)
 
-            self._pool = ordered
-            # 剪掉已不在池中的黑名单条目（过期条目由 _alive 自然忽略）
-            self._dead = {m: t for m, t in self._dead.items() if m in self._pool}
-            self._current = 0
+            with self._lock:      # 只锁"发布"这一步，不锁上面的网络与解析
+                self._pool = ordered
+                # 剪掉已不在池中的黑名单条目（过期条目由 _alive 自然忽略）
+                self._dead = {m: t for m, t in self._dead.items() if m in ordered}
+                self._current = 0
             self._logger.info(
                 "[FreeModelPool] 发现 %d 个免费模型: %s",
-                len(self._pool), ", ".join(self._pool))
+                len(ordered), ", ".join(ordered))
 
         except Exception as e:
             self._logger.warning(
