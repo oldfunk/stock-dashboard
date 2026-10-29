@@ -390,7 +390,7 @@ class MarketScheduler:
             # 交易日历未来段（2026-10-27，Issue #8）：每周按新浪源延长
             # （源覆盖到哪写到哪；2027 休市安排发布后下一次运行自动跟上）
             try:
-                from scripts.fix_price_contract import backfill_trading_calendar
+                from src.collector.trading_calendar import (backfill_trading_calendar,)
                 cal = backfill_trading_calendar()
                 logger.info(f"[调度器] 交易日历维护: {cal.get('future')}")
             except Exception as e:

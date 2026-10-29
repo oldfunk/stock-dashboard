@@ -41,10 +41,12 @@ def test_backfill_benchmark_maps_standard_codes(db):
 
 
 def test_backfill_trading_calendar(db, monkeypatch):
-    from scripts import fix_price_contract as fpc
-    from scripts.fix_price_contract import backfill_trading_calendar
+    # 函数已下沉 src 层（P2-1）：打桩目标必须跟着走，
+    # 否则 patch 的是 re-export 的旧名字，函数里的全局名不受影响
+    from src.collector import trading_calendar as tc
+    from src.collector.trading_calendar import backfill_trading_calendar
     # 源覆盖 10-27 ~ 11-06（含 10-31/11-01 周末非交易日窗口）
-    monkeypatch.setattr(fpc, "fetch_trade_calendar", lambda: [
+    monkeypatch.setattr(tc, "fetch_trade_calendar", lambda: [
         "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30",
         "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"])
     db_mod.KlineDAO().upsert_many("600519", [
@@ -72,9 +74,11 @@ def test_backfill_trading_calendar(db, monkeypatch):
 
 def test_backfill_calendar_future_fail_closed(db, monkeypatch):
     """源拉取失败（回 []）：只写历史，未来段一行都不写。"""
-    from scripts import fix_price_contract as fpc
-    from scripts.fix_price_contract import backfill_trading_calendar
-    monkeypatch.setattr(fpc, "fetch_trade_calendar", lambda: [])
+    # 函数已下沉 src 层（P2-1）：打桩目标必须跟着走，
+    # 否则 patch 的是 re-export 的旧名字，函数里的全局名不受影响
+    from src.collector import trading_calendar as tc
+    from src.collector.trading_calendar import backfill_trading_calendar
+    monkeypatch.setattr(tc, "fetch_trade_calendar", lambda: [])
     db_mod.KlineDAO().upsert_many("600519", [{
         "trade_date": "2026-10-26", "open": 1.0, "close": 1.0, "high": 1.0,
         "low": 1.0, "volume": 1.0, "amount": 1.0, "turnover": 0.1}])

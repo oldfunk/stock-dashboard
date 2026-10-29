@@ -46,7 +46,7 @@ def weekly_probe(sched, monkeypatch):
             started.append(self)
 
     import src.collector.dividend_fetcher as df
-    import scripts.fix_price_contract as fpc
+    from src.collector import trading_calendar as fpc
     import src.outcome_service as osvc
     import src.config as cmod
     monkeypatch.setattr(s.threading, "Thread", FakeThread)
