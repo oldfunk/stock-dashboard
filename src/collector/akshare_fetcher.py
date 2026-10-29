@@ -23,6 +23,7 @@ from src.utils import (
     safe_float, curl_get, tc_encode, parse_tc_line,
     parse_tc_indices, split_tc_response, INDEX_CODES, INDEX_TARGETS, now_cn,
 )
+from src.collector.price_model import merge_price_model
 
 logger = logging.getLogger(__name__)
 
@@ -1239,6 +1240,9 @@ def fetch_kline_data(code: str, start_date: str | None = None,
     - adjust: 复权类型，qfq=前复权（默认）
 
     返回：[{"trade_date", "open", "close", "high", "low", "volume", "amount", "turnover"}, ...]
+    adjust="qfq"（写库默认口径）时额外带 ``close_raw``/``close_adj``——三列模型
+    （U9-A，2026-10-29）：双拉 不复权+后复权 经 merge_price_model 合流，
+    两源全链失败返回 []（不写单列残行）。
 
     数据源优先级：东方财富（stock_zh_a_hist）→ 腾讯（stock_zh_a_hist_tx）备用。
     push2his.eastmoney.com 域名在某些网络环境下可能被封禁，腾讯数据源作为兜底。
@@ -1255,6 +1259,19 @@ def fetch_kline_data(code: str, start_date: str | None = None,
     end_str = now.strftime("%Y%m%d")
 
     # 优先：东方财富
+    if adjust == "qfq":
+        # U9 方案 A（Issue #9，2026-10-29 用户拍板）：qfq 是写库默认口径，
+        # 增量行必须带三列——双拉 不复权+后复权 走 merge_price_model（与 Sina
+        # 全量回填同一合流模型），close 由 hfq×scale 推导 = 锚点日正数前复权，
+        # 天然满足 §9.1 契约（B3 实证增量行缺 raw/adj 会把当日 coverage 压到
+        # 质量门阈值边缘）。两源任一全链失败返回 []——宁可不增量，不写单列残行。
+        records = _fetch_kline_full_model_em(code, start_str, end_str)
+        if records:
+            return records
+        logger.info(f"[K线] 东财三列双拉失败，回退腾讯双拉 {code}")
+        return _fetch_kline_full_model_tx(code, start_str, end_str)
+
+    # 非 qfq 的明确口径调用（研究/工具侧，不写库）：保持单拉，不擅自改口径
     records = _fetch_kline_em(code, start_str, end_str, adjust)
     if records:
         return records
@@ -1330,6 +1347,35 @@ def _fetch_kline_tx(code: str, start_str: str, end_str: str,
             "turnover": None,  # 腾讯数据源无换手率
         })
     return records
+
+
+def _fetch_kline_full_model_em(code: str, start_str: str, end_str: str) -> list[dict]:
+    """东财 不复权+后复权 双拉 → 三列模型（U9-A，Issue #9 方案 A）。
+
+    任一拉取为空即返回 []（fail-closed：不写单列残行，由调用方决定回退）。
+    """
+    raw = _fetch_kline_em(code, start_str, end_str, "")
+    if not raw:
+        return []
+    adj = _fetch_kline_em(code, start_str, end_str, "hfq")
+    if not adj:
+        return []
+    return merge_price_model(raw, adj)
+
+
+def _fetch_kline_full_model_tx(code: str, start_str: str, end_str: str) -> list[dict]:
+    """腾讯 不复权+后复权 双拉 → 三列模型（U9-A：东财限流日的兜底链）。
+
+    T1 之后 ``_fetch_kline_tx`` 透传 adjust，''/hfq 均为腾讯原生支持口径；
+    volume/turnover 腾讯不供（merge 取 raw 侧 .get → NULL，与既有回退行为一致）。
+    """
+    raw = _fetch_kline_tx(code, start_str, end_str, adjust="")
+    if not raw:
+        return []
+    adj = _fetch_kline_tx(code, start_str, end_str, adjust="hfq")
+    if not adj:
+        return []
+    return merge_price_model(raw, adj)
 
 
 # ── S8 行业分类（新浪 49 板块，stock_snapshot.sector 回填数据源）──

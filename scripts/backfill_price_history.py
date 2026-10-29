@@ -42,6 +42,8 @@ from src.models.database import (
 )
 from src.models.ai_watchlist import AiWatchlistDAO
 from src.collector.akshare_fetcher import fetch_kline_data
+# 三列模型合流逻辑 2026-10-29 上移 src 层（U9-A）；保留同名导入使旧引用不破
+from src.collector.price_model import merge_price_model
 
 PROGRESS_TASK = "price_history"
 
@@ -181,41 +183,6 @@ def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01") -> list[
             "turnover": num("turnover"), "shares": num("outstanding_share"),
         })
     return rows
-
-
-def merge_price_model(raw_rows: list[dict], adj_rows: list[dict]) -> list[dict]:
-    """合并不复权与后复权，生成三列价格。
-
-    - ``close_raw``：不复权（估值 PE/PB 用）
-    - ``close_adj``：后复权（回测总收益用，恒正）
-    - ``close``：后复权按最新价缩放（= 正数前复权，展示用；不再出现负价）
-    """
-    raw = {r["trade_date"]: r for r in raw_rows if r.get("close") is not None}
-    adj = {r["trade_date"]: r for r in adj_rows if r.get("close") is not None}
-    dates = sorted(set(raw) & set(adj))
-    if not dates:
-        return []
-    last = dates[-1]
-    if not adj[last]["close"]:
-        return []
-    scale = raw[last]["close"] / adj[last]["close"]
-    out = []
-    for d in dates:
-        a, r = adj[d], raw[d]
-        out.append({
-            "trade_date": d,
-            "open": a["open"] * scale if a.get("open") is not None else None,
-            "close": a["close"] * scale,
-            "high": a["high"] * scale if a.get("high") is not None else None,
-            "low": a["low"] * scale if a.get("low") is not None else None,
-            "volume": r.get("volume"),
-            "amount": r.get("amount"),
-            "turnover": r.get("turnover"),
-            "close_raw": r["close"],
-            "close_adj": a["close"],
-            "shares": r.get("shares"),
-        })
-    return out
 
 
 def fetch_kline_sina_adjusted(code: str, start_date: str,
