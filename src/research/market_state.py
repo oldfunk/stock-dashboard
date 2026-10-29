@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+import statistics
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable
 
-from src.models.database import db_conn
+from src.models.database import db_conn, get_connection
 from src.research.dao import ResearchDAO
 
 BLOCKS = ("valuation", "fundamentals", "breadth", "liquidity", "quality")
@@ -164,103 +166,116 @@ def _median(values: list[float]) -> float | None:
     return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
 
 
-def compute_vector(trade_date: str,
-                   schema: StateSchema | None = None) -> MarketStateVector:
-    """计算某日状态向量（纯函数；缺失显式 NULL）。
+@contextmanager
+def _read_txn():
+    """单连接只读事务：一次取数全程落在**同一个数据快照**上（审计 P2-3，批9-a）。
 
-    R1-1 先落地估值/基本面/质量（来自最新快照）与流动性（当日成交额）；
-    广度（MA20/MA60、涨跌比）在 R1-2 快照中接入。
+    旧实现把一次向量计算拆成 4 段各自独立的 ``with db_conn()``——每段一个事务。
+    若每日流水线正好夹在两段之间提交，一次 ``compute_vector`` 就会拼出**跨两个
+    时点**的向量（估值中位数来自写前、广度来自写后），而 ``market_state_daily``
+    是 regime 研究的输入。四段共用一个显式事务后，WAL 读快照固定在事务开始那一刻。
+
+    立事先用本机 WAL 库实测过四件事（不是推断）：
+    - ``isolation_level=None`` + 手工 ``BEGIN`` 后 ``in_transaction`` 为 True；
+    - 读事务打开期间，另一连接**已提交**的写入对本连接不可见，提交后才可见；
+    - 读事务不阻塞写连接（回填不会把产线写库锁住）；
+    - ``PRAGMA query_only=ON`` 后本连接任何写都抛 ``OperationalError``
+      ——用它把"取数函数不得写库"从口头约定变成硬约束。
     """
-    schema = schema or StateSchema()
-    metrics: dict[str, float] = {}
-    # 初始：所有已注册字段都视为缺失；算出来的再移除（未实现字段也显式 missing）
-    missing: list[str] = list(schema.names())
-    fail_closed_missing: list[str] = []
+    conn = get_connection()
+    conn.isolation_level = None          # 关闭驱动的隐式事务，BEGIN/COMMIT 由本函数说了算
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
-    def _set(name: str, value: float | None) -> None:
-        if value is None:
-            if schema.get(name) and schema.get(name).missing_policy == "fail_closed":
-                fail_closed_missing.append(name)
-        else:
-            metrics[name] = value
-            if name in missing:
-                missing.remove(name)
 
-    # 估值/基本面/质量：每 code 取 snapshot_date <= trade_date 的最新已知行
-    # （PIT：不用未来数据；stock_snapshot 每 code 一行，该行日期即其最后刷新日）。
-    # 审计 F6（2026-10-27）：原实现取"全局 MAX(snapshot_date) 单一日期桶"——
-    # 每日管道只给**当日候选**盖当日戳，历史日该桶=被后续运行覆盖后的残余
-    # （生产实测 10-23 桶仅 15 行、10-21 仅 2 行），且 ~4600 只从未进入；
-    # 改为按 code PIT 取数，样本回到全市场覆盖且不前视。
-    with db_conn() as conn:
-        for name in ("pe_median", "pb_median", "roe_median",
-                     "revenue_growth_median", "profit_growth_median",
-                     "debt_ratio_median"):
-            col = {
-                "pe_median": "pe", "pb_median": "pb", "roe_median": "roe",
-                "revenue_growth_median": "revenue_growth",
-                "profit_growth_median": "profit_growth",
-                "debt_ratio_median": "debt_ratio",
-            }[name]
-            values = [r[0] for r in conn.execute(
-                f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
-                "AND snapshot_date <= ?", (trade_date,)).fetchall()]
-            _set(name, _median(values))
-        # 毛利率：每只股票**已披露**的最新年报（PIT）。
-        # 审计 Hermes P0-2（2026-10-27）：原实现取全表最新年报、未按
-        # trade_date 截断 → 历史回算把未来年报毛利率灌进过去（前视）。
-        # 按仓内既定口径（valuation_percentile.py：notice_date 为披露时点、
-        # 缺 notice 不参与）：notice_date <= trade_date AND report_date <=
-        # trade_date（双条件，挡 notice_date=1900 占位假值配未来 report_date）。
-        gm = [r[0] for r in conn.execute(
-            "SELECT h.gross_margin FROM financial_history h "
-            "JOIN (SELECT stock_code, MAX(report_date) AS md "
-            "      FROM financial_history WHERE report_type = 'A' "
-            "        AND notice_date IS NOT NULL AND notice_date <= ? "
-            "        AND report_date <= ? "
-            "      GROUP BY stock_code) m "
-            "  ON m.stock_code = h.stock_code AND m.md = h.report_date "
-            "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL "
-            "  AND h.notice_date IS NOT NULL AND h.notice_date <= ? "
-            "  AND h.report_date <= ?",
-            (trade_date, trade_date, trade_date, trade_date)).fetchall()]
-        _set("gross_margin_median", _median(gm))
-        st_total = conn.execute(
-            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ?",
-            (trade_date,)).fetchone()["n"]
-        st_count = conn.execute(
-            "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ? "
-            "AND is_st = 1", (trade_date,)).fetchone()["n"]
-        # 取数审计字段：PIT 样本量 + 样本内最新刷新日（供 quality 追溯）
-        sample_n = st_total
-        snapshot_max = conn.execute(
-            "SELECT MAX(snapshot_date) AS d FROM stock_snapshot "
-            "WHERE snapshot_date <= ?", (trade_date,)).fetchone()["d"]
-    _set("st_ratio", round(100.0 * st_count / st_total, 4) if st_total else None)
+def _block_snapshot(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
+    """估值 / 基本面 / 质量：每 code 取 snapshot_date <= trade_date 的最新已知行。
 
-    # 流动性：当日成交额
-    with db_conn() as conn:
-        row = conn.execute(
-            "SELECT SUM(amount) AS s FROM kline_daily WHERE trade_date = ?",
-            (trade_date,)).fetchone()
-        _set("total_turnover_yi",
-             round(row["s"] / 1e8, 4) if row["s"] is not None else None)
-        row20 = conn.execute(
-            "SELECT AVG(s) AS a FROM (SELECT SUM(amount) AS s FROM kline_daily "
-            "WHERE trade_date <= ? GROUP BY trade_date "
-            "ORDER BY trade_date DESC LIMIT 20)", (trade_date,)).fetchone()
-        _set("avg_turnover_20d_yi",
-             round(row20["a"] / 1e8, 4) if row20["a"] is not None else None)
+    （PIT：不用未来数据；stock_snapshot 每 code 一行，该行日期即其最后刷新日）。
+    审计 F6（2026-10-27）：原实现取"全局 MAX(snapshot_date) 单一日期桶"——
+    每日管道只给**当日候选**盖当日戳，历史日该桶=被后续运行覆盖后的残余
+    （生产实测 10-23 桶仅 15 行、10-21 仅 2 行），且 ~4600 只从未进入；
+    改为按 code PIT 取数，样本回到全市场覆盖且不前视。
+    """
+    metrics: dict[str, float | None] = {}
+    for name, col in (("pe_median", "pe"), ("pb_median", "pb"),
+                      ("roe_median", "roe"),
+                      ("revenue_growth_median", "revenue_growth"),
+                      ("profit_growth_median", "profit_growth"),
+                      ("debt_ratio_median", "debt_ratio")):
+        values = [r[0] for r in conn.execute(
+            f"SELECT {col} FROM stock_snapshot WHERE {col} IS NOT NULL "
+            "AND snapshot_date <= ?", (trade_date,)).fetchall()]
+        metrics[name] = _median(values)
+    # 毛利率：每只股票**已披露**的最新年报（PIT）。
+    # 审计 Hermes P0-2（2026-10-27）：原实现取全表最新年报、未按
+    # trade_date 截断 → 历史回算把未来年报毛利率灌进过去（前视）。
+    # 按仓内既定口径（valuation_percentile.py：notice_date 为披露时点、
+    # 缺 notice 不参与）：notice_date <= trade_date AND report_date <=
+    # trade_date（双条件，挡 notice_date=1900 占位假值配未来 report_date）。
+    gm = [r[0] for r in conn.execute(
+        "SELECT h.gross_margin FROM financial_history h "
+        "JOIN (SELECT stock_code, MAX(report_date) AS md "
+        "      FROM financial_history WHERE report_type = 'A' "
+        "        AND notice_date IS NOT NULL AND notice_date <= ? "
+        "        AND report_date <= ? "
+        "      GROUP BY stock_code) m "
+        "  ON m.stock_code = h.stock_code AND m.md = h.report_date "
+        "WHERE h.report_type = 'A' AND h.gross_margin IS NOT NULL "
+        "  AND h.notice_date IS NOT NULL AND h.notice_date <= ? "
+        "  AND h.report_date <= ?",
+        (trade_date, trade_date, trade_date, trade_date)).fetchall()]
+    metrics["gross_margin_median"] = _median(gm)
+    st_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ?",
+        (trade_date,)).fetchone()["n"]
+    st_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM stock_snapshot WHERE snapshot_date <= ? "
+        "AND is_st = 1", (trade_date,)).fetchone()["n"]
+    metrics["st_ratio"] = round(100.0 * st_count / st_total, 4) if st_total else None
+    # 取数审计字段：PIT 样本量 + 样本内最新刷新日（供 quality 追溯）
+    snapshot_max = conn.execute(
+        "SELECT MAX(snapshot_date) AS d FROM stock_snapshot "
+        "WHERE snapshot_date <= ?", (trade_date,)).fetchone()["d"]
+    return metrics, {"snapshot_date": snapshot_max, "snapshot_n": st_total}
 
-    # 广度：MA20/MA60 占比、涨跌比（窗口 61 个交易日）
-    # 优化：先取最近 61 个交易日，只扫这些行（避免全表窗口函数）
-    with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT code, trade_date, close_adj FROM kline_daily "
-            "WHERE close_adj IS NOT NULL AND trade_date IN ("
-            "  SELECT DISTINCT trade_date FROM kline_daily "
-            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 61)",
-            (trade_date,)).fetchall()
+
+def _block_liquidity(conn, trade_date: str) -> dict[str, float | None]:
+    """流动性：当日成交额 + 20 日均成交额（元 → 亿元是单位换算，不是精度处理）。"""
+    metrics: dict[str, float | None] = {}
+    row = conn.execute(
+        "SELECT SUM(amount) AS s FROM kline_daily WHERE trade_date = ?",
+        (trade_date,)).fetchone()
+    metrics["total_turnover_yi"] = (
+        round(row["s"] / 1e8, 4) if row["s"] is not None else None)
+    row20 = conn.execute(
+        "SELECT AVG(s) AS a FROM (SELECT SUM(amount) AS s FROM kline_daily "
+        "WHERE trade_date <= ? GROUP BY trade_date "
+        "ORDER BY trade_date DESC LIMIT 20)", (trade_date,)).fetchone()
+    metrics["avg_turnover_20d_yi"] = (
+        round(row20["a"] / 1e8, 4) if row20["a"] is not None else None)
+    return metrics
+
+
+def _block_breadth(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
+    """广度：MA20/MA60 占比、涨跌比（窗口 61 个交易日）。
+
+    优化：先取最近 61 个交易日，只扫这些行（避免全表窗口函数）。
+    """
+    rows = conn.execute(
+        "SELECT code, trade_date, close_adj FROM kline_daily "
+        "WHERE close_adj IS NOT NULL AND trade_date IN ("
+        "  SELECT DISTINCT trade_date FROM kline_daily "
+        "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 61)",
+        (trade_date,)).fetchall()
     series: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
         series.setdefault(r["code"], []).append((r["trade_date"], r["close_adj"]))
@@ -281,25 +296,30 @@ def compute_vector(trade_date: str,
             adv += 1
         elif last < pts[-2][1]:
             dec += 1
-    _set("pct_above_ma20", round(100.0 * above20 / total, 4) if total else None)
-    _set("pct_above_ma60", round(100.0 * above60 / total, 4) if total else None)
-    _set("adv_dec_ratio", round(adv / dec, 4) if dec else None)
+    return ({
+        "pct_above_ma20": round(100.0 * above20 / total, 4) if total else None,
+        "pct_above_ma60": round(100.0 * above60 / total, 4) if total else None,
+        "adv_dec_ratio": round(adv / dec, 4) if dec else None,
+    }, {"breadth_n": total})
 
-    # 波动率：近 20 交易日**逐票日收益**的等权日均 → 年化波动（regime 波动规则用）
-    # 审计 F7（2026-10-27）：原实现先算"每日 AVG(close_adj)"再取收益——每日
-    # 覆盖的股票集不同（生产实测全量回填日 ~958 行 vs 日常增量日 ~261 行），
-    # 组成切换会造出伪收益污染波动率；改为每股对自身昨收算日收益（组成
-    # 切换不产生跳变），再按日等权平均。
-    with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT code, trade_date, close_adj FROM kline_daily "
-            "WHERE close_adj IS NOT NULL AND trade_date IN ("
-            "  SELECT DISTINCT trade_date FROM kline_daily "
-            "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21)",
-            (trade_date,)).fetchall()
-        kline_codes = conn.execute(
-            "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
-            "WHERE trade_date = ?", (trade_date,)).fetchone()["n"]
+
+def _block_volatility(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
+    """波动率：近 20 交易日**逐票日收益**等权日均 → 年化波动（regime 波动规则用）。
+
+    审计 F7（2026-10-27）：原实现先算"每日 AVG(close_adj)"再取收益——每日
+    覆盖的股票集不同（生产实测全量回填日 ~958 行 vs 日常增量日 ~261 行），
+    组成切换会造出伪收益污染波动率；改为每股对自身昨收算日收益（组成
+    切换不产生跳变），再按日等权平均。
+    """
+    rows = conn.execute(
+        "SELECT code, trade_date, close_adj FROM kline_daily "
+        "WHERE close_adj IS NOT NULL AND trade_date IN ("
+        "  SELECT DISTINCT trade_date FROM kline_daily "
+        "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21)",
+        (trade_date,)).fetchall()
+    kline_codes = conn.execute(
+        "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
+        "WHERE trade_date = ?", (trade_date,)).fetchone()["n"]
     dates = sorted({r["trade_date"] for r in rows})
     per_code: dict[str, dict[str, float]] = {}
     for r in rows:
@@ -315,12 +335,50 @@ def compute_vector(trade_date: str,
         rets = day_rets.get(key)
         if rets:
             daily_means.append(sum(rets) / len(rets))
+    vol: float | None = None
     if len(daily_means) >= 2:
-        import statistics
-        vol = statistics.pstdev(daily_means) * (252 ** 0.5)
-        _set("volatility_20d", round(vol, 4))
-    else:
-        _set("volatility_20d", None)
+        # 输出位数须 ≥ 阈值位（regime 波动阈值 0.15/0.30 是两位小数级）：
+        # 保 4 位是刻意为之，收到 2 位会把 0.0196 读成 0.02、丢掉有效位。
+        vol = round(statistics.pstdev(daily_means) * (252 ** 0.5), 4)
+    return {"volatility_20d": vol}, {"kline_codes": kline_codes}
+
+
+def compute_vector(trade_date: str,
+                   schema: StateSchema | None = None) -> MarketStateVector:
+    """计算某日状态向量（纯函数；缺失显式 NULL）。
+
+    R1-1 先落地估值/基本面/质量（来自最新快照）与流动性（当日成交额）；
+    广度（MA20/MA60、涨跌比）在 R1-2 快照中接入。
+
+    四段取数共用一个只读事务（``_read_txn``）：整份向量是同一天花板的数据，
+    不允许出现"写前半段 + 写后半段"的拼接。本函数不写库（query_only 兜住）。
+    """
+    schema = schema or StateSchema()
+
+    with _read_txn() as conn:
+        raw, quality = _block_snapshot(conn, trade_date)
+        raw.update(_block_liquidity(conn, trade_date))
+        breadth_metrics, breadth_quality = _block_breadth(conn, trade_date)
+        raw.update(breadth_metrics)
+        vol_metrics, vol_quality = _block_volatility(conn, trade_date)
+        raw.update(vol_metrics)
+        quality.update(breadth_quality)
+        quality.update(vol_quality)
+
+    metrics: dict[str, float] = {}
+    # 初始：所有已注册字段都视为缺失；算出来的再移除（未实现字段也显式 missing）
+    missing: list[str] = list(schema.names())
+    fail_closed_missing: list[str] = []
+    for name, value in raw.items():
+        if value is None:
+            spec = schema.get(name)
+            if spec and spec.missing_policy == "fail_closed":
+                fail_closed_missing.append(name)
+        else:
+            metrics[name] = value
+            if name in missing:
+                missing.remove(name)
+    quality["fail_closed_missing"] = fail_closed_missing
 
     # 覆盖率：只算"已实现"字段（未实现的不计入分母）
     implemented = [n for n in schema.names()
@@ -330,12 +388,7 @@ def compute_vector(trade_date: str,
     status = "invalid" if fail_closed_missing else "pass"
     return MarketStateVector(
         trade_date=trade_date, metrics=metrics, missing=missing,
-        quality={"snapshot_date": snapshot_max,
-                 "snapshot_n": sample_n,
-                 "kline_codes": kline_codes,
-                 "breadth_n": total,
-                 "fail_closed_missing": fail_closed_missing},
-        coverage=coverage, status=status)
+        quality=quality, coverage=coverage, status=status)
 
 
 # ── 快照持久化（R1-2） ──────────────────────────────────────────────────────
