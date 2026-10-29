@@ -316,6 +316,13 @@ class MarketScheduler:
         """周六维护：刷新年报分红 + 基准日线 + 分析前向收益。
 
         价值投资不需要实时：每周一次足够；重复执行幂等（已冻结的收益不重算）。
+
+        到点判定留在调度循环线程里，**执行**交给后台线程（审计 N9）：旧实现把
+        可能跑上数小时的 `ensure_dividend_data` / 日历延长 / `refresh_outcomes`
+        直接跑在主循环线程上，期间 `self._stop.wait(30)` 拿不到执行权——实时行情
+        轮询停摆、当天 15:30 的流水线根本不会被判定，`systemctl stop` 还会等到
+        `_scheduler.stop()` 超时后被 SIGKILL 打断在数据库写入中间。
+        这与 `_check_scheduled_review` / `_run_review` 已有的模式对齐。
         """
         try:
             from src.config import load_config
@@ -336,6 +343,12 @@ class MarketScheduler:
 
         self._last_weekly_refresh = now.date()
         self._weekly_in_progress = True
+        threading.Thread(target=self._run_weekly_refresh,
+                         args=(cfg, out_cfg), daemon=True,
+                         name="weekly-refresh").start()
+
+    def _run_weekly_refresh(self, cfg: dict, out_cfg: dict):
+        """后台执行周六维护；异常只记日志，不把进行中标志卡死。"""
         try:
             try:
                 from src.collector.dividend_fetcher import ensure_dividend_data
@@ -357,6 +370,8 @@ class MarketScheduler:
                     refresh_outcomes(cfg)
                 except Exception as e:
                     logger.warning(f"[调度器] 前向收益刷新失败: {e}")
+        except Exception as e:
+            logger.warning(f"[调度器] 每周维护线程异常: {e}", exc_info=True)
         finally:
             self._weekly_in_progress = False
 
