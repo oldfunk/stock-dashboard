@@ -10,6 +10,23 @@ from typing import Optional
 
 from src.utils import now_cn
 
+# 非 6 位数字代码不推导 instrument_id/market（"不臆造"是既定语义，见
+# tests/models/test_kline_daily.py:104）。但"静默"会让上游漏规范化这件事
+# 永远看不见（审计 P1-1），所以按代码去重提示一次。沿用本文件既有的
+# print("[DB] ...") 约定——models 层目前没有任何模块引 logging。
+_warned_bad_codes: set[str] = set()
+_WARN_BAD_CODE_CAP = 200          # 只去重到此数，防极端场景吃内存
+
+
+def _warn_unsupported_code(code) -> None:
+    key = str(code)
+    if key in _warned_bad_codes:
+        return
+    if len(_warned_bad_codes) < _WARN_BAD_CODE_CAP:
+        _warned_bad_codes.add(key)
+    print(f"[DB] kline code {code!r} 非 6 位数字，instrument_id/market 保持 NULL"
+          f"（有意扩展市场则可忽略；否则是上游写路径漏了规范化）")
+
 
 def get_db_path() -> str:
     """获取数据库文件路径"""
@@ -1502,6 +1519,9 @@ class KlineDAO:
                 iid = r.get('instrument_id')
                 if iid is None and len(code) == 6 and code.isdigit():
                     iid = f"CN:{code}"
+                elif iid is None:
+                    # 保持 NULL（不臆造），但不再无声——审计 P1-1
+                    _warn_unsupported_code(code)
                 mkt = r.get('market')
                 if mkt is None and iid and str(iid).startswith("CN:"):
                     mkt = "CN"

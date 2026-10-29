@@ -108,3 +108,20 @@ class TestKlineDAO:
         assert row["instrument_id"] is None
         assert row["market"] is None
         assert row["close_qfq"] == 260.0      # close_qfq 与市场无关，恒维护
+
+    def test_derive_skip_warns_but_keeps_null(self, db, capsys, monkeypatch):
+        """P1-1：可以不推导，但不能静默；NULL 语义保持不变。"""
+        monkeypatch.setattr(db, "_warned_bad_codes", set())
+        dao = db.KlineDAO()
+        dao.upsert_many("AAPL", [_row(d, 260.0) for d in
+                                 ("2026-10-26", "2026-10-27", "2026-10-28")])
+        out = capsys.readouterr().out
+        assert out.count("非 6 位数字") == 1, \
+            f"同一代码应去重提示一次，实际输出：{out!r}"
+        assert "AAPL" in out
+        assert dao.get_daily("AAPL")[0]["instrument_id"] is None
+
+    def test_six_digit_code_does_not_warn(self, db, capsys, monkeypatch):
+        monkeypatch.setattr(db, "_warned_bad_codes", set())
+        db.KlineDAO().upsert_many("000792", [_row("2026-10-27", 22.24)])
+        assert "非 6 位数字" not in capsys.readouterr().out
