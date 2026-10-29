@@ -16,7 +16,7 @@ import sys
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJ)
-os.chdir(PROJ)
+# 不切工作目录：src 侧路径均基于 __file__ 生成绝对路径，切了会污染调用方（详见 backfill_financial_extra.py 主入口注释）
 
 from src.logging_config import setup_logging
 setup_logging()
