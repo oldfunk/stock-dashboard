@@ -156,6 +156,11 @@ class MarketScheduler:
         self._last_stock_time = time.time()
         # 启动时从数据库检查今日是否已完成流水线，避免重启后重复触发
         self._last_daily_date = self._get_last_completed_date()
+        # 每日流水线的重试预算（审计 N10）：失败不再每 30 秒全市场重跑一次
+        self._daily_attempts = 0
+        self._daily_attempt_date = None
+        self._daily_give_up_logged = False
+        self.daily_max_attempts = 3        # 3 次仍未成功就当日放弃并告警
         # 周六复盘状态（避免重启后重复触发）
         self._last_review_date = self._get_last_review_date()
         # 复盘进行中标志：防止并发/30s 洪水式重复触发
@@ -283,7 +288,16 @@ class MarketScheduler:
             logger.warning(f"[调度器] 行情轮询失败: {e}")
 
     def _check_daily_pipeline(self):
-        """检查是否需要触发每日流水线"""
+        """检查是否需要触发每日流水线。
+
+        重试预算（审计 N10）：旧实现只在成功时记 `_last_daily_date`，异常分支不记
+        → 调度循环每 30 秒就重跑一次全市场采集（数千次 akshare 调用）直到午夜；
+        反过来 `run_daily_pipeline` 因锁竞争返回 False（orchestrator:217-219）时
+        返回值被忽略，"跳过"却被当成"今日已完成"，收盘那次选股就永久丢了。
+        现在：失败/跳过都消耗每日预算（默认 3 次），用尽后当日放弃并 error 告警一次；
+        只有真正跑完（返回 True）才置完成。与 `_run_review` 的"失败也标记、防洪水"
+        取向一致，但这里保留有限次重试，因为收盘选股比周复盘更值得再试。
+        """
         now = now_cn()
         today = now.date()
         # 交易日 + 时间超过 15:30 + 当天未运行过
@@ -293,13 +307,31 @@ class MarketScheduler:
             return
         if self._last_daily_date == today:
             return
+        if self._daily_attempt_date != today:
+            self._daily_attempt_date = today
+            self._daily_attempts = 0
+            self._daily_give_up_logged = False
+        if self._daily_attempts >= self.daily_max_attempts:
+            if not self._daily_give_up_logged:
+                self._daily_give_up_logged = True
+                logger.error(
+                    "[调度器] 今日流水线已尝试 %d 次仍未完成，本日不再重试；"
+                    "请查日志或手动执行 python -m src.main run",
+                    self._daily_attempts)
+            return
 
-        logger.info("[调度器] 触发每日选股流水线...")
+        self._daily_attempts += 1
+        logger.info("[调度器] 触发每日选股流水线（今日第 %d/%d 次尝试）...",
+                    self._daily_attempts, self.daily_max_attempts)
         try:
             from src.orchestrator import run_daily_pipeline
             from src.config import load_config
             config = load_config()
-            run_daily_pipeline(config)
+            ok = run_daily_pipeline(config)
+            if not ok:
+                # 锁竞争 = 跳过，不是完成：不置 _last_daily_date，预算内下轮再试
+                logger.warning("[调度器] 流水线被跳过（已有实例在跑），今日未完成，稍后重试")
+                return
             self._last_daily_date = today
             logger.info("[调度器] 每日流水线完成")
 
