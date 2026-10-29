@@ -455,22 +455,46 @@ def trading_dates(start: str, end: str,
     return [r["trade_date"] for r in rows]
 
 
+def recent_trading_dates(days: int, end: str | None = None) -> list[str]:
+    """取 ``<= end``（缺省=库内最新交易日）的最近 ``days`` 个**有行情行的**交易日。
+
+    没有 kline 行的日期不配进回填窗口：那种日子算出来的向量必然大面积 NULL，
+    写进目标表只会污染 regime 样本（口径选择，不是偷懒）。
+    """
+    with db_conn() as conn:
+        if end is None:
+            end = conn.execute(
+                "SELECT MAX(trade_date) AS d FROM kline_daily").fetchone()["d"]
+        if not end:
+            return []
+        rows = conn.execute(
+            "SELECT DISTINCT trade_date FROM kline_daily WHERE trade_date <= ? "
+            "ORDER BY trade_date DESC LIMIT ?", (end, days)).fetchall()
+    return sorted(r["trade_date"] for r in rows)
+
+
+def snapshot_day(trade_date: str, dry_run: bool = False,
+                 dao: ResearchDAO | None = None) -> MarketStateVector:
+    """算某日向量（含 regime）并落库；``dry_run`` 只算不写。"""
+    dao = dao or ResearchDAO()
+    vector = assess_vector(compute_vector(trade_date))
+    # regime 由透明规则计算（本地导入避免与 regime.py 循环依赖）
+    from src.research.regime import classify_regime
+    regime = classify_regime(vector)
+    vector.regime = regime.regime
+    vector.regime_confidence = regime.confidence
+    if not dry_run:
+        record_state_quality(vector, dao)
+        save_vector(vector, dao)
+    return vector
+
+
 def snapshot_range(start: str, end: str, dry_run: bool = False,
                    dao: ResearchDAO | None = None) -> dict:
     """对 [start, end] 内每个交易日计算并落库状态向量（可重跑）。"""
     dao = dao or ResearchDAO()
     dates = trading_dates(start, end, dao)
-    written = 0
     for day in dates:
-        vector = assess_vector(compute_vector(day))
-        # regime 由透明规则计算（本地导入避免与 regime.py 循环依赖）
-        from src.research.regime import classify_regime
-        regime = classify_regime(vector)
-        vector.regime = regime.regime
-        vector.regime_confidence = regime.confidence
-        if not dry_run:
-            record_state_quality(vector, dao)
-            save_vector(vector, dao)
-        written += 1
+        snapshot_day(day, dry_run=dry_run, dao=dao)
     return {"start": start, "end": end, "dates": len(dates),
-            "written": written, "dry_run": dry_run}
+            "written": len(dates), "dry_run": dry_run}
