@@ -81,10 +81,10 @@ def default_rules() -> list[RegimeRule]:
                    risk_on_threshold=0.15, risk_off_threshold=0.30,
                    direction="lower_better",
                    description="20 日波动率 <=15% 看多，>=30% 看空（字段单位 x，阈值为小数）"),
-        RegimeRule("style", "breadth", "value_vs_growth",
-                   risk_on_threshold=0.02, risk_off_threshold=-0.02,
-                   direction="higher_better",
-                   description="价值相对成长的超额（>+2% 看多，<-2% 看空）"),
+        # style/value_vs_growth 规则已移除（2026-10-29 母方裁定，Issue #9）：
+        # 该字段从未注册进 StateSchema、无任何生产者——规则永远拿不到数据，
+        # 属"宣传与实际不符"的假门（与 N5 同族教训）。将来有字段生产者再注册
+        # 规则 + 同步 test_regime 的量纲对齐用例。
     ]
 
 

@@ -94,7 +94,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | 表 | 写者 | 读者 | 说明 |
 |---|---|---|---|
 | `market_index` | 采集 | 首页 | 大盘指数，保留 30 天 |
-| `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据） |
+| `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据）；**只支持当日**——每日覆盖写、不保留历史截面（2026-10-29 P0-3 用户拍板 b），历史状态向量走 `market_state_daily`（F6 逐 code PIT），需要逐股历史截面时再议版本化 |
 | `financial_history` | 采集/回填 | 汇总重建/详情页/估值/回测 | 年报明细；全市场回填进行中（2026-10-26 起） |
 | `financial_summary` | 重建 | 筛选/详情页 | 5y/10y 均值（ROE/毛利/FCF/ROIC…） |
 | `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写 + 策略标签/股息字段 |

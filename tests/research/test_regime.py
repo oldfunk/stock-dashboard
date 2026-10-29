@@ -59,12 +59,13 @@ def test_pct_unit_rules_use_percentage_scale():
     assert (vol.risk_on_threshold, vol.risk_off_threshold) == (0.15, 0.30)
 
     # 出厂阈值与字段单位声明逐条对齐（漂移防线）
+    # 2026-10-29 收紧：default_rules 里每条规则的字段必须已注册——无生产者
+    # 字段的规则是假门（value_vs_growth 假门移除时的教训），不再静默跳过。
     from src.research.market_state import StateSchema
     schema = StateSchema()
     for r in rules.values():
         field = schema.get(r.field)
-        if field is None:
-            continue   # style 的 value_vs_growth 尚未注册（生产者无此字段）
+        assert field is not None, f"规则 {r.name} 的字段 {r.field} 未注册（假门）"
         scale = 100.0 if field.unit == "%" else 1.0
         top = max(abs(r.risk_on_threshold), abs(r.risk_off_threshold))
         assert 0.0 < top <= scale, (
@@ -74,17 +75,17 @@ def test_pct_unit_rules_use_percentage_scale():
 def test_classify_risk_on_when_all_agree():
     result = classify_regime(_vector({
         "pct_above_ma60": 80.0, "pe_percentile_5y": 10.0,
-        "volatility_20d": 0.10, "value_vs_growth": 0.05}))
+        "volatility_20d": 0.10}))
     assert result.regime == "risk_on"
     assert result.confidence == 1.0
-    assert len(result.drivers) == 4
+    assert len(result.drivers) == 3
     assert result.missing_fields == []
 
 
 def test_classify_risk_off_when_all_agree():
     result = classify_regime(_vector({
         "pct_above_ma60": 20.0, "pe_percentile_5y": 90.0,
-        "volatility_20d": 0.40, "value_vs_growth": -0.05}))
+        "volatility_20d": 0.40}))
     assert result.regime == "risk_off"
     assert result.confidence == 1.0
 
@@ -92,7 +93,7 @@ def test_classify_risk_off_when_all_agree():
 def test_classify_neutral_on_mixed_signals():
     result = classify_regime(_vector({
         "pct_above_ma60": 80.0, "pe_percentile_5y": 90.0,
-        "volatility_20d": 0.10, "value_vs_growth": -0.05}))
+        "volatility_20d": 0.10}))
     assert result.regime == "neutral"
     assert result.confidence == 0.0
 
@@ -103,7 +104,7 @@ def test_missing_fields_are_not_guessed():
     assert result.regime == "unknown"
     assert result.confidence == 0.0
     assert set(result.missing_fields) == {
-        "pe_percentile_5y", "volatility_20d", "value_vs_growth"}
+        "pe_percentile_5y", "volatility_20d"}
     assert len(result.drivers) == 1
 
 
