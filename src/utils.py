@@ -94,6 +94,10 @@ def parse_tc_line(raw: str) -> Optional[dict]:
             'amount': safe_float(parts[37]),
             'turnover_rate': safe_float(parts[38]) if len(parts) > 38 else None,
             'pe': safe_float(parts[39]) if len(parts) > 39 else None,
+            # N8①（2026-10-29）：parts[52]=市盈率TTM（实证 600519：动态 20.79
+            # / TTM 19.01 / 静态 20.56，语义自洽）。此前该值被丢弃，策略的
+            # pe_ttm_max 实际校验的是动态 pe（名不符实）。
+            'pe_ttm': safe_float(parts[52]) if len(parts) > 52 else None,
             'market_cap': safe_float(parts[45]) if len(parts) > 45 else None,
             'circulating_cap': safe_float(parts[44]) if len(parts) > 44 else None,
             'amplitude': safe_float(parts[43]) if len(parts) > 43 else None,

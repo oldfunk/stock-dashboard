@@ -284,7 +284,9 @@ def _computed_fallback(codes: list[dict]) -> list[dict]:
             'volume': pdata.get('volume'),
             'amount': pdata.get('amount'),
             'pe': pe,
-            'pe_ttm': pe,
+            # 自算兜底无 TTM 口径数据，不冒充（N8①）：门经 _num('pe_ttm','pe')
+            # 回退到 pe，行为与旧版一致但不污染新列语义
+            'pe_ttm': None,
             'pb': pb,
             'market_cap': market_cap,
         })

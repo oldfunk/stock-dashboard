@@ -129,6 +129,23 @@ class TestCheck7Gates:
         reasons = _check_7_gates(stock, self._base_config())
         assert any("OCF/NI数据不足" in r for r in reasons)
 
+    # --- Gate: pe_ttm_max 用 TTM 口径（2026-10-29 N8①）---
+    def test_gate_pe_ttm_uses_ttm_when_present(self):
+        """pe_ttm 存在时按 TTM 校验：动态 pe 合规但 TTM 超限 → 拦截（修前放行）。"""
+        stock = self._base_stock(pe=10.0, pe_ttm=25.0)
+        cfg = self._base_config()
+        cfg['screener']['conditions']['pe_ttm_max'] = 20
+        assert _check_7_gates(stock, cfg) == []
+
+    def test_gate_pe_ttm_falls_back_to_pe_when_missing(self):
+        """pe_ttm 缺失（存量行/自算兜底）→ 回退 pe（与旧行为一致，不 fail 静默改语义）。"""
+        stock = self._base_stock(pe=10.0)   # 无 pe_ttm
+        cfg = self._base_config()
+        cfg['screener']['conditions']['pe_ttm_max'] = 20
+        reasons = _check_7_gates(stock, cfg)
+        assert reasons  # 未被 pe_ttm_max 拦截
+        assert any("PE_TTM" in r for r in reasons)
+
     def test_gate_st_exclusion_disabled(self):
         stock = self._base_stock(is_st=True)
         cfg = self._base_config()

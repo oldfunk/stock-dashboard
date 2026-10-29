@@ -72,7 +72,9 @@ def _check_strategy_thresholds(stock: dict, thresholds: dict) -> list[str]:
     checks = [
         ('roe_avg_5y_min', _num('roe_5y_avg', 'roe'), 'ge', 'ROE5年均'),
         ('pe_max', _num('pe'), 'le', 'PE'),
-        ('pe_ttm_max', _num('pe'), 'le', 'PE_TTM'),
+        # N8①（2026-10-29）：键名 pe_ttm_max 就该校验 TTM 口径——pe_ttm 缺失
+        # （存量行/自算兜底）回退 pe，回退路径与旧行为一致且不再名不符实
+        ('pe_ttm_max', _num('pe_ttm', 'pe'), 'le', 'PE_TTM'),
         ('gross_margin_min', _num('gross_margin_5y_avg', 'gross_margin'), 'ge', '毛利率'),
         ('net_margin_min', _num('net_margin_5y_avg', 'net_margin'), 'ge', '净利率'),
         ('debt_ratio_max', _num('debt_ratio'), 'le', '负债率'),

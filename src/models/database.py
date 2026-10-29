@@ -463,6 +463,7 @@ def init_database():
         _add_column_if_not_exists(conn, 'stock_snapshot', 'payout_ratio', 'REAL')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_year', 'TEXT')
         _add_column_if_not_exists(conn, 'stock_snapshot', 'dividend_years', 'INTEGER')  # 2026-10-23 连续分红年数
+        _add_column_if_not_exists(conn, 'stock_snapshot', 'pe_ttm', 'REAL')  # 2026-10-29 N8① 腾讯 parts[52]
         _add_column_if_not_exists(conn, 'analysis_outcome', 'mos_at_entry', 'REAL')  # 2026-10-23 P0-9 买入安全边际
         _add_column_if_not_exists(conn, 'stock_analysis_history', 'model', 'TEXT')
         _add_column_if_not_exists(conn, 'ai_watchlist', 'status', 'TEXT')
@@ -660,13 +661,13 @@ class StockSnapshotDAO:
                     sector = prev["sector"] if prev else None
                 conn.execute("""
                     INSERT OR REPLACE INTO stock_snapshot
-                    (code, name, market, sector, pe, pb, ps, market_cap, circulating_cap,
+                    (code, name, market, sector, pe, pe_ttm, pb, ps, market_cap, circulating_cap,
                      roe, revenue, revenue_growth, profit, profit_growth, debt_ratio,
                      dividend_yield, payout_ratio, dividend_year, dividend_years,
                      current_price, high_52w, low_52w, is_st, list_date, snapshot_date)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (r['code'], r['name'], r.get('market', 'A'),
-                      sector, r.get('pe'), r.get('pb'), r.get('ps'),
+                      sector, r.get('pe'), r.get('pe_ttm'), r.get('pb'), r.get('ps'),
                       r.get('market_cap'), r.get('circulating_cap'),
                       r.get('roe'), r.get('revenue'), r.get('revenue_growth'),
                       r.get('profit'), r.get('profit_growth'), r.get('debt_ratio'),
