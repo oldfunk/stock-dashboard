@@ -493,6 +493,8 @@ def init_database():
         _add_column_if_not_exists(conn, 'financial_summary', 'fcf_5y_sum', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'share_dilution_5y', 'REAL')
         _add_column_if_not_exists(conn, 'financial_summary', 'roic_5y_avg', 'REAL')
+        # 2026-10-29 N5①：OCF/NI 精确门的分子列（分母 net_profit_5y_sum 建表即有）
+        _add_column_if_not_exists(conn, 'financial_summary', 'ocf_5y_sum', 'REAL')
         # 2026-07-22 新增：K线日线数据表
         conn.execute('''
             CREATE TABLE IF NOT EXISTS kline_daily (

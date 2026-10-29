@@ -90,6 +90,45 @@ class TestCheck7Gates:
         stock = self._base_stock(is_st=True)
         assert _check_7_gates(stock, self._base_config()) == []
 
+    # --- Gate 2: OCF/NI 精确门（2026-10-29 N5① 修活）---
+    def test_gate_ocf_ni_precise_pass_reason(self):
+        """同窗 5 年累计两侧配套 → 真实比值入理由（修前该门恒不执行）。"""
+        stock = self._base_stock(ocf_5y_sum=112_000_000.0,
+                                 net_profit_5y_sum=100_000_000.0)
+        reasons = _check_7_gates(stock, self._base_config())
+        assert any("OCF/NI=1.12（≥0.7，通过）" in r for r in reasons)
+
+    def test_gate_ocf_ni_below_threshold_excludes(self):
+        """OCF/NI < 0.7 且无豁免 → 排除（门真正生效）。"""
+        stock = self._base_stock(ocf_5y_sum=50_000_000.0,
+                                 net_profit_5y_sum=100_000_000.0,
+                                 gross_margin=20.0, revenue_growth=5.0,
+                                 profit_growth=5.0)   # 豁免B（gm≥30+高增长）不满足
+        assert _check_7_gates(stock, self._base_config()) == []
+
+    def test_gate_ocf_ni_below_threshold_exempted(self):
+        """OCF/NI < 0.7 但豁免B 成立（高毛利率+高增长+净利改善）→ 放行并记录。"""
+        stock = self._base_stock(ocf_5y_sum=50_000_000.0,
+                                 net_profit_5y_sum=100_000_000.0,
+                                 gross_margin=40.0, revenue_growth=25.0,
+                                 profit_growth=30.0)
+        reasons = _check_7_gates(stock, self._base_config())
+        assert any("OCF/NI=0.50（<0.7，豁免" in r for r in reasons)
+
+    def test_gate_ocf_ni_missing_falls_back_to_proxy(self):
+        """任一侧缺失 → 不产出比值，走代理路径（如实记数据不足，不假装精确）。"""
+        stock = self._base_stock(ocf_5y_sum=112_000_000.0)  # 缺 net_profit_5y_sum
+        reasons = _check_7_gates(stock, self._base_config())
+        assert reasons  # 未被精确门拦截
+        assert any("OCF/NI数据不足" in r for r in reasons)
+
+    def test_gate_ocf_ni_nonpositive_sides_not_computed(self):
+        """分子或分母 ≤0（累计亏损/累计经营现金流为负）→ 不产出比值（fail-closed）。"""
+        stock = self._base_stock(ocf_5y_sum=-50_000_000.0,
+                                 net_profit_5y_sum=100_000_000.0)
+        reasons = _check_7_gates(stock, self._base_config())
+        assert any("OCF/NI数据不足" in r for r in reasons)
+
     def test_gate_st_exclusion_disabled(self):
         stock = self._base_stock(is_st=True)
         cfg = self._base_config()

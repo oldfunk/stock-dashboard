@@ -166,3 +166,39 @@ def test_zero_roic_is_preserved_not_null(db):
     s = db_mod.FinancialSummaryDAO().get("601988")
     assert s["roic_10y_avg"] == 0.0
     assert s["roic_5y_avg"] == 0.0
+
+
+# ── OCF/NI 精确门数据（2026-10-29，审计 N5①）─────────────────────────────
+# 同窗配对：只取同时有 net_operate_cashflow 与 net_profit 的年份；共同年份
+# <3 不产出（宁缺勿错：分子分母必须同一报告期窗口，比值才无量纲）。
+
+def _seed_ocf_np(code, ocf_by_year, np_by_year):
+    rows = []
+    for i, (o, n) in enumerate(zip(ocf_by_year, np_by_year)):
+        rows.append({"stock_code": code, "report_date": f"{2021 + i}-12-31",
+                     "net_operate_cashflow": o, "net_profit": n})
+    db_mod.FinancialHistoryDAO().batch_save(rows)
+
+
+def test_ocf_ni_paired_sums_populated(db):
+    """3+ 共同年份 → 两侧同窗累计成对产出（缺一侧的年份剔除，不单独求和）。"""
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_ocf_np("600000",
+                 [100.0, 200.0, 300.0, 400.0, None],
+                 [50.0, 80.0, 100.0, 150.0, 999.0])   # 2025 缺 OCF → 剔除
+    rebuild_financial_summaries([{"code": "600000"}])
+    s = db_mod.FinancialSummaryDAO().get("600000")
+    assert s["ocf_5y_sum"] == 1000.0            # 100+200+300+400
+    assert s["net_profit_5y_sum"] == 380.0      # 50+80+100+150（999 不入窗）
+
+
+def test_ocf_ni_insufficient_common_years_is_null(db):
+    """共同年份 <3 → 两侧同时 NULL（不拿残缺窗口冒充 5 年累计）。"""
+    from src.collector.akshare_fetcher import rebuild_financial_summaries
+    _seed_ocf_np("600001",
+                 [100.0, None, None, None, 500.0],
+                 [50.0, 80.0, None, 150.0, 200.0])    # 共同年份仅 2021/2025
+    rebuild_financial_summaries([{"code": "600001"}])
+    s = db_mod.FinancialSummaryDAO().get("600001")
+    assert s["ocf_5y_sum"] is None
+    assert s["net_profit_5y_sum"] is None

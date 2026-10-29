@@ -1003,6 +1003,21 @@ def rebuild_financial_summaries(stocks: list[dict] | None):
         ocf_vals_5 = [r['ocf_per_share'] for r in last5 if r['ocf_per_share'] is not None]
         roic_vals_5 = [r['roic'] for r in last5 if r.get('roic') is not None]
 
+        # OCF/NI 精确门分子/分母（N5①，2026-10-29）：同窗配对——只取同时有
+        # 经营现金流净额（元）与净利（元）的年份，共同年份 <3 不产出（宁缺勿错：
+        # 分子分母必须同一报告期窗口，比值才无量纲）。不用 ocf_per_share×
+        # total_shares 反推——上游 total_shares 当前值盖历史年份，会引入静默误差。
+        paired = [(r['net_operate_cashflow'], r['net_profit'])
+                  for r in last5
+                  if r.get('net_operate_cashflow') is not None
+                  and r.get('net_profit') is not None]
+        if len(paired) >= 3:
+            ocf_5y_sum = round(sum(p[0] for p in paired), 2)
+            net_profit_5y_sum = round(sum(p[1] for p in paired), 2)
+        else:
+            ocf_5y_sum = None
+            net_profit_5y_sum = None
+
         # ── 10年窗口 ──
         last10 = reports[-10:] if len(reports) >= 10 else reports
         roe_vals_10 = [r['roe'] for r in last10 if r['roe'] is not None]
@@ -1071,7 +1086,9 @@ def rebuild_financial_summaries(stocks: list[dict] | None):
             'ocf_latest': ocf_latest,
             'ocf_positive_years': ocf_positive,
             'debt_ratio_latest': reports[-1].get('debt_ratio') if reports else None,
-            'net_profit_5y_sum': None,
+            # N5①：同窗 5 年累计（元），与 ocf_5y_sum 配对产出；不足 3 个共同年份为 NULL
+            'net_profit_5y_sum': net_profit_5y_sum,
+            'ocf_5y_sum': ocf_5y_sum,
             'intcov_5y_avg': round(intcov_5, 2) if intcov_5 is not None else None,
             'fcf_5y_sum': round(sum(fcf_vals_5), 2) if fcf_vals_5 else None,
             'share_dilution_5y': share_dilution_5y,

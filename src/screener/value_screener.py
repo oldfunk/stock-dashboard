@@ -201,20 +201,17 @@ def _check_7_gates(stock: dict, cfg: dict) -> list[str]:
     ocf = stock.get('ocf_per_share')
     ocf_pos_years = stock.get('ocf_positive_years')
     
-    # 新增：OCF/NI 精确计算（如果数据可得）
+    # OCF/NI 精确计算（N5① 修活，2026-10-29）：旧实现依赖 financial_summary
+    # 不存在的 ocf_5y_sum 列（条件恒假 = 死代码），且分母用单年净利/净利率×1e8
+    # （5年累计÷单年≈5 倍虚高；元÷百分数量纲不成立）。现在两侧均为 rebuild
+    # 产出的**同窗 5 年累计**（元），比值无量纲；任一侧缺失/非正 → 不产出
+    # （fail-closed，走下方代理路径，不假装精确）。
     ocf_ni_ratio = None
-    if stock.get('ocf_5y_sum') and stock.get('net_margin_5y_avg'):
-        # OCF/NI = 5年累计OCF / 5年累计净利润（近似）
-        ocf_5y_sum = stock.get('ocf_5y_sum', 0)
-        net_margin_5y_avg = stock.get('net_margin_5y_avg', 0)
-        if net_margin_5y_avg > 0 and ocf_5y_sum > 0:
-            # 用最新年度净利润作为分母基准
-            net_profit_latest = stock.get('net_profit', 0)
-            if net_profit_latest > 0:
-                ocf_ni_ratio = ocf_5y_sum / net_profit_latest
-            else:
-                # 净利润为0时用净利率推算
-                ocf_ni_ratio = ocf_5y_sum / (net_margin_5y_avg * 1e8) if net_margin_5y_avg > 0 else None
+    ocf_5y_sum = stock.get('ocf_5y_sum')
+    net_profit_5y_sum = stock.get('net_profit_5y_sum')
+    if (ocf_5y_sum is not None and net_profit_5y_sum is not None
+            and ocf_5y_sum > 0 and net_profit_5y_sum > 0):
+        ocf_ni_ratio = ocf_5y_sum / net_profit_5y_sum
     
     # 代理逻辑（保持向后兼容）- 放在精确计算之后
     if ocf is not None:
@@ -556,7 +553,7 @@ class ValueScreener:
                       'fcf_positive_years_10', 'roe_volatility', 'roe_improvement',
                       'intcov_10y_avg', 'share_dilution_10y', 'roic_10y_avg',
                       # 新增字段：用于精确计算
-                      'ocf_5y_sum', 'fcf_5y_sum', 'net_profit'):
+                      'ocf_5y_sum', 'net_profit_5y_sum', 'fcf_5y_sum', 'net_profit'):
                 if summary.get(k) is not None:
                     c[k] = summary.get(k)
 
