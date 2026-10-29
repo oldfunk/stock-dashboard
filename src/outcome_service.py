@@ -15,34 +15,56 @@ logger = logging.getLogger(__name__)
 
 
 def _benchmarks(config: dict | None) -> list[dict]:
+    """基准清单（唯一入口）。
+
+    代码在这里统一规范化（审计 P2-2）：`refresh_benchmarks` 用它决定**写哪个键**，
+    `refresh_outcomes` 用同一个键写 `analysis_outcome.benchmark_code`。旧实现把
+    config 里的原样字符串直接当键用，于是用户配 `000300`（不带前缀）时拉取符号
+    也不带前缀、两边虽然"自洽"但都与契约码 `sh000300` 对不上，且失败是静默的
+    （0 行只留一条 info）。规范化放这一个入口，读写两侧不可能再分叉。
+
+    注：子项目契约标准码（000001/399001/399006，Issue #5）是**有意存裸码**的，
+    由 `refresh_benchmarks` 里的 `contract_sources` 单独并入，不经此函数，
+    故本函数只规范化 config/DEFAULT 里的收益验证基准。
+    """
     from src.analyzer.outcomes import DEFAULT_BENCHMARKS
     cfg = (config or {}).get("outcomes", {})
     items = cfg.get("benchmarks") or DEFAULT_BENCHMARKS
     out = []
     for b in items:
         if isinstance(b, dict) and b.get("code"):
-            out.append({"code": b["code"],
-                        "name": b.get("name") or b["code"]})
+            code = normalize_index_code(b["code"])   # 认不出来就报错，不猜
+            out.append({"code": code,
+                        "name": b.get("name") or code})
     return out or DEFAULT_BENCHMARKS
 
 
-def _horizons(config: dict | None) -> tuple[int, ...]:
-    from src.analyzer.outcomes import HORIZONS
-    raw = (config or {}).get("outcomes", {}).get("horizons") or HORIZONS
-    try:
-        vals = tuple(int(x) for x in raw if int(x) > 0)
-    except (TypeError, ValueError):
-        vals = HORIZONS
-    return vals or HORIZONS
+def normalize_index_code(code) -> str:
+    """基准指数存储码规范化：统一成带前缀形态（`sh000300` / `sz399001`）。
+
+    已带 `sh`/`sz`/`bj` 前缀的原样返回（幂等）；6 位数字按契约同一套规则推断
+    前缀（399/159/16 归深市，其余归沪市）；认不出的直接 `ValueError`——
+    静默按原样当键用，就是 P2-2 里"超额悄悄为空"的根因。
+    """
+    s = str(code or "").strip().lower()
+    if not s:
+        raise ValueError("基准代码为空")
+    if s[:2] in ("sh", "sz", "bj") and len(s) == 8:
+        return s
+    if len(s) == 6 and s.isdigit():
+        return ("sz" if s.startswith(("399", "159", "16")) else "sh") + s
+    raise ValueError(
+        f"无法规范化基准指数代码: {code!r}（请用 sh000300 / sz399001，"
+        f"或 6 位数字由系统推断前缀）")
 
 
 def refresh_benchmarks(config: dict | None = None,
                        limit: int = 6000) -> dict:
     """拉取并落库基准指数日线（价格指数）。返回 {code: rows}。
 
-    除 config ``outcomes.benchmarks``（收益验证用）外，**固定包含子项目契约
-    标准码**（Issue #5：000001/399001/399006）——它们是一次性脚本回填的，
-    不进周刷就会在数天内 stale（审计 F3，同"有回填无调度"类）。
+    除 config ``outcomes.benchmarks``（收益验证用，经 `_benchmarks` 规范化）外，
+    **固定包含子项目契约标准码**（Issue #5：000001/399001/399006）——它们是一次性
+    脚本回填的，不进周刷就会在数天内 stale（审计 F3，同"有回填无调度"类）。
     """
     from src.collector.akshare_fetcher import (
         fetch_index_kline, fetch_index_kline_em,
@@ -56,7 +78,7 @@ def refresh_benchmarks(config: dict | None = None,
     dao = BenchmarkDailyDAO()
     targets: dict[str, str] = {}   # 存储码 → 拉取符号
     for b in _benchmarks(config):
-        targets[b["code"]] = b["code"]
+        targets[b["code"]] = b["code"]      # 已由 _benchmarks 规范化，键=符号
     for code, src in contract_sources.items():
         targets.setdefault(code, src)
     for code, src in targets.items():
@@ -68,11 +90,28 @@ def refresh_benchmarks(config: dict | None = None,
                 records = fetch_index_kline(src, limit=limit)
             saved = dao.upsert_many(code, records)
             stats[code] = saved
-            logger.info(f"[收益验证] 基准 {code} 日线 {saved} 条")
+            if not records or not saved:
+                # 非空校验（P2-2）：0 行以前只留一条 info，超额会静默为空
+                logger.warning(
+                    "[收益验证] 基准 %s（符号 %s）取到 %d 行 / 落库 %d 条，"
+                    "前向收益的超额将为空，请查上游或代码", 
+                    code, src, len(records or []), saved)
+            else:
+                logger.info(f"[收益验证] 基准 {code} 日线 {saved} 条")
         except Exception as e:
             logger.warning(f"[收益验证] 基准 {code} 拉取失败: {e}")
             stats[code] = 0
     return stats
+
+
+def _horizons(config: dict | None) -> tuple[int, ...]:
+    from src.analyzer.outcomes import HORIZONS
+    raw = (config or {}).get("outcomes", {}).get("horizons") or HORIZONS
+    try:
+        vals = tuple(int(x) for x in raw if int(x) > 0)
+    except (TypeError, ValueError):
+        vals = HORIZONS
+    return vals or HORIZONS
 
 
 def _mos_at_entry(fin_dao, code: str, analysis_date: str,
