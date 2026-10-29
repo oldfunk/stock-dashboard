@@ -17,8 +17,18 @@ mkdir -p "$BASETEMP"
 #（2026-10-26 实测：门禁失败时提前 exit，BASETEMP 未清理，/tmp 98% 满导致后续门禁全 ERROR）
 cleanup_basetemp() { rm -rf "$BASETEMP" 2>/dev/null || true; }
 trap cleanup_basetemp EXIT INT TERM
-# 清理更早遗留的 pytest 临时目录（按 PID 命名，进程已死）
-rm -rf "${LOCALAPPDATA:-/tmp}"/pytest-gate-* 2>/dev/null || true
+# 清理遗留的 pytest 临时目录：按目录名里的 PID 判活，**只删已死进程的**。
+# 旧实现是通配删 pytest-gate-*——两条 gate 同机并发时（母方验收 + 员工自检）
+# 会抽掉对方正在用的 basetemp，对方表现为整批偶发 ERROR，现场极难归因。
+# tmpfs 撑爆那条真风险已由上面的 trap 解决，不需要通配删来兜。
+# 判活失败只会留下残目录（可下次再清），不会误删在用目录——取这个方向。
+for _stale in "${LOCALAPPDATA:-/tmp}"/pytest-gate-*; do
+    [ -d "$_stale" ] || continue
+    _pid="${_stale##*-}"
+    case "$_pid" in (''|*[!0-9]*) continue ;; esac
+    kill -0 "$_pid" 2>/dev/null && continue
+    rm -rf "$_stale" 2>/dev/null || true
+done
 
 # 优先用项目 venv（生产服务器），否则回退系统 python
 PYBIN="${PYTHON:-}"
@@ -47,10 +57,16 @@ if [ -f scripts/gate-exclusions.txt ]; then
     done < scripts/gate-exclusions.txt
 fi
 
-_floor() {  # $1=基线文件
+_floor() {  # $1=基线文件；取**首个纯数字行**作下限，其余内容一律当注释忽略
+    # 旧实现 `tr -dc '0-9'` 会把文件里所有数字串成一个数：基线文件一旦被人
+    # 加一行日期注释（如 "# 2026-10-27 由 856 升 875"），下限就变成
+    # 202610278561875，此后每次部署都 fail-closed，而报错写的是
+    # "passed 低于下限"——看着像测试挂了，实际是门禁自己被读错了（审计 N14）。
     local f=0
-    if [ -f "$1" ]; then f=$(tr -dc '0-9' < "$1"); f=${f:-0}; fi
-    printf '%s' "$f"
+    if [ -f "$1" ]; then
+        f=$(grep -m1 -E '^[[:space:]]*[0-9]+[[:space:]]*$' "$1" | tr -dc '0-9')
+    fi
+    printf '%s' "${f:-0}"
 }
 
 _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
