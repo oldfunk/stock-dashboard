@@ -191,8 +191,8 @@ def main() -> int:
                         help="指定股票代码（逗号分隔）强制重跑，忽略进度表")
     args = parser.parse_args()
 
-    # 注意：不要 os.chdir —— get_db_path() 基于 __file__ 返回绝对路径；
-    # chdir 会污染调用方（pytest 会话中途换 cwd 曾导致偶发挂起）。
+    # 注意：这里不要切工作目录 —— get_db_path() 基于 __file__ 返回绝对路径；
+    # 切了会污染调用方（pytest 会话中途换 cwd 曾导致偶发挂起）。
     init_database()
     dao = FinancialHistoryDAO()
 
