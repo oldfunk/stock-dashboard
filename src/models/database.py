@@ -1329,13 +1329,14 @@ class FinancialSummaryDAO:
                 (stock_code, roe_5y_avg, roe_5y_count, gross_margin_5y_avg,
                  net_margin_5y_avg, ocf_5y_trend, ocf_latest,
                  ocf_positive_years, debt_ratio_latest, net_profit_5y_sum,
+                 ocf_5y_sum,
                  intcov_5y_avg, fcf_5y_sum, share_dilution_5y, roic_5y_avg,
                  roe_10y_avg, net_margin_10y_avg, intcov_10y_avg,
                  fcf_10y_sum, share_dilution_10y, fcf_positive_years_10,
                  roe_volatility, roe_improvement, roic_10y_avg,
                  data_years, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 code,
                 summary.get('roe_5y_avg'),
@@ -1347,6 +1348,9 @@ class FinancialSummaryDAO:
                 summary.get('ocf_positive_years'),
                 summary.get('debt_ratio_latest'),
                 summary.get('net_profit_5y_sum'),
+                # N5①（2026-10-29）：与 net_profit_5y_sum 同窗配对的 OCF 累计——
+                # 此前该键被这份显式列清单静默丢弃（rebuild 算了也落不了库）
+                summary.get('ocf_5y_sum'),
                 summary.get('intcov_5y_avg'),
                 summary.get('fcf_5y_sum'),
                 summary.get('share_dilution_5y'),

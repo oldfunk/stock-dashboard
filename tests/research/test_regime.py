@@ -12,10 +12,12 @@ def _vector(metrics):
     return MarketStateVector(trade_date="2026-10-26", metrics=metrics)
 
 
-def test_default_rules_cover_four_blocks():
+def test_default_rules_cover_registered_blocks():
+    # 2026-10-29：style/value_vs_growth 假门规则移除（字段无生产者），
+    # 出厂规则 = 有真实生产者的三块；新增规则必须先注册字段（见量纲用例）。
     rules = default_rules()
-    assert len(rules) == 4
-    assert {r.name for r in rules} == {"trend", "valuation", "volatility", "style"}
+    assert len(rules) == 3
+    assert {r.name for r in rules} == {"trend", "valuation", "volatility"}
 
 
 def test_evaluate_rule_boundaries():
@@ -91,9 +93,10 @@ def test_classify_risk_off_when_all_agree():
 
 
 def test_classify_neutral_on_mixed_signals():
+    # 三规则下中性 = 净和为 0：+1(80%) / -1(90%分位) / 0(波动率 0.20 在中性区)
     result = classify_regime(_vector({
         "pct_above_ma60": 80.0, "pe_percentile_5y": 90.0,
-        "volatility_20d": 0.10}))
+        "volatility_20d": 0.20}))
     assert result.regime == "neutral"
     assert result.confidence == 0.0
 
@@ -119,7 +122,7 @@ def test_all_missing_is_unknown():
     result = classify_regime(_vector({}))
     assert result.regime == "unknown"
     assert result.confidence == 0.0
-    assert len(result.missing_fields) == 4
+    assert len(result.missing_fields) == 3
 
 
 def test_rule_validation_rejects_bad_direction():

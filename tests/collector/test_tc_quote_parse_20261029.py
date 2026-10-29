@@ -24,8 +24,8 @@ def test_parse_tc_line_extracts_pe_ttm():
 
 
 def test_parse_tc_line_short_line_pe_ttm_none():
-    """字段不足 52 位的老格式行：pe_ttm 为 None，不崩（门经 _num 回退 pe）。"""
-    parts = ["v"] * 45
+    """有 50+ 位但不足 52 位的行：pe_ttm 为 None，不崩（门经 _num 回退 pe）。"""
+    parts = ["v"] * 51
     parts[1] = "x"
     parts[2] = "000001"
     parts[3] = "10.0"
