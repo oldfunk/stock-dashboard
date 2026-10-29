@@ -163,8 +163,11 @@ def get_discord_notifier() -> Optional[DiscordNotifier]:
             config.read('.env')
             if 'discord' in config and 'webhook_url' in config['discord']:
                 return DiscordNotifier(config['discord']['webhook_url'])
-        except:
-            pass
+        except Exception as e:
+            # 只吞"读配置失败"这一类；裸 `except:` 会连 KeyboardInterrupt /
+            # SystemExit 一起吞掉（本模块被 scheduler 线程调用，吞掉中断信号
+            # 会让服务停不干净且毫无线索）——审计 P1-3
+            logger.debug(f"从 .env 读取 Discord webhook 失败，忽略：{e}")
             
         return None
     except Exception as e:
