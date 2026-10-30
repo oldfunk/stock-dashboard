@@ -147,6 +147,9 @@ def test_no_data_is_skipped_unless_retry(db, monkeypatch, capsys):
         return []
 
     monkeypatch.setattr(s, "fetch_kline_sina_adjusted", empty)
+    # 批12-b：主源空会走备源复核（akshare）——备源同样打桩，
+    # 否则测试会真打网络/真出数，no_data 断言失去意义
+    monkeypatch.setattr(s, "fetch_via_akshare", lambda code, start_date=None: [])
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     assert calls == ["600519"]
@@ -176,6 +179,9 @@ def test_consecutive_failures_abort_and_mark_partial(db, monkeypatch, capsys):
         raise RuntimeError("connection reset")
 
     monkeypatch.setattr(s, "fetch_kline_sina_adjusted", boom)
+    # 批12-b：主源异常也会先走备源复核——备源同步打桩为异常，
+    # 保证"连续失败中止"的语义仍由主源失败计数驱动
+    monkeypatch.setattr(s, "fetch_via_akshare", boom)
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     out = capsys.readouterr().out
