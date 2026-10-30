@@ -99,7 +99,8 @@ def test_no_overlay_rows_behavior_unchanged(db):
     v = compute_vector(D)
     assert v.quality["breadth_n"] == 0
     assert v.quality["overlay_n"] == 0
-    assert v.metrics["pct_above_ma60"] is None
+    # None 值不进 metrics（落 missing）；键不存在与值为 None 对消费方等价
+    assert v.metrics.get("pct_above_ma60") is None
 
 
 def test_daily_close_dao_key_variants(db):

@@ -1696,14 +1696,17 @@ class DailyCloseDAO:
     """当日全市场收盘覆盖层（F2，2026-10-30；raw 口径，见 daily_close DDL 注释）。"""
 
     def upsert_batch(self, quotes: list[dict], trade_date: str) -> int:
-        """批量落当日收盘。行情 dict 兼容两种键名：主路径腾讯 parse_tc_line 给
-        ``current_price``，自算兜底给 ``price``——两套并存是既有事实，这里都收。"""
+        """批量落当日收盘。行情 dict 兼容三种键名：主路径腾讯 parse_tc_line 给
+        ``current_price``，自算兜底给 ``price``，直给 ``close`` 也收——三套并存
+        是既有事实，测试与覆盖层回填都可能用不同形状喂。"""
         rows = []
         for q in quotes:
             code = q.get('code')
             close = q.get('price')
             if close is None:
                 close = q.get('current_price')
+            if close is None:
+                close = q.get('close')
             if not code or close is None:
                 continue
             rows.append((code, trade_date, close,
