@@ -3,6 +3,12 @@
 import pytest
 
 from src.models import database as db_mod
+from src.utils import now_cn
+
+#: 用例日期必须相对真实今天：新鲜度判定按"今天 - trade_date > max_age_days(3)"算，
+#: 写死日期会让用例变成定时炸弹——2026-10-30 实录：固定 10-26 的用例在 10-29
+#: （差 3 天）刚好过、10-30（差 4 天）必炸 warn。全文件日期统一取 TODAY。
+TODAY = now_cn().date().isoformat()
 
 
 @pytest.fixture
@@ -15,7 +21,7 @@ def db(tmp_path, monkeypatch):
 
 
 def _record(**over):
-    d = {"dataset": "kline_daily", "trade_date": "2026-10-26",
+    d = {"dataset": "kline_daily", "trade_date": TODAY,
          "coverage": 0.98, "missing_rate": 0.01, "outliers": 0,
          "pit_violations": 0, "details": {}}
     d.update(over)
@@ -26,15 +32,15 @@ def _record(**over):
 def test_pass_quality(db):
     from src.research.quality import assert_quality, evaluate
     _record()
-    result = evaluate("kline_daily", "2026-10-26")
+    result = evaluate("kline_daily", TODAY)
     assert result.status == "pass"
     assert result.ok
-    assert assert_quality("kline_daily", "2026-10-26").status == "pass"
+    assert assert_quality("kline_daily", TODAY).status == "pass"
 
 
 def test_missing_record_is_invalid(db):
     from src.research.quality import evaluate
-    result = evaluate("kline_daily", "2026-10-26")
+    result = evaluate("kline_daily", TODAY)
     assert result.status == "invalid"
     assert "缺少质量记录" in result.reasons[0]
 
@@ -43,20 +49,20 @@ def test_low_coverage_is_invalid(db):
     from src.research.quality import QualityError, assert_quality
     _record(coverage=0.80)
     with pytest.raises(QualityError):
-        assert_quality("kline_daily", "2026-10-26")
+        assert_quality("kline_daily", TODAY)
 
 
 def test_pit_violation_is_invalid(db):
     from src.research.quality import QualityError, assert_quality
     _record(pit_violations=2)
     with pytest.raises(QualityError):
-        assert_quality("kline_daily", "2026-10-26")
+        assert_quality("kline_daily", TODAY)
 
 
 def test_missing_rate_warn_but_ok(db):
     from src.research.quality import evaluate
     _record(missing_rate=0.20)
-    result = evaluate("kline_daily", "2026-10-26")
+    result = evaluate("kline_daily", TODAY)
     assert result.status == "warn"
     assert result.ok
 
@@ -145,20 +151,20 @@ def test_old_date_is_looked_up_exactly_not_by_recent_window(db):
 
 def test_record_quality_returns_verdict(db):
     from src.research.quality import record_quality
-    result = record_quality("kline_daily", "2026-10-26", 0.99, 0.0, 0, 0)
+    result = record_quality("kline_daily", TODAY, 0.99, 0.0, 0, 0)
     assert result.status == "pass"
 
 
 def test_assess_kline_daily(db):
     from src.research.quality import assess_dataset
     dao = db_mod.KlineDAO()
-    dao.upsert_many("600519", [{"trade_date": "2026-10-26", "open": 1.0,
+    dao.upsert_many("600519", [{"trade_date": TODAY, "open": 1.0,
                                 "close": 1.0, "high": 1.0, "low": 1.0,
                                 "volume": 1.0, "amount": 1.0, "turnover": 0.1,
                                 "close_raw": 1.0, "close_adj": 1.0}])
-    dao.upsert_many("000001", [{"trade_date": "2026-10-26", "open": 1.0,
+    dao.upsert_many("000001", [{"trade_date": TODAY, "open": 1.0,
                                 "close": 1.0, "high": 1.0, "low": 1.0,
                                 "volume": 1.0, "amount": 1.0, "turnover": 0.1}])
-    stats = assess_dataset("kline_daily", "2026-10-26")
+    stats = assess_dataset("kline_daily", TODAY)
     assert stats["coverage"] == 0.5
     assert stats["details"]["codes"] == 2
