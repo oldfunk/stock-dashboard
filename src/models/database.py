@@ -732,6 +732,17 @@ class StockSnapshotDAO:
             row = conn.execute("SELECT COUNT(*) as cnt FROM stock_snapshot").fetchone()
         return row['cnt']
 
+    def codes_missing_sector(self) -> list[str]:
+        """sector 为空/空白的 code（升序）——行业扩图的目标集。
+
+        dry-run 靠它预测"这次能补多少只"，实跑后再查一次即得预测 vs 实际。
+        """
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT code FROM stock_snapshot "
+                "WHERE sector IS NULL OR TRIM(sector) = '' ORDER BY code").fetchall()
+        return [r['code'] for r in rows]
+
     def get_by_code(self, code: str) -> Optional[dict]:
         """按股票代码查最新快照（单条）"""
         with db_conn() as conn:
@@ -1182,6 +1193,80 @@ class FinancialHistoryDAO:
                 "WHERE stock_code = ? AND report_date = ? AND report_type = 'A'",
                 params)
             return cur.rowcount
+
+    def targets_missing_notice_quarterly(self, limit: int | None = None,
+                                         offset: int = 0, task: str | None = None,
+                                         retry_no_data: bool = False,
+                                         retry_partial: bool = False) -> list[tuple]:
+        """``[(股票代码, 该股最新季报报告期)]``——季报披露日回填的目标集。
+
+        入选条件：该股有 ``report_type='Q'`` 且 notice_date 为空/空白的行。
+
+        - 第二个返回值同时当进度表的 ``covered_report_date``：新季报一到，
+          ``covered < 新报告期`` 自动重新入选，不会被进度表永久锁死
+          （与年报补充字段回填同一套语义）。
+        - ``task`` 给了就按 ``backfill_progress`` 排除已处理过的股票；上游只回
+          ~20 年历史，早年季度行可能永远填不上，不靠进度表这轮目标集永不收敛。
+        """
+        sql = ("SELECT stock_code, MAX(report_date) AS latest_q FROM financial_history"
+               " WHERE report_type = 'Q'")
+        params: list = []
+        if task:
+            skip = ["done"]
+            if not retry_no_data:
+                skip.append("no_data")
+            if not retry_partial:
+                skip.append("partial")
+            marks = ", ".join("?" for _ in skip)
+            sql += (" AND NOT EXISTS (SELECT 1 FROM backfill_progress p"
+                    " WHERE p.task = ? AND p.code = financial_history.stock_code"
+                    f" AND p.status IN ({marks})"
+                    " AND COALESCE(p.covered_report_date, '') >="
+                    " (SELECT MAX(f2.report_date) FROM financial_history f2"
+                    "  WHERE f2.stock_code = financial_history.stock_code"
+                    "    AND f2.report_type = 'Q'))")
+            params.append(task)
+            params.extend(skip)
+        sql += (" GROUP BY stock_code"
+                " HAVING SUM(CASE WHEN notice_date IS NULL OR TRIM(notice_date) = ''"
+                "            THEN 1 ELSE 0 END) > 0"
+                " ORDER BY stock_code")
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += [limit, offset]
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [(r["stock_code"], r["latest_q"]) for r in rows]
+
+    def fill_quarterly_notice_dates(self, code: str, notices: dict,
+                                    dry_run: bool = False) -> int:
+        """按 ``{报告期: 披露日}`` 只填**季报行**的空缺 notice_date，返回填进行数。
+
+        三重限制都不可省：``report_type='Q'`` 不碰年报行（年报有自己那条
+        ``update_extra_fields`` 路径与口径）；``notice_date`` 已有值不覆盖（幂等、
+        重跑安全）；报告期与披露日全走绑定参数，不拼进 SQL 文本。
+        库里不存在的报告期命中 0 行——绝不因回填造出半截行。
+
+        ``dry_run=True`` 用**同一个谓词**数"这次能填几行"而不写，所以预测不会
+        与真实写入漂移（分成两条 SQL 迟早对不上）。
+        """
+        predicate = ("stock_code = ? AND report_date = ? AND report_type = 'Q'"
+                     " AND (notice_date IS NULL OR TRIM(notice_date) = '')")
+        touched = 0
+        with db_conn() as conn:
+            for report_date, notice in notices.items():
+                if not notice:
+                    continue
+                if dry_run:
+                    touched += conn.execute(
+                        f"SELECT COUNT(*) FROM financial_history WHERE {predicate}",
+                        (code, report_date)).fetchone()[0]
+                    continue
+                cur = conn.execute(
+                    f"UPDATE financial_history SET notice_date = ? WHERE {predicate}",
+                    (notice, code, report_date))
+                touched += cur.rowcount
+        return touched
 
     def get_codes_missing_extra(self, limit: int | None = None,
                                 offset: int = 0, task: str | None = None,

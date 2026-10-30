@@ -500,6 +500,19 @@ class ResearchDAO:
                 (limit,)).fetchall()
         return [self._state_dict(r) for r in rows]
 
+    def get_state_dates(self, start: str, end: str) -> list[str]:
+        """区间内已落库的市场状态交易日（升序）。
+
+        回填的"跑到哪了"直接以目标表为准——不另立进度表，写库面保持在目标表内
+        （代价：源数据事后被修正过的日子不会自动失效，须显式 ``--recompute``）。
+        """
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT trade_date FROM market_state_daily "
+                "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
+                (start, end)).fetchall()
+        return [r["trade_date"] for r in rows]
+
     @staticmethod
     def _state_dict(row) -> dict:
         d = dict(row)

@@ -1,5 +1,7 @@
 """市场状态向量定义回归测试（R1-1）。"""
 
+import sqlite3
+
 import pytest
 
 from src.models import database as db_mod
@@ -200,3 +202,103 @@ def test_volatility_and_regime(db):
     vector = compute_vector(days[-1])
     assert "volatility_20d" not in vector.missing
     assert classify_regime(vector).regime != "unknown"
+
+
+# ── 单连接只读事务（审计 P2-3，批9-a） ──────────────────────────────────────
+
+def _row(day, price=10.0, amount=1e8):
+    return {"trade_date": day, "open": price, "close": price, "high": price,
+            "low": price, "volume": 1.0, "amount": amount, "turnover": 0.1,
+            "close_adj": price}
+
+
+def test_compute_vector_reads_on_one_connection(db, monkeypatch):
+    """一次向量计算只开 1 个连接、且取数中途处于显式读事务内。
+
+    旧实现是 4 段各自 ``with db_conn()``（4 个连接 4 个事务）；本用例把连接数
+    钉成 1，并抽查中段 ``in_transaction``——只收进同一个 with 而不 BEGIN，
+    WAL 下每条 SELECT 各取快照，同样会拼接，所以两条都要守。
+    """
+    from src.research import market_state as ms
+    day = "2026-10-26"
+    db_mod.KlineDAO().upsert_many("600519", [_row(day)])
+    conns, in_txn = [], []
+    real_connect = ms.get_connection
+    real_liq = ms._block_liquidity
+
+    def counting_connect():
+        conn = real_connect()
+        conns.append(conn)
+        return conn
+
+    def spy(conn, trade_date):
+        in_txn.append(conn.in_transaction)
+        return real_liq(conn, trade_date)
+
+    monkeypatch.setattr(ms, "get_connection", counting_connect)
+    monkeypatch.setattr(ms, "_block_liquidity", spy)
+    vector = ms.compute_vector(day)
+    assert vector.metrics["total_turnover_yi"] == 1.0
+    assert len(conns) == 1, f"应只开 1 个连接，实际 {len(conns)}（旧实现 4 段各开一个）"
+    assert in_txn == [True], "取数中段必须在同一个事务里，否则读到的是拼接快照"
+
+
+def test_compute_vector_is_one_snapshot_not_spliced(db, monkeypatch):
+    """另一连接在两段取数之间提交，也不得把向量拼成跨时点的混合体。
+
+    注入方式说明：并发写不需要真起线程——旧 bug 的成因是"两段之间别的连接
+    提交了"，所以在第一段之后用**另一个连接**提交一次写，就是同一个交错点
+    （线程只会让它不可复现，不会更真实）。
+    """
+    from src.research import market_state as ms
+    day = "2026-10-26"
+    dao = db_mod.KlineDAO()
+    dao.upsert_many("600519", [_row(day, amount=1e8)])
+    real_liq = ms._block_liquidity
+
+    def liq_then_write(conn, trade_date):
+        out = real_liq(conn, trade_date)     # 流动性：写前（1 只票 / 1 亿）
+        dao.upsert_many("000001", [_row(day, price=20.0, amount=5e8)])
+        return out                            # 之后的广度/波动率段：写后
+
+    monkeypatch.setattr(ms, "_block_liquidity", liq_then_write)
+    vector = ms.compute_vector(day)
+    assert vector.metrics["total_turnover_yi"] == 1.0
+    assert vector.quality["kline_codes"] == 1, (
+        "同一向量里后取的样本量不得看见第 2 只票——那正是"
+        "「成交额说 1 只、quality 说 2 只」的跨时点拼接")
+    with db_mod.db_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n, SUM(amount) AS s FROM kline_daily "
+            "WHERE trade_date = ?", (day,)).fetchone()
+    assert (row["n"], row["s"]) == (2, 6.0e8), "写入确实已提交（自洽不是因为没写进去）"
+
+    # 下一次计算必须看见它：守的是"一次调用一个快照"，不是"永远读旧数据"
+    again = ms.compute_vector(day)
+    assert again.quality["kline_codes"] == 2
+    assert again.metrics["total_turnover_yi"] == 6.0
+
+
+def test_compute_vector_connection_cannot_write(db, monkeypatch):
+    """``query_only`` 把"取数是纯读"从注释变成硬约束（后来人加写会当场炸）。"""
+    from src.research import market_state as ms
+    day = "2026-10-26"
+    caught = []
+    real_liq = ms._block_liquidity
+
+    def spy(conn, trade_date):
+        try:
+            conn.execute(
+                "INSERT INTO market_state_daily (trade_date, status, created_at)"
+                " VALUES (?, 'pass', '2026-10-29')", (day,))
+        except sqlite3.OperationalError as e:
+            caught.append(e)
+        return real_liq(conn, trade_date)
+
+    monkeypatch.setattr(ms, "_block_liquidity", spy)
+    ms.compute_vector(day)
+    assert caught, "取数连接应拒绝写入，否则只读约束只写在 docstring 里"
+    assert "readonly" in str(caught[0])
+    with db_mod.db_conn() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_state_daily").fetchone()[0] == 0

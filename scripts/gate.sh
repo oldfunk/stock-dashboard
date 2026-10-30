@@ -87,11 +87,14 @@ _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
     # 文件名带 PID（批6-a N14b）：两条 gate 同机并发时（母方验收 + 员工自检）固定名
     # `-last.log` 会被后写的那条覆掉，前一条的取证现场直接消失。
     # 只在失败时保留、成功即删除——nec 的 /tmp 是 478M tmpfs，不能靠堆日志。
+    # `.out`（本次原始输出）与 `-last.log`（失败取证副本）同理：失败两份都留着，
+    # 成功两份都不留（批11-b：此前只删 last.log，`.out` 每次运行都留一个文件）。
     GATE_LOG="${TMPDIR:-/tmp}/gate-${label}-$$-last.log"
     if [ "$rc" != "0" ]; then
         cp "$outfile" "$GATE_LOG" 2>/dev/null || true
     else
         rm -f "$GATE_LOG" 2>/dev/null || true
+        rm -f "$outfile" 2>/dev/null || true
     fi
     if [ "$rc" = "124" ]; then
         echo "!!! $label 套件超时（>${limit}s，timeout 终止）——视为失败"
