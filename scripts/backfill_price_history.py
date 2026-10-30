@@ -159,17 +159,21 @@ def _sina_symbol(code: str) -> str:
     return sina_symbol(code)
 
 
-def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01") -> list[dict]:
+def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01",
+                end_date: str | None = None) -> list[dict]:
     """Sina 日线（akshare 封装）：adjust='' 不复权 / 'hfq' 后复权。
 
     Sina 同时返回每日 `outstanding_share`（流通股本），可用于历史每股指标。
+
+    `end_date` 缺省=今天；批13-a 的深度回填只取**早段窗口**时显式给到库内最早日，
+    少下载十一年尾巴（口径不变，只是右端提前收口）。
     """
     import akshare as ak
     from datetime import date as _date
     df = ak.stock_zh_a_daily(
         symbol=_sina_symbol(code),
         start_date=start_date.replace("-", ""),
-        end_date=_date.today().strftime("%Y%m%d"),
+        end_date=(end_date or _date.today().isoformat()).replace("-", ""),
         adjust=adjust,
     )
     if df is None or len(df) == 0:
@@ -199,17 +203,19 @@ def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01") -> list[
 
 
 def fetch_kline_sina_adjusted(code: str, start_date: str,
-                              retries: int = 3) -> list[dict]:
+                              retries: int = 3,
+                              end_date: str | None = None) -> list[dict]:
     """Sina 不复权 + 后复权 → 三列价格模型（2026-10-26）。
 
     单只约 3–5s×2；无东财式限流。失败退避 5/10/20s 重试。
+    `end_date` 给定时只取到那一天（批13-a 深度回填取早段窗口用）。
     """
     last_err = None
     for attempt in range(retries + 1):
         try:
-            raw = _sina_daily(code, "", start_date)
+            raw = _sina_daily(code, "", start_date, end_date)
             time.sleep(0.2)
-            adj = _sina_daily(code, "hfq", start_date)
+            adj = _sina_daily(code, "hfq", start_date, end_date)
             rows = merge_price_model(raw, adj)
             if rows:
                 return rows
