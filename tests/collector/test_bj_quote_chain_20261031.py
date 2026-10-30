@@ -100,6 +100,44 @@ def test_three_markets_share_one_parser(fetcher):
     assert {r["name"] for r in rows} == {"贵州茅台", "新粤能", "安徽凤凰"}
 
 
+def test_all_stocks_basic_entry_returns_bj_rows(fetcher, monkeypatch):
+    """派工单的验收口径是"daily_close/快照/初筛天然含 BJ"，它们共用这个入口。
+
+    代码表含 920 号段 -> `fetch_all_stocks_basic()` 的返回里就得有这只 BJ，
+    否则前面每条链路都对，入口仍然把北交所整体丢掉。
+    规模给到 121 只是入口自己的门槛（`len(raw) > 100` 才算腾讯出数），
+    顺便确认真拿到数时**不会**掉进自算兜底。
+    """
+    codes = ["920000"] + [f"600{i:03d}" for i in range(120)]
+    monkeypatch.setattr(fetcher, "_get_stock_codes", lambda: [
+        {"code": c, "name": "安徽凤凰" if c == "920000" else f"样本{c[-3:]}"}
+        for c in codes])
+
+    def fake_curl_get(url, timeout=20):
+        lines = []
+        for sym in url.split("q=", 1)[1].split(","):
+            code = sym[2:]
+            if code == "920000":
+                lines.append(f'v_{sym}="{_body(BJ_LINE)}";')
+            else:
+                f = _fields(f"样本{code[-3:]}", code, "1392.05", "1354.00",
+                            "21.18", "17401.76")
+                lines.append(f'v_{sym}="{_body(f)}";')
+        return "\n".join(lines)
+
+    fetcher.curl_get = fake_curl_get
+    rows = fetcher.fetch_all_stocks_basic()
+    by_code = {r["code"]: r for r in rows}
+    assert len(rows) == 121, "121 只都要出数（掉进兜底就是腾讯被判失败）"
+    assert "920000" in by_code
+    assert by_code["920000"]["current_price"] == 10.76
+    # 初筛吃的是同一批字典：BJ 的 PE/PB/市值都解析成了真数，走的是和沪深同一套阈值
+    kept = fetcher.pre_filter_stocks(rows, {"screener": {"conditions": {
+        "min_pe": 1, "max_pe": 30, "max_pb": 10,
+        "min_market_cap": 1, "max_market_cap": 60000, "min_price": 0.1}}})
+    assert {"920000", "600001"} <= {r["code"] for r in kept}
+
+
 def test_sina_fallback_batch_uses_bj_prefix(fetcher, monkeypatch):
     """Sina 自算兜底链路的 symbol 也必须三分，否则腾讯挂了时 BJ 整体消失。"""
     import urllib.request as ur
