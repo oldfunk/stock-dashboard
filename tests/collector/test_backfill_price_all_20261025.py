@@ -179,9 +179,11 @@ def test_consecutive_failures_abort_and_mark_partial(db, monkeypatch, capsys):
         raise RuntimeError("connection reset")
 
     monkeypatch.setattr(s, "fetch_kline_sina_adjusted", boom)
-    # 批12-b：主源异常也会先走备源复核——备源同步打桩为异常，
-    # 保证"连续失败中止"的语义仍由主源失败计数驱动
-    monkeypatch.setattr(s, "fetch_via_akshare", boom)
+    # 批12-b：主源异常也会先走备源复核——备源用**独立**的异常桩
+    # （不能复用 boom：它会往 calls 里追加，主源计数就翻倍了）
+    def boom_backup(code, start_date=None):
+        raise RuntimeError("connection reset")
+    monkeypatch.setattr(s, "fetch_via_akshare", boom_backup)
     monkeypatch.setattr("sys.argv", ["backfill", "--all", "--sleep", "0"])
     assert s.main() == 0
     out = capsys.readouterr().out
