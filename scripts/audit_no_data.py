@@ -18,6 +18,11 @@
 | `live_but_no_data` | ambiguous 桶里，末根日线仍新鲜 | **采集缺陷**（限流/空响应被误记 no_data 后会被进度表永久排除） |
 | `unattributed` | 落不进任何一类 | 非空即 exit 1 —— "100% 归因"是机器断言，不是我的口头承诺 |
 
+另有两个**不算 no_data** 的覆盖缺口桶（`--format md` 会一起打出来，不影响退出码）：
+有行情缺财务 / 有财务缺行情。它们是"回填任务的目标集本身没盖到"
+（例如财务回填只捞有年报的票），跟"跑过并确认无数据"是两件事，
+混进 no_data 会让 100% 归因变成假话。
+
 不写任何表；`--verify-live` 只 GET 新浪（默认不打网络、不碰东财）。
 """
 
@@ -162,6 +167,54 @@ def resolve(rows: list[dict], verify_live: bool, fresh_days: int,
     return rows
 
 
+def coverage_gaps(limit_samples: int = 8) -> dict:
+    """库内**交叉缺口**：有行情没财务 / 有财务没行情。
+
+    为什么不塞进 no_data 的分类里：no_data 是"回填任务跑过并确认无数据"的记账，
+    而这两桶是"任务范围本身没覆盖到"（例如财务回填只捞 `fundamental_codes()`
+    里有年报的票，于是有行情无年报的票永远不会进它的目标集，也就永远不会出现在
+    `backfill_progress` 里）。批10-c 交付后母方在生产跑出来的 192 只就是这么暴露的——
+    规则盖不住不等于没数据，所以单独成桶、单独报数。
+
+    每桶都给：只数、样例、按"最后交易日/最新报告期"的年份分布（退市票与新票的形状
+    在这里天然分开，不用猜）。
+    """
+    out = {}
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT k.code AS code, MAX(k.trade_date) AS last_trade"
+            " FROM kline_daily k"
+            " WHERE NOT EXISTS (SELECT 1 FROM financial_history f"
+            "                   WHERE f.stock_code = k.code)"
+            " GROUP BY k.code ORDER BY k.code").fetchall()
+        out["kline_without_financials"] = {
+            "codes": len(rows),
+            "samples": [(r["code"], r["last_trade"]) for r in rows[:limit_samples]],
+            "by_last_trade_year": _year_counts(r["last_trade"] for r in rows),
+        }
+        rows2 = conn.execute(
+            "SELECT f.stock_code AS code, MAX(f.report_date) AS last_report"
+            " FROM financial_history f"
+            " WHERE NOT EXISTS (SELECT 1 FROM kline_daily k"
+            "                   WHERE k.code = f.stock_code)"
+            " GROUP BY f.stock_code ORDER BY f.stock_code").fetchall()
+        out["financials_without_kline"] = {
+            "codes": len(rows2),
+            "samples": [(r["code"], r["last_report"]) for r in rows2[:limit_samples]],
+            "by_last_report_year": _year_counts(r["last_report"] for r in rows2),
+        }
+    return out
+
+
+def _year_counts(values) -> dict:
+    """按年份（升序）统计"最后一次有数据的年份"，None 归 '未知'。"""
+    counts: dict[str, int] = {}
+    for v in values or []:
+        year = str(v)[:4] if v else "未知"
+        counts[year] = counts.get(year, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def summarize(rows: list[dict]) -> dict:
     counts: dict[str, int] = {c: 0 for c in CATEGORIES}
     by_task: dict[str, dict[str, int]] = {}
@@ -174,22 +227,40 @@ def summarize(rows: list[dict]) -> dict:
                                    if r["category"] == "unattributed"]}
 
 
-def to_markdown(rows: list[dict]) -> str:
+def gaps_markdown(gaps: dict) -> str:
+    lines = ["## 覆盖缺口（不是 no_data：任务范围没盖到）", "",
+             "| 桶 | 只数 | 最后有数据年份分布 | 样例 |", "|---|---:|---|---|"]
+    for key, label in (("kline_without_financials", "有行情缺财务"),
+                       ("financials_without_kline", "有财务缺行情")):
+        g = gaps.get(key) or {}
+        years = g.get("by_last_trade_year") or g.get("by_last_report_year") or {}
+        samples = "、".join(f"{c}({d})" for c, d in (g.get("samples") or [])[:4])
+        lines.append(f"| {label} | {g.get('codes', 0)} | "
+                     f"{json.dumps(years, ensure_ascii=False)} | {samples} |")
+    return "\n".join(lines)
+
+
+def to_markdown(rows: list[dict], gaps: dict | None = None) -> str:
     lines = ["| 任务 | 代码 | 名称 | 类别 | 行情行数 | 财务行数 | 证据 |",
              "|---|---|---|---|---:|---:|---|"]
     for r in rows:
         lines.append(f"| {r['task']} | {r['code']} | {r['name'] or '-'} | "
                      f"{r['category']} | {r['kline_rows']} | {r['fin_rows']} | "
                      f"{r['evidence']} |")
+    if gaps:
+        lines += ["", gaps_markdown(gaps)]
     return "\n".join(lines)
 
 
 def run(verify_live: bool = False, fresh_days: int = 5,
-        sleep: float = 0.6) -> dict:
+        sleep: float = 0.6, with_gaps: bool = True) -> dict:
     rows = resolve(gather_facts(), verify_live=verify_live,
                    fresh_days=fresh_days, sleep=sleep)
-    return {"summary": summarize(rows), "rows": rows,
-             "verify_live": verify_live, "fresh_days": fresh_days}
+    result = {"summary": summarize(rows), "rows": rows,
+              "verify_live": verify_live, "fresh_days": fresh_days}
+    if with_gaps:
+        result["coverage_gaps"] = coverage_gaps()
+    return result
 
 
 def main(argv=None) -> int:
@@ -209,7 +280,7 @@ def main(argv=None) -> int:
     result = run(verify_live=args.verify_live, fresh_days=args.fresh_days,
                  sleep=args.sleep)
     if args.format == "md":
-        print(to_markdown(result["rows"]))
+        print(to_markdown(result["rows"], result.get("coverage_gaps")))
         print(json.dumps(result["summary"], ensure_ascii=False))
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2))
