@@ -544,6 +544,27 @@ def init_database():
             'CREATE INDEX IF NOT EXISTS idx_kline_trade_date '
             'ON kline_daily(trade_date)'
         )
+        # 2026-10-30 F2 覆盖层：当日全市场收盘（腾讯批查，raw 口径）。
+        # market_state 的广度/波动率/流动性需要**当日全市场**样本，而 kline
+        # 增量只写观察池+Top25（产线实测 21 只/日）——没有这层，日频向量的
+        # pct_above_ma60 等只代表那 21 只（coverage 却仍是 1.0 的假象）。
+        # close 为不复权口径；compute_vector 用该股最近 K 线条的 adj/raw 比值
+        # 缩放后入列（除权日之间比值恒定）。不写 kline_daily：那里是三列契约，
+        # 单列残行会污染 coverage 质量门。
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS daily_close (
+                code TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                close REAL,
+                amount REAL,
+                volume REAL,
+                PRIMARY KEY (code, trade_date)
+            )
+        ''')
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_daily_close_date '
+            'ON daily_close(trade_date)'
+        )
         # 回填进度表（2026-10-24）：全市场回填的断点续跑标记。
         # 动机：老股票有 20 年年报、上游只回 10 年，未填的老年份会让"按 NULL 判定"
         # 的目标集永远不缩小 → 无限重复处理。进度表让每只股票只处理一次。
@@ -1669,6 +1690,41 @@ class KlineDAO:
                 (code,)
             ).fetchone()
         return row['max_date'] if row else None
+
+
+class DailyCloseDAO:
+    """当日全市场收盘覆盖层（F2，2026-10-30；raw 口径，见 daily_close DDL 注释）。"""
+
+    def upsert_batch(self, quotes: list[dict], trade_date: str) -> int:
+        """批量落当日收盘。行情 dict 兼容两种键名：主路径腾讯 parse_tc_line 给
+        ``current_price``，自算兜底给 ``price``——两套并存是既有事实，这里都收。"""
+        rows = []
+        for q in quotes:
+            code = q.get('code')
+            close = q.get('price')
+            if close is None:
+                close = q.get('current_price')
+            if not code or close is None:
+                continue
+            rows.append((code, trade_date, close,
+                         q.get('amount'), q.get('volume')))
+        if not rows:
+            return 0
+        with db_conn() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO daily_close "
+                "(code, trade_date, close, amount, volume) VALUES (?,?,?,?,?)",
+                rows)
+        return len(rows)
+
+    def closes_for(self, trade_date: str) -> dict[str, dict]:
+        """某日覆盖层：{code: {close, amount, volume}}。"""
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT code, close, amount, volume FROM daily_close "
+                "WHERE trade_date = ?", (trade_date,)).fetchall()
+        return {r["code"]: {"close": r["close"], "amount": r["amount"],
+                            "volume": r["volume"]} for r in rows}
 
 
 class BenchmarkDailyDAO:

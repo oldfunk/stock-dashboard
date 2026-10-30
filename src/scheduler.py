@@ -338,6 +338,19 @@ class MarketScheduler:
             # 流水线后追加 K 线数据拉取
             self._fetch_kline_daily()
 
+            # F2（2026-10-30 重提，U9-A 昨晚实证解链）：市场状态日频快照。
+            # 依赖当日 daily_close 覆盖层（采集阶段已落全市场收盘）+ kline 历史；
+            # 当日向量的广度/波动率/流动性由覆盖层补全市场样本（见 market_state
+            # _load_overlay）。失败只告警：快照可由 backfill_market_state --force
+            # 补算，不该拖垮收盘选股主流程。
+            try:
+                from src.research.market_state import snapshot_day
+                sv = snapshot_day(today.strftime("%Y-%m-%d"))
+                logger.info("[调度器] market_state 快照: %s coverage=%s",
+                            sv.status, sv.coverage)
+            except Exception as e:
+                logger.warning(f"[调度器] market_state 快照失败: {e}")
+
             # AI 分析改由外部 AI 执行（读 API/库 → 写笔记），面板不再本地触发
             # （2026-09-21 方向；本地 Zen/备用通道已确认不可用，触发只会空转失败）
             # self._trigger_ai_analysis_async(config)

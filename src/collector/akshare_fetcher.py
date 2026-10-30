@@ -1131,6 +1131,18 @@ def run_collect_pipeline(config: dict) -> list[dict]:
     if not records:
         return []
 
+    # 当日全市场收盘覆盖层（F2，2026-10-30）：market_state 的广度/波动率/流动性
+    # 需要当日全市场样本，而 kline 增量只写观察池+Top25（产线实测 21 只/日）。
+    # 腾讯批查本来就把全市场行情拿在手里，顺手落 daily_close（raw 口径），
+    # 成本一次批量写；失败只降级（向量退化为 kline 样本，不阻断流水线）。
+    try:
+        from src.models.database import DailyCloseDAO
+        saved = DailyCloseDAO().upsert_batch(
+            records, now_cn().strftime("%Y-%m-%d"))
+        logger.info(f"[daily_close] 当日全市场收盘落库 {saved} 只")
+    except Exception as e:
+        logger.warning(f"[daily_close] 落库失败（market_state 覆盖层降级）: {e}")
+
     candidates = pre_filter_stocks(records, config)
     if not candidates:
         return []
