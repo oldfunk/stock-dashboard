@@ -38,6 +38,7 @@ if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
 
 from src.models.database import db_conn, init_database  # noqa: E402
+from src.utils import sina_symbol  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,13 @@ CATEGORIES = ("bj_unmapped", "delisted", "stopped_trading", "live_but_no_data",
 
 
 def sina_sina_symbol(code: str) -> str:
-    """新浪行情 symbol：6/9 开头走 sh，其余走 sz（北交所另有 bj 前缀，本函数不调它）。"""
-    return ("sh" if code.startswith(("6", "9")) else "sz") + code
+    """新浪行情 symbol：sh / sz / **bj**（批12-a 起用共用三分法）。
+
+    实测 `CN_MarketDataService.getKLineData?symbol=bj920000` 有日线
+    （末根 2026-10-30），所以 `--verify-live` 对北交所票同样能出末根日期；
+    旧的二分写法会把 920 拼成 sh920000，查不到就误判成"确属停止挂牌"。
+    """
+    return sina_symbol(code)
 
 
 def classify(fact: dict) -> tuple[str, str]:
@@ -63,7 +69,8 @@ def classify(fact: dict) -> tuple[str, str]:
     if code.startswith(BJ_PREFIXES) and fact.get("in_snapshot") \
             and not fact.get("kline_rows") and not fact.get("fin_rows"):
         return ("bj_unmapped",
-                f"北交所号段（{code[:3]}）、快照有行（{name}）但行情/财务均为 0 行")
+                f"北交所号段（{code[:3]}）、快照有行（{name}）但行情/财务均为 0 行"
+                "；批12-a 起采集已支持 BJ，仍是这状态=该票还没按 sina/curl/akshare 重跑")
     if "退" in name:
         return ("delisted", f"名称含退市标记：{name}")
     if not fact.get("kline_rows") and fact.get("fin_rows"):

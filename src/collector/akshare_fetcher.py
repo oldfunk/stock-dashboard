@@ -23,10 +23,21 @@ import pandas as pd
 from src.utils import (
     safe_float, curl_get, tc_encode, parse_tc_line,
     parse_tc_indices, split_tc_response, INDEX_CODES, INDEX_TARGETS, now_cn,
+    em_secid, em_secucode, market_of, sina_symbol,
 )
 from src.collector.price_model import merge_price_model
 
 logger = logging.getLogger(__name__)
+
+
+class SourceUnsupportedError(RuntimeError):
+    """某个数据源在结构上不支持这支票（当前唯一用途：北交所）。
+
+    为什么要有这个类型而不是返回 ``[]``：``[]`` 在回填侧的含义是"这只票没数据"
+    （会被记 ``no_data``，之后被进度表永久排除），而"这个源供不了 BJ"是**我们的
+    能力边界**，不是上游没数。把两者混成一个信号，就会出现批10-c 挖出的那种后果：
+    一次选错源 = 一只活跃票从此不再被采集。
+    """
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), '../../data/cache/stock_codes.json')
 SECTOR_CACHE_FILE = os.path.join(
@@ -177,8 +188,7 @@ def _computed_fallback(codes: list[dict]) -> list[dict]:
         batch = codes[i:i + batch_size]
         sina_codes = []
         for c in batch:
-            prefix = 'sh' if c['code'].startswith('6') else 'sz'
-            sina_codes.append(f"{prefix}{c['code']}")
+            sina_codes.append(sina_symbol(c['code']))
         url = f"https://hq.sinajs.cn/list={','.join(sina_codes)}"
         req = urllib.request.Request(url, headers={
             'Referer': 'https://finance.sina.com.cn',
@@ -392,8 +402,13 @@ def pre_filter_stocks(stocks: list[dict], config: dict) -> list[dict]:
 # ── 财务补充（AKShare 核心数据源 + 东财 datacenter 兜底）──
 
 def _code_to_em(code: str) -> str:
-    """股票代码转东方财富格式"""
-    return f"{code}.SH" if code.startswith(('6', '9')) else f"{code}.SZ"
+    """东财 datacenter 的 SECUCODE 形式：600519.SH / 000001.SZ / **920000.BJ**。
+
+    注意这里只服务 datacenter 的 `SECUCODE=` 过滤（实测 920000.BJ 给 5 行、
+    `.SH`/`.SZ` 给 0 行）。**不要**把它喂给 `ak.stock_zh_a_hist`——那个函数
+    要的是裸 6 位代码，见 `_fetch_kline_em`。
+    """
+    return em_secucode(code)
 
 
 def _fetch_eastmoney_direct(code: str) -> dict | None:
@@ -1304,11 +1319,20 @@ def fetch_kline_data(code: str, start_date: str | None = None,
 
 def _fetch_kline_em(code: str, start_str: str, end_str: str,
                     adjust: str) -> list[dict]:
-    """东方财富数据源拉取日K"""
-    em_code = _code_to_em(code)
+    """东方财富数据源拉取日K。
+
+    `symbol` 传**裸 6 位代码**：akshare 自己按 `market_code = 1 if symbol.startswith("6")
+    else 0` 拼 secid（1.20.1 源码 `stock/quote/stock_hist_em.py`），所以北交所 920xxx
+    天然落到 `0.920000` —— 正是实测有 1,417 根日线的那个 secid。
+    （旧实现传的是 `_code_to_em(code)` 即 `600519.SH`，会让 akshare 拼出
+    `1.600519.SH`；那种写法对沪深是否曾被东财容忍，我今天被 push2his 限流挡死
+    无法实测，见交付帖的待验证项——但**它对 BJ 一定不成立**，且裸代码是 akshare
+    文档签名里的正解。）
+    """
+    bare = (code or "").strip()
     try:
         df = ak.stock_zh_a_hist(
-            symbol=em_code, period="daily",
+            symbol=bare, period="daily",
             start_date=start_str, end_date=end_str, adjust=adjust
         )
     except Exception as e:
@@ -1340,8 +1364,16 @@ def _fetch_kline_tx(code: str, start_str: str, end_str: str,
     adjust 透传给 akshare（Issue #9 T1/N6-②）：EM 失败回退时必须保持
     与 EM qfq 同一口径，不能静默丢参写入不复权价。
     """
-    # 代码转腾讯格式：sz000792 / sh600519
-    tx_code = f"sh{code}" if code.startswith(('6', '9')) else f"sz{code}"
+    # 腾讯 K 线供不了北交所，两条证据都在（批12-a）：
+    # ① 实测 `web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=bj920000,day,...`
+    #    返回 data 里 **0 根**（同接口 sh600519 给 20 根）；
+    # ② akshare 1.20.1 的 `_normalize_tx_symbol` 只认 430/440/830/831/832/833/839
+    #    这几个旧号段，**920 号段会被原样丢掉前缀**。
+    # 所以这里不返回 []（那会被上层当成"这只票没数据"），而是显式抛能力边界。
+    if market_of(code) == 'BJ':
+        raise SourceUnsupportedError(
+            f"腾讯 K 线源不支持北交所代码 {code}（实测 bj 前缀 0 根）")
+    tx_code = sina_symbol(code)
     try:
         df = ak.stock_zh_a_hist_tx(
             symbol=tx_code, start_date=start_str, end_date=end_str,

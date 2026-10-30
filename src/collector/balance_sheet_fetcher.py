@@ -16,6 +16,8 @@ import time
 import urllib.parse
 import urllib.request
 
+from src.utils import em_f10_symbol
+
 logger = logging.getLogger(__name__)
 
 _F10 = "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis"
@@ -69,8 +71,14 @@ def _get_json(url: str, timeout: int = 15, headers: dict | None = None,
 
 
 def _em_symbol(code: str) -> str:
-    """东财 F10 用前缀格式：SH600519 / SZ000001。"""
-    return f"SH{code}" if code.startswith(("6", "9")) else f"SZ{code}"
+    """东财 F10 的前缀格式：SH600519 / SZ000001 / **BJ920000**。
+
+    委托给 `utils.market_of`（批12-a 三分法）。BJ 写法实测：
+    `zcfzbDateAjaxNew?code=BJ920000` 返回 38 条日期（年报 14 条），
+    `SH920000` / `SZ920000` 都是 **0 条**——旧的二分规则把 920 判成沪市，
+    北交所的资产负债表因此整段取不到。
+    """
+    return em_f10_symbol(code)
 
 
 def _interest_bearing_debt(row: dict) -> float | None:

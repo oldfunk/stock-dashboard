@@ -11,6 +11,7 @@
 import logging
 
 from src.collector.balance_sheet_fetcher import _get_json, _num
+from src.utils import em_secucode
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,13 @@ _HEADERS = {
 
 
 def _secucode(code: str) -> str:
-    """东财 SECUCODE 格式：600519.SH / 000001.SZ。"""
-    return f"{code}.SH" if code.startswith(("6", "9")) else f"{code}.SZ"
+    """东财 SECUCODE 格式：600519.SH / 000001.SZ / **920000.BJ**。
+
+    实测（920000 安徽凤凰）：`SECUCODE="920000.BJ"` 给 5 行，
+    `.SH` / `.SZ` 各给 0 行——旧二分规则把北交所判成沪市后，
+    主要财务指标（含披露日）整只票取不到。
+    """
+    return em_secucode(code)
 
 
 def fetch_mainfin_annual(code: str, timeout: int = 15) -> dict:
