@@ -41,7 +41,10 @@ from src.models.database import (
     ScreeningResultDAO, WatchlistDAO,
 )
 from src.models.ai_watchlist import AiWatchlistDAO
-from src.collector.akshare_fetcher import fetch_kline_data
+from src.collector.akshare_fetcher import (
+    fetch_kline_data, SourceUnsupportedError,
+)
+from src.utils import em_secid, market_of, sina_symbol
 # 三列模型合流逻辑 2026-10-29 上移 src 层（U9-A）；保留同名导入使旧引用不破
 from src.collector.price_model import merge_price_model
 
@@ -79,7 +82,8 @@ def _curl_json(url: str, timeout: int = 15):
 
 
 def _tx_symbol(code: str) -> str:
-    return f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}"
+    """腾讯行情格式（sh/sz/**bj**）。BJ 会在调用处被显式挡掉，见下面注释。"""
+    return sina_symbol(code)
 
 
 def _tx_get_json(url: str, timeout: int = 15):
@@ -107,6 +111,14 @@ def fetch_kline_tencent_qfq(code: str, start_date: str,
     2026-10-26：东财 push2his 约 35 次请求后限流，改用腾讯 `fqkline`：
     Python requests 可直连、返回前复权、无频率问题；10 年约 5 页/只。
     """
+    # 腾讯 fqkline 供不了北交所（批12-a 实测）：`param=bj920000,day,...` 在 data 里
+    # 给 **0 根**（同接口 sh600519 给 20 根）；且 akshare 1.20.1 的
+    # `_normalize_tx_symbol` 只认 430/440/830/831/832/833/839，920 号段会被丢掉前缀。
+    # 这里**显式抛能力边界**而不是返回 []：返回 [] 会被上层当成"这只票没数据"，
+    # 于是"选错源"= 北交所整段被永久记成 no_data（批10-c 缺陷 B 的同一个形状）。
+    if market_of(code) == "BJ":
+        raise SourceUnsupportedError(
+            f"腾讯 fqkline 不支持北交所代码 {code}（实测 bj 前缀 0 根）")
     sym = _tx_symbol(code)
     start = start_date
     end = date.today().isoformat()
@@ -143,7 +155,8 @@ def fetch_kline_tencent_qfq(code: str, start_date: str,
 
 
 def _sina_symbol(code: str) -> str:
-    return f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}"
+    """新浪格式：sh/sz/**bj**（实测 getKLineData?symbol=bj920000 有日线）。"""
+    return sina_symbol(code)
 
 
 def _sina_daily(code: str, adjust: str, start_date: str = "2016-01-01") -> list[dict]:
@@ -220,7 +233,7 @@ def fetch_kline_curl(code: str, start_date: str, retries: int = 3) -> list[dict]
     因此失败时指数退避（15/30/45s）重试，而不是直接放弃；仍失败才抛
     ``RuntimeError``（记 partial，可重试）。
     """
-    secid = ("1." if code.startswith(("6", "9")) else "0.") + code
+    secid = em_secid(code)   # 沪市 1.，深市与**北交所**都是 0.（实测 0.920000 有 1,417 根）
     url = _KLINE_URL.format(secid=secid, beg=start_date.replace("-", ""))
     data = None
     for attempt in range(retries + 1):
@@ -253,6 +266,64 @@ def fetch_kline_curl(code: str, start_date: str, retries: int = 3) -> list[dict]
         except (TypeError, ValueError):
             continue
     return out
+
+
+# ── 备源复核（批12-b，Issue #9；301139 一案的根治）────────────────────────
+
+# 存**函数名**而不是函数对象：字典在导入时就绑住原函数的话，测试里
+# `monkeypatch.setattr(s, "fetch_kline_sina_adjusted", fake)` 就换不掉它
+# （本仓那 3 条回填用例正是这样打桩的，改成存名字后才重新生效）。
+SOURCE_FETCHERS = {
+    "sina": "fetch_kline_sina_adjusted",
+    "curl": "fetch_kline_curl",
+    "tencent": "fetch_kline_tencent_qfq",
+    "akshare": "fetch_via_akshare",
+}
+
+
+def fetch_via_akshare(code: str, start_date: str) -> list[dict]:
+    """旧链路（东财 EM -> 腾讯 备用），qfq 时同样产出三列模型。"""
+    return fetch_kline_data(code, start_date=start_date, adjust="qfq")
+
+
+def get_fetcher(name: str):
+    """按源名从本模块命名空间取函数（每次解析，保住可打桩性）。"""
+    return getattr(sys.modules[__name__], SOURCE_FETCHERS[name])
+
+# 备源按**列模型兼容**排，不是随便挑一个还能用的：
+# - sina 与 akshare(qfq) 都产出三列模型（raw+adj 经 merge_price_model），可互换；
+# - curl / tencent 是前复权单口径，它们出问题时改走 sina（写进去的是更完整的三列，
+#   而不是另一种半截口径）；
+# - tencent 的备源不选 curl：两者都落在东财/腾讯的限流域，同批一起失败概率高。
+BACKUP_SOURCE = {"sina": "akshare", "akshare": "sina",
+                 "curl": "sina", "tencent": "sina"}
+
+
+def recheck_with_backup(code: str, start_date: str, primary: str):
+    """主源没出数/异常时换备源复核一次 -> ``(records, backup_used, notes)``。
+
+    只认"备源确实出数"。备源也空/也炸就返回空，由调用方按
+    "主源异常 -> partial（下轮重试）"、"两源皆空 -> no_data"定性 ——
+    这正是批10-c 缺陷 B 的根治点：以前主源一次限流空返回就直接记 no_data，
+    而 no_data 会被断点续跑排除，于是**一只活跃票从此不再被采集**。
+    """
+    backup = BACKUP_SOURCE.get(primary)
+    if not backup:
+        return [], None, [f"源 {primary} 没有配对的备源"]
+    notes = [f"备源={backup}"]
+    try:
+        rows = get_fetcher(backup)(code, start_date)
+    except SourceUnsupportedError as e:
+        notes.append(f"备源结构上不支持（{e}）")
+        return [], None, notes
+    except Exception as e:  # noqa: BLE001 - 复核失败要报出来，不能当成"没数据"
+        notes.append(f"备源异常 {type(e).__name__}: {str(e)[:80]}")
+        return [], None, notes
+    if rows:
+        notes.append(f"备源有数 {len(rows)} 条")
+        return rows, backup, notes
+    notes.append("备源同样无数据")
+    return [], None, notes
 
 
 def target_codes() -> list[str]:
@@ -340,39 +411,80 @@ def main() -> int:
         except Exception as mark_err:  # noqa: BLE001
             logger.warning(f"[P0-5] 进度标记失败 {code}（下轮将重试）: {mark_err}")
 
-    if args.source == "sina":
-        fetch = fetch_kline_sina_adjusted
-    elif args.source == "curl":
-        fetch = fetch_kline_curl
-    elif args.source == "tencent":
-        fetch = fetch_kline_tencent_qfq
-    else:
-        fetch = (lambda code, start_date: fetch_kline_data(
-            code, start_date=start_date, adjust="qfq"))
+    if args.source not in SOURCE_FETCHERS:
+        print(f"未知数据源：{args.source}")
+        return 2
+    fetch = get_fetcher(args.source)
     ok = 0
     total_rows = 0
+    no_data_count = 0
+    partial_count = 0
+    skipped_count = 0
+    rescued = 0
+    skip_reasons = {}
     consecutive_failures = 0
     aborted = False
     started = time.monotonic()
     for idx, code in enumerate(codes, 1):
+        # 取数：主源 ->（空或异常时）备源复核 -> 才定性
+        primary_error = None
         try:
             records = fetch(code, args.start)
+        except SourceUnsupportedError as e:
+            # 结构性不支持：既不写库也不记 no_data/partial。
+            # 记 no_data 会被断点续跑排除，"换个支持 BJ 的源重跑"这条路就自己堵死了。
+            skipped_count += 1
+            key = args.source + "_unsupported_bj"
+            skip_reasons[key] = skip_reasons.get(key, 0) + 1
+            logger.warning(f"[P0-5] {code} 被源 {args.source} 结构性跳过：{e}"
+                           "（不记 no_data；换 sina/curl/akshare 重跑即可）")
+            continue
+        except Exception as e:  # noqa: BLE001
+            records, primary_error = [], type(e).__name__ + ": " + str(e)[:120]
+
+        backup_used = None
+        if not records:
+            records, backup_used, notes = recheck_with_backup(
+                code, args.start, args.source)
+            detail = "；".join(notes)
             if records:
+                rescued += 1
+                logger.info(f"[P0-5] {code} 主源空，备源复核：有数（{detail}）")
+            else:
+                logger.warning("[P0-5] " + str(code) + " 主源空，备源复核：无数据（"
+                               + detail
+                               + ("；主源错误 " + primary_error if primary_error else "")
+                               + "）")
+
+        if records:
+            try:
                 n = dao.upsert_many(code, records)
+            except Exception as e:  # noqa: BLE001 - 写库失败可重试，记 partial
+                _mark(code, 0, "partial")
+                partial_count += 1
+                consecutive_failures += 1
+                logger.warning(f"[P0-5] {code} 写库失败（可重试）: {e}")
+                n = 0
+            else:
                 _mark(code, n, "done")
                 ok += 1
                 total_rows += n
                 consecutive_failures = 0
+                src_note = f"，备源 {backup_used}" if backup_used else ""
                 logger.info(f"[P0-5] {idx}/{len(codes)} {code}: {n} 条"
-                            f"（{records[0]['trade_date']}~{records[-1]['trade_date']}）")
-            else:
-                _mark(code, 0, "no_data")
-                consecutive_failures += 1
-                logger.warning(f"[P0-5] {code}: 无数据")
-        except Exception as e:
+                            f"（{records[0]['trade_date']}~"
+                            f"{records[-1]['trade_date']}）{src_note}")
+        elif primary_error:
+            # 主源是"失败"而不是"确认没数据" -> partial，下一轮自动重试
             _mark(code, 0, "partial")
+            partial_count += 1
             consecutive_failures += 1
-            logger.warning(f"[P0-5] {code} 失败（可重试）: {e}")
+            logger.warning(f"[P0-5] {code} 失败（记 partial，可重试）: {primary_error}")
+        else:
+            _mark(code, 0, "no_data")
+            no_data_count += 1
+            consecutive_failures += 1
+            logger.warning(f"[P0-5] {code}: 两个源都确认无数据 -> no_data")
         if args.max_consecutive_failures and \
                 consecutive_failures >= args.max_consecutive_failures:
             logger.error(f"[P0-5] 连续 {consecutive_failures} 只失败，中止本轮"
@@ -382,8 +494,18 @@ def main() -> int:
         if args.sleep:
             time.sleep(args.sleep)
     elapsed = round(time.monotonic() - started, 1)
+    summary = {
+        "source": args.source, "targets": len(codes), "done": ok, "rows": total_rows,
+        "no_data": no_data_count, "partial": partial_count,
+        "skipped": skipped_count, "skip_reasons": skip_reasons,
+        "rescued_by_backup": rescued, "aborted": aborted, "elapsed_s": elapsed,
+    }
     print(f"回填 {ok}/{len(codes)} 只，共 {total_rows} 条（{elapsed}s）"
+          f"；no_data={no_data_count} partial={partial_count}"
+          f" 结构性跳过={skipped_count}{skip_reasons or ''}"
+          f" 备源救回={rescued}"
           + ("；连续失败已中止" if aborted else ""))
+    print(json.dumps(summary, ensure_ascii=False))
     return 0
 
 

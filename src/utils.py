@@ -101,12 +101,59 @@ def curl_get(url: str, timeout: int = 20) -> Optional[str]:
     return None
 
 
-def tc_encode(code: str) -> str:
-    """6位股票代码转腾讯行情格式：600519→sh600519，000807→sz000807，900951→sh900951"""
-    c = code.strip()
+def market_of(code: str) -> str:
+    """6 位股票代码 -> 交易所代号：``BJ``（北交所）/ ``SH`` / ``SZ``。
+
+    三分法（批12-a，Issue #9）。旧实现全站都是"6/9 开头→沪，其余→深"的二分，
+    于是北交所被系统性误映射：新号段 ``920xxxx`` 以 9 开头被当成沪市，
+    旧号段 ``83/87/43`` 被当成深市。实测（920000 安徽凤凰）——
+
+    - 东财 datacenter：``SECUCODE="920000.BJ"`` 5 行，``.SH`` / ``.SZ`` 各 **0 行**；
+    - 东财 F10：``code=BJ920000`` 日期列表 38 条（年报 14 条），
+      ``SH920000`` / ``SZ920000`` **0 条**；
+    - 东财 K 线：``secid=0.920000`` 有 1,417 根日线，``secid=1.920000`` **0 根**
+      （所以 BJ 走"深圳那一侧"的 secid，不是沪市那一侧）。
+
+    判据来源是号段本身；``900xxx``（沪市 B 股）仍归 SH——它和 ``920`` 不冲突，
+    所以这里先判 BJ 再判 SH 的 ``9`` 分支。
+    """
+    c = (code or "").strip()
+    if c.startswith(('920', '83', '87', '43')):
+        return 'BJ'
     if c.startswith('6') or c.startswith('9'):
-        return f"sh{c}"
-    return f"sz{c}"
+        return 'SH'
+    return 'SZ'
+
+
+def sina_symbol(code: str) -> str:
+    """新浪/腾讯行情格式：``sh600519`` / ``sz000001`` / ``bj920000``。"""
+    c = (code or '').strip()
+    return f"{market_of(c).lower()}{c}"
+
+
+def em_secid(code: str) -> str:
+    """东财 K 线 secid：沪市 ``1.``，深市与**北交所**都是 ``0.``（实测）。"""
+    c = (code or '').strip()
+    return f"{'1' if market_of(c) == 'SH' else '0'}.{c}"
+
+
+def em_f10_symbol(code: str) -> str:
+    """东财 F10 的 ``code=`` 参数格式：``SH600519`` / ``SZ000001`` / ``BJ920000``。"""
+    c = (code or '').strip()
+    return f"{market_of(c)}{c}"
+
+
+def em_secucode(code: str) -> str:
+    """东财 datacenter 的 ``SECUCODE`` 格式：``600519.SH`` / ``920000.BJ``。"""
+    c = (code or '').strip()
+    return f"{c}.{market_of(c)}"
+
+
+def tc_encode(code: str) -> str:
+    """6 位股票代码转腾讯行情格式：600519→sh600519，000807→sz000807，
+    900951→sh900951，920000→bj920000（北交所，实测 qt.gtimg.cn 认这个前缀，
+    且字段布局与沪深同位：名称=1、代码=2、现价=3、昨收=4、今开=5、时间=30）。"""
+    return sina_symbol(code)
 
 
 def parse_tc_line(raw: str) -> Optional[dict]:
