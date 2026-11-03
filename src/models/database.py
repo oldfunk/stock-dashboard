@@ -1604,9 +1604,22 @@ class WatchlistDAO:
             conn.execute("DELETE FROM watchlist")
 
 
+def _price_cell(value):
+    """价格列的入库闸门：只有 **>0** 才算一个价。
+
+    上游（新浪/东财）把无成交、停牌日写成 ``0.00``——产线实证 184 行（全在
+    920xxx 北交所，夹在正常价之间）。0 进契约列会把收益序列变成 ``-100%/+900%``，
+    而真值是"那几天没有成交"，所以非正数在这里降成 None：新行存 NULL（与母方对
+    存量的处置同形），已有行的 COALESCE 就不会被 0 覆盖掉真价。
+    注意 ``volume``/``amount`` **不走这个闸门**——它们的 0 是真实无成交。
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    return value if isinstance(value, (int, float)) and value > 0 else None
+
+
 class KlineDAO:
     """K线日线数据 DAO（2026-09-28 从 WatchlistDAO 迁回：历史重构误删类，致 routes/scheduler ImportError）"""
-
     def upsert_many(self, code: str, records: list[dict]) -> int:
         """批量写入日K（UPSERT）
 
@@ -1617,12 +1630,25 @@ class KlineDAO:
         **契约列写路径维护（2026-10-27，Issue #4/#8 审计 F1；同日 Hermes P0-1 收口）**：
         - ``close_qfq``：契约恒等于 ``close``（§9.1 close 展示列=close_qfq）。
           **强制** close_qfq := close（忽略调用方传入的 close_qfq——调用方
-          分叉值会直接违反契约；冲突更新同样镜像 close，NULL close 则
-          close_qfq 同步 NULL，不留"close 空而 qfq 留旧值"的发散态）。
+          分叉值会直接违反契约；冲突更新镜像的是**这次落库的那个 close**：
+          传入空/0 时 close 保留旧值，close_qfq 也跟着保留，不留
+          "close 有值而 qfq 发散"的态）。
         - ``market``/``instrument_id``：6 位数字代码推导 ``CN``/``CN:xxxxxx``
           （§9.2 契约）；非 6 位数字（未来港股/美股）不推导，保持 NULL
           （不臆造），由该市场接入时显式传入。
-        - 冲突更新均用 COALESCE 保留旧值（close_qfq 除外，见上）。
+        - 冲突更新均用 COALESCE 保留旧值。
+
+        **零价不进价格列（批13-e，2026-11-03）**：上游把无成交/停牌日写成 ``0.00``
+        （产线实证：北交所 184 行 close=0，夹在正常价之间）。0 破坏比值与收益，
+        所以价格列是**三态**而不是"非空即写"：``>0`` 覆盖、``<=0``（含负数）
+        **保留已有真价**、调用方显式给 NULL 才清空。
+
+        第三种区分不能省：Hermes P0-1 要求"close 被传空 → close_qfq 同步空"，
+        13-e 要求"上游的 0 不许抹掉已有的价"——两件事都发生在冲突分支，所以 SET
+        里判的是**原始入参** ``:raw_*``，而不是降过值的 ``excluded.*``（在 excluded
+        上 0 和 NULL 长得一样，一合并就违反其中一条契约）。新行侧没有这个歧义：
+        ``_price_cell`` 把非正数降成 NULL 存进去，与母方对存量的处置同形。
+        ``volume``/``amount`` 不在闸门内：**0 是真实的无成交**，照写不误。
         """
         if not records:
             return 0
@@ -1630,7 +1656,7 @@ class KlineDAO:
             for r in records:
                 # 契约列推导：close_qfq 强制镜像 close（P0-1）；
                 # market/instrument_id 由 code 推导（不臆造）
-                qfq = r.get('close')
+                raw = {k: r.get(k) for k in ("open", "close", "high", "low")}
                 iid = r.get('instrument_id')
                 if iid is None and len(code) == 6 and code.isdigit():
                     iid = f"CN:{code}"
@@ -1640,35 +1666,55 @@ class KlineDAO:
                 mkt = r.get('market')
                 if mkt is None and iid and str(iid).startswith("CN:"):
                     mkt = "CN"
+                params = {
+                    "code": code, "trade_date": r['trade_date'],
+                    "open": _price_cell(raw["open"]),
+                    "close": _price_cell(raw["close"]),
+                    "high": _price_cell(raw["high"]),
+                    "low": _price_cell(raw["low"]),
+                    "raw_open": raw["open"], "raw_close": raw["close"],
+                    "raw_high": raw["high"], "raw_low": raw["low"],
+                    "volume": r.get('volume'), "amount": r.get('amount'),
+                    "turnover": r.get('turnover'),
+                    "close_raw": _price_cell(r.get('close_raw')),
+                    "close_adj": _price_cell(r.get('close_adj')),
+                    "shares": r.get('shares'),
+                    "market": mkt, "instrument_id": iid,
+                }
                 conn.execute("""
                     INSERT INTO kline_daily
                     (code, trade_date, open, close, high, low, volume, amount,
                      turnover, close_raw, close_adj, shares,
                      close_qfq, market, instrument_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (:code, :trade_date, :open, :close, :high, :low,
+                            :volume, :amount, :turnover, :close_raw,
+                            :close_adj, :shares, :close, :market, :instrument_id)
                     ON CONFLICT(code, trade_date) DO UPDATE SET
-                        open = excluded.open,
-                        close = excluded.close,
-                        high = excluded.high,
-                        low = excluded.low,
-                        volume = excluded.volume,
-                        amount = excluded.amount,
-                        turnover = COALESCE(excluded.turnover, turnover),
-                        close_raw = COALESCE(excluded.close_raw, close_raw),
-                        close_adj = COALESCE(excluded.close_adj, close_adj),
-                        shares = COALESCE(excluded.shares, shares),
-                        close_qfq = excluded.close,
-                        market = COALESCE(excluded.market, market),
-                        instrument_id = COALESCE(excluded.instrument_id, instrument_id)
-                """, (
-                    code, r['trade_date'],
-                    r.get('open'), r.get('close'),
-                    r.get('high'), r.get('low'),
-                    r.get('volume'), r.get('amount'),
-                    r.get('turnover'),
-                    r.get('close_raw'), r.get('close_adj'), r.get('shares'),
-                    qfq, mkt, iid,
-                ))
+                        open = CASE WHEN :raw_open IS NULL THEN NULL
+                                    WHEN :raw_open > 0 THEN :open
+                                    ELSE open END,
+                        close = CASE WHEN :raw_close IS NULL THEN NULL
+                                     WHEN :raw_close > 0 THEN :close
+                                     ELSE close END,
+                        high = CASE WHEN :raw_high IS NULL THEN NULL
+                                    WHEN :raw_high > 0 THEN :high
+                                    ELSE high END,
+                        low = CASE WHEN :raw_low IS NULL THEN NULL
+                                   WHEN :raw_low > 0 THEN :low
+                                   ELSE low END,
+                        volume = :volume,
+                        amount = :amount,
+                        turnover = COALESCE(:turnover, turnover),
+                        close_raw = COALESCE(:close_raw, close_raw),
+                        close_adj = COALESCE(:close_adj, close_adj),
+                        shares = COALESCE(:shares, shares),
+                        -- 镜像本次落库的那个 close（正数=新值，空=空，非正=保留值）
+                        close_qfq = CASE WHEN :raw_close IS NULL THEN NULL
+                                         WHEN :raw_close > 0 THEN :close
+                                         ELSE close END,
+                        market = COALESCE(:market, market),
+                        instrument_id = COALESCE(:instrument_id, instrument_id)
+                """, params)
         return len(records)
 
     def get_daily(self, code: str, limit: int = 250) -> list[dict]:
