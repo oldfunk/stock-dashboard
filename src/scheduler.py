@@ -335,8 +335,13 @@ class MarketScheduler:
             self._last_daily_date = today
             logger.info("[调度器] 每日流水线完成")
 
-            # 流水线后追加 K 线数据拉取
-            self._fetch_kline_daily()
+            # 流水线后追加 K 线数据拉取（非致命：失败/跳过只告警，
+            # 不阻断其后的温度计快照——2026-11-03 实录：能力边界异常逃逸
+            # 让快照整天缺席）
+            try:
+                self._fetch_kline_daily()
+            except Exception as e:
+                logger.warning(f"[调度器] K线增量阶段异常（不阻断快照）: {e}")
 
             # F2（2026-10-30 重提，U9-A 昨晚实证解链）：市场状态日频快照。
             # 依赖当日 daily_close 覆盖层（采集阶段已落全市场收盘）+ kline 历史；
@@ -421,9 +426,17 @@ class MarketScheduler:
             self._weekly_in_progress = False
 
     def _fetch_kline_daily(self):
-        """每日拉取观察池+候选股的K线数据（增量更新）"""
+        """每日拉取观察池+候选股的K线数据（增量更新）
+
+        单只失败不中止整个阶段（2026-11-03 实录）：北交所代码进入增量范围后，
+        腾讯/新浪路径抛 ``SourceUnsupportedError``（能力边界，非"没数据"）逃逸出
+        循环 → 整个阶段中止、其后的温度计快照也被跳过。现在：能力边界→跳过
+        计数；网络/源异常→告警计数；两者都不影响其余代码与后续阶段。
+        """
         from src.models.database import KlineDAO
-        from src.collector.akshare_fetcher import fetch_kline_data
+        from src.collector.akshare_fetcher import (
+            fetch_kline_data, SourceUnsupportedError,
+        )
         from src.models.ai_watchlist import AiWatchlistDAO
         from src.models.database import ScreeningResultDAO
 
@@ -441,14 +454,24 @@ class MarketScheduler:
             return
 
         dao = KlineDAO()
-        success = 0
+        success = skipped = failed = 0
         for code in codes:
             latest = dao.get_latest_date(code)
-            records = fetch_kline_data(code, start_date=latest)
+            try:
+                records = fetch_kline_data(code, start_date=latest)
+            except SourceUnsupportedError as e:
+                skipped += 1
+                logger.info(f"[调度器] K线拉取跳过（源能力边界）{code}: {e}")
+                continue
+            except Exception as e:
+                failed += 1
+                logger.warning(f"[调度器] K线拉取失败（下轮自愈）{code}: {e}")
+                continue
             if records:
                 dao.upsert_many(code, records)
                 success += 1
-        logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功")
+        logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功"
+                    f"（跳过 {skipped} 能力边界 / 失败 {failed}）")
 
     def _check_news_jobs(self):
         """新闻后台轮询 + AI 舆情摘要（节奏见 config.yaml news 段）。
