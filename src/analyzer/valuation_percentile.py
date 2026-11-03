@@ -10,7 +10,8 @@ total_shares / total_equity / notice_date）+ ``dividend_annual``（cash_per_sha
 - **当年股本**优先用 ``net_profit / eps`` 反推（``financial_history.total_shares``
   是当前股本盖到所有年份；审计实证 815/958 只年际不变）；无法反推的历史年份
   PB 记 NULL，不拿当前股本硬算。最新年报允许用 total_shares（此时它就是当年值）。
-- 股息率 = 每股现金分红 / price。
+- 股息率 = 当日**已披露**的最近一期每股现金分红 / 不复权价（U7，2026-11-03：
+  旧实现把"今天库里的最新分红"套满全历史，那条序列只是价格分位的倒数）。
 - 分位 = 当前值在历史窗口中的百分位（<= 当前值的比例，越低越便宜）。
 - 数据不足（缺价或缺财报）返回 None，不估算。
 """
@@ -44,14 +45,42 @@ def _reports(code: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _dividend(code: str) -> dict | None:
+def _dividends(code: str) -> list[dict]:
+    """每股现金分红时间线（附披露时点），供 PIT 取数。
+
+    `dividend_annual` 自己没有披露日，披露时点取同 `(stock_code, report_date)`
+    年报的 `notice_date`——与本模块对年报的取数口径完全一致（PE/PB 也这么取）。
+    """
     from src.models.database import db_conn
     with db_conn() as conn:
-        row = conn.execute(
-            "SELECT cash_per_share FROM dividend_annual WHERE stock_code=? "
-            "ORDER BY report_date DESC LIMIT 1", (code,)
-        ).fetchone()
-    return dict(row) if row else None
+        rows = conn.execute(
+            "SELECT d.report_date AS report_date, "
+            "       d.cash_per_share AS cash, f.notice_date AS notice_date "
+            "FROM dividend_annual d "
+            "LEFT JOIN financial_history f "
+            "       ON f.stock_code = d.stock_code "
+            "      AND f.report_date = d.report_date "
+            "WHERE d.stock_code = ? ORDER BY d.report_date DESC", (code,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _cash_at(dividends: list[dict], day: str) -> float | None:
+    """截止某日**已披露**的最近一期每股现金分红（与 `_report_at` 同一条 PIT 规则）。
+
+    审计 **U7**（2026-11-03 复核成立）：旧实现只取库里最新一条分红，然后把这个
+    常数套到全部历史交易日——于是 `dy = 常数 / price`，它的分位其实是**价格分位的
+    倒数**，回答不了"股息率现在处于历史什么位置"。分红会变（增派/减派/停派），
+    所以必须按时间线取当日已知的那一期。缺披露日的分红行不参与（不回退
+    report_date，与年报同一条不前视的规则）。
+    """
+    best_cash = None
+    best_notice = None
+    for d in dividends:
+        nd = d.get("notice_date")
+        if nd and nd <= day and (best_notice is None or nd > best_notice):
+            best_cash, best_notice = d.get("cash"), nd
+    return best_cash
 
 
 def _report_at(reports: list[dict], day: str) -> dict | None:
@@ -97,11 +126,10 @@ def compute_percentiles(code: str, years=(5, 10)) -> dict:
     """返回 {"5": {pe_pct, pb_pct, dy_pct, n}, "10": {...}}；数据不足返回 {}。"""
     prices = _prices(code)
     reports = _reports(code)
-    div = _dividend(code)
+    dividends = _dividends(code)
     if not prices or not reports:
         return {}
 
-    cash = (div or {}).get("cash_per_share")
     latest_rd = reports[0]["report_date"] if reports else ""
     series: list[tuple[str, float | None, float | None, float | None]] = []
     for day, close in prices:
@@ -116,6 +144,8 @@ def compute_percentiles(code: str, years=(5, 10)) -> dict:
         pe = round(close / eps, 2) if eps and eps > 0 else None
         bvps = (eq / sh) if (eq and sh and sh > 0) else None
         pb = round(close / bvps, 2) if bvps and bvps > 0 else None
+        # U7：当日的分红 = 那天**已经披露**的最近一期，不是今天才知道的最新一期
+        cash = _cash_at(dividends, day)
         dy = round(cash / close * 100, 3) if (cash and cash > 0) else None
         series.append((day, pe, pb, dy))
     if not series:
