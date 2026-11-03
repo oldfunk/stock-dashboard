@@ -260,3 +260,50 @@ def test_audit_never_writes(db):
     run()
     run(verify_live=False)
     assert snapshot() == before
+
+
+# ── 4. 覆盖缺口两桶（批13-c：有行情缺财务 / 有财务缺行情） ──────────────────
+
+def _seed_gap_shapes():
+    """A 只有行情、B 只有财务、C 两边都有、D 两边都没有。"""
+    rows = [{"trade_date": "2016-01-04", "open": 10.0, "close": 10.0,
+             "high": 10.0, "low": 10.0, "volume": 1.0, "amount": 1e4,
+             "turnover": 0.1}]
+    for code in ("600001", "600003"):         # 有行情
+        db_mod.KlineDAO().upsert_many(code, rows)
+    with db_mod.db_conn() as conn:
+        for code in ("600002", "600003"):     # 有财务
+            conn.execute(
+                "INSERT OR REPLACE INTO financial_history (stock_code,"
+                " report_date, report_type, created_at)"
+                " VALUES (?, '2015-12-31', 'A', '2026-10-31')", (code,))
+
+
+def test_coverage_gaps_buckets_are_separate_from_no_data(db):
+    from scripts.audit_no_data import coverage_gaps
+    _seed_gap_shapes()
+    gaps = coverage_gaps()
+    assert gaps["kline_without_financials"]["codes"] == 1     # 只有 600001
+    assert gaps["kline_without_financials"]["samples"][0][0] == "600001"
+    assert gaps["financials_without_kline"]["codes"] == 1     # 只有 600002
+    assert gaps["financials_without_kline"]["by_last_report_year"] == {"2015": 1}
+
+
+def test_run_reports_gaps_without_breaking_the_attribution_assertion(db, monkeypatch,
+                                                                    capsys):
+    """缺口桶不许污染退出码：全归因 + 有缺口 仍然是 0（缺口不是 no_data 的失败）。"""
+    import scripts.audit_no_data as aud
+    _seed_no_data(include_unattributable=False)
+    _seed_gap_shapes()
+    assert aud.main([]) == 0
+    payload = _stdout_json(capsys)
+    assert payload["summary"]["unattributed_codes"] == []
+    assert payload["coverage_gaps"]["kline_without_financials"]["codes"] == 1
+
+
+def test_gaps_markdown_renders_both_buckets(db):
+    from scripts.audit_no_data import gaps_markdown, coverage_gaps
+    _seed_gap_shapes()
+    text = gaps_markdown(coverage_gaps())
+    assert "有行情缺财务" in text and "有财务缺行情" in text
+    assert "600001" in text and "600002" in text
