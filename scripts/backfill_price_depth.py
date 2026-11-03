@@ -31,6 +31,13 @@ overlap 那一天为什么"抓而不写"（本件的关键口径）
 新浪对从未有过的日期返回空 → 记 `no_data`（语义就是"这只票在那段没有交易"，
 不是限流；限流/异常走 `partial`，下一轮重试）。新股因此不会被反复重抓。
 
+北交所（批13-d 之后）
+---------------------
+BJ 票现在已由 `--source akshare` 回填过行情，所以**会**进入本脚本的目标集，但深度
+取数走 sina，而 sina 结构上供不了 BJ（`SourceUnsupportedError`）。这类票记
+`skipped_unsupported`：不写库、**也不记进度**——记 `no_data` 会被断点续传永久排除，
+等 BJ 早段源接上就再也进不来；记 `partial` 则每轮白跑一遍。
+
 断点续传与护栏
 --------------
 进度表独立任务名 `price_depth`：`done`/`no_data` 跳过、`partial` 自动重试
@@ -65,6 +72,7 @@ if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
 
 from scripts.backfill_price_history import fetch_kline_sina_adjusted  # noqa: E402
+from src.collector.akshare_fetcher import SourceUnsupportedError  # noqa: E402
 from src.models.database import (  # noqa: E402
     db_conn, init_database, KlineDAO, FinancialHistoryDAO,
 )
@@ -174,7 +182,8 @@ def run(target_start: str = DEFAULT_TARGET_START, limit: int | None = None,
     summary = {"task": task, "target_start": target_start,
                "codes_with_kline": len(all_targets),
                "already_deep": already_deep, "targets": len(todo),
-               "done": 0, "no_data": 0, "partial": 0, "rows_added": 0,
+               "done": 0, "no_data": 0, "partial": 0, "skipped_unsupported": 0,
+               "rows_added": 0,
                "seam_mismatch": 0, "no_seam_bridge": 0, "errors": [],
                "aborted": False, "budget_hit": False, "dry_run": dry_run}
     started = time.monotonic()
@@ -183,6 +192,14 @@ def run(target_start: str = DEFAULT_TARGET_START, limit: int | None = None,
         try:
             res = backfill_one(code, first_date, target_start,
                                dry_run=dry_run, sleep=sleep)
+        except SourceUnsupportedError as e:
+            # 批13-d：sina 供不了 BJ（能力边界，不是"这段没交易"）。既不写库也不记
+            # 进度——记 no_data 会被断点续传永久排除，等 BJ 日线源接上就再也进不来；
+            # 记 partial 则每轮白跑。目标集里有 BJ 是因为它们已由 --source akshare
+            # 回填过行情，深度这步要等那条源也能供早段。
+            summary["skipped_unsupported"] += 1
+            logger.info("[深度回填] %s 被源结构性跳过（不记进度）：%s", code, e)
+            continue
         except Exception as e:  # noqa: BLE001 - 单只失败记 partial，可重试
             summary["partial"] += 1
             consecutive += 1

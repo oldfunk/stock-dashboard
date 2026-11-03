@@ -209,7 +209,19 @@ def fetch_kline_sina_adjusted(code: str, start_date: str,
 
     单只约 3–5s×2；无东财式限流。失败退避 5/10/20s 重试。
     `end_date` 给定时只取到那一天（批13-a 深度回填取早段窗口用）。
+
+    **批13-d：北交所是能力边界，不是"没数据"**。产线实测（2026-10-31，920305）：
+    akshare 的 `stock_zh_a_daily` 对 bj 前缀给空壳，底层 `_sina_daily` 抛
+    `JSONDecodeError: No value to decode`，本函数三次退避后包装成 RuntimeError——
+    在 `price_history` 主循环里就成了 partial，每轮重跑一次"注定失败的 35s 退避"。
+    这里在**打网络之前**抛 `SourceUnsupportedError`（镜像腾讯 fqkline 的 12-a 处理）：
+    调用方按能力边界跳过，既不记 no_data（那会被进度表永久排除），也不再白等退避。
+    守卫必须在重试循环**之外**：循环内是 `except Exception`，会把它吞掉。
     """
+    if market_of(code) == "BJ":
+        raise SourceUnsupportedError(
+            f"Sina 日线（akshare stock_zh_a_daily）不支持北交所代码 {code}"
+            "（实测 bj 前缀 No value to decode；BJ 日线走 --source akshare 的东财路径）")
     last_err = None
     for attempt in range(retries + 1):
         try:
