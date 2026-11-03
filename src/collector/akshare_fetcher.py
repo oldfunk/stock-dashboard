@@ -809,13 +809,14 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         ps_by_date[d] = row
                 for rec in records:
                     d = rec['report_date']
+                    # U6（2026-11-03 复核成立）：只按**同一报告期**精确取数。
+                    # 旧兜底是"同年任意一期"（且按 reverse=True 取年内最新），
+                    # 于是 2024-09-30 三季报的**年初至今累计值**会盖进 2024-12-31
+                    # 年报行或 2024-03-31 一季报行——利润表/现金流量表都是累计口径，
+                    # 跨期即错值（total_operate_reve 还是无条件覆盖）。顺带：
+                    # 那句 `A or (A and B)` 是恒等式，第二个条件永远不会单独起作用。
+                    # 现在精确匹配不到就保持 NULL（fail-closed），不拿别的期间凑数。
                     row_ps = ps_by_date.get(d)
-                    if row_ps is None:
-                        # 找最近的
-                        for ps_d in sorted(ps_by_date.keys(), reverse=True):
-                            if ps_d[:4] == d[:4] or (ps_d[:4] == d[:4] and ps_d[5:7] <= d[5:7]):
-                                row_ps = ps_by_date[ps_d]
-                                break
                     if row_ps is not None:
                         # 利息覆盖倍数 = 营业利润 / 利息费用
                         op = safe_float(row_ps.get('OPERATE_PROFIT'))
@@ -847,12 +848,9 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         cf_by_date[d] = row
                 for rec in records:
                     d = rec['report_date']
+                    # U6（同上）：现金流量表也只按同报告期精确匹配，
+                    # 09-30 的累计经营现金流不许盖进年报/一季报行。
                     row_cf = cf_by_date.get(d)
-                    if row_cf is None:
-                        for cf_d in sorted(cf_by_date.keys(), reverse=True):
-                            if cf_d[:4] == d[:4] or (cf_d[:4] == d[:4] and cf_d[5:7] <= d[5:7]):
-                                row_cf = cf_by_date[cf_d]
-                                break
                     if row_cf is not None:
                         ocf = safe_float(row_cf.get('NETCASH_OPERATE'))
                         capex = safe_float(row_cf.get('NETCASH_INVEST'))
