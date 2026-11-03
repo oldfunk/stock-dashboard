@@ -235,6 +235,31 @@ def block_bootstrap_ci(values: list[float], groups: list[str],
     return round(lo, 6), round(hi, 6)
 
 
+def _sole_benchmark(start_date: str, end_date: str) -> str | None:
+    """计划没写 benchmark 时的兜底：窗口里只有一种基准就用它，多于一种必须显式指定。
+
+    审计 **U5**（2026-11-03 复核成立）：`analysis_outcome` 主键含 `benchmark_code`，
+    产线现状是**同一批分析对两个基准各有一行**（只读实测 sh000300 / sh000922 各
+    390 行、日期区间完全重叠）。旧写法 `plan.benchmark or None` 会让空 benchmark
+    的计划**不过滤**，后果有两条：样本量按基准数翻倍，以及把两种超额口径
+    （相对沪深300 与相对中证500 的 excess）混进同一个均值与 bootstrap CI——
+    那不是任何一个可解释的数字。
+    """
+    with db_conn() as conn:
+        codes = [r["benchmark_code"] for r in conn.execute(
+            "SELECT DISTINCT benchmark_code FROM analysis_outcome"
+            " WHERE analysis_date BETWEEN ? AND ?",
+            (start_date, end_date)).fetchall()]
+    if not codes:
+        return None
+    if len(codes) > 1:
+        raise ExperimentError(
+            f"计划未指定 benchmark，但窗口内有 {len(codes)} 个基准"
+            f"（{', '.join(sorted(codes)[:6])}）：超额收益口径不能混算，"
+            "请在实验计划里写明 benchmark")
+    return codes[0]
+
+
 def _load_outcomes(start_date: str, end_date: str,
                    benchmark: str | None = None) -> list[dict]:
     sql = ("SELECT stock_code, analysis_date, signal, confidence, "
@@ -343,7 +368,8 @@ class OutcomeEventStudyRunner(ExperimentRunner):
         horizons = p.get("horizons") or [20, 60]
         n_boot = int(p.get("n_boot", 1000))
         splits = p.get("splits") or ["regime", "sector", "size"]
-        rows = _load_outcomes(start, end, plan.benchmark or None)
+        rows = _load_outcomes(start, end,
+                              plan.benchmark or _sole_benchmark(start, end))
         if "regime" in splits:
             _join_regime(rows)
         if "sector" in splits or "size" in splits:
