@@ -1,0 +1,48 @@
+# requirements.lock.txt —— 生产环境**已知可用**版本清单（T37，§5.5 裁决 8）
+# 生成机：nec (192.168.50.71)  Linux Mint 22.3  x86-64-v1 (Core2 Duo T9900)
+# Python：3.12.3   venv：~/paper-trading/venv   采集方式：venv/bin/pip freeze（只读，未改生产 venv）
+# 生成日期：2026-10-29
+#
+# 用途：新机/重装时 `pip install -r requirements.lock.txt` 精确复现现网环境。
+# 与 requirements.txt 的分工：后者是"允许区间"（含 numpy<2.4 硬上限），
+# 本文件是"钉死点"；CI 与新机部署用本文件，日常开发看 requirements.txt。
+#
+# 不要在这份文件里放开 numpy：2.4+ 的官方 wheel 基线是 x86-64-v2，
+# 本机 import 即 RuntimeError（T20 发现、T30 复现、T37 第三次现场复现）。
+# rqalpha 不在此清单：它拖 matplotlib/scipy/h5py 约 700 MB，要求独立引擎 venv
+# （见 requirements-rqalpha.lock.txt），两份 venv **不要合并**。
+akracer==0.0.14
+akshare==1.20.1
+beautifulsoup4==4.15.0
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+curl_cffi==0.17.0
+decorator==5.3.1
+et_xmlfile==2.0.0
+html5lib==1.1
+idna==3.20
+iniconfig==2.3.1
+jsonpath==0.82.2
+lxml==6.1.3
+numpy==2.2.6
+openpyxl==3.1.5
+packaging==26.3
+pandas==3.1.0
+pluggy==1.7.0
+py-mini-racer==0.6.0
+pycparser==3.12
+Pygments==2.21.0
+pytest==9.2.0
+python-dateutil==3.0.0
+PyYAML==6.0.3
+requests==2.34.2
+six==1.17.0
+soupsieve==3.0.4
+tabulate==0.10.0
+tqdm==4.70.1
+typing_extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0
+webencodings==0.6.1
+xlrd==2.0.2

@@ -1,5 +1,13 @@
-akshare>=1.12.0
-pandas>=2.0.0
-numpy>=1.24.0
+# 本文件是「允许区间」；精确复现现网环境请用 requirements.lock.txt（T37）。
+# 引擎（rqalpha）依赖另立 venv：见 requirements-rqalpha.lock.txt。
+# 上限是**部署安全线**，不是风格问题（依据 T20 实测 + T30 复测）：
+# NEC 生产机是 x86-64-v1 CPU（Core2 Duo T9900，/proc/cpuinfo 无 sse4_2/popcnt），
+# 而 numpy 自 2.4 起官方 wheel 基线抬到 x86-64-v2 ⇒ fresh install 只要解析到
+# 2.4+ 就 `RuntimeError: NumPy was built with baseline optimizations: (X86_V2)`，
+# **装得上、跑不了**。现网因为 2.2.6 早就装好才没暴露，任何重装/新机必踩。
+# 兼容线（report-t30.md 矩阵）：2.2.6 ✓ / 2.3.5 ✓ / 2.4.2 ✗ / 2.5.4 ✗
+akshare>=1.12.0,<2.0     # 现网 1.20.1；akshare 接口随数据源改名，跨大版本不做假设
+pandas>=2.0.0,<4.0       # 现网 3.1.0 全绿；4.x 未发布，这里只是护栏
+numpy>=1.26.0,<2.4       # ← 硬上限：v1-only CPU（唯一有实测失败证据的一条）
 pyyaml>=6.0
 pytest>=8.0

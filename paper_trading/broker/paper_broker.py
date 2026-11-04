@@ -16,10 +16,19 @@ from paper_trading.models import (
     Position,
     TradingConfig,
 )
+from paper_trading.utils import fees
 from paper_trading.utils import get_logger
 from paper_trading.utils.trading_calendar import as_date, is_trading_day, load_holidays, next_trading_day
 
 logger = get_logger(__name__)
+
+
+class LedgerConsistencyError(RuntimeError):
+    """外部引擎的成交与账本对不上（T47-G1）。
+
+    这是钱类 fail-loud：宁可抛错停笔，也**不**把一笔"账本付不起/卖不出"的成交
+    写进库——写坏的账本比少下一单严重得多，而且会污染后面所有 NAV 与门禁判定。
+    """
 
 
 class PaperBroker:
@@ -153,6 +162,21 @@ class PaperBroker:
                     executed_at TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_date TEXT NOT NULL,
+                    plan_id INTEGER,
+                    mode TEXT NOT NULL DEFAULT 'live',
+                    from_plan INTEGER NOT NULL DEFAULT 0,
+                    pool_source TEXT NOT NULL DEFAULT 'config',
+                    summary TEXT NOT NULL DEFAULT '',
+                    actions_json TEXT NOT NULL DEFAULT '[]',
+                    conditions_json TEXT NOT NULL DEFAULT '[]',
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                )
+            """)
             self._migrate_positions(conn)
 
     def _migrate_positions(self, conn) -> None:
@@ -238,17 +262,17 @@ class PaperBroker:
             )
 
     def _calc_buy_cost(self, amount: float) -> tuple[float, float]:
-        """计算买入成本: (佣金, 过户费)。"""
-        commission = max(amount * self.config.commission_rate, self.config.commission_min)
-        transfer_fee = amount * self.config.transfer_fee_rate
-        return commission, transfer_fee
+        """计算买入成本: (佣金, 过户费)。
+
+        公式在 `utils/fees.py`（T51 口径唯一）：回测 FeeModel 与 `m3 verify`
+        的重算走的是同一个函数，所以"账本记的费用"与"检查说应该记的费用"
+        不可能各自漂移成两把尺子。
+        """
+        return fees.buy_cost(self.config, amount)
 
     def _calc_sell_cost(self, amount: float) -> tuple[float, float, float]:
-        """计算卖出成本: (佣金, 印花税, 过户费)。"""
-        commission = max(amount * self.config.commission_rate, self.config.commission_min)
-        stamp_duty = amount * self.config.stamp_duty_rate
-        transfer_fee = amount * self.config.transfer_fee_rate
-        return commission, stamp_duty, transfer_fee
+        """计算卖出成本: (佣金, 印花税, 过户费)。公式同样在 `utils/fees.py`。"""
+        return fees.sell_cost(self.config, amount)
 
     def _apply_slippage(self, price: float, direction: int) -> float:
         """应用滑点并按最小变动价位(0.01元)取整。direction=1买入(加价), direction=-1卖出(减价)。"""
@@ -369,6 +393,69 @@ class PaperBroker:
             f"Order filled: {'BUY' if order.direction == 1 else 'SELL'} "
             f"{order.volume} {order.symbol} @ {exec_price:.3f}"
         )
+        return order
+
+    def apply_external_fill(self, *, symbol: str, direction: int, volume: int,
+                            price: float, commission: float = 0.0,
+                            stamp_duty: float = 0.0, transfer_fee: float = 0.0,
+                            filled_at: Optional[datetime] = None,
+                            order_type: Optional[OrderType] = None):
+        """把**外部引擎已经成交**的结果落进账本（T47-G1，rqalpha 是撮合真相源）。
+
+        与 `submit_order` 的区别就是这条路径存在的全部理由：
+        **不重判价格、不加滑点、不重算费用、不重做涨跌停/资金校验的"决定"**——
+        那些判定已经在框架里做完了（L1 数值红线：影响成交价/持仓/盈亏的数值
+        必须来自框架返回值）。这里只做两件事：
+        1. **一致性守卫**：钱不够/仓不够直接抛 `LedgerConsistencyError`。
+           引擎算出的结果与账本对不上时，写坏账本比不下单严重得多 ⇒ fail-loud；
+        2. 复用既有的落账原语（`_execute_buy/_execute_sell/_persist_order/_persist_fill`），
+           所以 avg_cost 含费、T+1 冻结、`t1_freeze` 解冻日、peak_price 等口径
+           与旧线**一字不差**——两条线共用一份账本算法，不另写一套。
+        """
+        sym = str(symbol).strip().zfill(6)
+        vol = int(volume)
+        px = float(price)
+        if vol <= 0 or px <= 0:
+            raise LedgerConsistencyError(
+                f"外部成交非法：{sym} direction={direction} volume={vol} price={px}")
+        if int(direction) not in (1, -1):
+            raise LedgerConsistencyError(f"外部成交方向必须是 1/-1，收到 {direction!r}")
+        amount = px * vol
+        commission = float(commission or 0.0)
+        stamp_duty = float(stamp_duty or 0.0)
+        transfer_fee = float(transfer_fee or 0.0)
+
+        order = Order(symbol=sym, direction=int(direction), volume=vol,
+                      order_type=order_type or OrderType.LIMIT, limit_price=px)
+        if int(direction) == 1:
+            need = amount + commission + transfer_fee
+            have = self.get_cash()
+            if need > have + 1e-6:
+                raise LedgerConsistencyError(
+                    f"引擎要买 {sym} {vol} 股花 {need:.2f}，账本只有 {have:.2f}"
+                    f"——两本账已分叉，先归因再写库")
+            self._execute_buy(order, px, amount, commission, transfer_fee)
+        else:
+            pos = self.get_position(sym)
+            avail = int(pos.available_volume) if pos else 0
+            if avail < vol:
+                raise LedgerConsistencyError(
+                    f"引擎要卖 {sym} {vol} 股，账本可卖只有 {avail}"
+                    f"——两本账已分叉，先归因再写库")
+            self._execute_sell(order, px, amount, commission, stamp_duty, transfer_fee)
+
+        order.status = OrderStatus.FILLED
+        order.filled_volume = vol
+        order.filled_price = px
+        order.commission = commission
+        order.stamp_duty = stamp_duty
+        order.transfer_fee = transfer_fee
+        order.filled_at = filled_at or datetime.now()
+        self._persist_order(order)
+        self._persist_fill(order)
+        logger.info("外部成交落账: %s %s %s @ %.4f 费 %.4f",
+                    "BUY" if order.direction == 1 else "SELL", vol, sym, px,
+                    commission + stamp_duty + transfer_fee)
         return order
 
     def _execute_buy(
@@ -648,6 +735,22 @@ class PaperBroker:
                  cash_after, total_value_after),
             )
 
+    def has_op_with(self, action: str, needle: str) -> bool:
+        """某类流水里是否已出现包含 `needle` 的行（params 或 result，全表按 action 查）。
+
+        给新线落账的幂等判定用：**不能**用 `get_op_log(N)` 的窗口扫描——
+        面板高频问答会把目标行挤出最近 N 条，查不到就重复落账，
+        重复成交比漏记更致命（见 `get_op_log_day` 同款教训）。
+        """
+        esc = str(needle).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM op_log WHERE action = ? "
+                "AND (params LIKE ? ESCAPE '\\' OR result LIKE ? ESCAPE '\\') LIMIT 1",
+                (action, f"%{esc}%", f"%{esc}%"),
+            ).fetchone()
+        return bool(row)
+
     def get_op_log(self, limit: int = 50) -> list[dict]:
         """读取操作流水（倒序）。"""
         with self._connect() as conn:
@@ -702,6 +805,55 @@ class PaperBroker:
             d["plan"] = _json.loads(d["plan_json"])
         except Exception:
             d["plan"] = {}
+        return d
+
+    def save_agent_decision(self, *, decision_date: str, plan_id=None,
+                            mode: str = "live", from_plan: bool = False,
+                            pool_source: str = "config", summary: str = "",
+                            actions=None, conditions=None, result=None) -> int:
+        """落库一条 AI 决策（供回放/审计）。返回 id。"""
+        import json as _json
+
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO agent_decisions
+                   (decision_date, plan_id, mode, from_plan, pool_source, summary,
+                    actions_json, conditions_json, result_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (decision_date, plan_id, mode, 1 if from_plan else 0,
+                 pool_source, summary,
+                 _json.dumps(actions or [], ensure_ascii=False, default=str),
+                 _json.dumps(conditions or [], ensure_ascii=False, default=str),
+                 _json.dumps(result or {}, ensure_ascii=False, default=str),
+                 datetime.now().isoformat()),
+            )
+            return int(cur.lastrowid)
+
+    def get_agent_decision(self, decision_date: str,
+                           plan_id=None) -> Optional[dict]:
+        """取某日 AI 决策（供回放）；plan_id 为空取当天最新一条。"""
+        import json as _json
+
+        with self._connect() as conn:
+            if plan_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM agent_decisions WHERE decision_date = ? "
+                    "AND plan_id = ? ORDER BY id DESC LIMIT 1",
+                    (decision_date, plan_id)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM agent_decisions WHERE decision_date = ? "
+                    "ORDER BY id DESC LIMIT 1", (decision_date,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        for k in ("actions_json", "conditions_json", "result_json"):
+            try:
+                d[k.replace("_json", "")] = _json.loads(d.get(k) or ("[]"
+                                                                    if k != "result_json"
+                                                                    else "{}"))
+            except Exception:
+                d[k.replace("_json", "")] = [] if k != "result_json" else {}
         return d
 
     def get_executable_plan(self, day: str,

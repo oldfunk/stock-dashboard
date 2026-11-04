@@ -57,7 +57,7 @@ def price_map(bridge, quotes: dict, symbols: list[str]) -> dict[str, float]:
         if q and float(q.get("price") or 0.0) > 0:
             out[s] = float(q["price"])
             continue
-        bars = bridge.data_db.get_bars(s, limit=1)
+        bars = bridge.bar_source.get_bars(s, limit=1)
         if bars:
             out[s] = float(bars[-1].close)
     return out
@@ -144,7 +144,7 @@ class EngineRunner:
         entry = str(pos.entry_day or "")
         if not entry:
             return 0
-        hist = bars_excluding_today(self.b.data_db.get_bars(sym, limit=120),
+        hist = bars_excluding_today(self.b.bar_source.get_bars(sym, limit=120),
                                     datetime.now())
         return len([b for b in hist
                     if b.timestamp.date().isoformat() > entry])
@@ -159,7 +159,7 @@ class EngineRunner:
         if quote:
             peak = max(peak, float(quote.get("price") or 0.0),
                        float(quote.get("high") or 0.0))
-        hist = bars_excluding_today(self.b.data_db.get_bars(sym, limit=120), now)
+        hist = bars_excluding_today(self.b.bar_source.get_bars(sym, limit=120), now)
         for b in hist:
             if not entry or b.timestamp.date().isoformat() >= entry:
                 peak = max(peak, float(b.high or 0.0))
@@ -253,7 +253,7 @@ class EngineRunner:
 
     def _context(self, sym: str, q: dict, now, day: str) -> RuleContext:
         # 排除当日未收盘日线：只用最近已收盘交易日的收盘序列（防 T+0/未来函数）
-        bars = bars_excluding_today(self.b.data_db.get_bars(sym, limit=61), now)
+        bars = bars_excluding_today(self.b.bar_source.get_bars(sym, limit=61), now)
         closes = [b.close for b in bars]
         prev_close = float(q.get("prev_close") or 0.0)
         price = float(q.get("price") or 0.0)
@@ -298,7 +298,7 @@ class EngineRunner:
 
                 fetched = fetch_minute(sym, period="5", days=30, now=now)
                 if fetched:
-                    self.b.data_db.upsert_minute_bars(sym, fetched)
+                    self.b.data_db.upsert_minute_bars(sym, fetched, period="5")
                     rows = self._today_minutes(sym, now, day)
             except Exception as e:      # noqa: BLE001 - 分钟线拿不到就跳过日内规则
                 logger.debug(f"minute refresh failed {sym}: {type(e).__name__}: {e}")
@@ -306,7 +306,9 @@ class EngineRunner:
 
     def _today_minutes(self, sym: str, now, day: str) -> list[tuple]:
         out: list[tuple] = []
-        for r in self.b.data_db.get_minute_bars(sym, limit=600):
+        # T35：显式要 5 分钟周期——主键含 period 后，读侧也必须声明周期，
+        # 否则将来 1 分钟数据进来会把日内规则的粒度搅浑（minute.py 的"不混粒度"约定）
+        for r in self.b.data_db.get_minute_bars(sym, limit=600, period="5"):
             ts = str(r.get("ts") or "")
             if not ts.startswith(day):
                 continue
@@ -335,8 +337,13 @@ class EngineRunner:
                 gap = (now - datetime.fromisoformat(last)).total_seconds()
                 if gap < cooldown:
                     return {"ok": False, "why": f"冷却中（剩 {cooldown - gap:.0f}s）"}
-            except Exception:
-                pass
+            except Exception as exc:                # noqa: BLE001 - 坏时间戳不拦单，但必须吭声
+                # 冷却是 11-04 那个 P0（同规则每分钟重灌）的唯一防线：时间戳读不出来
+                # 就等于这道闸**静默失效**——不 warn 的话，下一次重灌只会以"队列里
+                # 又多 19 条"的形式回来，而那时没人知道今天这里坏过。
+                logger.warning("冷却时间戳读不出（该标的的冷却本轮不生效）："
+                               "cooldown(%s)=%r → %s: %s", sym, last,
+                               type(exc).__name__, exc)
         # 日内预算
         if int(budget.get("orders", 0)) >= max_orders > 0:
             return {"ok": False, "why": "日内笔数上限"}
@@ -398,6 +405,32 @@ class EngineRunner:
                       prev_close=float(q.get("prev_close") or 0.0),
                       ref_high=float(q.get("high") or price),
                       ref_low=float(q.get("low") or price))
+        if self.cfg.get("executor") in ("rq", "rqalpha"):   # rqalpha 是 G3 校验枚举值
+            # M3b：撮合执行交 rq 引擎（判定仍在 L2 evaluate，纪律 1 不变）——
+            # 意图入队，`rq tick` 每 5 分钟分钟会话消费（T+1/涨跌停/费用=框架）
+            from paper_trading.integration.rq_engine.queue import enqueue
+            from paper_trading.utils import heartbeat as _hb
+            db = getattr(self.b.broker, "db_path", None) or \
+                getattr(getattr(self.b, "data_db", None), "db_path", None)
+            if not db:
+                return {"ok": False, "why": "rq 执行器缺账本路径（配置错误）"}
+            enqueue(db, sym, side, volume, rule_ref=f"rule:{rid}",
+                    detail={"price": price, **detail})
+            _hb.touch("engine", ok=True, detail=f"rq-enqueue {rid}:{sym}:{side}")
+            self.state.log_trigger(now.isoformat(), day, rid, sym, side,
+                                   "queued_rq", {**detail, "volume": volume})
+            # 防重与旧路径同语义（mark_order = 本规则对本标的今日已触发）：
+            # rq 执行是异步的（入队 ≠ 成交），必须**入队即 mark**——否则
+            # 每分钟重复入队同 key 意图（2026-11-04 现网实测：300390 一天
+            # 重复 19 条，18 条被标 executed 却无成交，m3 verify 钱类红）
+            self.state.mark_order(sym, now.isoformat())
+            # 预算也要在入队时累加：`max_orders_per_day` 的口径是"报单笔数"（见
+            # config 注释），入队即报单。条件单分支早就在 ok 后 bump_budget，
+            # 这条分支漏了 ⇒ 两条路径共用一个计数器却只有一家在加，
+            # 限额在 rqalpha 底座下形同虚设（2026-11-04 复核 d1a487d 时照出）。
+            self.state.bump_budget(day, 1, amount)
+            return {"ok": True, "queued": True,
+                    "why": "已交 rq 引擎队列（下一跳 ≤5 分钟执行）"}
         res = self.b.broker.submit_order(order)
         st = res.status.value
         self.state.log_trigger(now.isoformat(), day, rid, sym, side, st,
@@ -449,6 +482,17 @@ def run_loop(bridge, interval_sec: int = 60, dry_run: bool = False,
                 logger.error(f"engine/{name} crashed: {type(e).__name__}: {e}")
                 res[name] = {"error": f"{type(e).__name__}: {e}"}
         out.append(res)
+        # 心跳记在轮次**末尾**：中途被 SIGKILL/断电就不跳，看门狗才分得清
+        # "没跑成" 与 "跑成但没动作"（休市跳过也算跑成）。两个模块都错 ⇒ ok=False。
+        try:
+            from paper_trading.utils import heartbeat as _hb
+
+            errs = [str(res.get(k, {}).get("error")) for k in ("rules", "conds")
+                    if isinstance(res.get(k), dict) and res.get(k).get("error")]
+            _hb.touch("engine", ok=len(errs) < 2,
+                      detail="；".join(errs)[:200])
+        except Exception:                                   # noqa: BLE001 - 心跳不拖垮交易
+            pass
         n += 1
         if max_ticks and n >= max_ticks:
             break
@@ -466,7 +510,8 @@ class ConditionRunner:
 
     def __init__(self, bridge, orders, dry_run: bool = False,
                  min_ticket_cny: float = 0.0, max_per_day: int = 8,
-                 enabled: bool = True, state: Optional[EngineState] = None):
+                 enabled: bool = True, state: Optional[EngineState] = None,
+                 executor: Optional[str] = None):
         self.b = bridge
         self.orders = orders
         self.dry_run = dry_run
@@ -476,6 +521,16 @@ class ConditionRunner:
         self.enabled = bool(enabled)
         # 与规则引擎共用日内订单预算（同一账户同一天的总量不被叠加绕过）
         self.state = state
+        # M3b：执行器（legacy=PaperBroker 直撮；rq=入队交 rq 分钟会话）。
+        # 未显式传时从 engine config 读——三个构造点（runner/cli/dashboard）行为一致
+        if executor is None:
+            try:
+                from paper_trading.engine.config import load_engine_config
+                executor = load_engine_config(
+                    getattr(bridge, "config_path", "config.yaml")).get("executor")
+            except Exception:                 # noqa: BLE001 - 配置读不到走 legacy
+                executor = None
+        self.executor = str(executor or "legacy")
 
     def tick(self, quotes: Optional[dict] = None) -> dict:
         from paper_trading.data import realtime as rt
@@ -614,6 +669,18 @@ class ConditionRunner:
                       prev_close=float(quote.get("prev_close") or 0.0),
                       ref_high=float(quote.get("high") or price),
                       ref_low=float(quote.get("low") or price))
+        if self.executor in ("rq", "rqalpha"):
+            # M3b：条件单触发同样交 rq 引擎执行（判定仍在 L2 ConditionRunner）
+            from paper_trading.integration.rq_engine.queue import enqueue
+            db = getattr(self.b.broker, "db_path", None)
+            if not db:
+                return {"ok": False, "why": "rq 执行器缺账本路径（配置错误）"}
+            enqueue(db, sym, side, volume, rule_ref=f"cond:{d['id']}",
+                    detail={"price": price, "cond": f"{d['cond_type']}{d['cond_value']}"})
+            self.orders.mark(d["id"], "queued_rq", price,
+                             {"volume": volume, "why": "交 rq 引擎队列"}, now)
+            return {"ok": True, "queued": True,
+                    "why": "条件触发，已交 rq 引擎队列（下一跳 ≤5 分钟执行）"}
         res = self.b.broker.submit_order(order)
         st = res.status.value
         if st != "filled":

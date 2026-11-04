@@ -15,25 +15,37 @@ from typing import Optional
 from paper_trading.broker.paper_broker import PaperBroker
 from paper_trading.engine.rules import (INTRADAY_TYPES, Intent, PositionView,
                                          RuleContext, evaluate, size_for_value)
-from paper_trading.models import Position, Signal, SignalType
+from paper_trading.models import Position, Signal, SignalType, TradingConfig
+from paper_trading.utils import fees
+
+#: 费率的唯一数值来源仍是 TradingConfig（`models/types.py`）；这里只是引用，不再抄一遍
+_TC = TradingConfig()
 
 
 @dataclass
 class FeeModel:
-    """与 PaperBroker 同一套费率（parity 由单测锁定）。"""
-    commission_rate: float = 0.00025
-    commission_min: float = 5.0
-    stamp_duty_rate: float = 0.0005
-    transfer_fee_rate: float = 0.00001
+    """回测费用：数值来自 `TradingConfig`，公式来自 `utils/fees.py`（T51 口径唯一）。
+
+    原本这里抄了四个数字、又抄了一遍公式——`config.yaml` 改费率时回测不跟着变
+    （report-t51 §1 实测：三处 new 读错键 ⇒ 一直在吃这里的兜底值）。
+    现在字段默认值**引用** `TradingConfig`，不再自己写数字；生产路径一律用
+    `FeeModel.from_trading_config(cfg)` 显式构造。
+    """
+    commission_rate: float = _TC.commission_rate
+    commission_min: float = _TC.commission_min
+    stamp_duty_rate: float = _TC.stamp_duty_rate
+    transfer_fee_rate: float = _TC.transfer_fee_rate
+
+    @classmethod
+    def from_trading_config(cls, cfg) -> "FeeModel":
+        """从现网 `TradingConfig` 构造（回测/网格/面板唯一入口）。"""
+        return cls(**{k: float(getattr(cfg, k)) for k in fees.FEE_KEYS})
 
     def buy_cost(self, amount: float) -> tuple[float, float]:
-        commission = max(amount * self.commission_rate, self.commission_min)
-        return commission, amount * self.transfer_fee_rate
+        return fees.buy_cost(self, amount)
 
     def sell_cost(self, amount: float) -> tuple[float, float, float]:
-        commission = max(amount * self.commission_rate, self.commission_min)
-        return (commission, amount * self.stamp_duty_rate,
-                amount * self.transfer_fee_rate)
+        return fees.sell_cost(self, amount)
 
 
 @dataclass
@@ -56,6 +68,7 @@ class BacktestResult:
     skipped: list[dict] = field(default_factory=list)
     per_rule: dict[str, dict] = field(default_factory=dict)
     intraday_days: int = 0          # 有分钟线并重放了日内规则的天数（0=未重放）
+    fingerprint: dict = field(default_factory=dict)   # 数据/参数指纹（M2 可复现）
 
 
 class Backtester:
@@ -86,6 +99,9 @@ class Backtester:
         # 组合风控：默认与 config.yaml 同口径（30k/30%/95%）；显式 risk={} 关闭
         from paper_trading.risk.risk_manager import RiskManager
         self.risk = None
+        # 指纹用的生效风控参数（risk={} 表示关闭 → None）
+        self._risk_cfg = None if risk == {} else {**self.RISK_DEFAULTS,
+                                                  **(risk or {})}
         if risk != {}:
             self.risk = RiskManager(**{**self.RISK_DEFAULTS, **(risk or {})})
 
@@ -379,6 +395,18 @@ class Backtester:
         res.final_equity = equity_curve[-1]["equity"] if equity_curve else initial_cash
         res.total_fees = round(fees_total, 2)
         res.intraday_days = len(intraday_days)
+        # 可复现指纹（M2）：同 bars_hash+params_hash ⇒ 同实验；任一变化即新实验
+        try:
+            from paper_trading.engine.provenance import backtest_fingerprint
+
+            res.fingerprint = backtest_fingerprint(
+                bars_by_sym=bars_by_sym, days=days, cfg=self.cfg,
+                fee=self.fee, slippage_pct=self.slippage,
+                slippage_fixed=self.slippage_fixed,
+                risk_cfg=self._risk_cfg, initial_cash=initial_cash,
+                minutes_by_day=minutes_by_day)
+        except Exception:                   # noqa: BLE001 - 指纹故障不阻断回测
+            res.fingerprint = {}
         return res
 
     # ---------- 日内规则重放 ----------
@@ -551,7 +579,8 @@ def load_minutes(data_db, syms: list[str], days: list[str]) -> dict:
     out: dict = {}
     for sym in syms or []:
         try:
-            rows = data_db.get_minute_bars(sym, limit=4000)
+            # T35：分钟回测同样按周期取数（现网/采集默认 5 分钟）
+            rows = data_db.get_minute_bars(sym, limit=4000, period="5")
         except Exception:       # noqa: BLE001 - 表不存在/读失败都退化为无分钟数据
             continue
         for r in rows:
@@ -645,6 +674,14 @@ def metrics(res: BacktestResult, days: int) -> dict:
     mu = sum(rets) / len(rets) if rets else 0.0
     var = (sum((r - mu) ** 2 for r in rets) / len(rets)) if len(rets) > 1 else 0.0
     sharpe = (mu / (var ** 0.5) * (244 ** 0.5)) if var > 0 else 0.0
+    # 纪律 4「不静默」：被跳过的信号必须**分类**可见。旧行为只报 skipped 总数，
+    # CLI/面板再截 10~20 条样本 ⇒ 整类流失（如「金额不足一手」14 笔 + 连带
+    # 「无可卖持仓」15 笔，见 worker/report-t9.md F 表）在汇总里完全看不出来。
+    skip_counts: dict[str, int] = {}
+    for k in res.skipped:
+        why = str(k.get("why") or "").split("：")[0].strip() or "未归类"
+        skip_counts[why] = skip_counts.get(why, 0) + 1
+    attempts = len(res.trades) + len(res.skipped)
     return {
         "start": res.start, "end": res.end, "days": days,
         "initial_cash": round(res.initial_cash, 2),
@@ -664,4 +701,9 @@ def metrics(res: BacktestResult, days: int) -> dict:
         "fee_drag_pct": round(res.total_fees / res.initial_cash * 100, 2)
         if res.initial_cash else 0.0,
         "skipped": len(res.skipped),
+        # T17：分类计数 + 尝试数 + 流失率，供 CLI/面板做"不静默"可见性
+        "skip_counts": dict(sorted(skip_counts.items(), key=lambda x: -x[1])),
+        "order_attempts": attempts,
+        "signal_drop_pct": (round(len(res.skipped) / attempts * 100, 1)
+                            if attempts else 0.0),
     }

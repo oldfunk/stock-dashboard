@@ -6,6 +6,13 @@ Local event-driven paper trading framework for A-share markets. Pure local opera
 
 ## Hard Rules
 
+0. **立项约束优先（2026-10-27 对质后立，见 `docs/founding-mandate.md`）**：
+   分层路线（`docs/refactor-plan-open-source.md` §1，用户 2026-10-27 修正版）：
+   **L1 量化核心（撮合/账本/回测/计价判定）用社区成熟框架**——影响成交价/
+   持仓/盈亏/下单拒绝的数值必须来自框架 API；**L2 功能层（AI/数据/面板/
+   安全门禁/运维）自研合理**；任何"当前做法与立项约束冲突"的发现必须
+   **显式上报用户**，禁止静默沿用。安全门禁（尺度/偏离/条件/止损/接线）
+   是 L2 的一部分且**必须保持 fail-closed**。
 1. **Never fabricate market data** — always fetch via `AkshareFetcher` or read from local SQLite
 2. **Never bypass risk checks** — all orders must go through `RiskManager`
 3. **T+1 is mandatory** — `available_volume` must be 0 for same-day buys; `unfreeze_t1()` only runs on next settlement
@@ -35,9 +42,15 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 
 # 除权除息人工调整（M1：只检测+审计，不自动改账本）
 python -m paper_trading.cli corporate apply --symbol 600519 --ex-date 2026-06-20 --cash-per-share 0.5 --share-ratio 0.3 --json
+
+# 行情质量守卫（M2）：缺日/重复/异常涨跌幅/停牌停滞/无数据；有发现会落 op_log[data:quality]
+python -m paper_trading.cli data quality --json
+# 母库覆盖度/口径对照（P6）
+python -m paper_trading.cli data coverage --json
+python -m paper_trading.cli data compare --symbols 600036 --json
 ```
 
-### Cron Integration
+### Cron Integration（生产机 NEC；路径已同步）
 
 ```bash
 # v0.6.5 推荐：固定交易时段 + 收盘计划 + 开盘执行 + 事件复盘；
@@ -45,22 +58,22 @@ python -m paper_trading.cli corporate apply --symbol 600519 --ex-date 2026-06-20
 # 不再读取 strategy.local.yaml 的 agent_schedule 队列。
 
 # 开盘执行（09:30–10:00 内每 5 分钟：只消费当天 pending 计划，无计划即静默）
-(crontab -l 2>/dev/null; echo "30,35,40,45,50,55 9 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "30,35,40,45,50,55 9 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
 # 收盘计划（16:30–18:30 每 5 分钟：数据定稿后做下一交易日计划，成功即幂等停止）
-(crontab -l 2>/dev/null; echo "*/5 16-18 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "*/5 16-18 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli agent tick --json >> agent.log 2>&1") | crontab -
 # 事件驱动复盘（盘中每分钟检查，避开整点/错开 tick；无异动/冷却/预算用完时零 LLM 调用）
-(crontab -l 2>/dev/null; echo "1-59 9-11,13-14 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli agent event --json >> agent.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "1-59 9-11,13-14 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli agent event --json >> agent.log 2>&1") | crontab -
 # 规则引擎 + 条件单（每分钟单轮；engine.enabled=false 时只判定并落 blocked_disabled）
-(crontab -l 2>/dev/null; echo "* 9-15 * * 1-5 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.engine --once --json >> engine.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "* 9-15 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.engine --once --json >> engine.log 2>&1") | crontab -
 # 交易日历（每周同步一次未来交易日到 var/trading_calendar.json，只留最近 45 天+未来；失败回退周末）
-(crontab -l 2>/dev/null; echo "0 10 * * 6 cd /home/pi/paper-trading && venv/bin/python -m paper_trading.cli calendar sync --json >> calendar.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 10 * * 6 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli calendar sync --json >> calendar.log 2>&1") | crontab -
 ```
 
 `run_lock` 会检查锁文件里的 PID 与进程启动标识：进程被 SIGKILL/断电后残留的锁会自动接管，不需要人工删 `paper_trading.lock`；仍在运行的守护进程（`engine --interval` 会全天持锁）不会被等待方误删。akshare 日线/名称/日历调用都有硬超时，网络 stall 时按失败返回，不会长期持锁拖死盘中止损。
 
 事件复盘与引擎**不共用**同一把锁：`agent event` 用 `paper_trading.event.lock`（上一轮 LLM 复盘没跑完就跳过本轮），只有会下单的入口（sync/run/buy/sell/tick 执行/面板 fire）才占全局 `paper_trading.lock`。否则一次 120s 的复盘会把每分钟引擎挡在门外，推迟止损 1–3 分钟。
 
-Pi 日志轮转：`deploy/logrotate.paper-trading`（daily + 5M + 保留 14 份 + `copytruncate`），安装：
+NEC 日志轮转（生产机；Pi 冻结期不适用）：`deploy/logrotate.paper-trading`（daily + 5M + 保留 14 份 + `copytruncate`），安装：
 
 ```bash
 sudo cp deploy/logrotate.paper-trading /etc/logrotate.d/paper-trading
@@ -123,6 +136,11 @@ sudo logrotate -d /etc/logrotate.d/paper-trading   # dry-run 校验
 4. **命令行传 Key 会留 shell 历史，敏感环境一律用面板设置页。**
 5. **本地接口免令牌**：Ollama / LM Studio / vLLM / 局域网网关只填接口地址即可（`TOKENLESS_PRESETS`）；空 Key 时**不发** `Authorization` 头（空 Bearer 反而会被拒）。切到这类预设会清掉已存的云端 Key，避免把 Key 发到别的机器。无令牌接口没有 Key 可用来"换浏览器接管"，只能原浏览器改或删 `secrets.local.json` 重配。
 6. **模型差异不能打死链路**：`thinking=disabled` 是默认（省预算），但始终思考的模型（GLM 5.3 系列回 HTTP 400 / 1210）要自动降档 `enabled/low` 并把输出预算抬到至少 4096；答案被思考吃光时必须报"只输了思考过程"，禁止静默返回空串。
+7. **配置三件套（2026-10-27 require_stop 教训）**：新配置字段必须同时有
+   `config.yaml` 键 + 完整读取链（`utils/config.load_config` 归一化白名单
+   **和** `cli.py` 构造层，双层白名单缺一层=配置静默失效）+ `tests/test_config_wiring.py`
+   反射测试覆盖；新增 `AgentConfig` 字段而不过 wiring 测试 = 不许合并。
+   日常审计跑 `python tests/wiring_audit.py`（退出码非 0 = 有断层）。
 
 ## AI 交易员自治规则（P2，固定运行时刻 + 事件复盘）
 
@@ -130,11 +148,11 @@ sudo logrotate -d /etc/logrotate.d/paper-trading   # dry-run 校验
 2. **单交易员原则**：同一账户同一天只跑 `run`（MA）或 `agent run`（AI）其一，cron 二选一；默认每日 1 次时沿用 `already-decided` 幂等（`--force` 除外）。
 3. **三道闸**：单子数上限（`agent.max_orders_per_run`，默认 3）+ 单笔金额上限（默认 2 万）+ 日亏熔断（默认 -5%，另有回撤熔断 20% 兜底）。
 4. **fail-closed**：LLM 输出非严格 JSON / 标的不在池 / 非 100 倍数 / 超限 / 风控拒绝 → 整单作废，只记 `ai:decide` 流水，不下单。坏输出永不重试下单。
-5. **可审计**：每次决策记原文摘要 + 逐条处置（已成交/拒绝原因）+ 决策后资产；面板“AI 决策”中文渲染。
+5. **可审计**：每次决策记原文摘要 + 逐条处置（已成交/拒绝原因）+ 决策后资产；面板“AI 决策”中文渲染。**执行价尺度门禁（v0.7.5，2026-10-27 事故后加）**：执行价偏离基准价（计划 `price_source=last_close` 价优先，回退 `bars` 末根收盘）超过 `agent.max_price_deviation`（默认 0.30=A股最大日波幅）直接拒单——涨跌停带/单笔上限都以同一个 price_map 自洽，挡不住复权口径/取错列这类尺度错误，只有跨时点基准价能拦。**决策落库 + 回放（v0.7.2）**：每次决策写入 `agent_decisions`（含 `basis`/actions/conditions/result），`python -m paper_trading.cli agent replay --date YYYY-MM-DD` 回放并与规则信号对照（只读，不重新下单）；面板“数据来源”展示各富化接口的 `source/asof/stale`。**数据依据可审计（v0.7.0）**：每条 buy/sell 的 action 必须给 `basis`（1-5 个上下文里真实存在的数据字段名，如 `recent_closes` / `financial_summary.roe_5y_avg` / `screening.score_detail`），并给 `thesis`（论点）、`risk_stop`（止损价）、`confidence`（0-100）、`expected_hold_days`；`basis` 前缀会被校验，编造字段直接拒单；`agent.require_basis=true` 时缺 `basis` 直接拒单（数据判断不可绕过）。上下文超过 `agent.context_budget`（默认 8000）时自动分级压缩（长文本/财务白名单/条数/收盘根数），`data_provenance` 永不截断。
 6. **全市场选股漏斗（程序 + AI 共同选）**：`--pool-from auto`（缺省）= 母项目全市场量化筛选→ 观察池 → 手填 config 池逐级降级（手填只兜底、不叠加，`all` 也不含手填池）。随后 pass1 让 AI 在候选之外**自主提名任意 A 股**（写名称或 6 位代码），程序用母库全市场代码表（`stock_snapshot`，约 5500 只，只读）解析+校验 A 股前缀、过滤指数/ETF、去重、上限 `agent.picks_max`（默认 5），补齐 K 线后并入本轮决策范围；提名进 `ai:decide` 流水可审计。pass1 任何失败（坏 JSON/库不可读/全不合法）一律降级为“只用候选池”，绝不阻断；新鲜守卫拦下时不浪费提名调用。`--no-picks` 或 `agent.picks_enabled=false` 关闭。
 7. dry-run 不碰账本（不解冻不下单不记 NAV），只走校验链。
 8. **休盘计划、下一交易日开盘执行**：`--plan-only` 基于最新定稿数据做计划存 `agent_plans`；计划 `plan_date` 写**下一个交易日**（不是当晚）。开盘运行时只消费 `plan_date=今天` 的 pending（价格沿用计划基准，风控重验），执行后标记 done；手动 `agent run` 仍可用 `get_executable_plan` 兜底最近 7 天的旧计划。开盘 gap 与定稿价的差异是已知简化。**每日收盘 NAV**：运行时收盘计划窗口（16:30–18:30、数据已定稿到今天）记一条 `nav:close` 收盘 NAV（op_log 标记幂等、按业务日 `result.date` 判重而不是写入时间戳，无交易也记；计划已存在的 tick 也会补记，防上次快照失败留空洞），避免 `nav_history` 出现整天空洞、逐日收益/回撤基线失真；快照失败只告警不阻断计划。
-9. **Stock Dashboard 连接只读**：`paper_trading/integration/` 是唯一允许碰母库的地方，且只能 SQLite 只读打开；母库缺失/异常时静默回退本地，永不阻断交易。`--pool-from`（auto/config/watchlist/screening/all）是唯一的池来源开关，缺省 `auto`。
+9. **Stock Dashboard 连接只读（逐接口降级 + 来源标注）**：`paper_trading/integration/` 是唯一允许碰母库的地方，且只能 SQLite 只读打开（`mode=ro` + `query_only`）。**母库优先、逐接口降级**：`integration/mother.py` 的每个富化接口（日线/财务摘要/股息/基准/新闻/筛选/论点/追踪/大盘）母库有则用母库（`source=mother:<table>`），缺该标的/该表则只回退该接口的本地来源（`local:*`），两边都没有则 `unavailable`（**绝不填 0、绝不整体切换**）。每条数据带 `source/asof/stale`，进 AI 上下文 `data_provenance`。母库缺失/异常时静默回退，永不阻断交易。契约与母项目对齐细节见 `docs/mother-interface.md`。`--pool-from`（auto/config/watchlist/screening/all）是池来源开关，缺省 `auto`。
 10. **AI 条件单（实时执行层）**：决策 JSON 的 `conditions` 只挂条件、现在不成交；校验后落 `conditional_orders(source=ai)`，由 `ConditionRunner` 每轮盯价触发，复用同一套 `RiskManager` / `PaperBroker` / 日内预算 / `engine.enabled` 总开关。与直接动作、已有 pending 条件重复的条目必须跳过，禁止同一标的同方向双重下单。计划里的条件在目标交易日执行计划时才挂。**卖出条件必须对应真实持仓**：解析层（`parse_conditions_verbose(holdings=...)`，计划/现决/事件复盘/cond design 四条 AI 路径全接）+ 挂单层（`_arm_conditions` 兜底，防过夜计划持仓已变）双层校验，拒单进 `parse_rejected`（v0.6.6，堵计划 #12 给非持仓挂卖单的口子）。解析失败（低于 `min_ticket_cny`、池外、非法类型、有效期超过 `condition_max_days`、卖出无持仓等）必须进 `parse_rejected` 流水和面板，禁止静默丢弃；显式 `volume` 在触发时也按成交价再过一次手续费地板（卖出清仓不拦）。**离场优先**：同标的当日已有卖出成交（规则止损/时间止损/条件卖出）时，到价的买入条件作废并记拒因，禁止“刚止损又当日回补”（10-23 观察日 trail-300390 与 300390 回踩买入同分钟对打）。
 11. **事件驱动复盘（不是逐笔 LLM）**：`agent event` 由价格异动（默认 ±3%）或持仓自峰值回撤（默认 5%）触发；必须遵守全局最小间隔（15 分钟）、单标冷却（30 分钟）、每日调用预算（默认 6 次）。事件复盘只产出/更新条件单，不直接下单；无事件/冷却/预算用完时零 LLM 调用。阈值与预算在 `config.yaml` 的 `agent.event_*`。
 12. **离场三件套（止损/放飞/清仓）已写死在 `TRADER_SYSTEM` 第 9 条**：止损要么 `sell` 动作、要么 `price_below` 卖出条件，禁止只在理由里口头说会止损；放飞用 `price_above` 止盈条件或继续持有，未触发前不因小波动清掉好仓位；清仓 `sell` 且 `volume`=全部可用股；每只 hold 的理由必须写清“什么情况就卖”（止损价或论点卖出条件）。注意：条件单能否成交仍受 `engine.enabled` 总开关约束（Pi 已于 2026-10-23 验收后在本机 `engine.local.yaml` 开启；发布版 `config.yaml` 默认 `false`，未开启的部署仍只挂不成交）。
@@ -146,6 +164,7 @@ sudo logrotate -d /etc/logrotate.d/paper-trading   # dry-run 校验
 1.1 **总开关只有一处语义**：`engine.enabled=false` = 不自动交易，**无论谁调**（守护进程、cron 单轮 `--once`、CLI `engine run`、面板按钮）都只判定不成交；试运行 `--dry-run` 例外（只看意图）。条件单在开关关着时触发 → 保持"待触发"，不标"已拒绝"；规则/条件被拦下的意图落 `engine_triggers(status=blocked_disabled)`，同 key 每天一条，供 dry-run 观察。
 2. **唯一判定源**：`engine/rules.py` 里的规则是纯函数，回测（`engine/backtest.py`）与盘中守护（`engine/runner.py`）调用**同一个** `evaluate()`，禁止任何一侧另写一套判定。
 3. **无未来函数**：日线规则 T 日收盘判定、最早 T+1 开盘成交；日内规则只用**当日已走完**的分钟线（`ts > now` 的分钟必须丢弃），单测锁定。回测与实盘的 T+1 冻结、最低金额 5000、日内笔数/金额上限口径一致。
+3.2 **行情数据源（执行侧统一）**：引擎日线规则、AI 信号、`price_map`（NAV/风控计价）都走 `TradingBridge.bar_source`（`paper_trading/data/source.py`）。`config.yaml` 的 `data.daily_source`：`auto`（缺省，母库优先、缺该标的回退本地）/ `local`（只用本地前复权）/ `mother`（只用母库）。母库日线取价优先 `close_qfq`（前复权，母方 Issue #8 于 2026-10-27 交付后与本地 akshare 同口径、绝对价位可比），`close_qfq` 为 NULL 的老数据逐行降级 `close_adj`（后复权，绝对价位不可比）→ 不复权；`data compare`/`data coverage` 输出的 `adj` 标注当前口径。**三道尺度防线（2026-10-27 事故后，缺一不可）**：① `integration/mother.daily_bars` 出口跨源尺度闸——母库与本地**同日收盘**比值超 [0.9,1.1] 即拒用母库回退本地（`SCALE_TOLERANCE`，`scale_check` 落 provenance）；② 执行价偏离基准价（计划价优先）超 `agent.max_price_deviation`（默认 30%）拒单；③ 条件单 `cond_value` 偏离现价超 [0.5×,2×] 进 `parse_rejected`。**独立基准原则**：涨跌停带/金额上限与被校验价同源自洽，只防逻辑 bug 防不了数据 bug——"值 vs 基准"的校验必须跨源或跨时点。**同账户一个价源**：`get_status`/手动单/`price_map`/dry-run 全走 `bar_source`（回测除外：已存日线快照是可复现性要求）。`calendar sync` 同样母库优先（母库 `trading_calendar` 覆盖今天/未来才采用 → akshare 兜底）。
 3.1 **方向型规则的方向由信号决定**：`ma_cross` / `rsi_zone` / `pct_change` / `vwap_dev` 等（`rules.py` 的 `_DIRECTIONAL`）金叉=买、死叉=卖，`action.side` 只作默认、不覆盖信号方向（单测锁定）。同一标的的“金叉买 + 死叉卖”用**一条**规则（`action: {side: buy, value: …}`）即可；拆成金叉/死叉两条会让每条都双向触发、重复成交（10-23 核对 Pi 旧规则集时发现并合并）。
 4. **费用地板**：`min_ticket_cny` 默认 5000——100 股最小单位下，2 千以下单子往返费率 >50bp，提高频率不等于下更多小单。
 5. **条件单语义**：条件单**只挂条件、现在不成交**；触发时过同一套风控与撮合。校验 fail-closed（非 A 股代码/非法条件类型/金额越界/有效期 ≤0 或 >30 天一律不入库），每条状态可审计（armed/filled/cancelled/expired/rejected）。
@@ -200,8 +219,20 @@ After any trading operation, verify:
 - [ ] 同标的当日已有卖出成交后没有买入成交（离场优先，买入条件作废并记拒因）
 - [ ] 每个交易日收盘后有一条 `nav:close` 快照（无交易也记，NAV 序列无空洞；判重按业务日 `result.date`，补记历史日也不重复）
 
-## Pi Deployment Sync
+## Deployment Sync（生产机 = NEC，2026-10-28 起）
 
-`~/paper-trading` on Pi is a git clone tracking `origin/main` (read-only deploy key).
+生产机是 **NEC**（`192.168.50.71`，Linux Mint x86_64 / Py 3.12）；`~/paper-trading`
+是跟踪 `origin/main` 的 git clone（只读部署密钥）。**Pi 已冻结为回退副本**
+（0 进程 0 cron，观察期 2-3 交易日），观察期结束前不要回收 Pi 上的数据。
+
+迁移过程、逐字节校验（sha256）、回退顺序与扩展表清单的**唯一真相源是
+`docs/migration-nec.md`**——本节只放指引，不复制内容（避免两处说法漂移）。
+
 Update ONLY via `git pull` — never scp/rsync files (that breaks LF endings and bypasses history).
 `data.db` / `paper_account.db` / `venv/` are gitignored and survive pulls untouched.
+
+已知环境坑（踩过，写在这里省时间）：
+- **NEC 是 x86-64-v1 老 CPU（Core2 Duo）**：numpy ≥2.4 的官方 wheel 基线是 v2，装了会
+  `import numpy` 失败（`requirements.txt` 目前只有下限 ⇒ 新机器默认解析即坏，需钉 `numpy<2.4`）。
+- **cron 里 `systemctl --user` 需要 `XDG_RUNTIME_DIR=/run/user/1000`**，否则探测一律 unknown。
+- **ufw 需为 :8080 放行局域网来源**，否则"面板挂了"与"防火墙拦了"从症状上无法区分。

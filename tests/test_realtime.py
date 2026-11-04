@@ -23,10 +23,19 @@ def test_parse_line_fields():
 
 
 def test_tc_symbol_mapping():
+    """市场段表（口径唯一来源 `utils/markets.py`，T59/T60 收敛）。
+
+    第 4 行原来断言 `920000 → sz920000`（注释写"仅 8/4 开头判北交所，与
+    Stock Dashboard 一致"）——那是把 bug 当合同钉住了。2026-11-03 现网实测：
+    腾讯 `sz920156` 回 1 个字段（空），`bj920156` 回 87 个字段（海昌智能 36.10），
+    新浪实时与 5 分钟线同样只有 `bj` 前缀取得到 ⇒ 920 段就是北交所。
+    **母库 `tc_encode` 有同一处错**，已写进转给 stock-dashboard 的请求。
+    """
     assert rt.tc_symbol("600519") == "sh600519"
     assert rt.tc_symbol("000858") == "sz000858"
     assert rt.tc_symbol("430047") == "bj430047"
-    assert rt.tc_symbol("920000") == "sz920000"  # 仅8/4开头判北交所（与 Stock Dashboard 一致）
+    assert rt.tc_symbol("920000") == "bj920000"      # 北交所 920 新段
+    assert rt.tc_symbol("900901") == "sh900901"      # 沪市 B 股：9 字头但不是北交所
 
 
 def test_trading_session_window():

@@ -36,9 +36,22 @@ class AgentConfig:
     llm_timeout: float = 120.0  # 决策上下文大，放宽单次超时
     llm_retries: int = 1  # 仅超时重试一次，其他错误直接失败
     llm_max_tokens: int = 8192  # 答案区预算（实测推理 3000+ thinking 会挤掉答案）
+    #: 问答（面板/CLI）的输出预算。与决策用的 8192 刻意不同：实测该端点的响应时间
+    #: 跟着 max_tokens **上限**走（11-03：4096→82.4s、1536→45.5s、1200→28.3s，而真实
+    #: 输出都约 650 token），决策要 JSON 预算、问答要快，两个数不该是同一个。
+    #: 答案被这个上限掐断时 `llm_ask` 会显式标注（T67），不再静默。
+    ask_max_tokens: int = 1536
     llm_thinking: str = "disabled"  # 格式受限决策默认关 thinking，又快又省又稳
     picks_enabled: bool = True   # AI 自主提名池外标的（候选之外也允许它选股）
     picks_max: int = 5           # 单轮最多提名多少只（1-10）
+    # 决策可审计：每条 buy/sell 必须引用上下文里真实存在的数据字段（basis）
+    require_basis: bool = False  # True=缺 basis 直接拒单（fail-closed）；False=只记录
+    require_stop: bool = False   # True=买入必须有 risk_stop 或卖出条件，否则拒单
+    #: 执行价 vs 基准价最大允许偏差（小数；0.30=A股最大日波幅 30%）。
+    #: 超过即拒单——挡复权口径/取错列一类的尺度错误（2026-10-27 事故：
+    #: price_map 取母库后复权 175.96 买入真实价 22.25 的票，虚付 7.9 倍）。
+    max_price_deviation: float = 0.30
+    context_budget: int = 8000   # 上下文 token 预算（压缩用；当前仅记录，P3 启用）
     # AI 条件单：LLM 只出触发条件，引擎盘中每分钟执行（实时层）
     conditions_enabled: bool = True
     max_conditions: int = 5
@@ -57,49 +70,72 @@ class AgentConfig:
     news_timeout_sec: float = 15.0  # 抓取硬超时：连不上的源按超时回空，不挂死
 
 
+#: basis 允许引用的上下文顶层字段（前缀校验，防止 AI 编造数据字段）
+_BASIS_PREFIXES = frozenset({
+    "account", "positions", "recent_closes", "recent_nav", "recent_ops",
+    "value_view", "stock_cards", "financial_summary", "dividend", "outcomes",
+    "thesis", "fundamentals", "screening", "market_regime", "data_provenance",
+    "news", "intraday", "portfolio",
+})
+
+
+def _normalize_basis(raw) -> tuple[list, str]:
+    """把 basis 规范化成字段名列表；类型非法时返回 ( [], 错误信息 )。"""
+    if raw is None:
+        return [], ""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return [], "basis 须为字段名数组"
+    out = []
+    for x in raw:
+        s = str(x or "").strip()
+        if s:
+            out.append(s[:80])
+    return out[:10], ""
+
+
+def _basis_known(name: str) -> bool:
+    """basis 字段是否引用了上下文里真实存在的数据域。"""
+    return str(name).split(".", 1)[0] in _BASIS_PREFIXES
+
+
+def _has_sell_condition(conditions, sym: str) -> bool:
+    """该标的是否已有卖出条件单（用于买入止损门禁）。"""
+    for c in conditions or []:
+        if (isinstance(c, dict) and str(c.get("symbol", "")) == sym
+                and str(c.get("side", "")).lower() == "sell"):
+            return True
+    return False
+
+
+def _as_float(v) -> Optional[float]:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _as_int(v) -> Optional[int]:
+    f = _as_float(v)
+    return int(f) if f is not None else None
+
+
 def _ask_llm(cfg, prompt: str, system: str, timeout: float, retries: int,
              max_tokens: int = 8192, thinking: str = "disabled") -> str:
-    """带超时重试的 LLM 调用（只重试超时；Key 不进错误信息由 provider 保证）。
+    """决策路径的 LLM 调用：现在是 `provider.chat_with_retry` 的薄壳（T64）。
 
-    thinking="disabled" 时透传厂商开关，关掉 chain-of-thought：
-    格式受限的 JSON 决策不需要思考过程，开着只会烧掉输出预算
-    （曾实测 3220 thinking tokens 挤掉答案导致空返回）。
-
-    但有些模型**始终思考**（GLM 5.3 系列，HTTP 400 / 1210 "不支持关闭思考"），
-    这时降到 low 档（思考预算最小）再试一次——不能因为一个透传参数把整条链路打死。
+    原来这段自己实现超时重试 + thinking 透传降级，问答路径另写一份且没抄全，
+    于是出现"决策带 timeout、问答用 LLMConfig 默认"的接线断层（30 秒超时那次）。
+    逻辑提到 provider 之后两条路径共用同一份落点，签名保持不变是因为
+    既有测试与调用点都按位置传参。
     """
-    from paper_trading.llm.provider import LLMError
-    from paper_trading.llm.provider import chat as _chat
+    from paper_trading.llm.provider import chat_with_retry
 
-    cfg.timeout = timeout
-    cfg.max_tokens = max_tokens
-
-    def _attempt(extra: dict) -> str:
-        cfg.extra_body = extra
-        last: Exception | None = None
-        for attempt in range(retries + 1):
-            try:
-                return _chat(cfg, [{"role": "user", "content": prompt}],
-                             system=system)
-            except Exception as e:  # noqa: BLE001 - 仅超时重试，其余直接抛
-                last = e
-                if "timed out" not in str(e).lower() \
-                        and "timeout" not in str(e).lower():
-                    raise
-                if attempt >= retries:
-                    raise
-        raise last or RuntimeError("LLM unreachable")
-
-    extra = {"thinking": {"type": "disabled"}} if thinking == "disabled" else {}
-    try:
-        return _attempt(extra)
-    except LLMError as e:
-        if thinking == "disabled" and "1210" in str(e):
-            # 始终思考的模型：思考也占输出预算，给足（至少 4096），
-            # 否则"只剩思考、没有答案"（真机在 2048 上撞过）
-            cfg.max_tokens = max(int(max_tokens or 0), 4096)
-            return _attempt({"thinking": {"type": "enabled", "level": "low"}})
-        raise
+    return chat_with_retry(cfg, [{"role": "user", "content": prompt}], system,
+                           timeout=timeout, retries=retries,
+                           max_tokens=max_tokens, thinking=thinking)
 
 
 def today_str() -> str:
@@ -303,12 +339,14 @@ class AgentTrader:
 
     def _conditions_from_raw(self, raw: Optional[str],
                              pool: list[str],
-                             holdings: Optional[list] = None
+                             holdings: Optional[list] = None,
+                             prices: Optional[dict] = None
                              ) -> tuple[list[dict], list[dict]]:
         """从决策 JSON 里取 conditions，返回 (合法条目, 被拒原因)。
 
         坏输出/池外/金额越界/卖出无持仓 不能静默消失；原因要进
         ai:decide / ai:plan 流水。`holdings`=真实持仓代码（卖出条件只许挂持仓）。
+        `prices`=现价表（条件尺度闸，见 parse_conditions_verbose）。
         """
         if not self.cfg.conditions_enabled:
             return [], []
@@ -321,7 +359,7 @@ class AgentTrader:
                 max_value=float(self.cfg.max_order_value),
                 min_ticket=self._engine_min_ticket(),
                 max_days=int(self.cfg.condition_max_days),
-                holdings=holdings)
+                holdings=holdings, prices=prices)
         except Exception as e:                # noqa: BLE001 - 条件单失败不阻断主决策
             return [], [{"why": f"解析异常：{type(e).__name__}: {e}"}]
 
@@ -429,7 +467,9 @@ class AgentTrader:
             raw, pool, max_conds=int(max_conds or self.cfg.event_max_conditions),
             max_value=max_value, min_ticket=min_ticket,
             max_days=int(self.cfg.condition_max_days),
-            holdings=[p.symbol for p in b.broker.get_all_positions()])
+            holdings=[p.symbol for p in b.broker.get_all_positions()],
+            prices={s: float(q.get("price") or 0.0)
+                    for s, q in quotes.items() if isinstance(q, dict)})
         res = self._arm_conditions(conds, dry_run=dry_run)
         b.broker.log_operation(
             "ai:review", {"pool": pool, "event": event_txt[:300],
@@ -512,7 +552,7 @@ class AgentTrader:
         symbols, picks = self._enrich(symbols, candidates)
         all_bars: dict[str, list] = {}
         for sym in symbols:
-            bars = b.data_db.get_bars(sym, limit=30)
+            bars = b.bar_source.get_bars(sym, limit=30)
             if bars:
                 all_bars[sym] = bars
         if not all_bars:
@@ -566,8 +606,11 @@ class AgentTrader:
                     "timestamp": now, "symbols": symbols}
         summary = str((plan or {}).get("summary", ""))[:200]
         held_syms = [p.symbol for p in b.broker.get_all_positions()]
+        # 条件尺度闸用定稿收盘价（与 AI 看到的 recent_closes 同源同口径）
+        plan_prices = {s: float(v[-1].close)
+                       for s, v in all_bars.items() if v}
         conditions, conditions_rejected = self._conditions_from_raw(
-            raw, symbols, holdings=held_syms)
+            raw, symbols, holdings=held_syms, prices=plan_prices)
         # 计划基准价：买/卖动作一律回填定稿收盘价（prompt 约定 null=最新收盘）。
         # 不采信 LLM 自报价格；带 price_source 的基准价才允许在执行缺价时兜底。
         for a in actions:
@@ -716,7 +759,7 @@ class AgentTrader:
         # 2. 取数（执行计划不需要新鲜 K 线：计划本就是基于定稿数据做的）
         all_bars: dict[str, list] = {}
         for sym in symbols:
-            bars = b.data_db.get_bars(sym, limit=30)
+            bars = b.bar_source.get_bars(sym, limit=30)
             if bars:
                 all_bars[sym] = bars
         # 计价用全口径（run 标的 ∪ 持仓），持仓按 0 算会误触发熔断
@@ -782,7 +825,7 @@ class AgentTrader:
             symbols, picks = self._enrich(symbols, candidates)
             if picks:
                 for sym in (p["symbol"] for p in picks):
-                    bars = b.data_db.get_bars(sym, limit=30)
+                    bars = b.bar_source.get_bars(sym, limit=30)
                     if bars:
                         all_bars[sym] = bars
                 latest = b.price_map(symbols)
@@ -833,7 +876,7 @@ class AgentTrader:
             actions = []
         summary = str((plan or {}).get("summary", ""))[:200] if plan else ""
         conditions, conditions_rejected = self._conditions_from_raw(
-            raw, symbols, holdings=set(positions))
+            raw, symbols, holdings=set(positions), prices=latest)
 
         # 7. 逐条钳制执行（现决与计划执行共用实现）
         return self._execute_actions(
@@ -841,6 +884,7 @@ class AgentTrader:
             all_bars=all_bars, latest_prices=latest, cash=cash,
             positions=positions, nav_total=nav.total_value,
             dry_run=dry_run, mode=mode, now=now_iso, from_plan=False,
+            plan_id=(pending['id'] if pending else None),
             pool_source=pool_source, slot=_slot_s,
             picks=[{"symbol": p["symbol"], "name": p.get("name", "")}
                    for p in picks], conditions=conditions,
@@ -855,6 +899,13 @@ class AgentTrader:
 
         logger = get_logger(__name__)
         b = self.bridge
+        # T24 P0（Hermes 对抗审查，主 AI 修）：**消费前移到本函数第一句**。
+        # SIGKILL/SIGTERM 不执行 finally——消费留在 finally 时，进程被杀后
+        # 计划残留 pending，下 tick 会重跑已成交动作（重复下单）；且本函数
+        # 解析/补数据段在 try 之外，抛异常同样残留。前移后崩溃窗口=零
+        # （本句执行完即消费），与 H-5 consume-once 裁决语义一致：
+        # 消费即承诺"做过/尝试做过，永不自动重跑"，恢复=人工核查账本。
+        b.broker.mark_plan_done(int(pending["id"]))
         plan = pending.get("plan") or {}
         actions = plan.get("actions", [])
         if not isinstance(actions, list):
@@ -889,25 +940,61 @@ class AgentTrader:
         for sym in set(syms) | set(positions):
             bars = all_bars.get(sym)
             if not bars:
-                bars = b.data_db.get_bars(sym, limit=30)
+                bars = b.bar_source.get_bars(sym, limit=30)
                 if bars:
                     all_bars[sym] = bars
             if not latest.get(sym) and bars:
                 latest[sym] = float(bars[-1].close)
         cash = b.broker.get_cash()
         nav = b.broker.get_nav(latest)
-        res = self._execute_actions(
-            actions=actions, summary=summary, symbols=syms,
-            all_bars=all_bars, latest_prices=latest, cash=cash,
-            positions=positions, nav_total=nav.total_value,
-            dry_run=False, mode="live",
-            now=now_iso or datetime.now().isoformat(),
-            from_plan=True, pool_source=str(plan.get("pool_source", "config")),
-            slot=slot, conditions=conditions,
-            conditions_rejected=conditions_rejected)
-        b.broker.mark_plan_done(int(pending["id"]))
+        try:
+            res = self._execute_actions(
+                actions=actions, summary=summary, symbols=syms,
+                all_bars=all_bars, latest_prices=latest, cash=cash,
+                positions=positions, nav_total=nav.total_value,
+                dry_run=False, mode="live",
+                now=now_iso or datetime.now().isoformat(),
+                from_plan=True, plan_id=int(pending["id"]),
+                pool_source=str(plan.get("pool_source", "config")),
+                slot=slot, conditions=conditions,
+                conditions_rejected=conditions_rejected)
+        except Exception as e:                # noqa: BLE001
+            # H-5 定案（T8 复核后主 AI 裁决）：**执行中断也消费计划**。
+            # 反向风险更严重：崩溃不消费 → 下个 tick 自动重跑 → 已成交的
+            # 动作被再执行一遍（重复下单）。错误入审计后返回、不重试；
+            # 恢复路径 = 人工重做计划（agent tick 的下一轮会正常做新计划）。
+            logger.error(f"AI plan {pending['id']} crashed: {e}")
+            try:
+                b.broker.log_operation(
+                    "ai:decide",
+                    {"plan_id": int(pending["id"]), "symbols": syms},
+                    False,
+                    {"error": f"{type(e).__name__}: {e}",
+                     "note": "计划执行中断，已消费不重试（防重复下单）"},
+                    None, None)
+            except Exception:                  # noqa: BLE001 - 审计失败不挡消费
+                pass
+            res = {"ok": False,
+                   "error": f"计划执行中断：{type(e).__name__}: {e}",
+                   "plan_id": int(pending["id"]), "from_plan": True}
+        # 消费已在函数开头（T24 P0：finally 在 SIGKILL 下不执行，故不在此处）
         logger.info(f"AI plan {pending['id']} executed")
         return res
+
+    def _executor_of(self) -> str:
+        """执行底座（与 `engine --once` / `rq tick` 同一读法、同一校验）。
+
+        读不出来一律返回 `unknown(...)` 而不是"当 legacy"——底座不明时旧线照常下单
+        就等于允许双活（纪律 3：拿不准就不动钱）。
+        """
+        from paper_trading.engine.config import load_engine_config
+        from paper_trading.integration.rq_engine.ledger import executor_from_config
+
+        try:
+            return executor_from_config(load_engine_config(
+                getattr(self.bridge, "config_path", None)))
+        except Exception as exc:      # noqa: BLE001 - 判定交调用方，这里只如实带出原因
+            return f"unknown({type(exc).__name__})"
 
     def _execute_actions(self, *, actions: list, summary: str, symbols: list,
                          all_bars: dict, latest_prices: dict, cash: float,
@@ -917,7 +1004,8 @@ class AgentTrader:
                          slot: Optional[str] = None,
                          picks: Optional[list] = None,
                          conditions: Optional[list] = None,
-                         conditions_rejected: Optional[list] = None) -> dict:
+                         conditions_rejected: Optional[list] = None,
+                         plan_id: Optional[int] = None) -> dict:
         """逐条钳制执行（dry_run 不碰账本；from_plan 仅标记来源）。"""
         from paper_trading.models import Order, OrderType, Signal, SignalType
         from paper_trading.utils import get_logger
@@ -929,7 +1017,19 @@ class AgentTrader:
         allow_sell = set(positions)
         decided: list[dict] = []
         n_orders = 0
-        for a in actions[: self.cfg.max_orders_per_run + 5]:  # 多出的只记拒绝
+        all_actions = actions if isinstance(actions, list) else []
+        n_cap = self.cfg.max_orders_per_run + 5
+        for idx, a in enumerate(all_actions):
+            if idx >= n_cap:
+                # H-2（2026-10-27 同事审查）：超出处理上限的条目也必须进审计，
+                # 否则"AI 说了 10 条、后 2 条去哪了"无法复盘——只审不执行。
+                decided.append({
+                    "action": str(a.get("action", "hold")) if isinstance(a, dict) else "?",
+                    "symbol": str(a.get("symbol", "")) if isinstance(a, dict) else "",
+                    "volume": (a.get("volume") if isinstance(a, dict) else None),
+                    "reason": (str(a.get("reason", ""))[:120] if isinstance(a, dict) else ""),
+                    "status": f"拒绝：超出单轮处理上限 {n_cap} 条（仅审计，未执行）"})
+                continue
             if not isinstance(a, dict):
                 continue
             act = str(a.get("action", "hold")).lower()
@@ -937,6 +1037,17 @@ class AgentTrader:
             reason = str(a.get("reason", ""))[:120]
             rec: dict[str, Any] = {"action": act, "symbol": sym,
                                    "volume": a.get("volume"), "reason": reason}
+            # 决策可审计字段：数据依据(basis) + 论点/催化/止损/置信度/持有期
+            basis, basis_err = _normalize_basis(a.get("basis"))
+            rec.update({
+                "basis": basis,
+                "thesis": str(a.get("thesis") or "")[:200],
+                "catalyst": str(a.get("catalyst") or "")[:120],
+                "risk_stop": _as_float(a.get("risk_stop")),
+                "confidence": _as_float(a.get("confidence")),
+                "expected_hold_days": _as_int(a.get("expected_hold_days")),
+                "position_size_reason": str(a.get("position_size_reason") or "")[:120],
+            })
             if act == "hold" or not sym:
                 rec["status"] = "持有不动" if act == "hold" else "拒绝：无代码"
                 decided.append(rec)
@@ -960,8 +1071,40 @@ class AgentTrader:
                     px = float(a.get("price") or 0.0)
                 except (TypeError, ValueError):
                     px = 0.0
+            # 尺度门禁：执行价偏离基准价超过 A 股最大日波幅 = 数据口径错误，
+            # 必须拒单（2026-10-27 事故：母库后复权价 175.96 vs 计划价 22.25）。
+            # 基准价有两个：计划价（跨时点独立支点，事故场景的救命锚）；
+            # 同源的 bars[-1].close 只防取错列/单位错（事故场景两边同污染挡不住）。
+            _ref = 0.0
+            if from_plan and a.get("price_source") == "last_close":
+                try:
+                    _ref = float(a.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    _ref = 0.0
+            if not _ref:
+                _b = all_bars.get(sym) or []
+                try:
+                    _ref = float(_b[-1].close) if _b else 0.0
+                except (TypeError, ValueError, AttributeError):
+                    _ref = 0.0
+            _dev = (abs(px / _ref - 1.0)
+                    if _ref > 0 and px > 0 and math.isfinite(px) else 0.0)
             if act not in ("buy", "sell"):
                 rec["status"] = "拒绝：未知动作"
+            elif basis_err:
+                rec["status"] = f"拒绝：{basis_err}"
+            elif self.cfg.require_basis and not basis:
+                rec["status"] = "拒绝：缺 basis（未说明依据的数据字段）"
+            elif any(not _basis_known(x) for x in basis):
+                rec["status"] = "拒绝：basis 含未知数据字段"
+            elif (self.cfg.require_stop and act == "buy"
+                  and rec.get("risk_stop") is None
+                  and not _has_sell_condition(conditions, sym)):
+                rec["status"] = "拒绝：买入缺止损安排（risk_stop 或卖出条件）"
+            elif _dev > max(0.0, float(self.cfg.max_price_deviation)):
+                rec["status"] = (f"拒绝：执行价 {px:.2f} 偏离基准价 {_ref:.2f} "
+                                 f"达 {_dev:.0%}（超阈值 "
+                                 f"{self.cfg.max_price_deviation:.0%}，疑数据口径错误）")
             elif act == "buy" and sym not in allow_buy:
                 rec["status"] = "拒绝：不在股票池"
             elif act == "sell" and sym not in allow_sell:
@@ -970,6 +1113,12 @@ class AgentTrader:
                 rec["status"] = "拒绝：数量须为100倍数"
             elif not math.isfinite(px) or px <= 0:
                 rec["status"] = "拒绝：无有效价格"
+            elif not (_ref > 0 and math.isfinite(_ref)):
+                # H-1（2026-10-27 同事审查）fail-closed：px>0 但独立基准价缺失
+                # （bars/计划价都没有）时尺度门禁会静默失效——事故教训正是
+                # "门禁静默关闭 = 同源自洽盲区"。无基准 = 拒单，不放行。
+                rec["status"] = ("拒绝：无独立基准价（bars/计划价均缺失），"
+                                 "尺度门禁无法执行（fail-closed）")
             elif vol * px > self.cfg.max_order_value:
                 rec["status"] = f"拒绝：超单笔上限{int(self.cfg.max_order_value)}元"
             elif n_orders >= self.cfg.max_orders_per_run:
@@ -994,12 +1143,29 @@ class AgentTrader:
                                   prev_close=prev,
                                   ref_high=bars[-1].high if bars else None,
                                   ref_low=bars[-1].low if bars else None)
-                    res = b.broker.submit_order(order)
-                    rec["status"] = ("已成交 @%.2f" % res.filled_price
-                                     if res.status.value == "filled"
-                                     else f"撮合拒绝：{res.status.value}")
-                    rec["filled_price"] = res.filled_price
-                    n_orders += 1
+                    ex = self._executor_of()
+                    if ex == "rqalpha":
+                        # 防双活（M3 接管③）：底座切到新线后，AI 直接动作不能再自己
+                        # 撮合——同一个账本上两个撮合器 = 不可归因。改投意图队列，
+                        # 由 `rq tick` 的分钟会话统一执行（T+1/涨跌停/费用=框架口径）。
+                        from paper_trading.integration.rq_engine.queue import enqueue
+
+                        biz = enqueue(str(b.broker.db_path), sym, act, vol,
+                                      rule_ref=f"agent:{str(reason)[:24]}",
+                                      detail={"price": px, "via": "agent_tick"})
+                        rec["status"] = f"已入意图队列（新线执行）：{biz}"
+                        rec["queued_rq"] = True
+                        n_orders += 1
+                    elif ex != "legacy":
+                        # 底座读不出来/值非法 ⇒ 两侧都可能是活的，一条都不许下（纪律 3）
+                        rec["status"] = f"拒绝：执行底座无法判定（{ex}），不许蒙眼下单"
+                    else:
+                        res = b.broker.submit_order(order)
+                        rec["status"] = ("已成交 @%.2f" % res.filled_price
+                                         if res.status.value == "filled"
+                                         else f"撮合拒绝：{res.status.value}")
+                        rec["filled_price"] = res.filled_price
+                        n_orders += 1
                     # 刷新资金/持仓快照，供下一单校验
                     cash = b.broker.get_cash()
                     positions = {p.symbol: p for p in b.broker.get_all_positions()}
@@ -1021,7 +1187,24 @@ class AgentTrader:
                           **({"slot": slot} if slot else {})}, True,
             {"decisions": decided, "picks": picks or [], "conditions": cond_res},
             nav2.cash, nav2.total_value)
+        # 决策落库（供回放/审计）；失败不阻断决策链
+        try:
+            b.broker.save_agent_decision(
+                decision_date=now[:10], plan_id=plan_id, mode=mode,
+                from_plan=from_plan, pool_source=pool_source, summary=summary,
+                actions=decided, conditions=cond_res,
+                result={"decisions": decided, "conditions": cond_res})
+        except Exception:                       # noqa: BLE001
+            logger.warning("save agent_decision failed")
         logger.info(f"AI decide done: {len(decided)} actions, mode={mode}, from_plan={from_plan}")
+        try:
+            from paper_trading.utils import heartbeat as _hb
+
+            _hb.touch("agent", ok=True,
+                      detail=f"mode={mode} decisions={len(decided)}"
+                             + (" dry-run" if dry_run else ""))
+        except Exception:                       # noqa: BLE001 - 心跳不拖垮决策链
+            pass
         return {"ok": True, "timestamp": now, "symbols": symbols, "mode": mode,
                 "from_plan": from_plan, "pool_source": pool_source,
                 "summary": summary, "decisions": decided,

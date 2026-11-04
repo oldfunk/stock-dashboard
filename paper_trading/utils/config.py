@@ -1,8 +1,53 @@
 """配置加载：config.yaml 单一真相源。"""
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any
+
+#: `TradingConfig` 的字段名（config.yaml 的 trading 段按这些名字覆盖）
+_TRADING_FIELDS = None
+
+
+def _trading_fields() -> set[str]:
+    global _TRADING_FIELDS
+    if _TRADING_FIELDS is None:
+        from paper_trading.models import TradingConfig
+
+        _TRADING_FIELDS = {f.name for f in dataclasses.fields(TradingConfig)}
+    return _TRADING_FIELDS
+
+
+def trading_config_from_dicts(trading: dict, account: dict):
+    """config.yaml 的 `trading:`/`account:` 两段盖到 `TradingConfig` 上（T51 唯一构造点）。
+
+    **这里一个数字都不写**：兜底值只存在于 `TradingConfig` 的字段默认里。
+    原先 `float(trading.get("commission_rate", 0.00025))` 这种写法在四处各抄一遍，
+    每抄一次就多一条"改了 config 也不生效"的路（纪律 7 口径唯一）。
+    """
+    from paper_trading.models import TradingConfig
+
+    cfg = TradingConfig()
+    unknown: list[str] = []
+    for key, val in (trading or {}).items():
+        if key not in _trading_fields():
+            unknown.append(str(key))
+            continue
+        if key == "holidays":
+            cfg.holidays = tuple(val or ())
+        elif key == "use_slippage_pct":
+            cfg.use_slippage_pct = bool(val)
+        else:
+            setattr(cfg, key, float(val))
+    if account and account.get("initial_cash") is not None:
+        cfg.initial_cash = float(account["initial_cash"])
+    if unknown:
+        # 不静默吞：键名写错（如 commission-rate）与"没配"是两件事，后者才是默认值
+        from paper_trading.utils import get_logger
+
+        get_logger(__name__).warning(
+            "config.yaml 的 trading 段有未知键，已忽略：%s", unknown)
+    return cfg
 
 
 def _read_yaml(path: str | Path) -> dict[str, Any]:
@@ -18,8 +63,6 @@ def _read_yaml(path: str | Path) -> dict[str, Any]:
 
 def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     """加载配置并填充默认值。"""
-    from paper_trading.models import TradingConfig
-
     raw = _read_yaml(path)
     trading = raw.get("trading", {})
     account = raw.get("account", {})
@@ -27,17 +70,7 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     risk = raw.get("risk", {})
     agent = raw.get("agent", {})
 
-    tcfg = TradingConfig(
-        commission_rate=float(trading.get("commission_rate", 0.00025)),
-        commission_min=float(trading.get("commission_min", 5.0)),
-        stamp_duty_rate=float(trading.get("stamp_duty_rate", 0.0005)),
-        transfer_fee_rate=float(trading.get("transfer_fee_rate", 0.00001)),
-        slippage_fixed=float(trading.get("slippage_fixed", 0.01)),
-        slippage_pct=float(trading.get("slippage_pct", 0.001)),
-        use_slippage_pct=bool(trading.get("use_slippage_pct", False)),
-        initial_cash=float(account.get("initial_cash", 1_000_000.0)),
-        holidays=tuple(trading.get("holidays", []) or ()),
-    )
+    tcfg = trading_config_from_dicts(trading, account)
     def _norm_sym(s) -> str:
         # YAML 1.1 会把 000333 这类全小数字解析成八进制 int（219）且不可逆，
         # 因此 config 里必须加引号；这里再兜底：纯数字补齐 6 位
@@ -71,6 +104,7 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
             "llm_timeout": float(agent.get("llm_timeout", 120.0)),
             "llm_retries": int(agent.get("llm_retries", 1)),
             "llm_max_tokens": int(agent.get("llm_max_tokens", 8192)),
+            "ask_max_tokens": int(agent.get("ask_max_tokens", 1536)),
             "llm_thinking": str(agent.get("llm_thinking", "disabled")),
             "picks_enabled": bool(agent.get("picks_enabled", True)),
             "picks_max": int(agent.get("picks_max", 5)),
@@ -87,5 +121,10 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
             "news_enabled": bool(agent.get("news_enabled", True)),
             "news_limit": int(agent.get("news_limit", 12)),
             "news_timeout_sec": float(agent.get("news_timeout_sec", 15.0)),
+            # 安全门禁（v0.7.6：漏白名单 = config 写了也失效，见 wiring_audit）
+            "require_stop": bool(agent.get("require_stop", False)),
+            "require_basis": bool(agent.get("require_basis", False)),
+            "max_price_deviation": float(agent.get("max_price_deviation", 0.30)),
+            "context_budget": int(agent.get("context_budget", 8000)),
         },
     }

@@ -15,7 +15,11 @@ TRADER_SYSTEM = """你是本地 A 股模拟盘的 AI 交易员。今天只做一
 6. 价值视角中若有某股票的论点/卖出条件，优先遵守（基本面一票否决技术面）
 7. 只输出 JSON，不输出其他任何文字，格式：
 {{"actions": [{{"action": "buy|sell|hold", "symbol": "代码",
-"volume": 100, "price": null, "reason": "一句话理由"}}],
+"volume": 100, "price": null, "reason": "一句话理由",
+"basis": ["recent_closes", "financial_summary.roe_5y_avg"],
+"thesis": "一句话论点", "catalyst": "催化（可空）",
+"risk_stop": 1450.0, "confidence": 72, "expected_hold_days": 20,
+"position_size_reason": "仓位理由"}}],
 "conditions": [{{"symbol": "代码", "side": "buy|sell",
 "cond": {{"type": "price_below|price_above|pct_below|pct_above", "value": 数字}},
 "volume": 100, "value": 0, "expiry": "YYYY-MM-DD", "reason": "一句话理由"}}],
@@ -25,6 +29,20 @@ price 为 null 表示按最新收盘价成交；hold 也要写一行（说明为
 即使全部持有，也必须对每只股票各写一行 hold 并说明理由，summary 必填。
 只有上下文 positions 里的股票才是持仓；理由里不得声称买入/持有没有的股票。
 引用股票用“名称(代码)”格式，全部中文回复。
+10. 决策可审计（每条 buy/sell 必须给出“用什么数据判断”）：
+    - basis：1-5 个**上下文里真实存在**的数据字段名（如 recent_closes、
+      financial_summary.roe_5y_avg、screening.score_detail、dividend、
+      market_regime、thesis.sell_conditions）。程序会校验字段前缀，
+      编造不存在的字段会被拒绝。缺 basis 时若开启 require_basis 也会被拒绝。
+    - thesis：一句话论点；catalyst：催化（可空）；
+      confidence：0-100；expected_hold_days：预期持有交易日数。
+    - risk_stop：买入必须给止损价（数字）；若该标的已是持仓，也可用一条卖出条件代替
+      （非持仓的卖出条件会被解析层拒绝）。否则按离场纪律视为不合格。
+11. 组合约束（必须遵守，并在 basis 引用 portfolio.*）：
+    - 总仓位（portfolio.exposure_pct）不超过投资方案上限；单票不超过组合 30%；
+    - 行业集中度：portfolio.sector_exposure 显示各行业占比，单一行业过高时要说明分散理由；
+    - 现金占比过低（portfolio.cash_pct < 10）时买入要说明理由。
+    - 若开启 require_stop：买入必须给 risk_stop（持仓标的也可用卖出条件），否则会被拒单。
 8. conditions 是可选的“条件单”：现在不成交，由引擎盘中盯价触发；最多 {max_conditions} 条，
    有效期最长 {condition_max_days} 天。触发条件必须是可验证的数字，且与现价保持合理距离。
    price_below/price_above 是绝对价格；pct_below/pct_above 是当日涨跌幅%（相对昨收），
