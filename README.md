@@ -218,7 +218,7 @@ AI 分析（护城河/管理层/估值/交易信号/历史分析文本）**不�
 [Paper Trading Framework](https://github.com/oldfunk/paper-trading)（独立仓库，MIT）：
 A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交易员日内一次决策（三道闸），休盘做计划、开盘执行。
 
-- 本仓以 subtree 合流（`paper_trading/`，只跟上游 tag），当前 **v0.6.9**；`/paper` 直达面板（:8081）。
+- 本仓以 subtree 合流（`paper_trading/`，只跟上游 tag），当前 **v0.8.0**；`/paper` 直达面板（:8081）。
 - 母子协作协议见 `docs/subproject-protocol.md`（母整合/子施工/人包工头）。
 
 ---

@@ -165,6 +165,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-06（vendor：子项目 paper-trading v0.8.0 合并部署；v0.6.9 → v0.8.0，11 个 tag）
+
+- 子项目独立版漫长迭代后稳定，按单向 tag 流合并入母树：`git subtree pull --prefix=paper_trading paper-upstream v0.8.0 --squash`（`8078f5f`+`912d70c`，零冲突——接缝修复此前已随 tag 回流）。
+- v0.8.0 带来（据子项目 README/合并树）：规则引擎（9 种规则盘中守护，与 AI 同一风控尺子与撮合口径）、条件单（触发+有效期+留痕）、AI 交易员（固定时段+JSON 钳制+幂等闸+日亏熔断+离场三件套）、回测纪律（T+1 成交/真实费率/样本外检验防过拟合）、分钟线/T+15 批量/raw feed 管线等。
+- 部署：`--restart`（paper_trading/ 变更→父服务 :8081 重启；:8080 子项目独立版不受影响，用户自管）。
+- 母项目侧无手改 paper_trading/（AGENTS 纪律：单向 tag 流，接缝 bug 母修走 tag 回流）。
+
 ### 2026-11-05（批15+Hermes H2 验收合入；H-001 结论收窄定稿；gate 1190 → 1235）
 
 - **批15（6 commit）全过**：11-03 事故回归五层用例（含 6 处调用点全清单）；**U6 死路激活**（EM 利润/现金流表 symbol 前缀形态+静默改告警；抽样实证 13.3%→88.9% 覆盖且 `production_only=0` 严格超集）；U2 ATTACH 注入转义、U4 连接复用；U8 折现率警示单一来源（详情页+AI prompt+方法论文档，"加声明数值不变"守卫）；**15-e H-001 混杂算账**（`h001_regime_check.py`+文档）。
