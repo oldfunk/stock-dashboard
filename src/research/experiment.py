@@ -709,8 +709,11 @@ def main(argv: list[str] | None = None) -> int:
             metric=args.metric, threshold=args.threshold,
             horizon_days=args.horizon_days, regimes=regimes,
             costs=_parse_json_arg(args.costs, "costs"),
-            random_seed=args.seed, code_commit=args.code_commit or None,
-            config_hash=args.config_hash or None,
+            random_seed=args.seed,
+            # code_commit/config_hash 列 NOT NULL：缺省留空串（"未指定"），不传 None
+            # （2026-11-04 实测：None 会让后续 run 的 insert_experiment 撞约束）
+            code_commit=args.code_commit or "",
+            config_hash=args.config_hash or "",
             params=_parse_json_arg(args.params, "params"),
         )
         dao.insert_experiment(Experiment(
