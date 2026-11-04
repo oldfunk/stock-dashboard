@@ -23,6 +23,21 @@ _SCENARIOS = {
     "optimistic": (5, 0.06, 0.04, 0.03, 0.08),
 }
 
+# **折现率口径声明（U8，2026-11-04；母方裁定"并入 H-001 样本口径一起定，
+# 本批先做文档警示"）**：上表的 0.10 / 0.09 / 0.08 是**股权要求回报率**的量级，
+# 却被用来折 FCFF（企业级现金流，教科书口径应对应 WACC）。方向是**低估企业价值、
+# 安全边际偏保守**，不是算错方向。用 ``dcf_value`` 本体算的敏感性（同一 FCF=1.0 亿）：
+# 保守档 r 0.100→0.085 估值 10.00→11.77 亿（+17.6%）；
+# 基准档 r 0.090→0.075 估值 15.21→19.38 亿（**+27.4%**）；
+# 乐观档 r 0.080→0.065 估值 24.34→35.01 亿（+43.8%）。
+# 这句话必须出现在 UI 与 AI prompt 里（单一来源，两处共用本常量），
+# 否则读的人会以为三档数字是 WACC 口径的绝对估值。
+DISCOUNT_BASIS_NOTE = (
+    "折现率口径：三档用的是股权要求回报率（8%~10%）折 FCFF，"
+    "不是 WACC——结果系统性偏保守（同参数下折现率降 1.5pp，基准档估值约 +27%），"
+    "横向比较可用，绝对数值请勿当 fair value 引用。"
+)
+
 
 def dcf_value(fcf: float, years1: int, g1: float, g2: float,
               g_term: float, r: float) -> float | None:
@@ -178,4 +193,6 @@ def intrinsic_value_for_code(code: str, price: float | None = None) -> dict | No
     out["price"] = price
     out["report_date"] = fin.get("report_date")
     out["assumptions"] = scenario_assumptions()
+    # U8：口径声明随估值一起出，UI 与 AI prompt 共用同一句（不各写一份）
+    out["discount_basis_note"] = DISCOUNT_BASIS_NOTE
     return out
