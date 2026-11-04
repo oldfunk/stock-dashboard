@@ -85,6 +85,12 @@ tbody tr:hover{background:var(--bg-hover)}
 .tag.buy{background:var(--color-up-bg);color:var(--color-up)} .tag.sell{background:var(--color-down-bg);color:var(--color-down)}
 .tag.live{background:var(--accent-soft);color:var(--accent)}
 .scroll{overflow-x:auto}
+/* 长列表折叠：默认只显示最新 N 条，其余收起（最新在上） */
+tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
+.more-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:9px 12px;margin:0;border-width:0;border-top:1px dashed var(--divider);background:transparent;color:var(--text-tertiary);font-size:12px;font-family:inherit;letter-spacing:.02em;cursor:pointer}
+.more-btn:hover{color:var(--accent);background:var(--bg-hover)}
+.more-btn::before{content:"";width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;transition:transform .15s}
+.more-btn[data-open="1"]::before{transform:rotate(180deg)}
 .mut{color:var(--text-tertiary)}
 .ai-panel{background:var(--bg-secondary);border:1px solid var(--divider);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;box-shadow:var(--shadow)}
 .ai-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
@@ -111,6 +117,7 @@ tbody tr:hover{background:var(--bg-hover)}
 </header>
 
 <div class="market-row" id="cards"></div>
+<div class="status-bar" id="healthbar" style="display:none;border-color:#e0524d;color:#e0524d"></div>
 <div class="status-bar" id="statusbar"></div>
 
 <section>
@@ -151,6 +158,14 @@ tbody tr:hover{background:var(--bg-hover)}
     <div class="ai-row" id="schedrows" style="flex-wrap:wrap"></div>
     <div class="s" id="schedtoday"></div>
     <div class="s">旧版“AI 定时队列”已停用；需要人工补跑时用 CLI：`agent run --plan-only`、`agent event --force`。手动 run 不再被旧队列拦住。</div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header"><h2 class="section-title">数据来源</h2><span class="section-count" id="c-prov"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="prov-sum">数据来源：加载中…</div>
+    <div class="scroll"><table id="prov"></table></div>
   </div>
 </section>
 
@@ -267,6 +282,24 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 async function get(u){const r=await fetch(u);return r.json()}
 function rows(t,head,body){t.innerHTML="<thead><tr>"+head.map(h=>`<th${h[1]?' class="num"':''}>${h[0]}</th>`).join("")+"</tr></thead><tbody>"+body+"</tbody>"}
 
+/* 长列表折叠渲染：默认只显示最新 N 条（bodyArr 须已按最新在上排序），
+   其余收进 tfoot 的“展开剩余 N 条”。展开状态按表 id 记忆，刷新不丢。 */
+const COLLAPSE={};
+function rowsC(t,head,bodyArr,showN,emptyLabel){
+  t._head=head;t._body=bodyArr;t._showN=showN;t._empty=emptyLabel;
+  const total=bodyArr.length, open=!!COLLAPSE[t.id];
+  const vis=open?bodyArr:bodyArr.slice(0,showN);
+  const hid=open?[]:bodyArr.slice(showN);
+  t.innerHTML="<thead><tr>"+head.map(h=>`<th${h[1]?' class="num"':''}>${h[0]}</th>`).join("")+"</tr></thead>"+
+    "<tbody>"+(total?vis.join(""):
+      `<tr><td colspan="${head.length}" class="mut">${emptyLabel||"暂无记录"}</td></tr>`)+"</tbody>"+
+    (hid.length?`<tfoot><tr><td colspan="${head.length}" class="more-cell">`+
+      `<button class="more-btn" type="button" data-open="${open?"1":""}">${open?"收起":`展开剩余 ${hid.length} 条`}</button></td></tr></tfoot>`:"");
+  const btn=t.querySelector(".more-btn");
+  if(btn)btn.onclick=()=>{COLLAPSE[t.id]=!COLLAPSE[t.id];rowsC(t,t._head,t._body,t._showN,t._empty);};
+  if(t._after)t._after();
+}
+
 /* ---- 中文映射（名称表来自 /api/names，均为行情源真实名称） ----
    展示规范：股票一律写成 名称(代码)，如 贵州茅台(600519)；
    名称缺失时只写代码，不写“未知”等占位词。 */
@@ -355,9 +388,17 @@ function resultCN(a,ok,j){let r={};try{r=JSON.parse(j||"{}")}catch(e){}
   return "完成";}
 async function refresh(){
  try{
-  const [s,ops,pos,ord,nav,nm]=await Promise.all(["/api/status","/api/ops?limit=30","/api/positions","/api/orders?limit=30","/api/nav?limit=60","/api/names"].map(get));
+  const [s,ops,pos,ord,nav,nm,prov]=await Promise.all(["/api/status","/api/ops?limit=30","/api/positions","/api/orders?limit=30","/api/nav?limit=60","/api/names","/api/data-provenance"].map(get));
   NAMES=(nm&&nm.data)||{};
   try{const qq=await get("/api/quotes");QUOTES=(qq&&qq.data)||{};}catch(e){QUOTES={};}
+  // T22 看门狗红条：不健康才显示；恢复后后端状态翻回 healthy=true ⇒ 红条自动消失
+  try{const hh=await get("/api/health");const h=(hh&&hh.data)||{};
+    const bar=document.getElementById("healthbar");
+    if(h.healthy===false){bar.style.display="";
+      bar.innerHTML="🔴 生产健康告警："+(h.alerts||[]).map(esc).join("；")
+        +" <span class=\"mut\">看门狗 "+esc(h.checked_at||"")+"</span>";}
+    else{bar.style.display="none";bar.innerHTML="";}
+  }catch(e){}
   const st=s.data;
   document.getElementById("clock").textContent="行情截至 "+(st.data_asof||"无数据")+" · 页面更新于 "+new Date().toLocaleTimeString("zh-CN");
   document.getElementById("statusbar").innerHTML=`
@@ -373,26 +414,42 @@ async function refresh(){
   document.getElementById("c-ops").textContent=(ops.data||[]).length+" 条";
   document.getElementById("c-pos").textContent=(st.positions||[]).length+" 只股票";
   document.getElementById("c-orders").textContent=(ord.data||[]).length+" 笔";
-  rows(document.getElementById("nav"),[["时间"],["总资产",1],["可用资金",1],["浮动盈亏",1]],
-    (nav.data||[]).reverse().map(r=>{const d=new Date(r.timestamp);const pn=Number(r.pnl);
-    return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td class="num">${fmt(r.total_value)}</td><td class="num">${fmt(r.cash)}</td><td class="num ${cls(pn)}">${pn>=0?"+":""}${fmt(pn)}</td></tr>`}).join(""));
-  rows(document.getElementById("ops"),[["时间"],["操作"],["详情"],["结果"],["操作后资产",1]],
+  rowsC(document.getElementById("nav"),[["时间"],["总资产",1],["可用资金",1],["浮动盈亏",1]],
+    (nav.data||[]).map(r=>{const d=new Date(r.timestamp);const pn=Number(r.pnl);
+    return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td class="num">${fmt(r.total_value)}</td><td class="num">${fmt(r.cash)}</td><td class="num ${cls(pn)}">${pn>=0?"+":""}${fmt(pn)}</td></tr>`}),
+    10,"暂无净值记录");
+  rowsC(document.getElementById("ops"),[["时间"],["操作"],["详情"],["结果"],["操作后资产",1]],
     (ops.data||[]).map(r=>{const ok=!!r.ok;const d=new Date(r.timestamp);
     const label=ACTION_CN[r.action]||r.action;
     return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td><b>${esc(label)}</b></td>`+
       `<td class="mut">${esc(paramCN(r.action,r.params))}</td>`+
       `<td class="${ok?"ok":"bad"}">${esc(resultCN(r.action,ok,r.result))}</td>`+
-      `<td class="num">${r.total_value_after!=null?fmt(r.total_value_after):"-"}</td></tr>`}).join("")||`<tr><td colspan="5" class="mut">暂无操作记录 —— AI 执行每日结算、买入、卖出后会出现在这里</td></tr>`);
+      `<td class="num">${r.total_value_after!=null?fmt(r.total_value_after):"-"}</td></tr>`}),
+    10,"暂无操作记录 —— AI 执行每日结算、买入、卖出后会出现在这里");
   rows(document.getElementById("pos"),[["股票"],["总股数",1],["可卖股数",1],["买入成本",1],["当前价",1],["持股市值(收盘)",1],["浮动盈亏",1]],
     (st.positions||[]).map(p=>{const pn=(p.current_price-p.avg_cost)*p.total_volume;
     const live=(QUOTES||{})[p.symbol];
     const pxHtml=live&&live.price?`${fmt(live.price)} <span class="tag live">实时</span>`:`${fmt(p.current_price)}`;
     return `<tr><td><b>${esc(sym(p.symbol))}</b></td><td class="num">${p.total_volume}</td><td class="num">${p.available_volume}</td><td class="num">${fmt(p.avg_cost)}</td><td class="num">${pxHtml}</td><td class="num">${fmt(p.market_value,0)}</td><td class="num ${cls(pn)}">${pn>=0?"+":""}${fmt(pn)}</td></tr>`}).join("")||`<tr><td colspan="7" class="mut">空仓</td></tr>`);
-  rows(document.getElementById("orders"),[["时间"],["方向"],["股票"],["股数",1],["价格",1],["状态"],["手续费",1]],
+  rowsC(document.getElementById("orders"),[["时间"],["方向"],["股票"],["股数",1],["价格",1],["状态"],["手续费",1]],
     (ord.data||[]).map(r=>{const d=new Date(r.created_at);const buy=r.direction==1;
     const fee=(Number(r.commission)+Number(r.stamp_duty)+Number(r.transfer_fee));
     const stt=r.status=="filled"?`<span class="ok">已成交</span>`:`<span class="bad">已拒绝</span>`;
-    return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td><span class="tag ${buy?"buy":"sell"}">${buy?"买入":"卖出"}</span></td><td><b>${esc(sym(r.symbol))}</b></td><td class="num">${r.volume}</td><td class="num">${fmt(r.filled_price||r.limit_price)}</td><td>${stt}</td><td class="num">${fmt(fee)}</td></tr>`}).join("")||`<tr><td colspan="7" class="mut">暂无订单</td></tr>`);
+    return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td><span class="tag ${buy?"buy":"sell"}">${buy?"买入":"卖出"}</span></td><td><b>${esc(sym(r.symbol))}</b></td><td class="num">${r.volume}</td><td class="num">${fmt(r.filled_price||r.limit_price)}</td><td>${stt}</td><td class="num">${fmt(fee)}</td></tr>`}),
+    10,"暂无订单");
+  const provIf=(prov&&prov.data&&prov.data.interfaces)||{};
+  document.getElementById("c-prov").textContent=Object.keys(provIf).length+" 个接口";
+  document.getElementById("prov-sum").textContent=
+    `行情数据源 ${(prov&&prov.data&&prov.data.daily_source)||"auto"}；缺失接口 ${((prov&&prov.data&&prov.data.unavailable)||[]).join("、")||"无"}`;
+  rowsC(document.getElementById("prov"),[["接口"],["来源"],["截至"],["状态"]],
+    Object.entries(provIf).map(([k,v])=>{
+      const src=Array.isArray(v.sources)?v.sources.join("、"):(v.source||"-");
+      const isMother=String(src).startsWith("mother");
+      const isUn=src==="unavailable";
+      const st=(v.stale?`<span class="bad">过期</span> `:"")+
+        ((v.available===false||isUn)?`<span class="bad">缺失</span>`:`<span class="ok">可用</span>`);
+      return `<tr><td><b>${esc(k)}</b></td><td><span class="tag ${isMother?"":(isUn?"sell":"buy")}">${esc(src)}</span></td><td class="mut">${esc(v.asof||"-")}</td><td>${st}</td></tr>`;
+    }),12,"暂无来源数据");
  }catch(e){document.getElementById("clock").textContent="刷新失败: "+e}
 }
 refresh();setInterval(refresh,15000);
@@ -573,9 +630,13 @@ function btCN(m){
   const pr=Object.entries(m.per_rule||{}).map(([k,v])=>`${esc(k)} ${v.trades??0} 笔`).join("；");
   // 只提示「配置/数据级」的注意事项（没有 symbol 的那条），逐笔跳过原因不刷屏
   const note=(m.skipped_sample||[]).filter(s=>s&&s.why&&!s.symbol).map(s=>esc(s.why)).slice(0,2).join("；");
+  // T17（纪律 4「不静默」）：被跳过的信号按原因分类计数并展示 + 流失率，
+  // 不再只给总数或 10~20 条样本——整类流失（如「金额不足一手」）必须看得见
+  const sc=Object.entries(m.skip_counts||{}).map(([k,v])=>`${esc(k)} ${v}`).join("；");
   return `${esc(line)}<br><span class="mut">${esc(bl)}${esc(ex)}（近 ${m.days??0} 个交易日，含真实手续费）</span>`+
     (pr?`<br><span class="mut">${pr}</span>`:"")+
-    (note?`<br><span class="mut">注意：${note}</span>`:"")+curve;
+    (note?`<br><span class="mut">注意：${note}</span>`:"")+
+    (sc?`<br><span class="mut">跳过分类：${sc}（${m.skipped??0}/${m.order_attempts??0} 次尝试被跳过，流失 ${m.signal_drop_pct??0}%）</span>`:"")+curve;
 }
 async function guard(fn){
   // 写接口统一走口令 + 凭 Key 接管（与其它写操作同一套，不新增第二套鉴权）
@@ -625,6 +686,10 @@ document.getElementById("btn-engine-wf").onclick=async()=>{
   out.innerHTML=`<div class="s">样本内 ${esc((sp.in_sample||[]).join(" → "))}（${sp.in_days} 天）→ `+
     `样本外 ${esc((sp.out_of_sample||[]).join(" → "))}（${sp.oos_days} 天）；`+
     `样本内第一名超额 ${fmt(d.sample_in_best_excess)}%，样本外 ${d.n_oos_positive}/${d.n_tested} 组为正</div>`+
+    // T36：过拟合差距 = 事后最优 − 样本内第 1 名（旧版把同一个数当两个用，量不出来）
+    `<div class="s">样本内第 1 名到样本外还剩 ${fmt(d.in_best_oos_excess_pct)}%；`+
+    `事后最优 ${fmt(d.oracle_oos_excess_pct)}%（${esc(sym(d.oracle_oos_symbol||"—"))}）；`+
+    `<b class="${(d.overfit_gap_pct||0)>0?'bad':'good'}">过拟合差距 ${fmt(d.overfit_gap_pct)}%</b></div>`+
     `<div class="scroll"><table><thead><tr><th>标的</th><th>参数</th><th class="num">样本内超额</th><th class="num">样本外收益</th><th class="num">样本外超额</th><th class="num">笔数</th><th class="num">夏普</th></tr></thead><tbody>`+
     (d.out_of_sample||[]).map(t=>`<tr><td><b>${esc(sym(t.symbol))}</b></td><td class="mut">${esc(JSON.stringify(t.params))}</td>`+
       `<td class="num ${cls(t.in_excess_pct)}">${t.in_excess_pct>=0?"+":""}${fmt(t.in_excess_pct)}%</td>`+
@@ -640,8 +705,10 @@ engineStatus();
 function condRow(){
   const box=document.getElementById("conds");
   const d=(box.dataset.d)||"";
-  rows(box,[["状态"],["股票"],["方向"],["触发条件",1],["金额/股数",1],["有效期"],["理由"],["操作"]],
-    d?JSON.parse(d).map(o=>{
+  const os=d?JSON.parse(d):[];
+  // 最新在上：按创建时间倒序（缺失时保持原顺序）
+  os.sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  const body=os.map(o=>{
       const st=COND_ST[o.status]||[o.status,"mut"];
       const amt=o.side==="buy"?(Number(o.value)?fmt(o.value,0)+" 元":`${o.volume} 股`):`${o.volume?o.volume+" 股":"全部持仓"}`;
       const cond=`${esc(COND_CN[o.cond_type]||o.cond_type)} ${fmt(o.cond_value, o.cond_type.startsWith("pct")?2:2)}`;
@@ -650,9 +717,8 @@ function condRow(){
         `<td><b>${esc(sym(o.symbol))}</b></td><td><span class="tag ${o.side}">${o.side==="buy"?"买入":"卖出"}</span></td>`+
         `<td class="num">${cond}</td><td class="num">${amt}</td>`+
         `<td class="mut">${esc(String(o.expiry||"").replace("T"," ").slice(0,16))}</td>`+
-        `<td class="mut">${esc(o.note||"")}</td><td>${act}</td></tr>`;}).join("")
-    :`<tr><td colspan="8" class="mut">暂无条件单 —— 条件单现在不成交，盘中触发才下单</td></tr>`);
-  box.querySelectorAll(".ccancel").forEach(b=>b.onclick=async()=>{
+        `<td class="mut">${esc(o.note||"")}</td><td>${act}</td></tr>`;});
+  box._after=()=>{box.querySelectorAll(".ccancel").forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     const st=document.getElementById("condstat");
     const r=await guard((extra)=>post("/api/cond/cancel",
@@ -660,7 +726,9 @@ function condRow(){
     if(!r.ok){st.textContent="撤销失败："+(r.error||"");b.disabled=false;return}
     st.textContent=`已撤销条件单 #${b.dataset.id}`;
     await condStatus();refresh();
-  });
+  });};
+  rowsC(box,[["状态"],["股票"],["方向"],["触发条件",1],["金额/股数",1],["有效期"],["理由"],["操作"]],
+    body,8,"暂无条件单 —— 条件单现在不成交，盘中触发才下单");
 }
 async function condStatus(){
   try{
@@ -831,15 +899,15 @@ def _load_bars(bridge, syms: list[str], days: int):
 
 
 def _fee_of(cfg_path: str):
+    """面板回测/网格用的费用口径：**只从 config 的 TradingConfig 取**（T51 口径唯一）。
+
+    旧写法读 `load_config(cfg)["trading"]`，那个键不存在（返回的是 `trading_config`），
+    所以面板一直按硬编码费率算，与实盘/CLI 不同源——改 `config.yaml` 不生效。
+    """
     from paper_trading.engine.backtest import FeeModel
     from paper_trading.utils.config import load_config
 
-    t = (load_config(cfg_path).get("trading") or {})
-    return FeeModel(
-        commission_rate=float(t.get("commission_rate", 0.00025)),
-        commission_min=float(t.get("commission_min", 5.0)),
-        stamp_duty_rate=float(t.get("stamp_duty_rate", 0.0005)),
-        transfer_fee_rate=float(t.get("transfer_fee_rate", 0.00001)))
+    return FeeModel.from_trading_config(load_config(cfg_path)["trading_config"])
 
 
 def _optimize_payload(bridge, grid: str, symbols, days: int, cash: float,
@@ -900,6 +968,43 @@ def _walkforward_payload(bridge, grid: str, symbols, days: int, cash: float,
                        top=int(top or 5), split=float(split or 0.6),
                        minutes_by_day=minutes)
     return (not out.get("error")), out, str(out.get("error") or "")
+
+
+_PROV_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+def _data_provenance(bridge, symbols: list) -> dict:
+    """数据来源汇总（接口级 source/asof/stale/available），30s 缓存。"""
+    import time
+
+    now = time.time()
+    if _PROV_CACHE["data"] is not None and now - _PROV_CACHE["ts"] < 30:
+        return _PROV_CACHE["data"]
+    from paper_trading.integration import mother as _m
+
+    cov = _m.coverage(symbols)
+    interfaces: dict = {}
+    for k, v in cov.items():
+        if isinstance(v, dict) and "source" in v:
+            interfaces[k] = {"source": v.get("source"), "asof": v.get("asof"),
+                             "stale": v.get("stale"), "available": v.get("available")}
+        elif isinstance(v, dict):
+            items = [x for x in v.values() if isinstance(x, dict)]
+            srcs = sorted({x.get("source") for x in items if x.get("source")})
+            if srcs:
+                interfaces[k] = {
+                    "sources": srcs,
+                    "stale": any(x.get("stale") for x in items),
+                    "available": any(x.get("available") for x in items)}
+    data = {
+        "daily_source": getattr(bridge, "daily_source", "auto"),
+        "interfaces": interfaces,
+        "unavailable": [k for k, v in interfaces.items()
+                        if v.get("available") is False
+                        or v.get("sources") == ["unavailable"]],
+    }
+    _PROV_CACHE.update(ts=now, data=data)
+    return data
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -978,11 +1083,26 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", "/index.html"):
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+            elif u.path == "/api/health":
+                # 只读看门狗状态（var/health_status.json + 实时心跳体检），不碰账本
+                from paper_trading.utils import heartbeat as hb
+
+                st = hb.read_status()
+                if not st:
+                    st = hb.probe()      # 没人跑过 check：直接按心跳现状判一次
+                self._json({"ok": True, "data": st})
             elif u.path == "/api/status":
                 from paper_trading.cli import TradingBridge
 
                 b = TradingBridge(data_db=self.data_db, account_db=self.account_db)
                 self._json({"ok": True, "data": b.get_status()})
+            elif u.path == "/api/data-provenance":
+                from paper_trading.cli import TradingBridge
+
+                b = TradingBridge(data_db=self.data_db, account_db=self.account_db)
+                syms = list(b.stock_pool) + [p.symbol for p in
+                                             b.broker.get_all_positions()]
+                self._json({"ok": True, "data": _data_provenance(b, syms)})
             elif u.path == "/api/positions":
                 from paper_trading.cli import TradingBridge
 
@@ -1352,10 +1472,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": ok, "data": data if ok else None,
                             "error": err or None}, code=200 if ok else 400)
             elif u.path == "/api/llm/ask":
-                if not self._admin_ok(body):
-                    self._json({"ok": False, "error": "口令错误或未设置"}, code=403)
-                    return
-                r = self._bridge().llm_ask(body.get("prompt", ""), body.get("system", ""))
+                # 2026-11-03 bug 修复：AI 问答是**只读咨询**（prompt→LLM→回复 +
+                # 审计流水），不写配置/不碰资金——此前被误列入写操作门禁，
+                # 换浏览器/无 admin_token 时（模型设置完全正确）也报
+                # "口令错误或未设置"。内网面板 + 无 Key 时 llm_ask 自然失败，
+                # 保留审计留痕即可，不再要写口令。
+                syms = [str(s) for s in (body.get("symbols") or []) if str(s).strip()]
+                r = self._bridge().llm_ask(
+                    body.get("prompt", ""), body.get("system", ""),
+                    symbols=syms or None,
+                    # 默认精简（T63：咨询不需要全池历史）；面板显式传 slim=false 才带全量
+                    slim=bool(body.get("slim", True)),
+                    max_tokens=body.get("max_tokens") or None)
                 self._json(r, code=200 if r.get("ok") else 502)
             elif u.path == "/api/agent/schedule":
                 # 旧的手动队列已由代码运行时接管：不再允许面板改写。

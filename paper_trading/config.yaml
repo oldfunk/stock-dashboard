@@ -13,6 +13,13 @@ stock_pool:
 account:
   initial_cash: 100000.0
 
+# 行情数据源（执行侧：引擎/AI 信号/计价）
+# auto  = 母库优先、缺该标的回退本地（默认；母库覆盖更全更新）
+# local = 只用本地 akshare 前复权（独立运行/排障）
+# mother= 只用母库日线（注意复权口径为后复权/不复权，见 docs/mother-interface.md）
+data:
+  daily_source: auto
+
 trading:
   commission_rate: 0.00025
   commission_min: 5.0
@@ -48,6 +55,7 @@ agent:
   llm_timeout: 120.0
   llm_retries: 1
   llm_max_tokens: 8192
+  ask_max_tokens: 1536        # 问答输出预算（实测响应时间跟这个上限走，与决策的 8192 分开；截断会显式标注）
   llm_thinking: disabled
   picks_enabled: true     # AI 自主提名：候选之外允许它点名全市场任意 A 股
   picks_max: 5            # 单轮最多提名几只（1-10）
@@ -63,6 +71,10 @@ agent:
   event_min_interval_min: 15  # 任意两次复盘最小间隔
   event_max_calls_per_day: 6  # 每日模型调用预算
   event_max_conditions: 3     # 单次复盘最多挂几条条件单
+  require_stop: false         # true=买入缺 risk_stop/卖出条件直接拒单
+  require_basis: false        # true=动作缺 basis（数据字段依据）直接拒单
+  max_price_deviation: 0.30   # 执行价偏离基准价超 30%（A股最大日波幅）拒单，防数据口径错误
+  context_budget: 8000        # AI 上下文 token 预算（超预算分级压缩，provenance 不截断）
   # 要闻/政策快讯：给模型判断“催化”用（akshare 财联社/同花顺，15 分钟缓存）
   news_enabled: true
   news_limit: 12              # 进 prompt 最多几条（政策类排前；失败回空不阻断）

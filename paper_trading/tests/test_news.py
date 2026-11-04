@@ -127,6 +127,8 @@ def test_llm_context_news_wiring_and_guard(tmp_path, monkeypatch):
     import paper_trading.cli as hb
     from paper_trading.data import news as news_mod
 
+    # 本用例锁定"母库不可用"，只验证本地 akshare 兜底与注入防护（真机母库会走 mother 分支）
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(tmp_path / "no-sd"))
     f1 = tempfile.mktemp(suffix=".db", dir=tmp_path)
     f2 = tempfile.mktemp(suffix=".db", dir=tmp_path)
     b = hb.TradingBridge(data_db=f1, account_db=f2,

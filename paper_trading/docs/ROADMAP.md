@@ -5,7 +5,7 @@
 > 迭代时不得遗忘这里的事项；未完成的 P0 不进入下一里程碑。
 
 - 当前里程碑：**M1 已验收（2026-10-23）**：观察日全绿后按门禁在 Pi 开启引擎（本机 `engine.local.yaml`，repo 默认保持 `false`）；下一步 M1.5 除权除息自动化
-- 当前版本：v0.6.9（Issue #2 跨日幂等 + 时钟注入 + 残留锁接管 + 抓取硬超时 + 日历 horizon fail-closed + 事件/引擎锁分离 + 日志轮转 + 面板接管/改 Key/CSRF 收紧；本地 242 项全绿）
+- 当前版本：v0.7.8（M2 行情质量守卫上线 + 协作任务箱 WORKER.md；本地 301 项全绿）
 - 纪律：**M1 已验收，Pi 于 2026-10-23 开启引擎**（本机 `engine.local.yaml`；发布版 `config.yaml` 保持 `enabled: false`，防止母项目/新克隆被自动开启）
 - 相关：`README.md`（用法）、`AGENTS.md`（Agent 硬约束）、`docs/`（本文档）
 
@@ -163,8 +163,15 @@
 
 ## 2. M2 — 数据与可复现
 
-- [ ] 行情数据质量守卫：缺口、重复、异常涨跌幅、长期停牌标记；同步失败可见（不静默）。
-- [ ] 数据版本/快照：回测结果绑定数据哈希与参数哈希，可复现。
+- [x] 行情数据质量守卫（v0.7.8）：`data/quality.py` 五类发现（无数据/同日重复/
+  非法价/异常涨跌幅>31%/中段缺日/停牌停滞≥10 交易日），`sync_data` 落
+  `op_log[data:quality]` 不静默 + CLI `data quality`；守卫故障不阻断同步。
+- [x] 数据版本/快照（v0.7.9）：`engine/provenance.py` 指纹——回测结果绑定
+  `bars_hash`（K 线快照 sha256）/`minutes_hash`（分钟线）/`days_hash`（窗口）/
+  `params_hash`（规则/费用/滑点/风控/初始资金 canonical JSON）；同双哈希=同实验，
+  任一变化即新实验。`Backtester.run` 自动填充，`engine backtest` 输出带
+  fingerprint、`optimize/walkforward` 绑 `data_fingerprint`；5 项测试
+  （稳定性/敏感性/序无关/可复现/分钟哈希）。
 - [ ] 撮合细化：成交量约束、涨跌停排队近似、集合竞价简化口径集中到一处文档。
 - [ ] 基准与归因：等权买入持有之外，加入指数基准、行业/风格暴露（可选）。
 - [ ] 参数研究流程固化：样本内选择 → 样本外检验 → 前向模拟；禁止把网格第一名直接写生产。
@@ -189,8 +196,16 @@
 
 ## 5. 进度记录（追加，不覆盖）
 
+> **长线排查任务**（事故驱动，2026-10-27 起）：`docs/TODO-code-review-20261027.md`
+> —— 一周代码（10-20~10-27，40 提交/~2400 行）按 R0–R9 重审，P0（尺度/接线）
+> 未完成不并行开 P1。完成后在下表补汇总行。
+
 | 日期 | 版本 | 里程碑 | 内容 |
 |------|------|--------|------|
+| 2026-10-29 | — | **重构 M1 关闭**（`refactor-plan-open-source.md` 里程碑体系，与本文件旧 M1/M2 编号并存待 T27 统一） | **M1（rqalpha 数据适配与 parity）正式签字关闭**：七条门禁+第 8 条+四条件全满足（`docs/m1-signoff.md` 终评）。关键证据：判定层 111/111 全等（T19）、S 级 97.3%/100%、26+1 笔缺口全归因（T19-F 表+T12 收尾）、T16 钱类双侧双跑（T29：事故尺度/涨跌停带实测等价、费用差=过户费 0.001% 量化到分、3 条 L2 N/A 论证）、D1 终局裁决（T18：current_bar+F 级书面容差，T+1=M2 路径）。生产迁 NEC（Pi 过劳，sha256 数据零丢失）；心跳看门狗上线。340 passed。**下一步 M2 拍板（前置 T13）**。 |
+| 2026-10-27 | v0.7.8 | M2 + 双 AI 协作 | ① **M2 行情质量守卫**：`data/quality.py` 五类发现（no_data/同日重复/非法价/异常涨跌幅±31%/中段缺日/停牌停滞≥10 交易日），`sync_data` 钩子落 `op_log[data:quality]`（同步失败与停滞不静默）+ CLI `data quality`，守卫异常不阻断同步，5 项测试（含 CLI 子进程实测）；② **双 AI 协作启动**：`docs/WORKER.md` 协议 + 任务箱 Batch 1（T1 对抗性重审/T2 文档清扫/T3 覆盖盘点/T4 路线图评估），git 同步、分支提案制。本地 **301** 项全绿。 |
+| 2026-10-27 | v0.7.7 | 一周代码重审 | **`docs/TODO-code-review-20261027.md` R0–R9 全部完成**（用户指令：事故后全量重审本周 40 提交/~2400 行）。发现真问题 6 个全修：① 配置接线双层白名单断层（load_config 归一化层 + cli 构造层，`require_stop`/`news_*`/`context_budget` 共 7 字段断线）→ 两层补齐+反射回归测试+wiring_audit 脚本；② 母库 TTL 缓存永不命中（12 处键含连接序号、_COLUMNS 每连全清）→ 键改库路径；③ 6 处价源绕过 bar_source（get_status/手动单/preview/dry-run）→ 统一；④ 条件单无尺度闸 → parse 加 prices 带闸四路径全接；⑤ 回放无口径检查 → caliber_warning；⑥ financial_summary SELECT * → 动态列。**新增根因级防线**：R1.3 跨源尺度闸（daily_bars 出口母库 vs 本地同日比值 [0.9,1.1]）。R3 执行链/R5 引擎回测/R6 账本/R7 锁超时/R8 安全全部审查通过（证据见清单各节）；AGENTS 规则 3.2 重写 + 硬约束第 7 条（配置三件套）。本地/Pi **296** 项全绿。 |
+| 2026-10-27 | v0.7.6 | 防线补强 | 跨源尺度闸 `_scale_guard`（daily_bars 出口，同日双源比对超 10% 拒母库回退本地）+ 条件单尺度闸（[0.5×,2×] 带，事故 #29 场景锁定）+ 配置接线审计脚本与回归测试 + `agent replay` 口径告警。Pi 实测：R1.6 量级 25 只同日可比全部正常、回放事故日无告警、条件闸真实数据拒 180 vs 22.24 ✓。 |
 | 2026-10-21 | v0.5.5 | — | 量化能力审计完成；本路线图建立，M1 启动 |
 | 2026-10-21 | v0.6.0（开发中） | M1 | 持仓元数据 / 回测口径 / 账户级风控 / 时段与报价 / 其他硬问题（见上） |
 | 2026-10-21 | v0.6.0 | M1 | 14 项审计修复全部落地；新增 `tests/test_m1_correctness.py`（20 项，含回测 vs 模拟实盘 tick 对照）；本地 170 项全绿。待 Pi 部署后做双端验收。 |
@@ -216,3 +231,10 @@
 | 2026-10-25 | 审计修复 | 暗病审计 | 修跨日测试与账本幂等（母项目 Issue #2）：`has_operation` 同时匹配写入时间戳与 `result.date`，显式业务日（补记/测试）不再重复记 NAV；收盘计划窗口「计划已存在」分支也补记 `nav:close`（上次快照失败不再留空洞）。修时钟依赖：`tick(now=...)` 把注入时刻传给 `run()`（计划日/日亏基线/幂等查日统一），`test_tick_open_executes_today_plan` 改固定交易日、不再周末 skip；expiry 顺延测试改相对日期。运维加固：`run_lock` 检查持有者 PID+启动标识，SIGKILL/断电残留锁自动接管（Windows 不用 `os.kill(pid,0)`，避免误杀）；akshare 日线/名称/日历同步加硬超时（`utils/timeout.py`），stall 不再长期持锁；日历超出缓存 horizon 时告警（2027 源未发布的静默回退可见化）。新增 10 项回归，本地 **233** 全绿。待用户拍板：面板 token 回传口径、Pi `ma_cross` 是否 `once: true`、母项目旧 cron/DB 清理。 |
 | 2026-10-25 | v0.6.8 | 发版/安全/运维 | 按用户决策收口：① **发 v0.6.8**（不重指 v0.6.7；母项目需重新 subtree pull 该 tag 解锁 gate）；② Pi `ma_cross` **保持 `once:false`**（用户选择，接受同日多次触发，由日内 6 笔/6 万上限兜底）；③ 面板 LLM 配置**收紧口令回传**：只改模型名/厂商/Key 仍免口令，但不再回传 `admin_token`，仅首次配置、已持有效口令、`base_url` 接管成功三种情况回传（`llm_save(issue_token=...)` fail-closed 默认 False）；④ **停掉母项目旧 cron**（`*/15 16-17` 只做计划不执行），保留其代码与历史 DB，避免双交易员与 LLM 浪费。新增 2 项回归，双端 **235** 全绿。 |
 | 2026-10-26 | v0.6.9 | 审计收口 | 按用户“解决所有问题”继续收口剩余项：① **交易日历未覆盖日 fail-closed**：`calendar_covers` + `market_time` 三个窗口函数/`due_action`/`tick`/`_plan` 全部跳过（面板阶段显示“日历未覆盖”），2027 源未发布期间不再静默把未知节假日当交易日成交；② **事件复盘与引擎锁分离**：`agent event` 改用独立 `paper_trading.event.lock`（上一轮没跑完跳过本轮），不再占全局 `paper_trading.lock`，止损不再被复盘 LLM 推迟 1–3 分钟；③ **Pi 日志轮转**：`deploy/logrotate.paper-trading`（daily+5M+14 份+`copytruncate`），已装 `/etc/logrotate.d`；④ **面板写操作收口**：`base_url` 接管必须与已存 Key 一致、**覆盖已存 API Key 也需口令**（否则改 Key→凭新 Key 接管=任意写权限）、`Origin` 与 `Host` 不一致拒绝（CSRF）、口令比较改 `hmac.compare_digest`。新增 7 项回归，本地 **242** 全绿。 |
+| 2026-10-26 | v0.7.0 | 母库接口/AI 决策 | 按用户方向落地“母库优先、行情自有兜底、逐接口降级、来源标注”：① 新增 `integration/mother.py`（9 个富化接口，每个独立降级：母库 `mother:<table>` → 本地 `local:*` → `unavailable`，**绝不填 0、绝不整体切换**）+ `sources.py`（`source/asof/stale/available`，按 `asof` 自动判旧）；② `llm_context` 接入富化与 `data_provenance`（财务摘要/股息/筛选明细/追踪/新闻母库优先），日线母库优先、缺标的回退本地；③ **AI 决策可审计**：action 增加 `basis`（1-5 个上下文真实字段名，前缀校验，编造字段拒单）+ `thesis/catalyst/risk_stop/confidence/expected_hold_days/position_size_reason`，`agent.require_basis=true` 时缺 basis 拒单；④ **上下文压缩**：`agent/context.py` 预算感知（`agent.context_budget` 默认 8000），超预算分级截断长文本/财务白名单/条数/收盘根数，**provenance 永不截断**；⑤ `docs/mother-interface.md` 供母项目对齐（接口契约/来源/降级/性能），`docs/TODO-mother-integration.md` 管理后续。Pi 富化 cold 0.66s / warm 0.28s，真母库契约 9 passed，本地 **258** 项全绿。 |
+| 2026-10-27 | v0.7.5 | 事故冲正+门禁 | **价格尺度事故（2026-10-27）**：v0.7.1/v0.7.2 执行侧 `price_map` 取母库 `close_adj`（后复权 175.96），09:32 按计划 #14 买入 000792×100 成交 @175.97（真实 22.24，虚高 691%，虚付 ~15,372）；09:32 NAV 快照同被污染（总值虚记 155,999）。**处置**：① 按用户拍板以计划基准价 22.25 冲正 fill#11/order#12/持仓成本/现金（退 15,372），删污染 NAV#13，取消假价格条件单 #29（000792 止盈 180），全程 `op_log data:incident` 审计 + 改前备份 `paper_account.db.bak-incident-20261027`；② **v0.7.5 门禁**：执行价偏离基准价（计划价优先，回退 bars 末根）超 `agent.max_price_deviation`（默认 0.30=A股最大日波幅）→ 拒单，事故重演/正常跳空两组单测锁定；③ 顺手补接线：`require_stop`/`require_basis`/`max_price_deviation` 此前未从 config.yaml 读入。源头修复在 v0.7.3（切 `close_qfq`），事故发生在部署前 78 分钟。全量成交审计 11 笔仅此 1 笔异常。本地 **282** 项全绿。 |
+| 2026-10-27 | v0.7.4 | 契约验收热修 | Pi 验收发现母库 `trading_calendar` 只有历史无未来（max=10-26）：母库优先会把缓存写成覆盖不到今天 → 触发 fail-closed 停摆。热修：`calendar sync` 仅在母库日历覆盖今天/未来时采用，否则回退 akshare；补历史-only 回退单测。Pi 实测：真库契约 14 passed、`data compare` 同口径 corr=1.0、`agent replay` 首次实盘通过（4/5）。本地 **280** 项全绿。 |\n| 2026-10-27 | v0.7.3 | 母库契约验收 | 母方交付 Issue #4–#8 后验收：① 母库取价切 `close_qfq`（前复权，与本地同口径、绝对价位可比；NULL 逐行降级 `close_adj`→`close`，`adj` 标注）；② `calendar sync` 母库优先（`trading_calendar` → akshare 兜底）；③ 契约测试加数据级校验（近 30 天 `close_qfq` 非空、基准代码 `000001/399001/399006`、日历 `is_open=1` 行）+ `close_qfq` NULL 降级单测 + 母库优先日历单测。母库实测：close_qfq 无 NULL、日历 3949 行、market_index 至 10-27。本地 **279** 项全绿。 |\n| 2026-10-27 | v0.7.2 | P5.3/P5.4 + P7 | ① **P5.3** AI 决策落库 `agent_decisions`（含 basis/actions/conditions/result）；② **P5.4** `agent replay --date`：回放某日决策并与规则信号对照（只读，量化 AI vs 规则一致度）；③ **P7.1** `docs/CONTRACT.md` 三表契约（拥有/只读/永不碰 + 接缝清单 + 门禁建议）；④ **P7.2** 面板“数据来源”面板（`/api/data-provenance`，接口级 source/asof/stale 可视化，30s 缓存）。本地 **277** 项全绿。 |
+| 2026-10-27 | v0.7.1 | P5/P6 切库 | 按用户“开始测试切到母库策略”落地：① **P5.1** 组合级约束进 prompt（总敞口/现金占比/行业集中度，`basis` 可引用 `portfolio.*`）；② **P5.2** 止损门禁 `agent.require_stop`（买入缺 `risk_stop` 且无卖出条件 → 拒单）；③ **P6.1** 母库 schema 对齐（`instrument`→instrument_id、`trading_calendar`）；④ **P6.2/P6.3** `data coverage`/`data compare` CLI（并修 `--json` 日志走 stderr，stdout 纯 JSON）；⑤ **P6.5 执行侧切库**：`data.daily_source=auto` + `BarSource`，引擎日线规则/AI 信号/`price_map` 母库优先、缺标的回退本地；⑥ 按 `subproject-protocol.md` 给母库提接口级 Issue #4（缺 qfq）、#5（基准代码不一致）、#6（日历/大盘未回填）、#7（覆盖不全）。Pi 验证：多数持仓走母库（最新 10-26），000858 回退本地；本地 272 项全绿。 |
+
+| 2026-10-30 | — | **M3 引擎迁移切换完成**（用户 24h 迁移令，主 AI 亲执行） | **rqalpha 分钟会话接管撮合执行**：① 5 分钟线回填 191,862 行（106 天×38 只，新浪历史深度实测）② RawMinuteBarStore + PaperDataSource.get_bar 分钟覆盖（开源 BaseDataSource 拒 1m 查询=data_source.py:232，子类扩展）③ 意图队列 rq_intents（engine executor=rqalpha：判定仍在 evaluate、执行入队）④ rq tick 每 5 分钟消费（1m 会话+日内续跑+意图幂等 symbol[:6] 归一）⑤ R1 过户费 overlay start_up 直装（续跑不再漏装）、R2 盘中价成交实测（002192@44.94）⑥ T47-G1 落账全链（fills+rq:fill+rq-nav+m3:switch 留痕）⑦ G3 守卫分层化（engine 只入队不需 rqalpha）。实测：入队→分钟会话成交→账本三分量→NAV→留痕全通、executed_ids 防重复、m3 verify 钱类 4 项绿。606 passed。**生产 cron：engine 每分钟（判定+入队）+ rq tick 每 5 分钟（框架执行）**。观察期启动。 |
+| 2026-10-30 | — | **M3 切换更正 + 接管修复（T57，用户令「你直接开干，由你来接管」）** | 上一行"切换完成"经现场核验后**三条说法与现网证据不符**，逐条更正见 `docs/migration-m3.md §9` 与 `docs/worker/report-t57-m3-takeover.md`：① 「成交@44.94 是盘中价」不实——意图 `created_at=16:49:24`（收盘后），evidence 里成交 `datetime=2026-10-30 09:31:00`，是**每跳重放当天全部 bar** 造成的早盘价（P0-2）② 「m3 verify 钱类 4 项绿」不完整——当时**没有** `intent_queue` 这项，现网 3 条 `executed` 只对应 1 笔 fills（P0-3 按标的批量标，吞掉一条卖出机会）③ 「观察期启动」缺供给与报警：现网**没有任何行情采集 cron**，10-30 `daily_bars_raw` 0 行（周一 T50 盘后闸会全线挡）、分钟线只有收盘后那一份、消费跳没跑过也无人知。<br>**修复**：决策时点门（`_SessionState.decide`）+ 逐笔认领归因（`queue.resolve_outcomes`，含"同跳去重不许冒充成交""一条意图只定一次局"两处现网照出的残留）+ `rq_tick`/`minute_feed`/`intent_queue` 三项报警 + 盘中分钟采集（`minute.completed_slots`/`ensure_today_minutes`，只落已收完的 bar）+ 防双活互锁（底座非 rqalpha 拒消费；AI 直接动作改投意图队列）。**部署**：NEC 工作树 `56ae3b1→b5e4378`（`worker/m3-takeover`，main 未动、未合并），crontab 增 `40 15 fetch-raw` / `50 15 minute sync` 两行（备份 `crontab.pre-m3-takeover-20261030-183811.bak`），补齐 10-30 raw（38/38 checked）。**验收**：现网 scratch 真会话 `fills=1 / executed=1 / rejected=2`（重复与无持仓卖出各带原因）；现网 `m3 verify` 立即把切换日 3 条假账逐条点名（钱类红，退出码 3）。测试 647 passed（本地与现网各一遍），`spikes/mutation_m3_takeover.py` 13 条变异 13 条捕获。**账本未被写**（`paper_account.db` md5 前后同值）。待拍板 5 件见报告 §5。 |

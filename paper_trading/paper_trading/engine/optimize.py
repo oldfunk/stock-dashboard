@@ -246,11 +246,15 @@ def walk_forward(cfg: dict, bars_by_sym: dict[str, list], days: list[str],
             "oos_trades": m["trades"], "oos_sharpe": m["sharpe"],
             "oos_mdd_pct": m["mdd_pct"],
         })
+    # T36：过拟合量度必须在**重排之前**取——`oos_rows` 是按样本内排名生成的，
+    # 第 0 行就是"样本内第 1 名"；事后最优（oracle）是样本外表现最好的那个候选。
+    # 两者之差才是纪律 7 要的过拟合度量（旧实现在排序后各取 [0]，是同一行）。
+    in_best = oos_rows[0] if oos_rows else None
+    oracle = max(oos_rows, key=lambda r: r["oos_excess_pct"]) if oos_rows else None
     oos_rows.sort(key=lambda x: -x["oos_excess_pct"])
-    # 事后最优（用样本外挑出来的第一名）——用来量过拟合差距
-    oracle = oos_rows[0] if oos_rows else None
-    picked = oos_rows[0] if oos_rows else None
     n_pos = len([r for r in oos_rows if r["oos_excess_pct"] > 0])
+    overfit_gap = (round(float(oracle["oos_excess_pct"]) - float(in_best["oos_excess_pct"]), 2)
+                   if oracle and in_best else None)
     return {
         "grid": grid_name,
         "split": {"in_sample": [is_days[0], is_days[-1]],
@@ -261,9 +265,19 @@ def walk_forward(cfg: dict, bars_by_sym: dict[str, list], days: list[str],
         "n_oos_positive": n_pos,
         "n_tested": len(oos_rows),
         "sample_in_best_excess": (in_sample.get("top") or [{}])[0].get("excess_pct"),
-        "oracle_oos_excess": oracle.get("oos_excess_pct") if oracle else None,
-        "note": ("样本内排名 → 样本外检验。若样本外明显掉下来（甚至转负），"
-                 "说明参数是过拟合出来的，不能写进生产规则集。"),
+        # 样本内第 1 名拿到样本外还剩下多少（这才是能不能上生产的答案）
+        "in_best_oos_excess_pct": in_best["oos_excess_pct"] if in_best else None,
+        "in_best_oos_symbol": in_best["symbol"] if in_best else None,
+        "in_best_oos_params": in_best["params"] if in_best else None,
+        # 事后最优（用样本外信息回头挑的），只用来量差距，不可当结论
+        "oracle_oos_excess": oracle["oos_excess_pct"] if oracle else None,
+        "oracle_oos_excess_pct": oracle["oos_excess_pct"] if oracle else None,
+        "oracle_oos_symbol": oracle["symbol"] if oracle else None,
+        "oracle_oos_params": oracle["params"] if oracle else None,
+        "overfit_gap_pct": overfit_gap,
+        "note": ("样本内排名 → 样本外检验。过拟合差距 = 事后最优 − 样本内第 1 名"
+                 f"（overfit_gap_pct={overfit_gap}）；差距大或样本外转负说明参数是"
+                 "拟合出来的，不得写进生产规则集。"),
     }
 
 

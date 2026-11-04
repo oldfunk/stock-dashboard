@@ -26,20 +26,28 @@ class AkshareFetcher:
 
     @staticmethod
     def _sina_symbol(symbol: str) -> str:
-        if symbol.startswith("6"):
-            return f"sh{symbol}"
-        if symbol.startswith(("8", "4")):
-            return f"bj{symbol}"
-        return f"sz{symbol}"
+        """交易所前缀（口径唯一，见 `utils/markets.py`）。
+
+        旧写法在这里独立判过一次市：`920xxx`（北交所新段）被判成 `sz920xxx`
+        ⇒ 新浪返回空表（`KeyError 'date'`）⇒ 回落东财又连接被断 ⇒
+        `920156` 的 raw 日线**一根都没有**（2026-11-03 现网实据）。
+        """
+        from paper_trading.utils import markets
+
+        return markets.sina_symbol(symbol)
 
     @staticmethod
-    def _rows_to_bars(symbol: str, df) -> list[Bar]:
+    def _rows_to_bars(symbol: str, df, adjust: Optional[str] = None) -> list[Bar]:
         bars: list[Bar] = []
         for _, row in df.iterrows():
             try:
                 turn = float(row.get("turnover", row.get("turn", 0.0) or 0.0))
             except Exception:
                 turn = 0.0
+            try:
+                amount = float(row.get("amount") or 0.0) or None
+            except Exception:
+                amount = None
             bars.append(Bar(
                 symbol=symbol,
                 timestamp=pd.to_datetime(row["date"]).to_pydatetime(),
@@ -49,7 +57,25 @@ class AkshareFetcher:
                 close=float(row["close"]),
                 volume=int(row["volume"]),
                 turn=turn,
+                amount=amount,
+                adjust=adjust,
             ))
+        return bars
+
+    @classmethod
+    def fetch_daily_raw(cls, symbol: str, start_date: Optional[str] = None,
+                        end_date: Optional[str] = None, **kw) -> list[Bar]:
+        """原始价（不复权）日线——引擎唯一允许读的口径（T31 G-T13-1）。
+
+        新浪 `stock_zh_a_daily(adjust="")` 实测给**完整 raw OHLC + 成交额 + 股**
+        （2026-10-28 生产 venv 实测），与母库 `close_raw` 同日逐字段一致；
+        而母库的 `open/high/low/close` 四列本身是**前复权**口径，
+        只有 `close_raw/volume/amount` 是不复权 ⇒ 不能用母库拼 OHLC。
+        """
+        bars = cls.fetch_daily(symbol, start_date=start_date, end_date=end_date,
+                               adjust="", **kw)
+        for b in bars:
+            b.adjust = "raw"
         return bars
 
     @staticmethod

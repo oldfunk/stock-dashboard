@@ -196,3 +196,39 @@ class RiskManager:
         loss = (baseline - total_value) / baseline
         limit = float(self.daily_loss_halt_pct if halt_pct is None else halt_pct)
         return (limit > 0 and loss >= limit), loss
+
+    def describe(self, total_value: float, day: Optional[str] = None) -> dict:
+        """把"风控此刻怎么看这个账户"讲成一份结构（**只读**，给上下文与面板用）。
+
+        为什么单独开这个方法而不是复用 `check_*`：`check_daily_loss` 在当日没有基线时
+        会**写入** `risk_state`——那是结算路径的动作。问答/面板只是看一眼，
+        不该顺手把日亏基线锚定下来（那会让当天真正的开盘首轮拿到一个"面板写的"基线）。
+
+        这份口径存在的理由（2026-11-02/03 实况）：账户被孤儿峰值熔断挡住、全天零成交，
+        而 AI 上下文里**没有熔断态**——用户问"为什么没交易"，模型只能瞎猜。
+        """
+        day = day or date.today().isoformat()
+        peak = float(self._peak_value or 0.0)
+        drawdown = (peak - total_value) / peak if peak > 0 else None
+        baseline = None
+        if self._state is not None:
+            try:
+                baseline = float(self._state.get(f"daily_baseline:{day}") or 0.0) or None
+            except (TypeError, ValueError):
+                baseline = None
+        daily_loss = ((baseline - total_value) / baseline
+                      if baseline and total_value > 0 else None)
+        return {
+            "peak_total_value": round(peak, 2) if peak > 0 else None,
+            "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
+            "max_drawdown_pct": round(self.max_drawdown_pct * 100, 2),
+            "drawdown_halt": bool(drawdown is not None
+                                  and drawdown >= self.max_drawdown_pct),
+            "daily_baseline": round(baseline, 2) if baseline else None,
+            "daily_loss_pct": round(daily_loss * 100, 2) if daily_loss is not None else None,
+            "daily_loss_halt_pct": round(self.daily_loss_halt_pct * 100, 2),
+            "daily_loss_halt": bool(daily_loss is not None
+                                    and self.daily_loss_halt_pct > 0
+                                    and daily_loss >= self.daily_loss_halt_pct),
+            "peak_source": "落库（重启不丢）" if self._state is not None else "内存",
+        }
