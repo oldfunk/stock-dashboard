@@ -253,14 +253,60 @@ def test_skip_counts_are_logged(env, monkeypatch):
 
 # ── DAO：判定要的集合从哪来 ───────────────────────────────
 
-def test_get_deep_field_dates_reports_periods_not_booleans():
+def test_get_deep_field_dates_reports_periods_not_booleans(env):
     """返回**报告期集合**：新出一期时布尔会撒谎，集合天然把新期算成缺。"""
+    from src.collector.akshare_fetcher import EM_DEEP_FIELDS
     _seed("600519", ["2024-12-31", "2024-09-30"], fcf=False)
     _seed("000001", ["2024-12-31"])
-    out = db_mod.FinancialHistoryDAO().get_deep_field_dates(["600519", "000001", "920000"])
+    dao = db_mod.FinancialHistoryDAO()
+    out = dao.get_deep_field_dates(["600519", "000001", "920000"], EM_DEEP_FIELDS)
     assert out["600519"]["interest_coverage"] == {"2024-12-31", "2024-09-30"}
     assert out["600519"]["fcf"] == set(), "fcf 留空的期不能算已填"
     assert out["000001"] == {"interest_coverage": {"2024-12-31"},
                              "fcf": {"2024-12-31"}}
     assert "920000" not in out, "库里没这只票就不该出现在结果里"
-    assert db_mod.FinancialHistoryDAO().get_deep_field_dates([]) == {}
+    assert dao.get_deep_field_dates([], EM_DEEP_FIELDS) == {}
+    # fields 是必填：调用方漏传就 TypeError，而不是悄悄退回一份内置默认清单
+    with pytest.raises(TypeError):
+        dao.get_deep_field_dates(["600519"])
+
+
+# ── 批17-a：Hermes H3 两条非阻断建议 ─────────────────────
+
+@pytest.mark.parametrize("window", [0, -3])
+def test_window_not_positive_is_clamped_to_one_period_not_full_history(window):
+    """H3 建议①：window<=0 以前退化成"全历史参与判定"，那是开关最没用的形状。
+
+    全历史里一定有空期（产线实测 ic 在 2017 年及以前覆盖 12.4%）→ 退化成"每天都拉"。
+    钳到最少 1 期之后：最新一期已填满 ⇒ 不拉，尽管 2016 那期是空的。
+    """
+    from src.collector.akshare_fetcher import _em_sheets_needed
+    dates = ["2024-12-31", "2016-12-31"]
+    filled = {"interest_coverage": {"2024-12-31"}, "fcf": {"2024-12-31"}}
+    assert _em_sheets_needed(dates, filled, window=window) == (False, False)
+    # 窗口=1 时最新一期是空的 → 必须拉（钳制没把判定变成永远不拉）
+    assert _em_sheets_needed(dates, {"interest_coverage": set(),
+                                     "fcf": set()}, window=window) == (True, True)
+
+
+def test_dao_query_and_predicate_use_one_field_list(env):
+    """H3 建议②防漂移：判据用的字段名与 DAO 查的列必须是同一份清单。
+
+    采集侧把 `EM_DEEP_FIELDS` 传给 DAO，DAO 返回的键就由它决定；这条用例把
+    "两边各写一份、日后各漂各的"这条路堵死——漏同步时这里先红。
+    """
+    from src.collector.akshare_fetcher import EM_DEEP_FIELDS
+    dao = db_mod.FinancialHistoryDAO()
+    assert set(EM_DEEP_FIELDS) <= set(dao.DEEP_FIELD_COLUMNS), \
+        "EM_DEEP_FIELDS 里有 DAO 白名单外的列 → 增量判定会直接抛 ValueError"
+    _seed("600519", ["2024-12-31"])
+    out = dao.get_deep_field_dates(["600519"], EM_DEEP_FIELDS)
+    assert set(out["600519"]) == set(EM_DEEP_FIELDS)
+
+
+@pytest.mark.parametrize("bad", ["password", "1=1; DROP TABLE financial_history",
+                                 "interest_coverage, fcf"])
+def test_dao_rejects_fields_outside_the_whitelist(env, bad):
+    """列名进 f-string SQL，白名单是唯一防线（批8 P1-2 的同一条规矩）。"""
+    with pytest.raises(ValueError):
+        db_mod.FinancialHistoryDAO().get_deep_field_dates(["600519"], (bad,))

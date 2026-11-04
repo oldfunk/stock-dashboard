@@ -698,6 +698,11 @@ def _parse_pct(value) -> float | None:
 # ── 增量"仅缺字段才拉"的判定（批16-a）──
 
 EM_DEEP_WINDOW = 8   # 只看本次要写的最近 8 个报告期（≈2 年）；见 _em_sheets_needed
+# 判据字段清单：顺序即两张表的产物 —— [0]=东财利润表填的，[1]=东财现金流量表填的。
+# 这是**单一来源**：`get_deep_field_dates(codes, EM_DEEP_FIELDS)` 用它决定查哪几列，
+# `_em_sheets_needed` 用它决定判哪几列。新增深度字段时改这一行就够（DAO 侧还要把列名
+# 加进 `FinancialHistoryDAO.DEEP_FIELD_COLUMNS` 白名单，两处一致由用例守着）。
+EM_DEEP_FIELDS = ("interest_coverage", "fcf")
 
 
 def _em_sheets_needed(report_dates: list[str], filled: dict[str, set],
@@ -709,7 +714,8 @@ def _em_sheets_needed(report_dates: list[str], filled: dict[str, set],
     实测 todo 高峰期一天 737 只 → 2211 次请求里 1474 次是这两张表，而它们的产物
     （interest_coverage / fcf）多数早就填过了，重复拉只是白花配额。
 
-    判据是"本次要写的最近 window 期里，有没有哪一期在库里还没有对应字段"：
+    判据是"本次要写的最近 window 期里，有没有哪一期在库里还没有对应字段"
+    （字段名取自 `EM_DEEP_FIELDS`，与 DAO 查询用的是同一份清单）：
     - **只看最近 window 期**：产线只读实测 interest_coverage 在 2017 年及以前
       覆盖只有 12.4%（东财不供那么老的利息费用），银行/券商/保险 26 只**全历史
       为 0**——若不设窗口，"有一期缺就拉"会变成"永远都拉"，开关等于没装。
@@ -720,14 +726,15 @@ def _em_sheets_needed(report_dates: list[str], filled: dict[str, set],
     的字段保持原值，不会因为这次没拉就把已填的 interest_coverage/fcf 抹成 NULL。
     周六 `force_full` 不走这里——全量重采本来就是修老数据的手段。
     """
-    recent = sorted(set(report_dates), reverse=True)[:window] if window > 0 \
-        else sorted(set(report_dates))
+    # Hermes H3（2026-11-05）小建议①：window<=0 原先退化成"全历史参与判定"。
+    # 全历史里一定有空期（2017 年及以前 ic 覆盖只有 12.4%），于是退化成"每天都拉"，
+    # 开关正好废在它要防的那个形状上。现在钳到最少 1 期：窗口只可能变小，不会被关成全量。
+    recent = sorted(set(report_dates), reverse=True)[:max(1, int(window))]
     if not recent:
         return False, False
-    ic_filled = filled.get("interest_coverage") or set()
-    fcf_filled = filled.get("fcf") or set()
-    return (any(d not in ic_filled for d in recent),
-            any(d not in fcf_filled for d in recent))
+    ps_field, cf_field = EM_DEEP_FIELDS     # 顺序错/长度错在这里就炸，不靠下标蒙
+    return (any(d not in (filled.get(ps_field) or set()) for d in recent),
+            any(d not in (filled.get(cf_field) or set()) for d in recent))
 
 
 def collect_historical_financial_data(all_stocks: list[dict],
@@ -777,7 +784,7 @@ def collect_historical_financial_data(all_stocks: list[dict],
     collected = {}
     # 增量判定要的"哪些报告期已经有东财深度字段"，一次批量读，不在循环里逐只查
     filled_map = {} if force_full else dao.get_deep_field_dates(
-        [s['code'] for s in todo])
+        [s['code'] for s in todo], EM_DEEP_FIELDS)
     skipped_ps = skipped_cf = 0
 
     for idx, s in enumerate(todo):
