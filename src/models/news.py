@@ -77,24 +77,31 @@ class NewsDAO:
     def for_codes(self, codes: list[str], limit_per_code: int = 8,
                   since: Optional[str] = None,
                   unsummarized_only: bool = False) -> list[dict]:
-        """多只股票的新闻（AI 摘要输入），按代码分组取最近的。"""
+        """多只股票的新闻（AI 摘要输入），按代码分组取最近的。
+
+        U4（2026-11-04 由母方裁定并入本批）：连接开在循环**外面**。
+        旧写法每只票新建一次连接，而两个调用点（调度器舆情摘要、详情页路由）
+        都是 200–500 只的量级——每轮白付几百次 open/close。SQL 的主体是常量，
+        只有参数逐只变，所以顺带把语句也只拼一次。
+        """
         if not codes:
             return []
+        sql = "SELECT * FROM news_item WHERE code = ?"
+        if since:
+            sql += " AND COALESCE(published_at, fetched_at) >= ?"
+        if unsummarized_only:
+            sql += " AND summarized_at IS NULL"
+        sql += (" ORDER BY COALESCE(published_at, fetched_at) DESC,"
+                " id DESC LIMIT ?")
         out: list[dict] = []
-        for code in codes:
-            sql = "SELECT * FROM news_item WHERE code = ?"
-            args: list = [code]
-            if since:
-                sql += " AND COALESCE(published_at, fetched_at) >= ?"
-                args.append(since)
-            if unsummarized_only:
-                sql += " AND summarized_at IS NULL"
-            sql += (" ORDER BY COALESCE(published_at, fetched_at) DESC,"
-                    " id DESC LIMIT ?")
-            args.append(limit_per_code)
-            with self._conn() as conn:
+        with self._conn() as conn:
+            for code in codes:
+                args: list = [code]
+                if since:
+                    args.append(since)
+                args.append(limit_per_code)
                 rows = conn.execute(sql, args).fetchall()
-            out.extend(dict(r) for r in rows)
+                out.extend(dict(r) for r in rows)
         return out
 
     def mark_fetched(self, codes: list, ok: bool = True) -> None:

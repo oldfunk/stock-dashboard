@@ -1698,6 +1698,7 @@ def _model_valuation_line(code: str, price: float | None = None) -> str:
         f"系统模型估值（可复现，FCFF 两阶段折现）：保守 {f(iv['conservative'])} / "
         f"基准 {f(iv['base_case'])} / 乐观 {f(iv['optimistic'])} 元/股；"
         f"当前价 {price:.2f} → 安全边际 {val['margin_of_safety']:.1f}%。"
+        f"{val.get('discount_basis_note') or ''}"
         f"请以此为准校验你的估值，偏离需说明理由；不要另给一套主观估值。"
     )
 

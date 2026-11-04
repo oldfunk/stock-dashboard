@@ -97,13 +97,19 @@ class ParquetManifest:
 
 
 def _connect_source(con, db_path: str) -> None:
-    """DuckDB 只读挂载 SQLite 业务库（sqlite 扩展首次需下载）。"""
+    """DuckDB 只读挂载 SQLite 业务库（sqlite 扩展首次需下载）。
+
+    U2（2026-11-04 由母方裁定并入本批）：路径也是 SQL 字面量，必须与本模块另三处
+    （`read_parquet` / `COPY`）一样过 `sql_quote`。此前唯独这一处直接插值——带单引号的
+    目录名（`C:\\Users\\O'Brien\\...`）会把语句截断成语法错误，而可被篡改的配置/manifest
+    路径就是注入点（审计 P1-2 的同类尾巴）。
+    """
     try:
         con.execute("LOAD sqlite;")
     except Exception:  # noqa: BLE001 - 未安装时安装后再加载
         con.execute("INSTALL sqlite;")
         con.execute("LOAD sqlite;")
-    con.execute(f"ATTACH '{db_path}' AS _src (TYPE SQLITE, READ_ONLY);")
+    con.execute(f"ATTACH '{sql_quote(db_path)}' AS _src (TYPE SQLITE, READ_ONLY);")
 
 
 def _max_date(con, dest: Path) -> str | None:

@@ -23,7 +23,7 @@ import pandas as pd
 from src.utils import (
     safe_float, curl_get, tc_encode, parse_tc_line,
     parse_tc_indices, split_tc_response, INDEX_CODES, INDEX_TARGETS, now_cn,
-    em_secid, em_secucode, market_of, sina_symbol,
+    em_secid, em_secucode, em_f10_symbol, market_of, sina_symbol,
 )
 from src.collector.price_model import merge_price_model
 
@@ -745,21 +745,34 @@ def collect_historical_financial_data(all_stocks: list[dict],
         code = s['code']
         try:
             # 方法1：stock_financial_abstract_ths — 带净利率/负债率/毛利率的完整历史
+            # （同花顺接口要的是裸 6 位代码，与下面两个东财 F10 接口不同形）
             try:
                 df_abs = ak.stock_financial_abstract_ths(symbol=code)
-            except Exception:
+            except Exception as e:  # noqa: BLE001 - 单源失败只降级不中断
+                logger.warning(f"[历史财务] {code} 同花顺摘要失败: {e}")
                 df_abs = None
 
-            # 方法2：stock_profit_sheet — 带利息费用/总股本的利润表
+            # 方法2/3：东财 F10 利润表 / 现金流量表
+            #
+            # 批15-b（U6 激活）：这两个接口的 symbol 形态是**带市场前缀**的
+            # （akshare 签名默认 'SH600519'）。本仓一直传裸 6 位代码，产线实测
+            # `TypeError: 'NoneType' object is not subscriptable`——两拉全失败，
+            # 而except 是静默的，于是"利息覆盖/总股本/FCF/每股经营现金流"这四段
+            # 补充**从来没执行过**（2026-11-03 取证、母方裁定激活）。
+            # 现在用 em_f10_symbol(code)：SH600519 / SZ000001 / BJ920000（北交所
+            # 实测 41 期出数），并把失败记成 warning——静默是这次能瞒这么久的原因。
             try:
-                df_ps = ak.stock_profit_sheet_by_report_em(symbol=code)
-            except Exception:
+                df_ps = ak.stock_profit_sheet_by_report_em(
+                    symbol=em_f10_symbol(code))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[历史财务] {code} 东财利润表失败: {e}")
                 df_ps = None
 
-            # 方法3：stock_cash_flow_sheet — 带经营/投资现金流的现金流量表
             try:
-                df_cf = ak.stock_cash_flow_sheet_by_report_em(symbol=code)
-            except Exception:
+                df_cf = ak.stock_cash_flow_sheet_by_report_em(
+                    symbol=em_f10_symbol(code))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[历史财务] {code} 东财现金流量表失败: {e}")
                 df_cf = None
 
             # 合并数据：以 financial_abstract 为骨架，补充深度字段
