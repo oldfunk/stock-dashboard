@@ -7,7 +7,8 @@ T+1 解冻日、实时交易时段判断。历史交易日与这些判断无关�
 
 优先级：
 
-1. `var/trading_calendar.json`（由 `calendar sync` 从 akshare 同步，可靠源）
+1. `var/trading_calendar.json`（由 `calendar sync` 同步：母库 `trading_calendar`
+   优先、akshare 兜底，可靠源）
 2. 若日期落在缓存覆盖区间内：严格按缓存判断（能识别工作日节假日）
 3. 缓存不存在/未覆盖该日期：回退为「周一~周五，且不在 config.holidays」
 4. 任何缓存读写/解析失败：继续用回退口径，绝不阻断交易主流程
@@ -124,14 +125,39 @@ def save_calendar(dates: Iterable[str | date | datetime],
 
 def sync_calendar(path: Optional[str | Path] = None,
                   timeout_sec: float = 30.0) -> dict:
-    """从 akshare（新浪交易日历）同步**未来**交易日并缓存；失败返回 ok=False。
+    """同步**未来**交易日并缓存；失败返回 ok=False。
 
-    接口虽叫 hist，返回的是“历史 + 未来”的全量交易所日历；我们只留
-    「最近 HISTORY_TAIL_DAYS 天 + 未来全部」，历史部分不入库。
+    母库优先（母方 Issue #8 交付 `trading_calendar` 回填后）：`integration`
+    只读取母库 `trading_calendar`（is_open=1），成功即落缓存
+    （source=`mother:trading_calendar`）；母库不可用/无数据时回退 akshare
+    （新浪交易日历，历史+未来的全量交易所日历），只留
+    「最近 HISTORY_TAIL_DAYS 天 + 未来全部」。
 
     `timeout_sec`：akshare 没有逐请求 timeout，连不上会 stall；超时按失败
-    返回，绝不挂住 cron（否则会长期持有 run_lock）。
+    返回，绝不挂住 cron（否则会长期持有 run_lock）。母库是本地 SQLite，
+    不受该超时影响。
     """
+    cutoff = (date.today() - timedelta(days=HISTORY_TAIL_DAYS)).isoformat()
+    # 1) 母库权威日历（只读；任何异常静默回退 akshare，不阻断）
+    try:
+        from ..integration.mother import trading_calendar as _mother_calendar
+
+        mc = _mother_calendar()
+        if mc.get("available"):
+            dates = [str(r.get("trade_date"))[:10] for r in (mc.get("data") or [])
+                     if r.get("is_open") == 1 and r.get("trade_date")]
+            dates = [d for d in dict.fromkeys(dates) if d >= cutoff]
+            # 权威日历必须能回答“今天/明天是不是交易日”：母库只回填了历史
+            # （如回填中，max < 今天）不算可用，回退 akshare——否则缓存
+            # max_date 会落在昨天，触发 calendar_covers fail-closed 停摆。
+            if dates and max(dates) >= date.today().isoformat():
+                info = save_calendar(dates, source="mother:trading_calendar",
+                                     path=path)
+                return {"ok": True, "history_tail_days": HISTORY_TAIL_DAYS,
+                        **info}
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.warning("母库交易日历不可用，回退 akshare：%s", e)
+    # 2) akshare 兜底
     try:
         import akshare as ak  # type: ignore
     except Exception as e:  # noqa: BLE001
@@ -141,7 +167,6 @@ def sync_calendar(path: Optional[str | Path] = None,
     try:
         df = call_with_timeout(ak.tool_trade_date_hist_sina, timeout_sec)
         col = "trade_date" if "trade_date" in df.columns else df.columns[0]
-        cutoff = (date.today() - timedelta(days=HISTORY_TAIL_DAYS)).isoformat()
         dates = [d for d in (str(x)[:10] for x in df[col].tolist()) if d >= cutoff]
         info = save_calendar(dates, source="akshare.tool_trade_date_hist_sina",
                              path=path)

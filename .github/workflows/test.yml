@@ -9,4 +9,8 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
+      # T67 批复 4：接线门禁**独立一步**。混在 pytest 里红，看不出是"测试挂了"还是
+      # "配置接了线却没人读"——后者是会被当普通红忽略掉的那类问题（llm_timeout 那次）。
+      - name: wiring audit (配置接线门禁)
+        run: python tests/wiring_audit.py --quiet
       - run: python -m pytest tests/ -q

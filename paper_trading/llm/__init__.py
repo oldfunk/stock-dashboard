@@ -6,12 +6,13 @@
 - 下单链路零改动：LLM 只动嘴，风控与撮合仍是硬边界（P2 才接决策环）
 """
 from .presets import PRESETS, TOKENLESS_PRESETS, preset_base_url
-from .provider import LLMConfig, LLMError, chat, list_models
+from .provider import (LLMConfig, LLMError, chat, chat_with_retry,
+                    list_models)
 from .secrets import load_secrets, masked_key, public_provider_view, save_provider, save_secrets
 
 __all__ = [
     "PRESETS", "TOKENLESS_PRESETS", "preset_base_url",
-    "LLMConfig", "LLMError", "chat", "list_models",
+    "LLMConfig", "LLMError", "chat", "chat_with_retry", "list_models",
     "load_secrets", "save_provider", "save_secrets", "masked_key",
     "public_provider_view",
 ]

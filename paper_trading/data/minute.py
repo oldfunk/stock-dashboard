@@ -42,16 +42,9 @@ def _f(x, default: float = 0.0) -> float:
 
 def _market_prefix(symbol: str) -> str:
     """6 位代码 → 交易所前缀（sh/sz/bj）。"""
-    c = str(symbol or "").strip()
-    if len(c) != 6 or not c.isdigit():
-        return "sh"
-    if c[0] == "6":
-        return "sh"
-    if c[0] in "03":
-        return "sz"
-    if c[0] in "48":
-        return "bj"
-    return "sh"
+    from paper_trading.utils import markets
+
+    return markets.exchange_of(symbol)
 
 
 def _http_get(url: str, timeout: int = 20,
@@ -205,3 +198,170 @@ def fetch_minute_batch(symbols: list[str], period: str = "1",
         if i + 1 < len(symbols) and gap > 0:
             time.sleep(gap)
     return out
+
+
+# ---------- T26：每日收盘后积累 + 缺口报告 ----------
+#: A 股连续竞价分钟全集，bar 以**右端时刻**标记（09:35 = 09:30-09:35 那根）：
+#: 上午 09:31..11:30（120 根）、下午 13:01..15:00（120 根）→ 1 分钟 240 根/日。
+SESSION_START_MIN = 9 * 60 + 30
+
+
+def _trading_minutes() -> list[int]:
+    return (list(range(9 * 60 + 31, 11 * 60 + 31)) +
+            list(range(13 * 60 + 1, 15 * 60 + 1)))
+
+
+def expected_slots(period: str = "5") -> list[str]:
+    """该周期下一交易日应有的 bar 时刻（实测生产库 5 分钟 = 48 根/标的/日）。"""
+    step = max(1, int(period))
+    out = []
+    for m in _trading_minutes():
+        if (m - SESSION_START_MIN) % step == 0 or m in (11 * 60 + 30, 15 * 60):
+            out.append(f"{m // 60:02d}:{m % 60:02d}")
+    return out
+
+
+def completed_slots(period: str = "5",
+                    now: Optional[datetime] = None) -> list[str]:
+    """到现在为止**已经收完**的 bar 时刻。
+
+    bar 以右端标记（14:35 那根覆盖 14:30–14:35）⇒ 只有严格早于当前分钟的
+    时刻才算收完；把"还在走"的那根当完整 bar 落库，引擎就会拿半个 K 线的
+    收盘价撮合（不可归因），所以这里宁可晚一分钟。
+    """
+    tn = now or datetime.now()
+    limit = tn.hour * 60 + tn.minute
+    out = []
+    for s in expected_slots(period):
+        if int(s[:2]) * 60 + int(s[3:5]) < limit:
+            out.append(s)
+    return out
+
+
+def gap_fingerprint(day: str, errors) -> str:
+    """一次采集的"症状指纹"（同日同指纹只落一条 `op_log[minute:gap]`）。
+
+    盘中采集每 15 分钟一跳，11-03 现网一天刷出 92 条 `minute:gap`：
+    刷屏的告警会把真故障埋掉（T22 看门狗"只在状态翻转时落流水"同一精神）。
+    症状**集合变化**（新标的坏了 / 修好了又坏）仍然立刻留痕。
+    """
+    return f"{day}|" + ",".join(sorted(str(e) for e in (errors or [])))
+
+
+def latest_expected_ts(day: str, period: str = "5",
+                       now: Optional[datetime] = None) -> Optional[str]:
+    """到此刻为止**应该已经有了**的最后一根 bar 时刻（午休/盘前都算得对）。
+
+    11-03 现网 12:09 的误报就是缺这个：A 股 11:30 收午盘，`minute_bars` 的最新
+    一根停在 11:30 是**正确**的，但按"墙钟距今 > 20 分钟"判陈旧就会红——整个午休
+    每小时响一次、午后立刻再响，报警一失真就没人看（纪律 4 的反面）。
+    """
+    done = completed_slots(period, now)
+    return f"{day}T{done[-1]}" if done else None
+
+
+def ensure_today_minutes(db, symbols, *, day: Optional[str] = None,
+                         period: str = "5", now: Optional[datetime] = None,
+                         fetch=None, gap: float = GAP_SEC,
+                         days: int = 3) -> dict:
+    """盘中把当日**已收完**的分钟线补进库（新线撮合的命脉供给）。
+
+    为什么需要它：切换后判定侧每分钟跑，撮合侧每 5 分钟才跳一次，而
+    `minute_bars` 里没有任何 cron 在盘中喂数据——旧线只是 14:xx 靠实时报价
+    直接成交，新线 14:xx 必须在库里找那根 bar，找不到就排队、隔日过期
+    （= 静默丢机会，纪律 4 要禁止的那种）。
+
+    只写已收完的 bar；只拉缺的标的（库里已齐的标的不重复打接口）；
+    每只的 written/latest/missing/error 如实返回，调用方据此报警，不静默。
+    """
+    tn = now or datetime.now()
+    day = day or tn.date().isoformat()
+    if fetch is None:
+        def fetch(s, p, d, n):
+            return fetch_minute(s, period=p, days=d, now=n)
+    want = completed_slots(period, tn)
+    want_set = set(want)
+    per_symbol: dict[str, dict] = {}
+    for i, sym in enumerate(symbols or []):
+        try:
+            have = {str(t)[:16] for t in db.minute_ts_on(sym, day, period=period)}
+        except Exception as exc:                    # noqa: BLE001 - 读库失败如实带出
+            per_symbol[sym] = {"written": 0, "latest": "", "missing": list(want),
+                               "error": f"{type(exc).__name__}: {str(exc)[:60]}"}
+            continue
+        missing = [s for s in want if f"{day}T{s}" not in have]
+        if not missing:
+            per_symbol[sym] = {"written": 0, "latest": (f"{day}T{want[-1]}"
+                                                        if want else ""),
+                               "missing": []}
+            continue
+        try:
+            rows = fetch(sym, period, days, tn) or []
+        except Exception as exc:                    # noqa: BLE001
+            per_symbol[sym] = {"written": 0, "latest": "", "missing": missing,
+                               "error": f"{type(exc).__name__}: {str(exc)[:60]}"}
+            if i + 1 < len(symbols) and gap > 0:
+                time.sleep(gap)
+            continue
+        # 只留：今天 + 已收完的时刻（源可能把在走的那根也吐出来）
+        keep = [r for r in rows
+                if str(r.get("ts", ""))[:10] == day
+                and str(r.get("ts", ""))[:16] in {f"{day}T{s}" for s in want_set}]
+        written = db.upsert_minute_bars(sym, keep, period=period) if keep else 0
+        have2 = {str(t)[:16] for t in db.minute_ts_on(sym, day, period=period)}
+        still = [s for s in want if f"{day}T{s}" not in have2]
+        per_symbol[sym] = {"written": written,
+                           "latest": (max(have2)[0:16] if have2 else ""),
+                           "missing": still,
+                           "error": "" if not still
+                           else f"源无这些 bar：{','.join(still[-3:])}"}
+        if i + 1 < len(symbols) and gap > 0:
+            time.sleep(gap)
+    errs = sorted(s for s, v in per_symbol.items() if v.get("error"))
+    return {"day": day, "period": str(period), "symbols": len(per_symbol),
+            "written": sum(v["written"] for v in per_symbol.values()),
+            "needed": any(v.get("missing") or v.get("written") for v in
+                          per_symbol.values()),
+            "errors": errs, "per_symbol": per_symbol}
+
+
+def sync_day(db, symbols, *, day: Optional[str] = None, period: str = "5",
+             days: int = MAX_DAYS, fetch=None, now: Optional[datetime] = None,
+             gap: float = GAP_SEC) -> dict:
+    """把某交易日的分钟线落库（幂等 upsert）并给出**缺口报告**。
+
+    `fetch(symbol, period, days, now) -> list[dict]` 可注入（测试用假源）。
+    数据现实：新浪 N 分钟只给最近约 22 个交易日，更早的缺口**补不回来**，
+    所以这里只报告、不假装能回填（AGENTS 纪律 4 不静默）。
+    """
+    now = now or datetime.now()
+    day = day or now.date().isoformat()
+    if fetch is None:
+        def fetch(s, p, d, n):
+            return fetch_minute(s, period=p, days=d, now=n)
+
+    written = 0
+    per_symbol: dict[str, dict] = {}
+    for i, sym in enumerate(symbols or []):
+        try:
+            rows = fetch(sym, period, days, now) or []
+        except Exception as exc:            # noqa: BLE001 - 单只失败不影响整批
+            per_symbol[sym] = {"written": 0, "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
+            continue
+        day_rows = [r for r in rows if str(r.get("ts", ""))[:10] == day]
+        n = db.upsert_minute_bars(sym, day_rows, period=period) if day_rows else 0
+        written += n
+        have = db.minute_ts_on(sym, day, period=period)
+        missing = [f"{day}T{s}" for s in expected_slots(period)
+                   if f"{day}T{s}" not in have]
+        per_symbol[sym] = {"written": n, "bars": len(have), "missing": len(missing),
+                           "missing_sample": missing[:6]}
+        if i + 1 < len(symbols) and gap > 0:
+            time.sleep(gap)
+    return {"day": day, "period": str(period), "symbols": len(symbols or []),
+            "written": written,
+            "expected_per_symbol": len(expected_slots(period)),
+            "per_symbol": per_symbol,
+            "no_data": sorted(s for s, v in per_symbol.items() if not v.get("written")),
+            "gapped": sorted(s for s, v in per_symbol.items() if v.get("missing")),
+            "errors": sorted(s for s, v in per_symbol.items() if v.get("error"))}

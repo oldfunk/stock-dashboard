@@ -44,6 +44,16 @@ def main() -> None:
     if not cfg.get("enabled") and not args.once:
         print("enabled=false，拒绝启动守护（先在 config/engine.local.yaml 打开）")
         sys.exit(3)
+    # T47-G3（runbook §5.2）：底座在启动时就校验并打印；未知值/引擎缺失一律**拒绝启动**，
+    # 不许静默退回旧线——事后没人能证明那天是谁下的单。
+    from paper_trading.integration.rq_engine import ledger as _ld
+    from paper_trading.integration.rq_engine import rq_alpha_available
+
+    executor, guard_error = _ld.startup_guard(cfg, rqalpha_available=rq_alpha_available())
+    print(f"执行底座：{executor}")
+    if guard_error:
+        print(f"✗ {guard_error}", file=sys.stderr)
+        sys.exit(2)
     interval = args.interval or int(cfg.get("interval_sec") or 60)
     with run_lock(args.lock_file):
         out = run_loop(bridge, interval_sec=interval, dry_run=args.dry_run,

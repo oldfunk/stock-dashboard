@@ -37,6 +37,8 @@ class Bar:
     close: float
     volume: int
     turn: float = 0.0  # 换手率
+    amount: Optional[float] = None   # 成交额（元）；raw 口径才有，qfq 序列历史上常缺
+    adjust: Optional[str] = None     # 口径标签：'raw' | 'qfq' | 'hfq'（T31 G-T13-1）
 
 
 @dataclass
