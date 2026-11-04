@@ -1449,6 +1449,34 @@ class FinancialHistoryDAO:
             ).fetchall()
         return {r['stock_code']: r['max_date'] for r in rows}
 
+    def get_deep_field_dates(self, codes: list[str]) -> dict[str, dict[str, set]]:
+        """批量返回"哪些报告期已经有东财深度字段"，供增量采集判定要不要发请求。
+
+        返回 ``{code: {"interest_coverage": {已有值的报告期}, "fcf": {…}}}``。
+        用**报告期集合**而不是"这只票填满了没"的布尔：新披露一期，布尔会立刻过期
+        （老期填满≠新期有值），而集合天然把新期算成"缺"。
+        """
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        out: dict[str, dict[str, set]] = {}
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT stock_code, report_date,
+                           interest_coverage, fcf
+                    FROM financial_history
+                    WHERE stock_code IN ({placeholders})""",
+                codes,
+            ).fetchall()
+        for r in rows:
+            d = out.setdefault(
+                r['stock_code'], {"interest_coverage": set(), "fcf": set()})
+            if r['interest_coverage'] is not None:
+                d["interest_coverage"].add(r['report_date'])
+            if r['fcf'] is not None:
+                d["fcf"].add(r['report_date'])
+        return out
+
 
 class FinancialSummaryDAO:
     """财务汇总快照 DAO"""
