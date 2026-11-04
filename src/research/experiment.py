@@ -673,6 +673,14 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("--hypothesis", default=None)
     p_list.add_argument("--status", default=None)
 
+    p_run = sub.add_parser("run", help="执行已预注册计划（planned → done/failed/invalid）")
+    p_run.add_argument("experiment_id")
+    p_run.add_argument("--runner", default=None,
+                       choices=["outcome_event_study", "topk_backtest"],
+                       help="缺省按 dataset 推断（analysis_outcome→outcome_event_study）")
+    p_run.add_argument("--thresholds", default=None,
+                       help="质量门阈值覆盖 JSON（缺省用数据集默认）")
+
     args = parser.parse_args(argv)
     dao = ResearchDAO()
 
@@ -721,6 +729,28 @@ def main(argv: list[str] | None = None) -> int:
         for row in dao.list_experiments(args.hypothesis, args.status):
             print(f"{row['id']}\t{row['status']}\t"
                   f"{row['hypothesis_id']}\t{row['data_snapshot_id']}")
+    elif args.cmd == "run":
+        row = dao.get_experiment(args.experiment_id)
+        if row is None:
+            raise ExperimentError(f"实验不存在: {args.experiment_id}")
+        if row["status"] != ExperimentStatus.PLANNED.value:
+            raise ExperimentError(
+                f"实验 {args.experiment_id} 状态为 {row['status']}，"
+                "只有 planned 可执行（预注册计划不可重复跑；"
+                "失败/无效请查 outcome 记录）")
+        plan = ExperimentPlan(**row["plan"])
+        runner_name = args.runner
+        if runner_name is None:
+            runner_name = ("outcome_event_study"
+                           if plan.dataset == "analysis_outcome"
+                           else "topk_backtest")
+        runner = {"outcome_event_study": OutcomeEventStudyRunner(),
+                  "topk_backtest": TopKBacktestRunner()}[runner_name]
+        thresholds = (_parse_json_arg(args.thresholds, "thresholds")
+                      if args.thresholds else None)
+        outcome = run_experiment(runner, plan, dao, thresholds)
+        print(json.dumps(outcome.to_dict(), ensure_ascii=False,
+                         indent=2, default=str))
     return 0
 
 

@@ -52,6 +52,43 @@ def test_create_binds_and_registers_planned(experiment_fixture, capsys):
     assert plan["dataset"] == "kline_daily"
 
 
+def test_run_executes_planned_and_persists_outcome(experiment_fixture, capsys, monkeypatch):
+    """run 执行 planned 计划：结果落库、状态转 done；非 planned 再跑被拒。"""
+    from src.research import experiment as exp
+    from src.research.dao import ResearchDAO
+    assert _create(**{"id": "E-FIX-RUN", "dataset": "kline_daily"}) == 0
+
+    class FakeRunner(exp.ExperimentRunner):
+        name = "fake"
+
+        def run(self, plan, snapshot):
+            return exp.ExperimentOutcome(
+                experiment_id=plan.experiment_id,
+                status=exp.ExperimentStatus.DONE.value,
+                started_at="t0", finished_at="t1",
+                results=[exp.ExperimentResult(
+                    id="R1", experiment_id=plan.experiment_id,
+                    metric="m", value=1.5, sample_size=3)],
+                verdict="pass")
+
+    # dataset=kline_daily → 缺省推断 topk_backtest；打桩替换
+    monkeypatch.setattr(exp, "TopKBacktestRunner", FakeRunner)
+    assert exp.main(["run", "E-FIX-RUN"]) == 0
+    row = ResearchDAO().get_experiment("E-FIX-RUN")
+    assert row["status"] == "done"
+    assert any(r["metric"] == "m" for r in ResearchDAO().list_results("E-FIX-RUN"))
+
+    # 预注册计划不可重复跑（done 后拒绝）
+    with pytest.raises(exp.ExperimentError, match="只有 planned 可执行"):
+        exp.main(["run", "E-FIX-RUN"])
+
+
+def test_run_rejects_unknown_experiment(experiment_fixture):
+    from src.research import experiment as exp
+    with pytest.raises(exp.ExperimentError, match="实验不存在"):
+        exp.main(["run", "E-NOPE"])
+
+
 def test_create_rejects_missing_hypothesis(experiment_fixture):
     from src.research.experiment import ExperimentError
     with pytest.raises(ExperimentError, match="假设不存在"):
