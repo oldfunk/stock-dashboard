@@ -72,6 +72,263 @@ def test_agent_buy_fills_and_logs(monkeypatch, tmp_path):
     assert ops[0]["action"] == "ai:decide" and ops[0]["ok"] == 1
 
 
+def test_portfolio_context_exposed(tmp_path):
+    """组合级约束进上下文；母库缺 sector 时如实标 unavailable。"""
+    from paper_trading.agent.loop import _basis_known
+
+    b = _bridge(str(tmp_path), _fresh_bars())
+    ctx = b.llm_context(max_ops=2, max_nav=2, closes_n=3, symbols=[])
+    p = ctx["portfolio"]
+    assert p["cash_pct"] is not None and p["exposure_pct"] is not None
+    assert p["positions_count"] == 0
+    assert p["sector_source"] == "unavailable"
+    assert _basis_known("portfolio.exposure_pct")   # portfolio 是合法 basis 前缀
+
+
+def test_require_stop_rejects_buy_without_stop(monkeypatch, tmp_path):
+    """require_stop=true：买入缺 risk_stop/卖出条件 → 拒单。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估",
+                         "basis": ["recent_closes"]}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0,
+                                   require_stop=True))
+    res = t.run(["600519"])
+    assert "止损安排" in res["decisions"][0]["status"]
+    assert b.broker.get_position("600519") is None
+
+
+def test_require_stop_accepts_with_risk_stop(monkeypatch, tmp_path):
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估", "risk_stop": 1450.0,
+                         "basis": ["recent_closes"]}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0,
+                                   require_stop=True))
+    res = t.run(["600519"])
+    assert res["decisions"][0]["status"].startswith("已成交")
+
+
+def test_price_deviation_gate_rejects_scale_pollution(monkeypatch, tmp_path):
+    """2026-10-27 事故重演：执行价 175.96（母库后复权）vs 计划基准价 22.25 → 拒单。
+
+    事故中三道闸全过（涨跌停带/单笔上限都以污染价自洽），只有跨时点的
+    计划基准价能把尺度错误拦下来。阈值默认 30%（A股最大日波幅）。
+    """
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    day = datetime.now().date().isoformat()
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+    last_close = round(float(bars["600519"][-1].close), 2)
+    # 计划是干净口径（price_source=last_close 是计划生成时的定稿收盘）
+    b.broker.save_plan(day, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": last_close, "price_source": "last_close",
+                     "reason": "低估", "basis": ["recent_closes"]}],
+        "summary": "计划买"})
+    pend = b.broker.get_pending_plan(day)
+    # 执行时 price_map 被污染成后复权价（约 7.9 倍）
+    latest = {s: px * 7.913 for s, px in b.price_map(["600519"]).items()}
+    r = t._execute_plan(pend, bars, latest)
+    assert r["ok"] and r.get("from_plan") is True
+    st = r["decisions"][0]["status"]
+    assert "偏离基准价" in st and "拒" in st
+    assert b.broker.get_position("600519") is None
+
+
+def test_price_deviation_gate_allows_normal_move(monkeypatch, tmp_path):
+    """正常波动（含 10% 涨跌停内跳空）不触发尺度门禁。"""
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    day = datetime.now().date().isoformat()
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+    last_close = round(float(bars["600519"][-1].close), 2)
+    b.broker.save_plan(day, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": last_close, "price_source": "last_close",
+                     "reason": "低估", "basis": ["recent_closes"]}],
+        "summary": "计划买"})
+    pend = b.broker.get_pending_plan(day)
+    latest = {s: px * 1.09 for s, px in b.price_map(["600519"]).items()}  # +9% 跳空
+    r = t._execute_plan(pend, bars, latest)
+    st = r["decisions"][0]["status"]
+    assert "偏离基准价" not in st
+    assert b.broker.get_position("600519") is not None
+
+
+def test_has_sell_condition_helper():
+    """止损门禁：卖出条件只对已持仓标的有效（非持仓卖出条件会被解析层拒）。"""
+    from paper_trading.agent.loop import _has_sell_condition
+
+    assert _has_sell_condition([{"symbol": "600519", "side": "sell"}], "600519")
+    assert _has_sell_condition([{"symbol": "600519", "side": "sell"}], "000001") is False
+    assert _has_sell_condition([{"symbol": "600519", "side": "buy"}], "600519") is False
+    assert _has_sell_condition(None, "600519") is False
+
+
+def test_agent_decision_persisted_for_replay(monkeypatch, tmp_path):
+    """决策落库 agent_decisions，供回放/审计。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估",
+                         "basis": ["recent_closes"], "thesis": "低估"}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    t.run(["600519"])
+    day = datetime.now().date().isoformat()
+    d = b.broker.get_agent_decision(day)
+    assert d and d["actions"][0]["symbol"] == "600519"
+    assert d["actions"][0]["basis"] == ["recent_closes"]
+    assert d["mode"] == "live" and not d["from_plan"]
+
+
+def test_replay_decision_compares_rules(monkeypatch, tmp_path):
+    """回放：AI 决策 vs 规则信号对照，不重新下单。"""
+    import paper_trading.cli as hb
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估",
+                         "basis": ["recent_closes"]}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    t.run(["600519"])
+    day = datetime.now().date().isoformat()
+    res = hb._replay_decision(b, day)
+    assert res["ok"] and res["date"] == day
+    assert len(res["comparison"]) == 1
+    assert res["comparison"][0]["symbol"] == "600519"
+    assert res["agreement"].endswith("/1")
+
+
+def test_replay_flags_caliber_mismatch(monkeypatch, tmp_path):
+    """R1.5 回放口径检查：决策价 vs 回放价偏离 >30% → 显式告警。"""
+    import paper_trading.cli as hb
+    from paper_trading.llm import provider as prov
+
+    # LLM 说 buy，落库决策价写成 7.9 倍（模拟事故时点的污染价）
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估",
+                         "basis": ["recent_closes"]}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=1e9))
+    t.run(["600519"])
+    # 篡改已落库的决策价为污染价
+    day = datetime.now().date().isoformat()
+    import sqlite3
+    c = sqlite3.connect(b.account_db_path)
+    row = c.execute("SELECT id, actions_json FROM agent_decisions WHERE decision_date=?",
+                    (day,)).fetchone()
+    acts = json.loads(row[1])
+    acts[0]["price"] = acts[0].get("price") or 12.9
+    acts[0]["price"] = acts[0]["price"] * 7.9
+    c.execute("UPDATE agent_decisions SET actions_json=? WHERE id=?",
+              (json.dumps(acts), row[0]))
+    c.commit()
+    c.close()
+
+    res = hb._replay_decision(b, day)
+    assert res["ok"] and res["caliber_warnings"], "污染决策价应触发口径告警"
+    assert "偏离" in res["caliber_warnings"][0]
+    # 正常决策（价格未篡改）不告警
+    b.broker.save_agent_decision(decision_date=day + "x",
+                                 actions=[{"action": "hold", "symbol": "600519",
+                                           "price": 12.9}])
+    res2 = hb._replay_decision(b, day + "x")
+    assert res2["ok"] and not res2["caliber_warnings"]
+
+
+def test_save_agent_decision_roundtrip(tmp_path):
+    b = _bridge(str(tmp_path), _fresh_bars())
+    did = b.broker.save_agent_decision(
+        decision_date="2026-10-27", plan_id=3, mode="live", from_plan=True,
+        pool_source="screening", summary="测试",
+        actions=[{"action": "buy", "symbol": "600519", "basis": ["recent_closes"]}],
+        conditions={"created": []}, result={"decisions": []})
+    assert did > 0
+    d = b.broker.get_agent_decision("2026-10-27", plan_id=3)
+    assert d["plan_id"] == 3 and d["actions"][0]["basis"] == ["recent_closes"]
+    assert b.broker.get_agent_decision("2026-01-01") is None
+
+
+def test_agent_basis_and_audit_fields_recorded(monkeypatch, tmp_path):
+    """决策可审计：basis/论点/止损/置信度/持有期被记录进流水。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "低估",
+                         "basis": ["recent_closes", "financial_summary.roe_5y_avg"],
+                         "thesis": "估值低于历史中枢", "catalyst": "业绩改善",
+                         "risk_stop": 1450.0, "confidence": 72,
+                         "expected_hold_days": 20, "position_size_reason": "小仓位"}],
+            "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    res = t.run(["600519"])
+    d = res["decisions"][0]
+    assert d["status"].startswith("已成交")
+    assert d["basis"] == ["recent_closes", "financial_summary.roe_5y_avg"]
+    assert d["risk_stop"] == 1450.0 and d["confidence"] == 72
+    assert d["expected_hold_days"] == 20 and d["thesis"] == "估值低于历史中枢"
+    ops = [o for o in b.broker.get_op_log(5) if o["action"] == "ai:decide"]
+    assert "basis" in (ops[0]["result"] or "")
+
+
+def test_agent_require_basis_rejects_missing(monkeypatch, tmp_path):
+    """require_basis=True：buy/sell 缺 basis 直接拒单（数据判断不可绕过）。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "感觉会涨"}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0,
+                                   require_basis=True))
+    res = t.run(["600519"])
+    d = res["decisions"][0]
+    assert "basis" in d["status"]
+    assert b.broker.get_position("600519") is None
+
+
+def test_agent_basis_unknown_field_rejected(monkeypatch, tmp_path):
+    """basis 引用不存在的字段 → 拒绝（防编造数据）。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "编造",
+                         "basis": ["不存在的字段"]}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    res = t.run(["600519"])
+    assert "未知数据字段" in res["decisions"][0]["status"]
+
+
+def test_agent_basis_bad_type_rejected(monkeypatch, tmp_path):
+    """basis 类型非法 → 拒绝（fail-closed）。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                         "price": None, "reason": "坏类型", "basis": 123}],
+            "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    res = t.run(["600519"])
+    assert "basis" in res["decisions"][0]["status"]
+
+
 def test_agent_rejects_bad_actions(monkeypatch, tmp_path):
     from paper_trading.llm import provider as prov
 
@@ -128,6 +385,35 @@ def test_agent_arms_ai_conditions(monkeypatch, tmp_path):
     o = ConditionalOrders(b.account_db_path).list_all(5)[0]
     assert o["status"] == "armed" and o["source"] == "ai"
     assert o["cond_type"] == "price_below" and o["cond_value"] == 10.5
+
+
+def test_condition_scale_gate_rejects_polluted_value():
+    """条件尺度闸（2026-10-27 事故）：000792 现价 22.24 挂 180 止盈 → 拒。"""
+    from paper_trading.engine.ai_conditions import parse_conditions_verbose
+
+    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
+    raw = json.dumps({"conditions": [
+        {"symbol": "000792", "side": "sell",
+         "cond": {"type": "price_above", "value": 180.0},
+         "volume": 100, "expiry": exp, "reason": "止盈"},
+        {"symbol": "000792", "side": "sell",
+         "cond": {"type": "price_below", "value": 20.0},
+         "volume": 100, "expiry": exp, "reason": "止损"},
+    ]})
+    valid, rejected = parse_conditions_verbose(
+        raw, ["000792"], holdings=["000792"],
+        prices={"000792": 22.24})
+    assert len(valid) == 1 and valid[0]["cond_value"] == 20.0   # 0.90× 放行
+    assert len(rejected) == 1
+    assert "偏离现价" in rejected[0]["why"]                       # 8.1× 拒掉
+    # pct_* 是百分比类型，不适用尺度闸
+    raw2 = json.dumps({"conditions": [
+        {"symbol": "000792", "side": "buy",
+         "cond": {"type": "pct_below", "value": 3.0},
+         "value": 8000, "expiry": exp}]})
+    v2, r2 = parse_conditions_verbose(raw2, ["000792"],
+                                      prices={"000792": 22.24})
+    assert len(v2) == 1 and not r2
 
 
 def test_ai_condition_fills_through_engine(monkeypatch, tmp_path):
@@ -366,6 +652,161 @@ def test_agent_llm_timeout_retries_once(monkeypatch, tmp_path):
         raise AssertionError("should raise")
     except LLMError:
         pass
+
+
+def test_no_reference_price_fails_closed(monkeypatch, tmp_path):
+    """H-1：px>0 但无独立基准价（bars/计划价均缺）→ fail-closed 拒单。
+
+    事故教训：门禁静默关闭 = 同源自洽盲区；无基准时必须拒，不许放行。
+    """
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    res = t._execute_actions(
+        actions=[{"action": "buy", "symbol": "600519", "volume": 100,
+                  "reason": "无基准", "basis": ["recent_closes"]}],
+        summary="", symbols=["600519"], all_bars={},
+        latest_prices={"600519": 12.9}, cash=1000000.0, positions={},
+        nav_total=1000000.0, dry_run=True, mode="live",
+        now=datetime.now().isoformat(), from_plan=False)
+    st = res["decisions"][0]["status"]
+    assert "fail-closed" in st and "基准价" in st
+    assert b.broker.get_order_history(5) == []   # 没有下单
+
+
+def test_actions_beyond_cap_are_audited(monkeypatch, tmp_path):
+    """H-2：超出单轮处理上限的条目也必须进 decisions 审计（只审不执行）。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "hold", "symbol": f"60000{i}",
+                         "reason": f"h{i}"} for i in range(9)], "summary": "超量"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=2, max_order_value=20000.0))
+    res = t.run(["600519"])
+    assert res["ok"]
+    ds = res["decisions"]
+    assert len(ds) == 9, f"超出上限的条目必须留审计，实际 {len(ds)}"
+    # cap = max_orders_per_run + 5 = 7 → 第 8/9 条拒绝但入账
+    assert "超出单轮处理上限" in ds[7]["status"]
+    assert "超出单轮处理上限" in ds[8]["status"]
+    assert ds[0]["status"] == "持有不动"
+
+
+def test_condition_gate_rejects_when_no_price():
+    """H-4：prices 提供但缺该标的现价 → fail-closed 进 parse_rejected。"""
+    from paper_trading.engine.ai_conditions import parse_conditions_verbose
+
+    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
+    raw = json.dumps({"conditions": [
+        {"symbol": "000792", "side": "sell",
+         "cond": {"type": "price_below", "value": 20.0},
+         "volume": 100, "expiry": exp},
+        {"symbol": "000792", "side": "buy",
+         "cond": {"type": "pct_below", "value": 3.0},
+         "value": 8000, "expiry": exp}]})
+    # 行情失败：空表 → price_* 拒，pct_*（不适用）仍放行
+    valid, rejected = parse_conditions_verbose(
+        raw, ["000792"], holdings=["000792"], prices={})
+    assert not any(v["cond_type"] == "price_below" for v in valid)
+    assert any("无法校验尺度" in r["why"] for r in rejected)
+    assert any(v["cond_type"] == "pct_below" for v in valid)
+    # prices=None（未提供现价表）保持旧行为：兼容手工调用
+    valid2, _ = parse_conditions_verbose(
+        raw, ["000792"], holdings=["000792"], prices=None)
+    assert any(v["cond_type"] == "price_below" for v in valid2)
+
+
+def test_plan_buy_on_held_symbol_allowed(monkeypatch, tmp_path):
+    """H-3 复核：计划对持仓加仓不被“不在股票池”误拒。
+
+    计划 symbols 由 _decision_symbols 生成时已含持仓 → allow_buy 天然覆盖；
+    此测试锁定该行为，防止未来改动把加仓路径堵死。
+    """
+    from paper_trading.llm import provider as prov
+
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    buy = {"actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                        "reason": "建仓"}], "summary": "买"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(buy))
+    t.run(["600519"])
+    assert b.broker.get_position("600519") is not None
+    # 计划再加仓（symbols 含持仓）
+    b.broker.save_plan(datetime.now().date().isoformat(), ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": None, "price_source": "last_close",
+                     "reason": "加仓", "basis": ["recent_closes"]}],
+        "summary": "加仓"})
+    pend = b.broker.get_pending_plan(datetime.now().date().isoformat())
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+    res = t._execute_plan(pend, bars, b.price_map(["600519"]))
+    st = res["decisions"][0]["status"]
+    assert "不在股票池" not in st, f"持仓加仓被误拒：{st}"
+    assert b.broker.get_position("600519").total_volume == 200
+
+
+def test_plan_consumed_before_actions_begin(monkeypatch, tmp_path):
+    """T24 P0（Hermes 对抗审查）：**消费必须前移到执行第一句**。
+
+    SIGKILL/SIGTERM 不执行 finally——若消费留在 finally，进程被杀后计划
+    残留 pending，下 tick 会重跑已成交动作（重复下单）。本测试在
+    _execute_actions **执行期间**探针检查 pending 已为 None：
+    消费若回退到 finally（或 try 之后），探针即失败（测试真红）。
+    """
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    day = datetime.now().date().isoformat()
+    b.broker.save_plan(day, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": None, "price_source": "last_close",
+                     "reason": "前移", "basis": ["recent_closes"]}],
+        "summary": "消费前移"})
+    pend = b.broker.get_pending_plan(day)
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+    seen = {}
+
+    orig = t._execute_actions
+
+    def spy(**kw):
+        seen["pending_during_exec"] = b.broker.get_pending_plan(day)
+        return orig(**kw)
+
+    monkeypatch.setattr(t, "_execute_actions", spy)
+    t._execute_plan(pend, bars, b.price_map(["600519"]))
+    assert seen["pending_during_exec"] is None, \
+        "执行期间计划必须已被消费（T24 P0：否则 SIGKILL 下残留 pending 会重复下单）"
+    assert b.broker.get_pending_plan(day) is None
+
+
+def test_plan_consumed_even_if_execution_crashes(monkeypatch, tmp_path):
+    """H-5 定案（T8 复核后裁决）：执行崩溃也必须消费计划。
+
+    反向风险更严重：崩溃不消费 → 下 tick 自动重跑 → 已成交动作再执行
+    （重复下单）。正确语义 = consume-once + 错误入审计 + 人工重做恢复。
+    """
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    day = datetime.now().date().isoformat()
+    b.broker.save_plan(day, ["600519"], {
+        "actions": [{"action": "buy", "symbol": "600519", "volume": 100,
+                     "price": None, "price_source": "last_close",
+                     "reason": "崩", "basis": ["recent_closes"]}],
+        "summary": "崩溃计划"})
+    pend = b.broker.get_pending_plan(day)
+    bars = {"600519": b.data_db.get_bars("600519", limit=30)}
+
+    def _boom(order):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(b.broker, "submit_order", _boom)
+    res = t._execute_plan(pend, bars, b.price_map(["600519"]))
+    assert res["ok"] is False and "中断" in res["error"]
+    assert b.broker.get_pending_plan(day) is None, \
+        "崩溃后计划必须被消费（否则下 tick 重跑会重复下单）"
+    errs = [o for o in b.broker.get_op_log(20)
+            if o["action"] == "ai:decide" and not o["ok"]]
+    assert errs, "崩溃必须落 ai:decide 错误审计"
+    assert "重复下单" in str(errs[-1]["result"])
 
 
 def test_agent_dry_run_changes_nothing(monkeypatch, tmp_path):

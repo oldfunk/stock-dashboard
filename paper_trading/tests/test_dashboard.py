@@ -202,6 +202,50 @@ def test_llm_config_key_change_requires_token(cloud_panel):
     assert saved["provider"]["api_key"] == "sk-ROTATED"
 
 
+def test_provenance_panel_and_endpoint():
+    import inspect
+
+    import paper_trading.dashboard as d
+
+    assert "/api/data-provenance" in d.PAGE
+    assert 'id="prov"' in d.PAGE
+    assert "/api/data-provenance" in inspect.getsource(d.Handler.do_GET)
+
+
+def test_data_provenance_summary(tmp_path, monkeypatch):
+    import paper_trading.dashboard as d
+
+    class _Bridge:
+        daily_source = "auto"
+        stock_pool = []
+
+    monkeypatch.setenv("STOCK_DASHBOARD_DIR", str(tmp_path / "no-sd"))
+    d._PROV_CACHE.update(ts=0.0, data=None)
+    try:
+        out = d._data_provenance(_Bridge(), [])
+        assert out["daily_source"] == "auto"
+        assert "screening" in out["interfaces"]
+        assert isinstance(out["unavailable"], list)
+    finally:
+        d._PROV_CACHE.update(ts=0.0, data=None)
+
+
+def test_long_lists_are_collapsible_latest_first():
+    """长列表（资产走势/订单/条件单/操作流水）默认折叠，最新在上。"""
+    import paper_trading.dashboard as d
+
+    src = d.PAGE
+    assert "function rowsC(" in src
+    for tid in ("nav", "ops", "orders"):
+        assert f'rowsC(document.getElementById("{tid}")' in src
+    assert 'rowsC(box,[["状态"]' in src
+    # 资产走势不再 reverse：API 已按 id DESC，最新在上
+    assert "(nav.data||[]).reverse()" not in src
+    # 折叠状态记忆 + 展开按钮 + 条件单按创建时间倒序
+    assert "COLLAPSE" in src and "展开剩余" in src
+    assert "created_at" in src and "localeCompare" in src
+
+
 def test_same_origin_guard():
     """跨站 POST（CSRF）拒绝；同源或非浏览器请求放行。"""
     import paper_trading.dashboard as d

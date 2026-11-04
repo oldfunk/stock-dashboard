@@ -1,0 +1,575 @@
+{
+ "commit": "b5983f6",
+ "modules": 72,
+ "total_lines": 16517,
+ "edges": 49,
+ "fan_in": {
+  "paper_trading.models": 16,
+  "paper_trading.utils": 14,
+  "paper_trading.data": 5,
+  "paper_trading.integration": 5,
+  "paper_trading.llm": 3,
+  "paper_trading.agent": 2,
+  "paper_trading.integration.rq_engine": 2,
+  "paper_trading.strategy": 2,
+  "paper_trading": 0,
+  "paper_trading.agent.context": 0,
+  "paper_trading.agent.events": 0,
+  "paper_trading.agent.loop": 0,
+  "paper_trading.agent.prompts": 0,
+  "paper_trading.agent.runtime": 0,
+  "paper_trading.agent.schedule": 0,
+  "paper_trading.broker": 0,
+  "paper_trading.broker.paper_broker": 0,
+  "paper_trading.cli": 0,
+  "paper_trading.dashboard": 0,
+  "paper_trading.data.akshare_fetcher": 0,
+  "paper_trading.data.db_manager": 0,
+  "paper_trading.data.minute": 0,
+  "paper_trading.data.news": 0,
+  "paper_trading.data.quality": 0,
+  "paper_trading.data.raw_feed": 0,
+  "paper_trading.data.realtime": 0,
+  "paper_trading.data.source": 0,
+  "paper_trading.engine": 0,
+  "paper_trading.engine.__main__": 0,
+  "paper_trading.engine.ai_conditions": 0,
+  "paper_trading.engine.backtest": 0,
+  "paper_trading.engine.conditional": 0,
+  "paper_trading.engine.config": 0,
+  "paper_trading.engine.optimize": 0,
+  "paper_trading.engine.provenance": 0,
+  "paper_trading.engine.rules": 0,
+  "paper_trading.engine.runner": 0,
+  "paper_trading.engine.state": 0,
+  "paper_trading.integration.analysis": 0,
+  "paper_trading.integration.mother": 0,
+  "paper_trading.integration.pool": 0,
+  "paper_trading.integration.rq_engine.bands": 0,
+  "paper_trading.integration.rq_engine.costs": 0,
+  "paper_trading.integration.rq_engine.data_source": 0,
+  "paper_trading.integration.rq_engine.mod_entry": 0,
+  "paper_trading.integration.rq_engine.provider": 0,
+  "paper_trading.integration.rq_engine.runner": 0,
+  "paper_trading.integration.rq_engine.shadow": 0,
+  "paper_trading.integration.rq_engine.store": 0,
+  "paper_trading.integration.settings": 0,
+  "paper_trading.integration.sources": 0,
+  "paper_trading.integration.universe": 0,
+  "paper_trading.llm.presets": 0,
+  "paper_trading.llm.provider": 0,
+  "paper_trading.llm.secrets": 0,
+  "paper_trading.main": 0,
+  "paper_trading.models.types": 0,
+  "paper_trading.portfolio": 0,
+  "paper_trading.portfolio.portfolio": 0,
+  "paper_trading.risk": 0,
+  "paper_trading.risk.risk_manager": 0,
+  "paper_trading.strategy.base_strategy": 0,
+  "paper_trading.strategy.ma_cross_strategy": 0,
+  "paper_trading.strategy.schemes": 0,
+  "paper_trading.utils.config": 0,
+  "paper_trading.utils.heartbeat": 0,
+  "paper_trading.utils.jsonx": 0,
+  "paper_trading.utils.logger": 0,
+  "paper_trading.utils.market_time": 0,
+  "paper_trading.utils.run_lock": 0,
+  "paper_trading.utils.timeout": 0,
+  "paper_trading.utils.trading_calendar": 0
+ },
+ "top_by_lines": [
+  {
+   "module": "paper_trading.cli",
+   "lines": 2408,
+   "funcs": 37,
+   "classes": 1,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.dashboard",
+   "lines": 1519,
+   "funcs": 20,
+   "classes": 1,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.agent.loop",
+   "lines": 1204,
+   "funcs": 30,
+   "classes": 2,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.integration.mother",
+   "lines": 930,
+   "funcs": 43,
+   "classes": 0,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.broker.paper_broker",
+   "lines": 819,
+   "funcs": 38,
+   "classes": 1,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.engine.backtest",
+   "lines": 697,
+   "funcs": 15,
+   "classes": 4,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.engine.runner",
+   "lines": 647,
+   "funcs": 21,
+   "classes": 2,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.data.db_manager",
+   "lines": 535,
+   "funcs": 30,
+   "classes": 1,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.integration.rq_engine.runner",
+   "lines": 345,
+   "funcs": 16,
+   "classes": 2,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.data.raw_feed",
+   "lines": 329,
+   "funcs": 10,
+   "classes": 0,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.engine.rules",
+   "lines": 327,
+   "funcs": 14,
+   "classes": 3,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.engine.optimize",
+   "lines": 285,
+   "funcs": 6,
+   "classes": 0,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.utils.trading_calendar",
+   "lines": 276,
+   "funcs": 11,
+   "classes": 0,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.data.minute",
+   "lines": 270,
+   "funcs": 12,
+   "classes": 0,
+   "fan_in": 0
+  },
+  {
+   "module": "paper_trading.engine.conditional",
+   "lines": 239,
+   "funcs": 12,
+   "classes": 1,
+   "fan_in": 0
+  }
+ ],
+ "entries": [
+  "paper_trading.cli",
+  "paper_trading.dashboard",
+  "paper_trading.engine.__main__",
+  "paper_trading.main"
+ ],
+ "leaf_only": [
+  "paper_trading",
+  "paper_trading.agent.context",
+  "paper_trading.agent.events",
+  "paper_trading.agent.loop",
+  "paper_trading.agent.prompts",
+  "paper_trading.agent.runtime",
+  "paper_trading.agent.schedule",
+  "paper_trading.broker",
+  "paper_trading.broker.paper_broker",
+  "paper_trading.data.akshare_fetcher",
+  "paper_trading.data.db_manager",
+  "paper_trading.data.minute",
+  "paper_trading.data.news",
+  "paper_trading.data.quality",
+  "paper_trading.data.raw_feed",
+  "paper_trading.data.realtime",
+  "paper_trading.data.source",
+  "paper_trading.engine",
+  "paper_trading.engine.ai_conditions",
+  "paper_trading.engine.backtest",
+  "paper_trading.engine.conditional",
+  "paper_trading.engine.config",
+  "paper_trading.engine.optimize",
+  "paper_trading.engine.provenance",
+  "paper_trading.engine.rules",
+  "paper_trading.engine.runner",
+  "paper_trading.engine.state",
+  "paper_trading.integration.analysis",
+  "paper_trading.integration.mother",
+  "paper_trading.integration.pool",
+  "paper_trading.integration.rq_engine.bands",
+  "paper_trading.integration.rq_engine.costs",
+  "paper_trading.integration.rq_engine.data_source",
+  "paper_trading.integration.rq_engine.mod_entry",
+  "paper_trading.integration.rq_engine.provider",
+  "paper_trading.integration.rq_engine.runner",
+  "paper_trading.integration.rq_engine.shadow",
+  "paper_trading.integration.rq_engine.store",
+  "paper_trading.integration.settings",
+  "paper_trading.integration.sources",
+  "paper_trading.integration.universe",
+  "paper_trading.llm.presets",
+  "paper_trading.llm.provider",
+  "paper_trading.llm.secrets",
+  "paper_trading.models.types",
+  "paper_trading.portfolio",
+  "paper_trading.portfolio.portfolio",
+  "paper_trading.risk",
+  "paper_trading.risk.risk_manager",
+  "paper_trading.strategy.base_strategy",
+  "paper_trading.strategy.ma_cross_strategy",
+  "paper_trading.strategy.schemes",
+  "paper_trading.utils.config",
+  "paper_trading.utils.heartbeat",
+  "paper_trading.utils.jsonx",
+  "paper_trading.utils.logger",
+  "paper_trading.utils.market_time",
+  "paper_trading.utils.run_lock",
+  "paper_trading.utils.timeout",
+  "paper_trading.utils.trading_calendar"
+ ],
+ "orphans": [
+  "paper_trading",
+  "paper_trading.agent.context",
+  "paper_trading.agent.prompts",
+  "paper_trading.agent.schedule",
+  "paper_trading.broker",
+  "paper_trading.data.news",
+  "paper_trading.data.quality",
+  "paper_trading.data.realtime",
+  "paper_trading.engine",
+  "paper_trading.engine.ai_conditions",
+  "paper_trading.engine.conditional",
+  "paper_trading.engine.config",
+  "paper_trading.engine.optimize",
+  "paper_trading.engine.provenance",
+  "paper_trading.engine.rules",
+  "paper_trading.engine.state",
+  "paper_trading.integration.analysis",
+  "paper_trading.integration.mother",
+  "paper_trading.integration.pool",
+  "paper_trading.integration.rq_engine.bands",
+  "paper_trading.integration.rq_engine.costs",
+  "paper_trading.integration.rq_engine.data_source",
+  "paper_trading.integration.rq_engine.provider",
+  "paper_trading.integration.rq_engine.runner",
+  "paper_trading.integration.rq_engine.store",
+  "paper_trading.integration.settings",
+  "paper_trading.integration.sources",
+  "paper_trading.integration.universe",
+  "paper_trading.llm.presets",
+  "paper_trading.llm.provider",
+  "paper_trading.llm.secrets",
+  "paper_trading.models.types",
+  "paper_trading.portfolio",
+  "paper_trading.risk",
+  "paper_trading.strategy.schemes",
+  "paper_trading.utils.heartbeat",
+  "paper_trading.utils.jsonx",
+  "paper_trading.utils.logger",
+  "paper_trading.utils.market_time",
+  "paper_trading.utils.run_lock",
+  "paper_trading.utils.timeout",
+  "paper_trading.utils.trading_calendar"
+ ],
+ "untested_modules": [
+  "paper_trading.integration.rq_engine",
+  "paper_trading.llm.presets",
+  "paper_trading.main",
+  "paper_trading.portfolio.portfolio",
+  "paper_trading.strategy.base_strategy"
+ ],
+ "never_referenced": [
+  "paper_trading.engine.__main__"
+ ],
+ "by_package": {
+  "engine": {
+   "modules": 11,
+   "lines": 2883
+  },
+  "integration": {
+   "modules": 16,
+   "lines": 2836
+  },
+  "cli": {
+   "modules": 1,
+   "lines": 2408
+  },
+  "data": {
+   "modules": 9,
+   "lines": 1944
+  },
+  "agent": {
+   "modules": 7,
+   "lines": 1908
+  },
+  "dashboard": {
+   "modules": 1,
+   "lines": 1519
+  },
+  "utils": {
+   "modules": 9,
+   "lines": 980
+  },
+  "broker": {
+   "modules": 2,
+   "lines": 823
+  },
+  "strategy": {
+   "modules": 4,
+   "lines": 320
+  },
+  "llm": {
+   "modules": 4,
+   "lines": 286
+  },
+  "risk": {
+   "modules": 2,
+   "lines": 202
+  },
+  "main": {
+   "modules": 1,
+   "lines": 188
+  },
+  "models": {
+   "modules": 2,
+   "lines": 153
+  },
+  "portfolio": {
+   "modules": 2,
+   "lines": 65
+  },
+  "(根)": {
+   "modules": 1,
+   "lines": 2
+  }
+ },
+ "tested_modules": 51,
+ "tests_count": 45,
+ "dup_candidates": {
+  "费用计算": [
+   {
+    "module": "paper_trading.cli",
+    "hits": 16
+   },
+   {
+    "module": "paper_trading.integration.rq_engine.runner",
+    "hits": 9
+   },
+   {
+    "module": "paper_trading.engine.backtest",
+    "hits": 7
+   },
+   {
+    "module": "paper_trading.broker.paper_broker",
+    "hits": 6
+   },
+   {
+    "module": "paper_trading.dashboard",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.engine.provenance",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.integration.rq_engine.costs",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.utils.config",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.integration.rq_engine.mod_entry",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.integration.rq_engine.shadow",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.models.types",
+    "hits": 2
+   }
+  ],
+  "交易日历": [
+   {
+    "module": "paper_trading.utils.trading_calendar",
+    "hits": 19
+   },
+   {
+    "module": "paper_trading.utils.market_time",
+    "hits": 11
+   },
+   {
+    "module": "paper_trading.integration.mother",
+    "hits": 9
+   },
+   {
+    "module": "paper_trading.agent.runtime",
+    "hits": 7
+   },
+   {
+    "module": "paper_trading.broker.paper_broker",
+    "hits": 6
+   },
+   {
+    "module": "paper_trading.agent.loop",
+    "hits": 5
+   },
+   {
+    "module": "paper_trading.data.realtime",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.utils",
+    "hits": 3
+   },
+   {
+    "module": "paper_trading.cli",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.dashboard",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.data.raw_feed",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.integration",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.utils.config",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.data.quality",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.models.types",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.utils.heartbeat",
+    "hits": 1
+   }
+  ],
+  "价格映射": [
+   {
+    "module": "paper_trading.integration.rq_engine.runner",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.cli",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.engine.runner",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.integration.rq_engine.mod_entry",
+    "hits": 1
+   }
+  ],
+  "股票池解析": [
+   {
+    "module": "paper_trading.cli",
+    "hits": 10
+   },
+   {
+    "module": "paper_trading.integration.pool",
+    "hits": 7
+   },
+   {
+    "module": "paper_trading.dashboard",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.data.db_manager",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.engine.runner",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.main",
+    "hits": 1
+   }
+  ],
+  "心跳/健康": [
+   {
+    "module": "paper_trading.utils.heartbeat",
+    "hits": 5
+   },
+   {
+    "module": "paper_trading.cli",
+    "hits": 2
+   },
+   {
+    "module": "paper_trading.agent.loop",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.agent.runtime",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.agent.schedule",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.dashboard",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.engine.runner",
+    "hits": 1
+   }
+  ],
+  "CLI 装配": [
+   {
+    "module": "paper_trading.dashboard",
+    "hits": 4
+   },
+   {
+    "module": "paper_trading.cli",
+    "hits": 1
+   },
+   {
+    "module": "paper_trading.engine.__main__",
+    "hits": 1
+   }
+  ]
+ }
+}

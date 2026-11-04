@@ -26,6 +26,11 @@ LOCAL_FILE = "engine.local.yaml"
 
 DEFAULTS = {
     "enabled": False,
+    # T47-G3 执行底座开关：legacy=旧自研撮合（默认，切换前的现网真相），
+    # rqalpha=rqalpha 会话成交直接落账。
+    # **必须列在这里**：`load_engine_config` 用 DEFAULTS 当白名单过滤，
+    # 不列进来配置里写了也会被静默丢掉（T45 runbook 专门点过这个坑）。
+    "executor": "legacy",
     "interval_sec": 60,
     "universe": "auto",        # auto=规则未点名时用本地股票池；list=必须逐条点名
     "universe_max": 50,        # auto 模式最多订阅多少只（防一次拉爆行情源）

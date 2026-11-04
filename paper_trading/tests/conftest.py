@@ -22,6 +22,18 @@ def _isolated_cwd(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_mother(monkeypatch):
+    """母库隔离：默认指向不存在的目录，单测不读真机母库（含 363MB 大库）。
+
+    需要真母库契约校验时，用 ``PAPER_TRADING_MOTHER_DIR`` 显式指定母库目录。
+    """
+    import os
+
+    if not os.environ.get("PAPER_TRADING_MOTHER_DIR"):
+        monkeypatch.setenv("STOCK_DASHBOARD_DIR", "/nonexistent-stock-dashboard")
+
+
+@pytest.fixture(autouse=True)
 def _no_external_news(monkeypatch):
     """新闻抓取一律打桩：单测永不碰真实 akshare/网络。
 

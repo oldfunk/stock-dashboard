@@ -1,0 +1,58 @@
+# requirements-rqalpha.lock.txt —— rqalpha 引擎**独立 venv** 的可用清单（T37 spike 实测）
+# 生成机：nec (x86-64-v1)  Python 3.12.3   生成日期：2026-10-29
+# 生成方式：/tmp 临时 venv 先 `pip install rqalpha==6.4.2`，再 `pip install 'numpy<2.4'`，
+#   随后 import 全链验证：rqalpha / h5py / scipy / matplotlib(Agg) / statsmodels /
+#   patsy / jsonpickle / logbook / click / pandas 全部通过，`rqalpha --help` 正常。
+#
+# ★ 关键坑（本轮现场复现）：直接装 rqalpha 会解析到 **numpy 2.5.4**，
+#   本机 import 即 `RuntimeError: NumPy was built with baseline optimizations: (X86_V2)`。
+#   rqalpha 自己不锁 numpy ⇒ 安装顺序必须先钉后装：
+#     python3 -m venv ~/venvs/rq-engine
+#     ~/venvs/rq-engine/bin/pip install 'numpy<2.4'
+#     ~/venvs/rq-engine/bin/pip install 'rqalpha==6.4.2'
+#     ~/venvs/rq-engine/bin/pip check        # 收敛核对（本轮 No broken requirements）
+#   体积实测：venv 697 MB；安装耗时约 2 分 10 秒（NEC 现网带宽）。
+#
+# 用法：引擎进程用这份清单的 venv；交易/面板/采集进程用 requirements.lock.txt。
+# 两份不要合并——合并会让生产 venv 背上 matplotlib/scipy 这类非必需二进制。
+certifi==2026.10.23
+charset-normalizer==3.5.2
+click==8.5.0
+contourpy==1.4.0
+cycler==0.12.1
+et_xmlfile==2.0.0
+filelock==4.2.4
+fonttools==4.68.0
+formulaic==1.2.2
+h5py==3.16.0
+hdf5plugin==7.1.0
+idna==3.20
+interface_meta==2.0.1
+jsonpickle==4.1.4
+kiwisolver==1.5.1
+Logbook==1.10.1
+matplotlib==3.11.2
+methodtools==0.4.7
+narwhals==2.28.0
+numpy==2.3.5
+openpyxl==3.1.5
+packaging==26.3
+pandas==3.1.0
+patsy==1.0.3
+pillow==13.0.0
+pyparsing==3.3.3
+python-dateutil==3.0.0
+PyYAML==6.0.3
+requests==2.34.2
+rqalpha==6.4.2
+rqrisk==1.0.13
+scipy==1.18.1
+simplejson==4.2.0
+six==1.17.0
+statsmodels==0.15.0
+tabulate==0.10.0
+typing_extensions==4.16.0
+tzdata==2026.6
+urllib3==2.8.0
+wirerope==1.0.0
+wrapt==2.5.1
