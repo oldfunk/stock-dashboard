@@ -594,6 +594,12 @@ def init_database():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_kline_instrument_date "
             "ON kline_daily(instrument_id, trade_date)")
+        # 批17-b（R2-5 结论与冻结）：实验的判定与限定语要能落在冻结的实验行上。
+        # 产线 2 个实验 16 条 result 的 verdict 全为空串，结论只存在于当时的 CLI 输出，
+        # 事后审计只能靠 Issue 里的手抄——新库由 RESEARCH_SCHEMA_SQL 直接建，
+        # 已有库靠这两条 ALTER。
+        _add_column_if_not_exists(conn, 'research_experiment', 'verdict', 'TEXT')
+        _add_column_if_not_exists(conn, 'research_experiment', 'notes', 'TEXT')
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 

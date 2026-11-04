@@ -138,6 +138,25 @@ def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
     return "supported" if ok else "rejected"
 
 
+def inconclusive_reason(plan: ExperimentPlan, outcome: "ExperimentOutcome") -> str:
+    """R2-5：判不了的时候要写清**缺的是哪一种证据**。
+
+    `derive_verdict` 有三种情况给 inconclusive，落在库里如果长一个样，事后就只能猜：
+      1. 一条结果都没有（窗口内没有可算指标）；
+      2. 计划判据不在实报指标集合里（改名/分档变了/预注册写错）；
+      3. 阈值不可解析或与结果不可比。
+    """
+    if not outcome.results:
+        return "无结果行：窗口内没有可算指标（样本或字段缺失）"
+    values = outcome.metric_values()
+    if plan.metric not in values:
+        return (f"计划判据 {plan.metric} 不在实报的 {len(values)} 个指标里"
+                f"（{', '.join(sorted(values)[:6])}…）")
+    if _compare(values[plan.metric], plan.threshold) is None:
+        return f"阈值 {plan.threshold!r} 不可解析，或与结果量纲不可比"
+    return ""
+
+
 # ── 运行器接口 ──────────────────────────────────────────────────────────────
 
 class ExperimentRunner(ABC):
@@ -713,28 +732,42 @@ def run_experiment(runner: ExperimentRunner, plan: ExperimentPlan,
             finished_at=now_cn().isoformat(),
             verdict="invalid",
             notes=f"数据质量门未通过: {'; '.join(quality.reasons)}")
-        _persist(dao, plan, outcome)
+        _persist(dao, plan, outcome, manifest)
         return outcome
 
     outcome = runner.run(plan, manifest)
-    _persist(dao, plan, outcome)
+    _persist(dao, plan, outcome, manifest)
     return outcome
 
 
 def _persist(dao: ResearchDAO, plan: ExperimentPlan,
-             outcome: ExperimentOutcome) -> None:
+             outcome: ExperimentOutcome,
+             manifest: SnapshotManifest | None = None) -> None:
+    notes = outcome.notes
+    if outcome.verdict == "inconclusive":
+        reason = inconclusive_reason(plan, outcome)
+        if reason:
+            notes = f"{notes}；缺证据：{reason}" if notes else f"缺证据：{reason}"
+    # 产线实况：E-H001/E-H001b 两行的 code_commit/config_hash 都是空串，
+    # 而它们绑定的快照 manifest 里写着 2b2b13b / 336312fe——锚点本来就有，
+    # 只是计划没填、也没从快照抄过来，冻结的实验行因此说不出"哪个版本跑出来的"。
+    # 计划本身不改（预注册不可篡改），只补实验行；显式填过的值一律尊重。
+    commit = plan.code_commit or (manifest.code_commit if manifest else "") or ""
+    cfg = plan.config_hash or (manifest.config_hash if manifest else "") or ""
     dao.insert_experiment(Experiment(
         id=plan.experiment_id,
         hypothesis_id=plan.hypothesis_id,
         plan=plan.to_dict(),
         data_snapshot_id=plan.data_snapshot_id,
-        code_commit=plan.code_commit,
-        config_hash=plan.config_hash,
+        code_commit=commit,
+        config_hash=cfg,
         random_seed=plan.random_seed,
         status=outcome.status,
         started_at=outcome.started_at,
         finished_at=outcome.finished_at,
         error=outcome.error,
+        verdict=outcome.verdict,
+        notes=notes,
     ))
     for result in outcome.results:
         dao.insert_result(result)
