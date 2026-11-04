@@ -248,7 +248,7 @@ def _sole_benchmark(start_date: str, end_date: str) -> str | None:
     with db_conn() as conn:
         codes = [r["benchmark_code"] for r in conn.execute(
             "SELECT DISTINCT benchmark_code FROM analysis_outcome"
-            " WHERE analysis_date BETWEEN ? AND ?",
+            " WHERE SUBSTR(analysis_date, 1, 10) BETWEEN ? AND ?",
             (start_date, end_date)).fetchall()]
     if not codes:
         return None
@@ -262,9 +262,15 @@ def _sole_benchmark(start_date: str, end_date: str) -> str | None:
 
 def _load_outcomes(start_date: str, end_date: str,
                    benchmark: str | None = None) -> list[dict]:
+    # 窗口按**日期**比，不按整串比（P2-H2-1 的同一类，这里是第三处）：
+    # `analysis_date BETWEEN '2026-07-08' AND '2026-07-08'` 会把
+    # "2026-07-08 09:30" 静默排除在单日窗口外——样本无声变少，且 notes 里
+    # 的分母与实到样本还会不一致。代价是放弃 idx_analysis_outcome_date
+    # （产线 780 行；一次扫描远便宜于 block bootstrap）。
     sql = ("SELECT stock_code, analysis_date, signal, confidence, "
            "mos_at_entry, ret_20, ret_60, excess_20, excess_60 "
-           "FROM analysis_outcome WHERE analysis_date BETWEEN ? AND ?")
+           "FROM analysis_outcome"
+           " WHERE SUBSTR(analysis_date, 1, 10) BETWEEN ? AND ?")
     params: list = [start_date, end_date]
     if benchmark:
         sql += " AND benchmark_code = ?"
@@ -275,26 +281,51 @@ def _load_outcomes(start_date: str, end_date: str,
 
 
 def _join_regime(rows: list[dict]) -> None:
-    """给每行补 regime（join market_state_daily）。"""
+    """给每行补 regime（join market_state_daily）。
+
+    与 `_join_sector_size` 同样按**日期**对齐：`analysis_date` 带时间部分时
+    `trade_date = '2026-07-08 09:30'` 会整列 join 不上，regime 全线落进 unknown
+    （P2-H2-1 的同一类错，只是这里表现为"没数据"而不是"分错边"）。
+    """
     with db_conn() as conn:
         for row in rows:
             hit = conn.execute(
                 "SELECT regime FROM market_state_daily WHERE trade_date = ?",
-                (row["analysis_date"],)).fetchone()
+                (str(row["analysis_date"])[:10],)).fetchone()
             row["regime"] = hit["regime"] if hit else None
 
 
+def _size_bucket(cap) -> str | None:
+    """市值（元）→ 大小盘分档。
+
+    P1-H2-1 的另一半：**没有市值就是 None**。旧写法 `(cap or 0) >= 1e10 ...`
+    一路落到 else，把"取不到市值"归成 `small`——退市股/未覆盖股会被算进小盘组，
+    而小盘组恰恰是这类实验里最容易出"高收益"的桶。
+    """
+    if not cap or cap <= 0:
+        return None
+    if cap >= 1e10:
+        return "large"
+    return "mid" if cap >= 1e9 else "small"
+
+
 def _join_sector_size(rows: list[dict]) -> None:
-    """给每行补 sector / size（join stock_snapshot）。"""
+    """给每行补 sector / size —— **按该行 analysis_date 取 PIT 快照**。
+
+    审计 P1-H2-1（Hermes H2，2026-11-04）：旧写法
+    `ORDER BY snapshot_date DESC LIMIT 1` 不截日期，于是 7 月的分析用 11 月的市值
+    分档（前视），且退市股在"最新快照"里往往根本没有行（幸存者偏差）。
+    现在与 `_block_snapshot` / 事件研究的 PIT 口径一致：`snapshot_date <= 分析日`，
+    取不到就 None（分域里进 `unknown` 桶，见 `_bucket_label`）。
+    """
     with db_conn() as conn:
         for row in rows:
             hit = conn.execute(
                 "SELECT sector, market_cap FROM stock_snapshot WHERE code = ? "
-                "ORDER BY snapshot_date DESC LIMIT 1", (row["stock_code"],)).fetchone()
+                "AND snapshot_date <= ? ORDER BY snapshot_date DESC LIMIT 1",
+                (row["stock_code"], str(row["analysis_date"])[:10])).fetchone()
             row["sector"] = hit["sector"] if hit else None
-            cap = hit["market_cap"] if hit else None
-            row["size"] = ("large" if (cap or 0) >= 1e10 else
-                           "mid" if (cap or 0) >= 1e9 else "small")
+            row["size"] = _size_bucket(hit["market_cap"] if hit else None)
 
 
 class OutcomeEventStudyRunner(ExperimentRunner):
@@ -312,7 +343,7 @@ class OutcomeEventStudyRunner(ExperimentRunner):
             snapshot: SnapshotManifest) -> ExperimentOutcome:
         started = now_cn().isoformat()
         try:
-            metrics = self._compute(plan)
+            metrics, context = self._compute(plan)
         except Exception as exc:  # noqa: BLE001 - 运行失败转实验状态
             return ExperimentOutcome(
                 experiment_id=plan.experiment_id,
@@ -327,7 +358,7 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                 ci_low=metric_stats.get("ci_low"),
                 ci_high=metric_stats.get("ci_high"),
                 splits=metric_stats.get("splits", {}),
-                notes="分域明细" if metric_stats.get("splits") else "",
+                notes="分域明细（每桶 {mean, n}）" if metric_stats.get("splits") else "",
             )
             for rid, (metric, value, metric_stats) in zip(
                 _result_ids(plan, len(metrics)), metrics)
@@ -337,25 +368,54 @@ class OutcomeEventStudyRunner(ExperimentRunner):
             status=ExperimentStatus.DONE.value,
             started_at=started, finished_at=now_cn().isoformat(),
             results=results,
-            notes=self._notes(plan, metrics))
+            notes=self._notes(plan, metrics, context))
         outcome.verdict = derive_verdict(plan, outcome)
         return outcome
 
     @staticmethod
-    def _notes(plan: ExperimentPlan, metrics: list) -> str:
+    def _notes(plan: ExperimentPlan, metrics: list, context: dict | None = None) -> str:
         p = plan.params
+        ctx = context or {}
         with db_conn() as conn:
             total = conn.execute(
                 "SELECT COUNT(*) AS n FROM instrument").fetchone()["n"]
             row = conn.execute(
                 "SELECT COUNT(DISTINCT stock_code) AS n FROM analysis_outcome "
-                "WHERE analysis_date BETWEEN ? AND ?",
+                "WHERE SUBSTR(analysis_date, 1, 10) BETWEEN ? AND ?",
                 (p.get("start_date"), p.get("end_date"))).fetchone()
         stocks = row["n"] if row else 0
         holdout = (f"；holdout 末尾 {p['holdout_days']} 自然日"
                    if p.get("holdout_days") else "")
-        return (f"事件研究；样本 {stocks} 只股票 / 全市场 {total} 只"
-                f"（**可能存在幸存者偏差**：退市股无历史分析）；"
+        # P2-H2-2：两个数分开命名。旧文案"样本 X 只 / 全市场 Y 只"读起来像
+        # "覆盖了 X/Y 的市场"，其实 X 是**分析期出现过的股票数**、Y 是**当前**
+        # instrument 行数——退市股根本不在 Y 里，幸存者偏差被这个分母表述弱化了。
+        cov = ""
+        if ctx.get("rows"):
+            parts = []
+            for key, label in (("regime_known", "regime"), ("size_known", "size"),
+                               ("sector_known", "sector")):
+                if key in ctx:      # 只报本次真正 join 过的维度（splits 里没要就不报）
+                    parts.append(f"{label} {ctx[key]}/{ctx['rows']}")
+            cov = "分域覆盖率：" + "、".join(parts) if parts else ""
+        unparsed = (f"；{ctx['unparsed_dates']} 行日期不可解析，留在估计集"
+                    if ctx.get("unparsed_dates") else "")
+        missing = (f"；缺分域标签的行进 unknown 桶，每桶样本数见 splits[维度][桶].n"
+                   if ctx.get("rows") else "")
+        # P1-H2-1 的实测后果（2026-11-05 生产只读）：stock_snapshot 是
+        # `code` PRIMARY KEY + 每日 INSERT OR REPLACE，全库 5527 行=5527 个 code，
+        # 表里**只有最新一行**，没有历史快照可 join。于是 PIT 口径下 780 行分析只
+        # 命中 2 行——sector/size 分域在补出快照历史之前基本读不出东西。
+        # 旧实现不是"覆盖率高"，是把 30/31 只股票都用**分析日之后**的市值分了档。
+        known = [ctx[k] for k in ("size_known", "sector_known") if k in ctx]
+        pit_note = ("；sector/size 取 stock_snapshot 的 PIT 快照，该表一码一行"
+                    "（code 是 PRIMARY KEY，每日整行覆盖），历史分析日没有当日快照"
+                    "时进 unknown——分域可用度受快照历史限制，不是样本本身的问题"
+                    if known and ctx.get("rows") and min(known) < ctx["rows"]
+                    else "")
+        return (f"事件研究；分析期出现 {stocks} 只股票；instrument 表当前 {total} 只"
+                f"（**两者不是同一集合**：退市股既不在 instrument 也无历史分析，"
+                f"幸存者偏差由此来，不能用 {stocks}/{total} 当覆盖率）；"
+                f"{cov}{unparsed}{missing}{pit_note}；"
                 f"CI 为按股票分块的 block bootstrap；共 {len(metrics)} 个指标"
                 f"{holdout}；结论需按多重比较（R2-6 对照假设）解读")
 
@@ -379,17 +439,43 @@ class OutcomeEventStudyRunner(ExperimentRunner):
         holdout_days = int(p.get("holdout_days", 0))
         est_rows = rows
         hold_rows: list[dict] = []
+        unparsed_dates = 0
         if holdout_days > 0:
             from datetime import date as _date, timedelta as _td
-            cutoff = (_date.fromisoformat(end) - _td(days=holdout_days)).isoformat()
-            est_rows = [r for r in rows if r["analysis_date"] <= cutoff]
-            hold_rows = [r for r in rows if r["analysis_date"] > cutoff]
+            cutoff = _date.fromisoformat(end) - _td(days=holdout_days)
+            # P2-H2-1：按 date 比较，不按字符串。旧写法 `r["analysis_date"] <= cutoff`
+            # 在 analysis_date 带时间部分（"2026-07-08 09:30"）或格式不一致时会误分类
+            # ——而 holdout 与估计集的分界恰恰决定预注册算不算数。
+            kept_est: list[dict] = []
+            kept_hold: list[dict] = []
+            for r in rows:
+                day = _as_date(r.get("analysis_date"))
+                if day is None:
+                    unparsed_dates += 1
+                    kept_est.append(r)   # 判不了期的留在估计集，但如实计数
+                elif day > cutoff:
+                    kept_hold.append(r)
+                else:
+                    kept_est.append(r)
+            est_rows, hold_rows = kept_est, kept_hold
 
         out = self._tier_metrics(plan, est_rows, tiers, horizons, n_boot, splits)
         if hold_rows:
             out += [("holdout_" + m, v, s) for m, v, s in
                     self._tier_metrics(plan, hold_rows, tiers, horizons, n_boot, [])]
-        return out
+        context = {
+            "rows": len(rows),
+            "horizons": horizons,
+            "unparsed_dates": unparsed_dates,
+        }
+        # P1-H2-2：分域覆盖率进 notes——分域均值只有配上"这桶几行"才可解读。
+        if "regime" in splits:
+            context["regime_known"] = sum(1 for r in rows if r.get("regime"))
+        if "size" in splits:
+            context["size_known"] = sum(1 for r in rows if r.get("size"))
+        if "sector" in splits:
+            context["sector_known"] = sum(1 for r in rows if r.get("sector"))
+        return out, context
 
     def _tier_metrics(self, plan: ExperimentPlan, rows: list[dict],
                       tiers: list, horizons: list, n_boot: int,
@@ -407,19 +493,46 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                 mean = sum(values) / len(values)
                 ci_low, ci_high = block_bootstrap_ci(values, groups, n_boot,
                                                      plan.random_seed)
-                split_stats = {}
+                split_stats: dict[str, dict] = {}
                 for key in splits:
                     bucket: dict[str, list[float]] = {}
                     for r in sel:
-                        bucket.setdefault(str(r.get(key)), []).append(r[suffix])
+                        bucket.setdefault(
+                            _bucket_label(r.get(key)), []).append(r[suffix])
+                    # P1-H2-2：每桶同时给均值和样本数。只给均值，读者无法判断
+                    # "17pp 全来自 risk_off"是 22 行还是 2 行撑起来的；桶数放进
+                    # splits 本身（而非新增 splits_n 字段），这样旧的 splits_json
+                    # 列不用迁移，且均值与 n 不可能被拆到两处各自演化。
                     split_stats[key] = {
-                        k: round(sum(v) / len(v), 6) for k, v in bucket.items()}
+                        b: {"mean": round(sum(v) / len(v), 6), "n": len(v)}
+                        for b, v in bucket.items()}
                 out.append((
                     f"excess_{horizon}_{label}", round(mean, 6),
                     {"n": len(sel), "ci_low": ci_low, "ci_high": ci_high,
                      "hit_rate": round(sum(1 for v in values if v > 0) / len(values), 4),
                      "splits": split_stats}))
         return out
+
+
+def _as_date(value):
+    """analysis_date → date；脏值/空值返回 None（由调用方决定归哪边，不静默消失）。"""
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _bucket_label(value) -> str:
+    """分域桶名：缺值一律叫 `unknown`，不再变成字符串 "None" 混在桶里。
+
+    审计 P1-H2-2：旧写法 `str(r.get(key))` 把 market_state 回填缺口产生的 None
+    变成名为 "None" 的桶，报告层很容易整桶忽略——而 E-H001 的 risk_off 集中度
+    正是被这种"看不见的桶"放大的（缺标签的行被算进别处或直接消失）。
+    """
+    if value is None or value == "":
+        return "unknown"
+    return str(value)
 
 
 def _in_tier(value: float | None, lo: float | None, hi: float | None) -> bool:
