@@ -254,6 +254,35 @@ def block_bootstrap_ci(values: list[float], groups: list[str],
     return round(lo, 6), round(hi, 6)
 
 
+def _block_bootstrap_diff_ci(ga: dict, gb: dict, n_boot: int, seed: int,
+                             confidence: float = 0.95) -> tuple[float | None, float | None]:
+    """两独立分层（股票分块）均值差的 block bootstrap CI——净增量判据用。
+
+    与 ``block_bootstrap_ci`` 同规：每侧按股票重抽样（保留组内相关），
+    差分分布取分位数。两侧股票零重叠时尤其要注意不能按行混合重抽。
+    """
+    if not ga or not gb:
+        return None, None
+    import random
+    rng = random.Random(seed)
+    na, nb = list(ga), list(gb)
+    diffs = []
+    for _ in range(n_boot):
+        sa = [rng.choice(na) for _ in na]
+        sb = [rng.choice(nb) for _ in nb]
+        va = [v for name in sa for v in ga[name]]
+        vb = [v for name in sb for v in gb[name]]
+        if va and vb:
+            diffs.append(sum(va) / len(va) - sum(vb) / len(vb))
+    if not diffs:
+        return None, None
+    diffs.sort()
+    alpha = (1 - confidence) / 2
+    lo = diffs[int(alpha * len(diffs))]
+    hi = diffs[min(len(diffs) - 1, int((1 - alpha) * len(diffs)))]
+    return round(lo, 6), round(hi, 6)
+
+
 def _sole_benchmark(start_date: str, end_date: str) -> str | None:
     """计划没写 benchmark 时的兜底：窗口里只有一种基准就用它，多于一种必须显式指定。
 
@@ -530,6 +559,31 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                     {"n": len(sel), "ci_low": ci_low, "ci_high": ci_high,
                      "hit_rate": round(sum(1 for v in values if v > 0) / len(values), 4),
                      "splits": split_stats}))
+            # 净增量（H-002 主判据）：两档均值差，两侧各自按股票分块 bootstrap。
+            # 只在同一 horizon 内比较（同 regime 同窗口才构成对照）。
+            net = plan.params.get("net")
+            if net and len(net) == 2:
+                la, lb = net
+                tier_map = {t[0]: (t[1], t[2]) for t in tiers}
+                if la in tier_map and lb in tier_map:
+                    def _groups_for(label):
+                        lo, hi = tier_map[label]
+                        by_group: dict[str, list[float]] = {}
+                        for r in usable:
+                            if _in_tier(r.get("mos_at_entry"), lo, hi):
+                                by_group.setdefault(r["stock_code"], []).append(r[suffix])
+                        return by_group
+                    ga, gb = _groups_for(la), _groups_for(lb)
+                    if ga and gb:
+                        va = [v for vs in ga.values() for v in vs]
+                        vb = [v for vs in gb.values() for v in vs]
+                        diff = sum(va) / len(va) - sum(vb) / len(vb)
+                        d_lo, d_hi = _block_bootstrap_diff_ci(
+                            ga, gb, n_boot, plan.random_seed)
+                        out.append((
+                            f"net_{horizon}_{la}_vs_{lb}", round(diff, 6),
+                            {"n": len(va) + len(vb), "ci_low": d_lo, "ci_high": d_hi,
+                             "splits": {}}))
         return out
 
 
