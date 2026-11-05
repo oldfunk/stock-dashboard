@@ -93,3 +93,31 @@ def test_net_identical_tiers_ci_covers_zero(db):
     r = _net(outcome)[0]
     assert r.value == pytest.approx(0.0)
     assert r.ci_low <= 0.0 <= r.ci_high
+
+
+def test_net_regime_conditions_the_comparison(db):
+    """net_regime：对照限定在单一 regime 内（H-002 的"同一市场环境"本意）。
+
+    risk_off 日：>=40 档 e60=10、<=0 档 e60=4 → 净 6；
+    neutral 日：两档都 0 → 不条件化时全样本净 = (10+0)/2-(4+0)/2 = 3。
+    """
+    rows = [("A0", "2026-07-08", 50.0, 10.0), ("A1", "2026-07-08", 50.0, 10.0),
+            ("B0", "2026-07-08", -5.0, 4.0), ("B1", "2026-07-08", -5.0, 4.0)]
+    rows += [("C0", "2026-07-09", 50.0, 0.0), ("C1", "2026-07-09", 50.0, 0.0),
+             ("D0", "2026-07-09", -5.0, 0.0), ("D1", "2026-07-09", -5.0, 0.0)]
+    _insert(rows)
+    with db_mod.db_conn() as conn:
+        conn.execute("INSERT INTO market_state_daily (trade_date, status, regime,"
+                     " created_at) VALUES ('2026-07-08','pass','risk_off',"
+                     "'2026-11-05T00:00:00')")
+        conn.execute("INSERT INTO market_state_daily (trade_date, status, regime,"
+                     " created_at) VALUES ('2026-07-09','pass','neutral',"
+                     "'2026-11-05T00:00:00')")
+    plan = _plan()
+    plan.params["net_regime"] = "risk_off"
+    outcome = _run(plan)
+    r = _net(outcome)[0]
+    assert r.metric == "net_60_>=40_vs_<=0_risk_off"
+    assert r.value == pytest.approx(6.0)
+    assert r.sample_size == 4
+

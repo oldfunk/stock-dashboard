@@ -561,15 +561,22 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                      "splits": split_stats}))
             # 净增量（H-002 主判据）：两档均值差，两侧各自按股票分块 bootstrap。
             # 只在同一 horizon 内比较（同 regime 同窗口才构成对照）。
+            # net_regime：把对照限定在单一 regime 内（H-002 的"同一市场环境"本意；
+            # 不填则全样本——99% 成熟行在 risk_off 时两者数值接近但不义相同）。
             net = plan.params.get("net")
             if net and len(net) == 2:
                 la, lb = net
                 tier_map = {t[0]: (t[1], t[2]) for t in tiers}
                 if la in tier_map and lb in tier_map:
+                    net_scope = usable
+                    net_regime = plan.params.get("net_regime")
+                    if net_regime:
+                        net_scope = [r for r in usable
+                                     if str(r.get("regime")) == net_regime]
                     def _groups_for(label):
                         lo, hi = tier_map[label]
                         by_group: dict[str, list[float]] = {}
-                        for r in usable:
+                        for r in net_scope:
                             if _in_tier(r.get("mos_at_entry"), lo, hi):
                                 by_group.setdefault(r["stock_code"], []).append(r[suffix])
                         return by_group
@@ -580,8 +587,11 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                         diff = sum(va) / len(va) - sum(vb) / len(vb)
                         d_lo, d_hi = _block_bootstrap_diff_ci(
                             ga, gb, n_boot, plan.random_seed)
+                        tag = f"net_{horizon}_{la}_vs_{lb}"
+                        if net_regime:
+                            tag += f"_{net_regime}"
                         out.append((
-                            f"net_{horizon}_{la}_vs_{lb}", round(diff, 6),
+                            tag, round(diff, 6),
                             {"n": len(va) + len(vb), "ci_low": d_lo, "ci_high": d_hi,
                              "splits": {}}))
         return out
