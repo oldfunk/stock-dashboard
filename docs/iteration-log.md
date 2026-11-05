@@ -165,7 +165,17 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
-### 2026-11-06（vendor：子项目 paper-trading v0.8.0 合并部署；v0.6.9 → v0.8.0，11 个 tag）
+### 2026-11-05（批16/17 验收 + vendor v0.8.0 合并部署 + H-002 首跑：净增量 +3.0pp 但 CI 覆盖 0；gate 1235 → 1299）
+
+- **批16+批17（8 commit）验收合入**（`8f9904c`）：H2 四点+PIT 第 5 处、EM 仅缺字段才拉（省量实测峰值 2211→~1177 次/日）、U2/U4、U8 警示单一来源、17-c 可读性闸（H-001 乱码兜底）、17-b/d R2-5 冻结自证（verdict/notes 落库+锚点从快照继承）、**15-e 混杂算账**、Hermes H3 通过。
+- **H-001 数据完整性修复（母方执行）**：statement/prior/kill_criteria 乱码按原文重写（根因：创建时中文经 PowerShell→ssh 管道被转码——**非 ASCII 文案一律走 scp/文件通道**）；E-H001/E-H001b 锚点从快照继承；快照 notes `???` 修复。
+- **H-002 首跑（预注册链完整）**：主判据 `net_60_>=40_vs_<=0_risk_off` = **+3.01pp，CI [-5.18,+10.18] 覆盖 0（不显著）**；verdict 字面 supported 但按 Q1 裁定（exclude_zero）应读"方向为正、不显著"——Q1 缺陷的实证代价，批18-b 优先。**CI 口径分歧**：15-e 离线 [+0.67,+5.36]（疑似按行重抽）vs runner 股票分块 [-5.18,+10.18]（正确处理聚类）——以 runner 为准。**H-001 终审**：17pp = 环境基线 ~14pp + 净增量 ~3pp（不显著）。
+- **净增量指标原生化**（母方 `b64960b`/`0c7bba5`）：runner 支持 params.net=[档A,档B]+net_regime 条件——H-002 主判据直接进 verdict，不再靠离线脚本。
+- **vendor v0.8.0 合并部署**（`768bfd3`）：subtree pull --squash v0.6.9→v0.8.0（11 tag，零冲突）；gate 母 1235/vendor **772**；README/architecture 版本引用同步。子项目代码内 `__version__` 停在 0.7.0（其子仓库卫生问题，已记录）。
+- **生产事件**：deploy 重启窗口内 :9527 被 Hermes 常驻 agent 起的 `python main.py`（nec 目录旧应用）+多进程子进程占用 → 母服务重启循环 http:500；清理占用者后恢复（16:03 main/parent 200）。**跨团队约定提请**：母仓库目录不跑非母项目进程；端口各归其主。
+- **门禁**：1235 → **1299**（母）/ vendor 772（记录）。
+
+### 2026-11-05（vendor：子项目 paper-trading v0.8.0 合并部署；v0.6.9 → v0.8.0，11 个 tag）
 
 - 子项目独立版漫长迭代后稳定，按单向 tag 流合并入母树：`git subtree pull --prefix=paper_trading paper-upstream v0.8.0 --squash`（`8078f5f`+`912d70c`，零冲突——接缝修复此前已随 tag 回流）。
 - v0.8.0 带来（据子项目 README/合并树）：规则引擎（9 种规则盘中守护，与 AI 同一风控尺子与撮合口径）、条件单（触发+有效期+留痕）、AI 交易员（固定时段+JSON 钳制+幂等闸+日亏熔断+离场三件套）、回测纪律（T+1 成交/真实费率/样本外检验防过拟合）、分钟线/T+15 批量/raw feed 管线等。
