@@ -59,7 +59,8 @@ def _run(plan):
 
 
 def _net(outcome):
-    return [r for r in outcome.results if r.metric == "net_60_>=40_vs_<=0"]
+    """净增量指标（runner 在带 net_regime 时会给名加后缀，故按前缀匹配）。"""
+    return [r for r in outcome.results if r.metric.startswith("net_60_")]
 
 
 def test_net_emitted_with_diff_and_ci(db):
@@ -115,6 +116,7 @@ def test_net_regime_conditions_the_comparison(db):
                      "'2026-11-05T00:00:00')")
     plan = _plan()
     plan.params["net_regime"] = "risk_off"
+    plan.params["splits"] = ["regime"]   # 开启 regime join，净增量对照才有标签
     outcome = _run(plan)
     r = _net(outcome)[0]
     assert r.metric == "net_60_>=40_vs_<=0_risk_off"
