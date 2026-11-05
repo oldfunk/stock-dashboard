@@ -144,6 +144,12 @@ CREATE TABLE IF NOT EXISTS research_experiment (
     started_at       TEXT,
     finished_at      TEXT,
     error            TEXT,
+    -- 批17-b（R2-5 结论与冻结）：判定与限定语原先只活在内存/CLI 输出里，
+    -- 冻结的实验行只剩 plan_json + 数字（产线 2 个实验 16 条 result 的 verdict 全为空串）。
+    -- 用可空 TEXT 而不是 NOT NULL DEFAULT ''：老库靠 ALTER 补列时，迁移前的行本来
+    -- 就没有"当时的结论"，NULL 比空串更诚实；新写入由 DAO 一律带值。
+    verdict          TEXT,
+    notes            TEXT,
     created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_experiment_hypothesis ON research_experiment(hypothesis_id);

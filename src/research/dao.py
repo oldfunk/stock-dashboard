@@ -100,13 +100,14 @@ class ResearchDAO:
                 INSERT OR REPLACE INTO research_experiment
                 (id, hypothesis_id, plan_json, data_snapshot_id, code_commit,
                  config_hash, random_seed, status, started_at, finished_at, error,
-                 created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 verdict, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 d["id"], d.get("hypothesis_id"), _dumps(d.get("plan")),
                 d.get("data_snapshot_id"), d.get("code_commit"), d.get("config_hash"),
                 d.get("random_seed"), d.get("status"), d.get("started_at"),
-                d.get("finished_at"), d.get("error"), d.get("created_at") or now_cn().isoformat(),
+                d.get("finished_at"), d.get("error"), d.get("verdict", ""),
+                d.get("notes"), d.get("created_at") or now_cn().isoformat(),
             ))
 
     def get_experiment(self, experiment_id: str) -> dict | None:

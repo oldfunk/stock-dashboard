@@ -276,6 +276,10 @@ class Experiment:
     started_at: str = ""
     finished_at: str = ""
     error: str = ""
+    # 批17-b（R2-5）：判定与限定语必须随实验行一起冻结。放在最后，位置参数
+    # 构造（Experiment(id, hypothesis_id, ...)）不受影响。
+    verdict: str = ""
+    notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -695,6 +695,48 @@ def _parse_pct(value) -> float | None:
         return None
 
 
+# ── 增量"仅缺字段才拉"的判定（批16-a）──
+
+EM_DEEP_WINDOW = 8   # 只看本次要写的最近 8 个报告期（≈2 年）；见 _em_sheets_needed
+# 判据字段清单：顺序即两张表的产物 —— [0]=东财利润表填的，[1]=东财现金流量表填的。
+# 这是**单一来源**：`get_deep_field_dates(codes, EM_DEEP_FIELDS)` 用它决定查哪几列，
+# `_em_sheets_needed` 用它决定判哪几列。新增深度字段时改这一行就够（DAO 侧还要把列名
+# 加进 `FinancialHistoryDAO.DEEP_FIELD_COLUMNS` 白名单，两处一致由用例守着）。
+EM_DEEP_FIELDS = ("interest_coverage", "fcf")
+
+
+def _em_sheets_needed(report_dates: list[str], filled: dict[str, set],
+                      window: int = EM_DEEP_WINDOW) -> tuple[bool, bool]:
+    """增量模式下这次还需不需要东财**利润表**与**现金流量表**两个 F10 接口。
+
+    批15-b 把这两个接口激活之后（以前一直传裸代码、两个拉全失败且 except 静默），
+    平日增量对每只 todo 股票都发 3 个请求：同花顺骨架 1 + 东财两张表 2。产线日志
+    实测 todo 高峰期一天 737 只 → 2211 次请求里 1474 次是这两张表，而它们的产物
+    （interest_coverage / fcf）多数早就填过了，重复拉只是白花配额。
+
+    判据是"本次要写的最近 window 期里，有没有哪一期在库里还没有对应字段"
+    （字段名取自 `EM_DEEP_FIELDS`，与 DAO 查询用的是同一份清单）：
+    - **只看最近 window 期**：产线只读实测 interest_coverage 在 2017 年及以前
+      覆盖只有 12.4%（东财不供那么老的利息费用），银行/券商/保险 26 只**全历史
+      为 0**——若不设窗口，"有一期缺就拉"会变成"永远都拉"，开关等于没装。
+    - **新报告期自动算缺**：库里没有这一期 → 需要拉（这正是每日增量想要的效果）。
+    - **骨架没出数就不拉**：records 为空时两张表的产物没人消费（旧写法照样发 2 个
+      请求，返回值被丢弃）。
+    跳过是安全的：`FinancialHistoryDAO.batch_save` 逐列 ``COALESCE``，采集器不提供
+    的字段保持原值，不会因为这次没拉就把已填的 interest_coverage/fcf 抹成 NULL。
+    周六 `force_full` 不走这里——全量重采本来就是修老数据的手段。
+    """
+    # Hermes H3（2026-11-05）小建议①：window<=0 原先退化成"全历史参与判定"。
+    # 全历史里一定有空期（2017 年及以前 ic 覆盖只有 12.4%），于是退化成"每天都拉"，
+    # 开关正好废在它要防的那个形状上。现在钳到最少 1 期：窗口只可能变小，不会被关成全量。
+    recent = sorted(set(report_dates), reverse=True)[:max(1, int(window))]
+    if not recent:
+        return False, False
+    ps_field, cf_field = EM_DEEP_FIELDS     # 顺序错/长度错在这里就炸，不靠下标蒙
+    return (any(d not in (filled.get(ps_field) or set()) for d in recent),
+            any(d not in (filled.get(cf_field) or set()) for d in recent))
+
+
 def collect_historical_financial_data(all_stocks: list[dict],
                                       force_full: bool = False,
                                       incremental_days: int = 60) -> dict:
@@ -740,6 +782,10 @@ def collect_historical_financial_data(all_stocks: list[dict],
 
     logger.info(f"[历史财务] AKShare 逐只采集 {len(todo)} 只（全量={force_full}）...")
     collected = {}
+    # 增量判定要的"哪些报告期已经有东财深度字段"，一次批量读，不在循环里逐只查
+    filled_map = {} if force_full else dao.get_deep_field_dates(
+        [s['code'] for s in todo], EM_DEEP_FIELDS)
+    skipped_ps = skipped_cf = 0
 
     for idx, s in enumerate(todo):
         code = s['code']
@@ -751,29 +797,6 @@ def collect_historical_financial_data(all_stocks: list[dict],
             except Exception as e:  # noqa: BLE001 - 单源失败只降级不中断
                 logger.warning(f"[历史财务] {code} 同花顺摘要失败: {e}")
                 df_abs = None
-
-            # 方法2/3：东财 F10 利润表 / 现金流量表
-            #
-            # 批15-b（U6 激活）：这两个接口的 symbol 形态是**带市场前缀**的
-            # （akshare 签名默认 'SH600519'）。本仓一直传裸 6 位代码，产线实测
-            # `TypeError: 'NoneType' object is not subscriptable`——两拉全失败，
-            # 而except 是静默的，于是"利息覆盖/总股本/FCF/每股经营现金流"这四段
-            # 补充**从来没执行过**（2026-11-03 取证、母方裁定激活）。
-            # 现在用 em_f10_symbol(code)：SH600519 / SZ000001 / BJ920000（北交所
-            # 实测 41 期出数），并把失败记成 warning——静默是这次能瞒这么久的原因。
-            try:
-                df_ps = ak.stock_profit_sheet_by_report_em(
-                    symbol=em_f10_symbol(code))
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[历史财务] {code} 东财利润表失败: {e}")
-                df_ps = None
-
-            try:
-                df_cf = ak.stock_cash_flow_sheet_by_report_em(
-                    symbol=em_f10_symbol(code))
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[历史财务] {code} 东财现金流量表失败: {e}")
-                df_cf = None
 
             # 合并数据：以 financial_abstract 为骨架，补充深度字段
             records = []
@@ -812,6 +835,41 @@ def collect_historical_financial_data(all_stocks: list[dict],
                         except (ValueError, TypeError):
                             pass
                     records.append(rec)
+
+            # 方法2/3：东财 F10 利润表 / 现金流量表（**批16-a：仅缺字段才拉**）
+            #
+            # 批15-b（U6 激活）：这两个接口的 symbol 形态是**带市场前缀**的
+            # （akshare 签名默认 'SH600519'）。本仓一直传裸 6 位代码，产线实测
+            # `TypeError: 'NoneType' object is not subscriptable`——两拉全失败，
+            # 而 except 是静默的，于是"利息覆盖/总股本/FCF/每股经营现金流"这四段
+            # 补充**从来没执行过**（2026-11-03 取证、母方裁定激活）。
+            # 激活后用的是 em_f10_symbol(code)：SH600519 / SZ000001 / BJ920000
+            # （北交所实测 41 期出数），失败记 warning——静默是这次能瞒这么久的原因。
+            #
+            # 批16-a：请求挪到 records 之后，先判"这次要写的报告期还缺不缺 ic/fcf"
+            # （见 _em_sheets_needed）。放在 records 之后是必须的——判定要的期间
+            # 集合来自骨架，骨架没出数时两张表的产物本来就没处消费。
+            need_ps, need_cf = ((True, True) if force_full else _em_sheets_needed(
+                [rec['report_date'] for rec in records], filled_map.get(code, {})))
+            df_ps = df_cf = None
+            if need_ps:
+                try:
+                    df_ps = ak.stock_profit_sheet_by_report_em(
+                        symbol=em_f10_symbol(code))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[历史财务] {code} 东财利润表失败: {e}")
+                    df_ps = None
+            else:
+                skipped_ps += 1
+            if need_cf:
+                try:
+                    df_cf = ak.stock_cash_flow_sheet_by_report_em(
+                        symbol=em_f10_symbol(code))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[历史财务] {code} 东财现金流量表失败: {e}")
+                    df_cf = None
+            else:
+                skipped_cf += 1
 
             # 从利润表补充利息费用/总股本/FCF
             if df_ps is not None and not df_ps.empty:
@@ -972,6 +1030,12 @@ def collect_historical_financial_data(all_stocks: list[dict],
 
         time.sleep(0.3)  # AKShare 防限流
 
+    if not force_full:
+        # 这行是批16-a 的效果证据：没有它，"省了多少请求"只能靠推断。
+        logger.info(
+            f"[历史财务] 增量省请求：跳过东财利润表 {skipped_ps} 只、"
+            f"现金流量表 {skipped_cf} 只（判定窗口=近 {EM_DEEP_WINDOW} 期，"
+            f"共少发 {skipped_ps + skipped_cf} 个请求）")
     logger.info(f"[历史财务] AKShare 完成: {len(collected)} 只")
     return collected
 

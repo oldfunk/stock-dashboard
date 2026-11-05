@@ -39,6 +39,54 @@ class HypothesisLockedError(HypothesisError):
     """假设已锁定，不可修改。"""
 
 
+# 会被完整性检查覆盖的文案字段（机器字段如 benchmark/metric 是 ASCII 码，不查）
+TEXT_FIELDS = ("statement", "prior", "kill_criteria")
+
+
+def assert_readable_text(field: str, value: Any) -> None:
+    """预注册卡片的文案必须**真的可读**，否则锁了就永远读不出。
+
+    产线实况（2026-11-05 只读取证）：H-001 的 `statement` 39 个字符里 26 个是
+    `?`（库里字节 `3F3F3F…4D4F53` = `??…MOS?`），`kill_criteria_json` 同样
+    —— 也就是这张已锁定的预注册卡，**判据与终止条件在权威库里是乱码**。
+    这是文案经过某个 ASCII 通道（errors=replace）留下的形状，不是应用逻辑错，
+    但应用可以在唯一不可逆的那一步（lock）之前拦住它：
+      - `??` 连续两个问号：中文被逐字替换的典型痕迹（单个 `?` 是正常英文问句，放行）；
+      - U+FFFD 替换符：编码失败的另一种痕迹；
+      - 代理残留（`\\udcXX`）：argv/文件系统按 ASCII surrogateescape 解码留下的，
+        这种值连 UTF-8 都编不出来，进库后不可逆。
+    拦下时报错要说清"哪一个字段、为什么"，让人能改——不是静默清洗成问号。
+    """
+    if isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            assert_readable_text(f"{field}[{i}]", item)
+        return
+    if not isinstance(value, str):
+        return
+    why = None
+    if "??" in value:
+        why = "出现连续问号（中文文案被 ASCII 通道逐字替换成 ? 的痕迹）"
+    elif "\ufffd" in value:
+        why = "出现 U+FFFD 替换符（上游解码失败）"
+    else:
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            why = "含代理残留（argv/路径按非 UTF-8 解码，入库后不可恢复）"
+    if why:
+        raise HypothesisError(
+            f"假设字段 {field} 不可锁定：{why}；当前值={value!r}。"
+            "请用 UTF-8 通道重新录入（检查调用侧 locale / 传输层），"
+            "锁定的预注册卡片必须能被人读出判据与终止条件")
+
+
+def assert_hypothesis_readable(hyp: dict) -> None:
+    """按 TEXT_FIELDS 逐个查（create/update/lock 三处共用）。"""
+    for field in TEXT_FIELDS:
+        if field in hyp and hyp[field] is not None:
+            assert_readable_text(field, hyp[field])
+
+
 class HypothesisService:
     def __init__(self, dao: ResearchDAO | None = None,
                  registry: HypothesisRegistry | None = None):
@@ -61,6 +109,9 @@ class HypothesisService:
             metric=metric, threshold=threshold, regimes=regimes, costs=costs,
             kill_criteria=kill_criteria, status="draft", owner=owner,
             review_date=review_date)
+        assert_hypothesis_readable(
+            {"statement": statement, "prior": prior,
+             "kill_criteria": kill_criteria})
         self.registry.register(hypothesis)
         return self.dao.get_hypothesis(hid)
 
@@ -77,6 +128,9 @@ class HypothesisService:
     def lock(self, hypothesis_id: str) -> dict:
         row = self.view(hypothesis_id)
         validate_transition("hypothesis", row["status"], "locked")
+        # 锁定是不可逆的那一步：文案读不出来就不许锁（产线 H-001 的判据与
+        # kill_criteria 已是 ?，正是这一步没有闸留下的教训）
+        assert_hypothesis_readable(row)
         with db_conn() as conn:
             conn.execute(
                 "UPDATE research_hypothesis SET status = 'locked', locked_at = ? "
@@ -100,6 +154,7 @@ class HypothesisService:
             if not merged.get(key):
                 raise HypothesisError(f"假设字段不可为空: {key}")
         hypothesis = Hypothesis.from_dict(merged)
+        assert_hypothesis_readable(merged)
         self.dao.insert_hypothesis(hypothesis)
         return self.dao.get_hypothesis(hypothesis_id)
 

@@ -594,6 +594,12 @@ def init_database():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_kline_instrument_date "
             "ON kline_daily(instrument_id, trade_date)")
+        # 批17-b（R2-5 结论与冻结）：实验的判定与限定语要能落在冻结的实验行上。
+        # 产线 2 个实验 16 条 result 的 verdict 全为空串，结论只存在于当时的 CLI 输出，
+        # 事后审计只能靠 Issue 里的手抄——新库由 RESEARCH_SCHEMA_SQL 直接建，
+        # 已有库靠这两条 ALTER。
+        _add_column_if_not_exists(conn, 'research_experiment', 'verdict', 'TEXT')
+        _add_column_if_not_exists(conn, 'research_experiment', 'notes', 'TEXT')
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 
@@ -1448,6 +1454,43 @@ class FinancialHistoryDAO:
                 codes,
             ).fetchall()
         return {r['stock_code']: r['max_date'] for r in rows}
+
+    # 深度字段列白名单（f-string 会把列名拼进 SQL，只允许这些；采集侧传进来的
+    # 清单必须逐个在这里出现，Hermes H3 小建议②的落点）
+    DEEP_FIELD_COLUMNS = ("interest_coverage", "fcf", "total_shares", "roic",
+                          "ocf_per_share")
+
+    def get_deep_field_dates(self, codes: list[str],
+                             fields: tuple) -> dict[str, dict[str, set]]:
+        """批量返回"哪些报告期已经有深度字段"，供增量采集判定要不要发请求。
+
+        返回 ``{code: {字段名: {已有该字段的报告期}}}``。
+        用**报告期集合**而不是"这只票填满了没"的布尔：新披露一期，布尔会立刻过期
+        （老期填满≠新期有值），而集合天然把新期算成"缺"。
+        ``fields`` 由调用方（采集侧 `EM_DEEP_FIELDS`）传入，本方法不再自带字段清单——
+        判据用哪几列与查询取哪几列从此是同一份，新增列时漏一边会被用例打红。
+        """
+        if not codes:
+            return {}
+        unknown = [f for f in fields if f not in self.DEEP_FIELD_COLUMNS]
+        if unknown:
+            raise ValueError(f"非白名单深度字段：{unknown}")
+        placeholders = ','.join('?' * len(codes))
+        cols = ', '.join(fields)
+        out: dict[str, dict[str, set]] = {}
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT stock_code, report_date, {cols}
+                    FROM financial_history
+                    WHERE stock_code IN ({placeholders})""",
+                codes,
+            ).fetchall()
+        for r in rows:
+            d = out.setdefault(r['stock_code'], {f: set() for f in fields})
+            for f in fields:
+                if r[f] is not None:
+                    d[f].add(r['report_date'])
+        return out
 
 
 class FinancialSummaryDAO:
