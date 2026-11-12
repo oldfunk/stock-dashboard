@@ -86,17 +86,37 @@ def _get_stock_codes() -> list[dict]:
 
 # ── 腾讯批量行情 ──
 
-def fetch_tencent_batch(codes: list[str], batch_size=80) -> list[dict]:
-    """从腾讯API批量获取股票行情"""
+def fetch_tencent_batch(codes: list[str], batch_size=80, max_retries: int = 2) -> list[dict]:
+    """从腾讯API批量获取股票行情。
+
+    单批失败会**重试**（2026-11-12 产线实证：11-10 缺 80 只、11-12 缺 7 只，
+    都是某一批 curl 返回空、那批代码整天没进 daily_close 覆盖层）。
+    重试仍失败则如实告警"哪一批缺了多少只"——覆盖层可以少，但不能静默少。
+    """
     results, tc_codes = [], [tc_encode(c) for c in codes]
     for i in range(0, len(tc_codes), batch_size):
         batch = tc_codes[i:i + batch_size]
-        raw = curl_get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=30)
+        raw = None
+        for att in range(max_retries):
+            try:
+                raw = curl_get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=30)
+            except Exception as e:  # noqa: BLE001 - 单批失败不该拖垮全市场
+                logger.warning(f"[腾讯] 批次 {i // batch_size + 1} 第 {att + 1} 次异常: {e}")
+            if raw:
+                break
+            if att < max_retries - 1:
+                time.sleep(1.5)
         if raw:
             for val in split_tc_response(raw):
                 q = parse_tc_line(val)
                 if q:
                     results.append(q)
+        else:
+            logger.warning(
+                f"[腾讯] 批次 {i // batch_size + 1}/"
+                f"{(len(tc_codes) + batch_size - 1) // batch_size} "
+                f"重试 {max_retries} 次仍失败，{len(batch)} 只本次缺失"
+                "（daily_close 覆盖层会少这批，market_state 广度如实下降）")
         if i + batch_size < len(tc_codes):
             time.sleep(0.5)
     logger.info(f"[腾讯] {len(results)} 只")
