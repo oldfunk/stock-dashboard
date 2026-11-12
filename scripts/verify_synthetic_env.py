@@ -5,11 +5,24 @@
 """
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 
 DB = os.environ.get("STOCK_DASHBOARD_DB", "data/db/stock_dashboard_synthetic.db")
 PY = sys.executable
+
+# 幂等：清掉上一次验证留下的记录（合成库是 disposable 的）
+_conn = sqlite3.connect(DB)
+for t, k, v in (("research_result", "experiment_id", "E-SYN"),
+                ("research_experiment", "id", "E-SYN"),
+                ("research_hypothesis", "id", "H-SYN")):
+    try:
+        _conn.execute(f"DELETE FROM {t} WHERE {k}=?", (v,))
+    except sqlite3.OperationalError:
+        pass
+_conn.commit()
+_conn.close()
 
 
 def run(args, label):
@@ -58,4 +71,19 @@ run(["-m", "src.research.experiment", "create",
     "create plan E-SYN")
 
 run(["-m", "src.research.experiment", "run", "E-SYN"], "run E-SYN")
-print("\n===== 验证完成 =====")
+
+# ── 紧凑汇总 ──
+import sqlite3
+conn = sqlite3.connect(DB)
+conn.row_factory = sqlite3.Row
+print("\n===== 研究 OS 结论汇总 =====")
+for r in conn.execute(
+        "SELECT metric, value, ci_low, ci_high, sample_size FROM research_result"
+        " WHERE experiment_id='E-SYN' ORDER BY id"):
+    ci = (f"CI [{r['ci_low']}, {r['ci_high']}]"
+          if r["ci_low"] is not None else "CI n/a")
+    print(f"  {r['metric']}: {r['value']} {ci} n={r['sample_size']}")
+exp = conn.execute("SELECT verdict, notes FROM research_experiment"
+                   " WHERE id='E-SYN'").fetchone()
+print(f"  verdict = {exp['verdict']!r}")
+print("===== 验证完成 =====")

@@ -78,7 +78,8 @@ def _codes(n: int) -> list[tuple[str, str, str]]:
     return out
 
 
-def build(out_path: Path, n_stocks: int = 100, seed: int = 42) -> dict:
+def build(out_path: Path, n_stocks: int = 100, seed: int = 42,
+          slope_scale: float = 1.0) -> dict:
     import src.models.database as db
 
     db.get_db_path = lambda: str(out_path)
@@ -86,6 +87,10 @@ def build(out_path: Path, n_stocks: int = 100, seed: int = 42) -> dict:
     if out_path.exists():
         out_path.unlink()
     db.init_database()
+
+    # slope_scale=0 → 零关系对照库（研究 OS 应当判"不支持"，验假阳性）
+    true_excess = {h: (b, s * slope_scale, sd)
+                   for h, (b, s, sd) in TRUE_EXCESS.items()}
 
     rng = random.Random(seed)
     codes = _codes(n_stocks)
@@ -204,7 +209,7 @@ def build(out_path: Path, n_stocks: int = 100, seed: int = 42) -> dict:
                        "stock_code": code, "stock_name": name, "analysis_date": d,
                        "signal": "BUY", "confidence": "中", "verdict": "通过",
                        "entry_date": d, "entry_price": 10.0, "mos_at_entry": round(mos, 2)}
-                for h, (base, slope, sd) in TRUE_EXCESS.items():
+                for h, (base, slope, sd) in true_excess.items():
                     ex_ret = base + slope * mos + rng.gauss(0, sd)
                     row[f"excess_{h}"] = round(ex_ret, 4)
                     row[f"ret_{h}"] = round(bench[h] + ex_ret, 4)
@@ -215,12 +220,12 @@ def build(out_path: Path, n_stocks: int = 100, seed: int = 42) -> dict:
                 conn.execute(
                     f"INSERT OR REPLACE INTO analysis_outcome ({cols}) VALUES ({q})",
                     list(row.values()))
-            aid += 1
+                aid += 1
 
     with db.db_conn() as conn:
         n_rows = conn.execute("SELECT COUNT(*) FROM analysis_outcome").fetchone()[0]
     return {"out": str(out_path), "stocks": n_stocks, "days": len(days),
-            "analysis_rows": n_rows, "true_excess": TRUE_EXCESS}
+            "analysis_rows": n_rows, "true_excess": true_excess}
 
 
 def main(argv=None) -> int:
@@ -228,8 +233,10 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(DEFAULT_OUT), help="输出库路径")
     ap.add_argument("--stocks", type=int, default=100)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--slope-scale", type=float, default=1.0,
+                    help="ground truth 斜率倍率；0 = 零关系对照库（验假阳性）")
     args = ap.parse_args(argv)
-    stats = build(Path(args.out), args.stocks, args.seed)
+    stats = build(Path(args.out), args.stocks, args.seed, args.slope_scale)
     print(f"[合成库] {stats['out']}")
     print(f"  股票 {stats['stocks']} 只 / 交易日 {stats['days']} 天 / "
           f"analysis_outcome {stats['analysis_rows']} 行")
