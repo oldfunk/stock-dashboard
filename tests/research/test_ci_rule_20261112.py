@@ -7,7 +7,7 @@
 
 from src.research.domain import CI_RULES, ExperimentResult
 from src.research.experiment import (
-    ExperimentOutcome, ExperimentPlan, derive_verdict,
+    ExperimentOutcome, ExperimentPlan, derive_verdict, mark_result_verdicts,
 )
 
 
@@ -66,3 +66,37 @@ def test_exclude_zero_still_rejects_wrong_sign():
 def test_unknown_rule_falls_back_to_point_estimate():
     """未登记的名字按 none 处理（不静默放行、也不炸）。"""
     assert derive_verdict(_plan("weird"), _outcome("net", 0.4, -0.4, 1.2)) == "supported"
+
+
+# ── Q3：result 级 verdict 只填预注册判据那一条 ──────────────
+
+def test_only_primary_metric_gets_verdict():
+    plan = _plan("exclude_zero")
+    outcome = ExperimentOutcome(
+        experiment_id="E-T", status="done",
+        results=[
+            ExperimentResult(id="R1", experiment_id="E-T", metric="net",
+                             value=15.7, ci_low=12.3, ci_high=19.4, sample_size=100),
+            ExperimentResult(id="R2", experiment_id="E-T", metric="excess_60_<=0",
+                             value=1.0, ci_low=0.5, ci_high=1.5, sample_size=100),
+        ])
+    outcome.verdict = derive_verdict(plan, outcome)
+    mark_result_verdicts(plan, outcome)
+    assert outcome.results[0].verdict == "supported", "判据那条要填"
+    assert outcome.results[1].verdict == "", "辅助指标不许填 verdict"
+    assert "未预注册" in outcome.results[1].notes
+
+
+def test_aux_metric_with_existing_notes_keeps_them():
+    plan = _plan("none")
+    outcome = ExperimentOutcome(
+        experiment_id="E-T", status="done",
+        results=[
+            ExperimentResult(id="R1", experiment_id="E-T", metric="net",
+                             value=1.0, sample_size=10),
+            ExperimentResult(id="R2", experiment_id="E-T", metric="aux",
+                             value=2.0, sample_size=10, notes="分域明细"),
+        ])
+    outcome.verdict = derive_verdict(plan, outcome)
+    mark_result_verdicts(plan, outcome)
+    assert outcome.results[1].notes == "分域明细", "已有 notes 不被覆盖"

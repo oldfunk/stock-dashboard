@@ -164,6 +164,20 @@ def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
     return "supported"
 
 
+def mark_result_verdicts(plan: ExperimentPlan, outcome: ExperimentOutcome) -> None:
+    """Q3：result 级 verdict 只填**预注册判据**那一条。
+
+    其余指标是辅助证据。给它们也填 verdict，事后就分不清"预注册判据说支持"
+    与"顺手看的指标恰好为正"——多重比较的失真正来自这种混淆。落库时给非判据
+    指标留空并注明。
+    """
+    for r in outcome.results:
+        if r.metric == plan.metric:
+            r.verdict = outcome.verdict
+        elif not r.notes:
+            r.notes = "未预注册为判据（辅助指标）"
+
+
 def inconclusive_reason(plan: ExperimentPlan, outcome: "ExperimentOutcome") -> str:
     """R2-5：判不了的时候要写清**缺的是哪一种证据**。
 
@@ -444,6 +458,7 @@ class OutcomeEventStudyRunner(ExperimentRunner):
             results=results,
             notes=self._notes(plan, metrics, context))
         outcome.verdict = derive_verdict(plan, outcome)
+        mark_result_verdicts(plan, outcome)
         return outcome
 
     @staticmethod
@@ -700,6 +715,7 @@ class TopKBacktestRunner(ExperimentRunner):
             notes=(f"快照 {snapshot.snapshot_id}；runner={self.name}；"
                    f"再平衡 {summary['n_rebalances']} 次"))
         outcome.verdict = derive_verdict(plan, outcome)
+        mark_result_verdicts(plan, outcome)
         return outcome
 
     def _compute(self, plan: ExperimentPlan) -> tuple[list[dict], dict]:
