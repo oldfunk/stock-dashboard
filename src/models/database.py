@@ -3,6 +3,7 @@ SQLite 本地存储，无外部依赖
 """
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,7 +30,17 @@ def _warn_unsupported_code(code) -> None:
 
 
 def get_db_path() -> str:
-    """获取数据库文件路径"""
+    """获取数据库文件路径。
+
+    环境变量 ``STOCK_DASHBOARD_DB`` 可覆盖（2026-11-12）：研究线/测试要跑在
+    **合成库**上时，不必等真实采集，也不许碰生产库。例：
+        STOCK_DASHBOARD_DB=data/db/stock_dashboard_synthetic.db python -m src.research.experiment run E-H001
+    """
+    env = os.environ.get("STOCK_DASHBOARD_DB")
+    if env:
+        p = Path(env)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return str(p)
     db_dir = Path(__file__).parent.parent.parent / "data" / "db"
     db_dir.mkdir(parents=True, exist_ok=True)
     return str(db_dir / "stock_dashboard.db")
