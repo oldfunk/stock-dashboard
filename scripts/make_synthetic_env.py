@@ -126,13 +126,18 @@ def build(out_path: Path, n_stocks: int = 100, seed: int = 42,
                      close, close, 1e9, "A", f"CN:{code}", close))
                 price = close
 
-        # ── benchmark_daily ──
+        # ── benchmark_daily：双基准（sh000300 + sh000922，Q4 基准邻域要用）──
         b = 4000.0
+        b2 = 9000.0
         for d in days:
             b *= (1 + rng.gauss(0.0003, 0.010))
+            b2 *= (1 + rng.gauss(0.0002, 0.012))
             conn.execute(
                 "INSERT OR REPLACE INTO benchmark_daily (code, trade_date, close)"
                 " VALUES (?,?,?)", ("sh000300", d, round(b, 2)))
+            conn.execute(
+                "INSERT OR REPLACE INTO benchmark_daily (code, trade_date, close)"
+                " VALUES (?,?,?)", ("sh000922", d, round(b2, 2)))
 
         # ── market_state_daily ──
         for d in days:
@@ -198,28 +203,36 @@ def build(out_path: Path, n_stocks: int = 100, seed: int = 42,
                  "2026-11-12"))
 
         # ── analysis_outcome（核心）：bake 已知 MOS->超额关系 ──
+        # 双基准各一份（sh000300 / sh000922），Q4 的基准邻域才跑得起来
         analysis_days = days[120::3]           # 2025 年中起，每隔 3 个交易日
         aid = 1
         for d in analysis_days:
-            bench = {"20": rng.gauss(0, 4), "60": rng.gauss(0, 6), "120": rng.gauss(0, 8)}
+            bench_maps = {
+                "sh000300": {"20": rng.gauss(0, 4), "60": rng.gauss(0, 6),
+                             "120": rng.gauss(0, 8)},
+                "sh000922": {"20": rng.gauss(0, 5), "60": rng.gauss(0, 7),
+                             "120": rng.gauss(0, 9)},
+            }
             for k in range(20):
                 code, name, ex = codes[(aid + k) % n_stocks]
                 mos = rng.uniform(-20, 60)
-                row = {"analysis_id": aid, "benchmark_code": "sh000300",
-                       "stock_code": code, "stock_name": name, "analysis_date": d,
-                       "signal": "BUY", "confidence": "中", "verdict": "通过",
-                       "entry_date": d, "entry_price": 10.0, "mos_at_entry": round(mos, 2)}
-                for h, (base, slope, sd) in true_excess.items():
-                    ex_ret = base + slope * mos + rng.gauss(0, sd)
-                    row[f"excess_{h}"] = round(ex_ret, 4)
-                    row[f"ret_{h}"] = round(bench[h] + ex_ret, 4)
-                    row[f"bench_{h}"] = round(bench[h], 4)
-                row["updated_at"] = d + "T16:00:00"
-                cols = ", ".join(row)
-                q = ",".join("?" * len(row))
-                conn.execute(
-                    f"INSERT OR REPLACE INTO analysis_outcome ({cols}) VALUES ({q})",
-                    list(row.values()))
+                for bcode, bmap in bench_maps.items():
+                    row = {"analysis_id": aid, "benchmark_code": bcode,
+                           "stock_code": code, "stock_name": name,
+                           "analysis_date": d, "signal": "BUY", "confidence": "中",
+                           "verdict": "通过", "entry_date": d, "entry_price": 10.0,
+                           "mos_at_entry": round(mos, 2)}
+                    for h, (base, slope, sd) in true_excess.items():
+                        ex_ret = base + slope * mos + rng.gauss(0, sd)
+                        row[f"excess_{h}"] = round(ex_ret, 4)
+                        row[f"ret_{h}"] = round(bmap[h] + ex_ret, 4)
+                        row[f"bench_{h}"] = round(bmap[h], 4)
+                    row["updated_at"] = d + "T16:00:00"
+                    cols = ", ".join(row)
+                    q = ",".join("?" * len(row))
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO analysis_outcome ({cols}) VALUES ({q})",
+                        list(row.values()))
                 aid += 1
 
     with db.db_conn() as conn:

@@ -164,6 +164,96 @@ def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
     return "supported"
 
 
+SENSITIVITY_TIER_DELTA = 10.0   # pp（Q4 裁定）
+
+
+def sensitivity_neighbors(plan: "ExperimentPlan") -> list[tuple[str, dict]]:
+    """参数敏感性邻域（Q4 裁定）：tier ±10pp / horizon ±10 天 / 基准换 sh000922。
+
+    返回 ``[(标签, 参数覆盖)]``；``__benchmark__`` 是保留键（换基准要改 plan 的
+    benchmark 字段本身，不只是 params）。调用方据此跑邻域、看主判据符号是否翻转。
+    """
+    p = dict(plan.params or {})
+    out: list[tuple[str, dict]] = []
+    tiers = p.get("tiers")
+    if tiers:
+        for delta in (-SENSITIVITY_TIER_DELTA, SENSITIVITY_TIER_DELTA):
+            shifted = [[lab, (lo + delta if lo is not None else None),
+                        (hi + delta if hi is not None else None)]
+                       for lab, lo, hi in tiers]
+            q = dict(p)
+            q["tiers"] = shifted
+            out.append((f"tier{delta:+g}pp", q))
+    # horizon：analysis_outcome 只存 20/60/120 三档，±10 天没有对应列可算，
+    # 所以邻域取"邻近的可用 horizon"（调用方也可用 params.available_horizons 覆盖）
+    available = p.get("available_horizons") or [20, 60, 120]
+    for h in (p.get("horizons") or []):
+        for alt in available:
+            if int(alt) != int(h):
+                q = dict(p)
+                q["horizons"] = [int(alt)]
+                out.append((f"horizon{alt}d", q))
+    bench = plan.benchmark or p.get("benchmark")
+    if bench:
+        alt = "sh000922" if bench == "sh000300" else "sh000300"
+        out.append((f"benchmark_{alt}", {"__benchmark__": alt}))
+    return out
+
+
+def _retarget_metric(metric: str | None, horizon: int) -> str | None:
+    """horizon 变了以后，metric 名里的 `{net|excess|ret}_{h}` 段要跟着变。
+
+    否则邻域跑出来还是找 ``net_60_...``，新 horizon 的结果根本对不上号
+    （2026-11-12 合成库实证：horizon50/70 全 null）。
+    """
+    import re
+    if not metric:
+        return metric
+    return re.sub(r"\b(net|excess|ret)_\d+",
+                  lambda m: f"{m.group(1)}_{horizon}", metric)
+
+
+def _apply_neighbor(plan: "ExperimentPlan", overrides: dict) -> "ExperimentPlan":
+    """把邻域的参数覆盖应用成一份新 plan（不动原 plan）。"""
+    d = plan.to_dict()
+    params = dict(d.get("params") or {})
+    params.update({k: v for k, v in (overrides or {}).items()
+                   if k != "__benchmark__"})
+    d["params"] = params
+    if overrides.get("__benchmark__"):
+        d["benchmark"] = overrides["__benchmark__"]
+    horizons = params.get("horizons") or []
+    if len(horizons) == 1:
+        d["metric"] = _retarget_metric(d.get("metric"), int(horizons[0]))
+    return ExperimentPlan(**d)
+
+
+def run_sensitivity(plan: "ExperimentPlan",
+                    run_one, base_outcome: "ExperimentOutcome | None" = None) -> dict:
+    """跑参数敏感性邻域：**主判据符号翻转即不晋升**（Q4 裁定）。
+
+    ``run_one(plan) -> ExperimentOutcome`` 由调用方给（通常是 runner.run）；
+    本函数只管生成邻域、逐跑、比对符号，不碰数据库。
+    """
+    base = (base_outcome.metric_values().get(plan.metric)
+            if base_outcome is not None else None)
+    base_sign = (base > 0) - (base < 0) if base is not None else 0
+    rows, flipped = [], False
+    for label, overrides in sensitivity_neighbors(plan):
+        q = _apply_neighbor(plan, overrides)
+        outcome = run_one(q)
+        v = outcome.metric_values().get(q.metric)
+        sign = (v > 0) - (v < 0) if v is not None else 0
+        row_flip = bool(sign and base_sign and sign != base_sign)
+        flipped = flipped or row_flip
+        rows.append({"label": label, "metric": q.metric, "value": v,
+                     "sign": sign, "verdict": outcome.verdict,
+                     "flipped": row_flip})
+    return {"base_metric": plan.metric, "base_value": base,
+            "base_sign": base_sign, "rows": rows,
+            "sign_flipped": flipped, "robust": not flipped}
+
+
 def bonferroni_confidence(plan: "ExperimentPlan", base: float = 0.95) -> float:
     """Q2：同实验指标族内的 Bonferroni 校正置信度。
 
@@ -372,7 +462,8 @@ def _load_outcomes(start_date: str, end_date: str,
     # 的分母与实到样本还会不一致。代价是放弃 idx_analysis_outcome_date
     # （产线 780 行；一次扫描远便宜于 block bootstrap）。
     sql = ("SELECT stock_code, analysis_date, signal, confidence, "
-           "mos_at_entry, ret_20, ret_60, excess_20, excess_60 "
+           "mos_at_entry, ret_20, ret_60, ret_120, "
+           "excess_20, excess_60, excess_120 "
            "FROM analysis_outcome"
            " WHERE SUBSTR(analysis_date, 1, 10) BETWEEN ? AND ?")
     params: list = [start_date, end_date]
@@ -951,6 +1042,14 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--runner", default=None,
                        choices=["outcome_event_study", "topk_backtest"],
                        help="缺省按 dataset 推断（analysis_outcome→outcome_event_study）")
+
+    p_sens = sub.add_parser(
+        "sensitivity",
+        help="参数敏感性邻域（Q4：主判据符号翻转即不晋升）")
+    p_sens.add_argument("experiment_id")
+    p_sens.add_argument("--runner", default=None,
+                        choices=["outcome_event_study", "topk_backtest"],
+                        help="缺省按 dataset 推断")
     p_run.add_argument("--thresholds", default=None,
                        help="质量门阈值覆盖 JSON（缺省用数据集默认）")
 
@@ -1030,6 +1129,21 @@ def main(argv: list[str] | None = None) -> int:
         outcome = run_experiment(runner, plan, dao, thresholds)
         print(json.dumps(outcome.to_dict(), ensure_ascii=False,
                          indent=2, default=str))
+    elif args.cmd == "sensitivity":
+        row = dao.get_experiment(args.experiment_id)
+        if row is None:
+            raise ExperimentError(f"实验不存在: {args.experiment_id}")
+        plan = ExperimentPlan(**row["plan"])
+        runner_name = args.runner or (
+            "outcome_event_study" if plan.dataset == "analysis_outcome"
+            else "topk_backtest")
+        runner = {"outcome_event_study": OutcomeEventStudyRunner(),
+                  "topk_backtest": TopKBacktestRunner()}[runner_name]
+        snapshot = verify_snapshot(plan.data_snapshot_id)
+        base_outcome = runner.run(plan, snapshot)
+        res = run_sensitivity(plan, lambda p: runner.run(p, snapshot),
+                              base_outcome=base_outcome)
+        print(json.dumps(res, ensure_ascii=False, indent=2, default=str))
     return 0
 
 
