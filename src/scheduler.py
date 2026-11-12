@@ -363,7 +363,11 @@ class MarketScheduler:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
     def _check_weekly_data_refresh(self):
-        """周六维护：刷新年报分红 + 基准日线 + 分析前向收益。
+        """周六维护：刷新年报分红 + 交易日历未来段 + 基准日线 + 分析前向收益
+        + 深层字段全量（批19-b）。
+
+        到点时刻取自 ``outcomes.refresh_weekday`` / ``refresh_time``（默认周六 09:00），
+        深层字段段没有自己的时点，跟着这一班车走。
 
         价值投资不需要实时：每周一次足够；重复执行幂等（已冻结的收益不重算）。
 
