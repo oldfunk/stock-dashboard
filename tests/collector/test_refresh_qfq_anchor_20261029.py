@@ -169,8 +169,10 @@ def test_pending_codes_only_covers_codes_with_rows_in_window(db):
         "low": 9.0, "volume": 1.0, "amount": 1.0}])
     with db_mod.db_conn() as conn:
         assert pending_codes(conn, END, days=30) == ["600519"]
-        # 窗口拉到覆盖到 08-01，两只都该进来
-        assert pending_codes(conn, END, days=90) == ["000001", "600519"]
+        # 窗口拉到覆盖到 08-01，两只都该进来。
+        # 批20-b 起排序改成"漂移优先"（多锚点先修），本用例钉的是**资格**不是顺序，
+        # 故用 sorted；顺序契约由 test_qfq_anchor_rhythm_20261112.py 单独钉。
+        assert sorted(pending_codes(conn, END, days=90)) == ["000001", "600519"]
 
 
 def test_run_on_empty_db_reports_no_anchor(db):

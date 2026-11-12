@@ -363,11 +363,15 @@ class MarketScheduler:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
     def _check_weekly_data_refresh(self):
-        """周六维护：刷新年报分红 + 交易日历未来段 + 基准日线 + 分析前向收益
-        + 深层字段全量（批19-b）。
+        """周六维护：刷新年报分红 + 交易日历未来段 + qfq 锚点重锚 + 基准日线
+        + 分析前向收益 + 深层字段全量（批19-b）。
 
         到点时刻取自 ``outcomes.refresh_weekday`` / ``refresh_time``（默认周六 09:00），
-        深层字段段没有自己的时点，跟着这一班车走。
+        qfq 重锚与深层字段段没有自己的时点，跟着这一班车走。
+
+        顺序有讲究（批20-b）：分红 → 日历 → **qfq 重锚** → 前向收益 → 深层字段。
+        分红会移动前复权锚点，所以重锚排在分红之后；前向收益用 close 算且算出即冻结，
+        所以重锚必须排在它之前。深层字段最贵，放最后，不拖前面几件的时点。
 
         价值投资不需要实时：每周一次足够；重复执行幂等（已冻结的收益不重算）。
 
@@ -417,6 +421,19 @@ class MarketScheduler:
                 logger.info(f"[调度器] 交易日历维护: {cal.get('future')}")
             except Exception as e:
                 logger.warning(f"[调度器] 交易日历维护失败: {e}")
+            # qfq 锚点重锚（批20-b）：必须排在 refresh_outcomes **之前**——前向收益
+            # 用 kline 的 close 算（analyzer/outcomes.py）且算出即冻结不重算，
+            # 先把价格口径统一到本窗口锚点，新冻结的收益才不会带批次台阶。
+            # 限量/限时/进度表续跑（config: qfq_anchor），慢活有上限。
+            try:
+                from src.collector.qfq_anchor import run_weekly_qfq_anchor
+                qfq = run_weekly_qfq_anchor(cfg)
+                logger.info(f"[调度器] qfq 锚点重锚: 锚点 {qfq.get('anchor')}，"
+                            f"重锚 {qfq.get('done')} 只 / partial {qfq.get('partial')}"
+                            f" / 源不支持 {qfq.get('skipped_unsupported')}，"
+                            f"剩余 {qfq.get('remaining')} 只")
+            except Exception as e:
+                logger.warning(f"[调度器] qfq 锚点重锚失败: {e}")
             if out_cfg.get('enabled', True):
                 try:
                     from src.outcome_service import refresh_benchmarks, refresh_outcomes

@@ -34,8 +34,8 @@ if str(PROJ) not in sys.path:
 from src.models.database import init_database  # noqa: E402
 # 逻辑已上移 src 层（批20-a）；保留同名导入使旧引用与单测不破
 from src.collector.qfq_anchor import (  # noqa: E402,F401
-    TASK, existing_window_rows, merge_with_existing, pending_codes,
-    refresh_code, run, window_end, window_start,
+    TASK, existing_window_rows, merge_with_existing, pending_codes, pending_rows,
+    refresh_code, run, run_weekly_qfq_anchor, window_end, window_start,
 )
 
 
@@ -45,10 +45,15 @@ def main(argv=None) -> int:
                     help="窗口天数（自然日），默认 90")
     ap.add_argument("--codes", default=None,
                     help="逗号分隔代码；显式指定即必跑（不查进度表）")
-    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--limit", type=int, default=None,
+                    help="本次最多几只（漂移优先排序）；缺省=目标集全跑")
     ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--sleep", type=float, default=1.0,
                     help="每只之间的间隔秒（限流），默认 1.0")
+    ap.add_argument("--max-seconds", type=float, default=0.0,
+                    help="本次时间预算（秒），到点即停、下次续跑；0=不限时")
+    ap.add_argument("--max-consecutive-failures", type=int, default=5,
+                    help="连续失败几只即中止（防上游抽风把全市场标 partial）")
     ap.add_argument("--force", action="store_true",
                     help="忽略进度表，已重锚过的也重跑")
     ap.add_argument("--dry-run", action="store_true",
@@ -61,7 +66,8 @@ def main(argv=None) -> int:
         if args.codes else None
     result = run(days=args.days, codes=codes, dry_run=args.dry_run,
                  limit=args.limit, offset=args.offset, sleep=args.sleep,
-                 force=args.force)
+                 force=args.force, max_seconds=args.max_seconds,
+                 max_consecutive_failures=args.max_consecutive_failures)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result.get("partial", 0) == 0 else 1
 
