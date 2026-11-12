@@ -5,9 +5,12 @@
 本批把 CI 变成**预注册**字段：``exclude_zero`` 要求 CI 不覆盖 0 才 supported。
 """
 
+import pytest
+
 from src.research.domain import CI_RULES, ExperimentResult
 from src.research.experiment import (
-    ExperimentOutcome, ExperimentPlan, derive_verdict, mark_result_verdicts,
+    ExperimentOutcome, ExperimentPlan, bonferroni_confidence, derive_verdict,
+    mark_result_verdicts,
 )
 
 
@@ -100,3 +103,21 @@ def test_aux_metric_with_existing_notes_keeps_them():
     outcome.verdict = derive_verdict(plan, outcome)
     mark_result_verdicts(plan, outcome)
     assert outcome.results[1].notes == "分域明细", "已有 notes 不被覆盖"
+
+
+# ── Q2：同实验指标族内 Bonferroni 校正 ──────────────
+
+def test_bonferroni_default_is_uncorrected():
+    assert bonferroni_confidence(_plan()) == pytest.approx(0.95)
+
+
+def test_bonferroni_m8_tightens_confidence():
+    plan = _plan()
+    plan.params["bonferroni_m"] = 8
+    assert bonferroni_confidence(plan) == pytest.approx(1 - 0.05 / 8)
+
+
+def test_bonferroni_invalid_m_falls_back():
+    plan = _plan()
+    plan.params["bonferroni_m"] = "不是数字"
+    assert bonferroni_confidence(plan) == pytest.approx(0.95)

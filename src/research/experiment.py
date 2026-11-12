@@ -164,6 +164,22 @@ def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
     return "supported"
 
 
+def bonferroni_confidence(plan: "ExperimentPlan", base: float = 0.95) -> float:
+    """Q2：同实验指标族内的 Bonferroni 校正置信度。
+
+    ``params['bonferroni_m'] = m``（默认 1 = 不校正）。m 个指标同时看时，
+    单个 CI 的置信度要收紧到 ``1 - (1-base)/m``，族内的整体置信度才回到 base。
+    跨实验不合并（E-H001/E-H001b 是复跑，不是独立证据）。
+    """
+    try:
+        m = int(plan.params.get("bonferroni_m") or 1)
+    except (TypeError, ValueError):
+        m = 1
+    if m <= 1:
+        return base
+    return 1.0 - (1.0 - base) / m
+
+
 def mark_result_verdicts(plan: ExperimentPlan, outcome: ExperimentOutcome) -> None:
     """Q3：result 级 verdict 只填**预注册判据**那一条。
 
@@ -581,7 +597,8 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                 groups = [r["stock_code"] for r in sel]
                 mean = sum(values) / len(values)
                 ci_low, ci_high = block_bootstrap_ci(values, groups, n_boot,
-                                                     plan.random_seed)
+                                                     plan.random_seed,
+                                                     bonferroni_confidence(plan))
                 split_stats: dict[str, dict] = {}
                 for key in splits:
                     bucket: dict[str, list[float]] = {}
@@ -627,7 +644,8 @@ class OutcomeEventStudyRunner(ExperimentRunner):
                         vb = [v for vs in gb.values() for v in vs]
                         diff = sum(va) / len(va) - sum(vb) / len(vb)
                         d_lo, d_hi = _block_bootstrap_diff_ci(
-                            ga, gb, n_boot, plan.random_seed)
+                            ga, gb, n_boot, plan.random_seed,
+                            bonferroni_confidence(plan))
                         tag = f"net_{horizon}_{la}_vs_{lb}"
                         if net_regime:
                             tag += f"_{net_regime}"
