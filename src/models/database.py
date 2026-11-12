@@ -1492,6 +1492,48 @@ class FinancialHistoryDAO:
                     d[f].add(r['report_date'])
         return out
 
+    def get_report_dates(self, codes: list[str]) -> dict[str, list[str]]:
+        """批量返回每只股票库内**全部报告期**（新→旧）。
+
+        与 ``get_deep_field_dates`` 配对使用：后者给"哪些期已有深度字段"，
+        本方法给"这只票有哪些期"，两者一起才能判"近 N 期里有没有缺"
+        （批19-a 的 todo 判定）。一次查询取回，不在采集循环里逐只查。
+        """
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        out: dict[str, list[str]] = {}
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT stock_code, report_date FROM financial_history
+                    WHERE stock_code IN ({placeholders})
+                    ORDER BY stock_code, report_date DESC""",
+                codes,
+            ).fetchall()
+        for r in rows:
+            out.setdefault(r['stock_code'], []).append(r['report_date'])
+        return out
+
+    def get_backfill_marks(self, task: str, codes: list[str]) -> dict[str, dict]:
+        """批量取进度表标记 ``{code: {status, covered_report_date}}``。
+
+        增量采集用它做"同一报告期拉过就冷却"（母方 2026-11-05 EM 冷却裁定）：
+        上游确实供不出这个字段时，不冷却就会每天白拉同一只票。
+        """
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT code, status, covered_report_date
+                    FROM backfill_progress
+                    WHERE task = ? AND code IN ({placeholders})""",
+                [task, *codes],
+            ).fetchall()
+        return {r['code']: {'status': r['status'],
+                            'covered_report_date': r['covered_report_date']}
+                for r in rows}
+
 
 class FinancialSummaryDAO:
     """财务汇总快照 DAO"""

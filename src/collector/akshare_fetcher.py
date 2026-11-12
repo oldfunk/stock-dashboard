@@ -737,6 +737,41 @@ def _em_sheets_needed(report_dates: list[str], filled: dict[str, set],
             any(d not in (filled.get(cf_field) or set()) for d in recent))
 
 
+# 进度表任务名：增量"同一报告期拉过就冷却"的标记（母方 2026-11-05 EM 冷却裁定）。
+# 与 financial_extra / financial_full 等回填任务分开，互不影响各自的目标集。
+EM_DEEP_TASK = "em_deep_gap"
+
+
+def _mark_deep_progress(dao, code: str, records: list[dict],
+                        filled: dict[str, set], fetch_failed: bool) -> str:
+    """把"这次拉完深度字段还缺不缺"记进进度表，返回记录的 status。
+
+    为什么必须有冷却（批19-a 取证）：东财利润表的 ``INTEREST_EXPENSE`` 对
+    **非金融股恒为 NaN**（产线实测 605259 0/31 期、000983 0/108 期），所以
+    ``op / abs(ie)`` 这句算不出 ic，拉多少次都一样。19-a 把"近 8 期缺字段"
+    纳入 todo 之后，771 只候选会**全部**入选（实测 0 → 771），不冷却就是
+    每天 2313 个白请求，且缺口永不闭合。
+
+    status 语义（与 ``backfill_progress`` 既有口径一致）：
+    - ``partial``：这次有请求失败 → 不冷却，明天重试（网络问题不是"上游没有"）；
+    - ``no_data``：请求成功但字段仍缺 → 冷却到**新报告期**出现为止；
+    - ``done``：近窗口字段补齐。
+    ``covered_report_date`` 取本次写到的最新报告期，新期一到自动重新入选。
+    """
+    got = {f: set(filled.get(f) or ()) for f in EM_DEEP_FIELDS}
+    for rec in records:
+        for f in EM_DEEP_FIELDS:
+            if rec.get(f) is not None:
+                got[f].add(rec['report_date'])
+    still_missing = any(_em_sheets_needed(
+        [r['report_date'] for r in records], got))
+    status = "partial" if fetch_failed else ("no_data" if still_missing else "done")
+    dao.mark_backfill_done(
+        EM_DEEP_TASK, code, len(records), status,
+        covered_report_date=max(r['report_date'] for r in records))
+    return status
+
+
 def collect_historical_financial_data(all_stocks: list[dict],
                                       force_full: bool = False,
                                       incremental_days: int = 60) -> dict:
@@ -754,27 +789,56 @@ def collect_historical_financial_data(all_stocks: list[dict],
 
     dao = FinancialHistoryDAO()
     today = datetime.now()
+    filled_all: dict[str, dict[str, set]] = {}
+    stale_added = gap_added = gap_cooled = 0
 
     if force_full:
         todo = all_stocks
         logger.info("[历史财务] 强制全量采集模式")
     else:
-        # 每日增量模式：没有历史数据，或最新报告期过旧的股票
+        # 每日增量模式：没有历史数据、最新报告期过旧、或近窗口深层字段仍缺的股票
         codes = [s['code'] for s in all_stocks]
         latest_dates = dao.get_latest_report_dates(codes)
+        # 批19-a：判"近 EM_DEEP_WINDOW 期缺不缺字段"要的两份集合都在这里一次
+        # 批量取回（产线候选池 771 只，逐只查就是 771 次 SQL）。同一份 filled_all
+        # 稍后直接喂给循环内的两张表开关，不再重复查一遍。
+        filled_all = dao.get_deep_field_dates(codes, EM_DEEP_FIELDS)
+        periods_all = dao.get_report_dates(codes)
+        cooled = dao.get_backfill_marks(EM_DEEP_TASK, codes)
         todo = []
         for s in all_stocks:
             code = s['code']
             latest = latest_dates.get(code)
             if not latest:
+                stale_added += 1
                 todo.append(s)
                 continue
             try:
                 latest_dt = datetime.strptime(latest, "%Y-%m-%d")
-                if (today - latest_dt).days > incremental_days:
-                    todo.append(s)
+                stale = (today - latest_dt).days > incremental_days
             except Exception:
+                stale = True
+            if stale:
+                stale_added += 1
                 todo.append(s)
+                continue
+            # 报告期够新，但近 8 期里 ic/fcf 还缺 → 也要拉。判据复用
+            # _em_sheets_needed：与循环内"要不要发这两张表"是同一份逻辑，
+            # 不会出现"入选了却两张表都跳过"的空转。
+            if not any(_em_sheets_needed(periods_all.get(code, []),
+                                         filled_all.get(code, {}))):
+                continue
+            mark = cooled.get(code)
+            if (mark and mark['status'] in ('done', 'no_data')
+                    and (mark['covered_report_date'] or '') >= latest):
+                gap_cooled += 1
+                continue
+            gap_added += 1
+            todo.append(s)
+        logger.info(
+            f"[历史财务] 增量入选：无历史/报告期过旧 {stale_added} 只、"
+            f"近 {EM_DEEP_WINDOW} 期深层字段缺失 {gap_added} 只"
+            f"（同一报告期已拉过、冷却跳过 {gap_cooled} 只）")
 
     if not todo:
         logger.info("[历史财务] 全部候选股已有近期历史数据，跳过")
@@ -782,9 +846,8 @@ def collect_historical_financial_data(all_stocks: list[dict],
 
     logger.info(f"[历史财务] AKShare 逐只采集 {len(todo)} 只（全量={force_full}）...")
     collected = {}
-    # 增量判定要的"哪些报告期已经有东财深度字段"，一次批量读，不在循环里逐只查
-    filled_map = {} if force_full else dao.get_deep_field_dates(
-        [s['code'] for s in todo], EM_DEEP_FIELDS)
+    # 增量判定要的"哪些报告期已经有东财深度字段"，上面已一次批量读好
+    filled_map = {} if force_full else filled_all
     skipped_ps = skipped_cf = 0
 
     for idx, s in enumerate(todo):
@@ -852,6 +915,7 @@ def collect_historical_financial_data(all_stocks: list[dict],
             need_ps, need_cf = ((True, True) if force_full else _em_sheets_needed(
                 [rec['report_date'] for rec in records], filled_map.get(code, {})))
             df_ps = df_cf = None
+            ps_failed = cf_failed = False
             if need_ps:
                 try:
                     df_ps = ak.stock_profit_sheet_by_report_em(
@@ -859,6 +923,7 @@ def collect_historical_financial_data(all_stocks: list[dict],
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"[历史财务] {code} 东财利润表失败: {e}")
                     df_ps = None
+                    ps_failed = True
             else:
                 skipped_ps += 1
             if need_cf:
@@ -868,6 +933,7 @@ def collect_historical_financial_data(all_stocks: list[dict],
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"[历史财务] {code} 东财现金流量表失败: {e}")
                     df_cf = None
+                    cf_failed = True
             else:
                 skipped_cf += 1
 
@@ -1022,6 +1088,10 @@ def collect_historical_financial_data(all_stocks: list[dict],
                 dao.batch_save(deduped)
                 collected[code] = True
                 logger.info(f"[历史] {code} {s.get('name','')}: {len(deduped)} 期")
+                # 冷却标记：这次拉完还缺不缺（见 _mark_deep_progress）。
+                # 骨架没出数时不标记——那是"这次没取到"，不是"上游没有"，明天该重试。
+                _mark_deep_progress(dao, code, deduped, filled_map.get(code, {}),
+                                    ps_failed or cf_failed)
             else:
                 logger.warning(f"[历史] {code}: 无数据")
 
