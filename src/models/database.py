@@ -1295,6 +1295,57 @@ class FinancialHistoryDAO:
                 touched += cur.rowcount
         return touched
 
+    def targets_missing_deep_fields(self, fields: tuple, window: int,
+                                    limit: int | None = None, offset: int = 0,
+                                    task: str | None = None,
+                                    retry_no_data: bool = False,
+                                    retry_partial: bool = False) -> list[tuple]:
+        """``[(股票代码, 最新报告期)]``——近 ``window`` 期里 ``fields`` 仍有 NULL 的股票。
+
+        窗口口径与采集侧 ``_em_sheets_needed`` 一致（都只看最近 window 个报告期，
+        老期缺口不绑架请求）；差别只在**不看冷却**：周六全量重拉就是给平日拉不上
+        的股票再一次机会（批19-b）。``window<=0`` 钳到 1 期，与批17-a H3 建议①同规矩。
+
+        ``fields`` 由调用方传（采集侧 ``EM_DEEP_FIELDS`` 单一来源）；列名要拼进 SQL，
+        所以逐个过 ``DEEP_FIELD_COLUMNS`` 白名单（批8 P1-2）。
+        """
+        unknown = [f for f in fields if f not in self.DEEP_FIELD_COLUMNS]
+        if unknown:
+            raise ValueError(f"非白名单深度字段：{unknown}")
+        cols = ", ".join(fields)
+        having = " OR ".join(f"SUM({f} IS NULL) > 0" for f in fields)
+        sql = f"""
+            WITH ranked AS (
+                SELECT stock_code, report_date, {cols},
+                       ROW_NUMBER() OVER (PARTITION BY stock_code
+                                          ORDER BY report_date DESC) AS rn
+                FROM financial_history)
+            SELECT stock_code, MAX(report_date) AS latest FROM ranked
+            WHERE rn <= ?"""
+        params: list = [max(1, int(window))]
+        if task:
+            skip = ["done"]
+            if not retry_no_data:
+                skip.append("no_data")
+            if not retry_partial:
+                skip.append("partial")
+            marks = ", ".join("?" for _ in skip)
+            sql += (" AND NOT EXISTS (SELECT 1 FROM backfill_progress p"
+                    " WHERE p.task = ? AND p.code = ranked.stock_code"
+                    f" AND p.status IN ({marks})"
+                    " AND COALESCE(p.covered_report_date, '') >="
+                    " (SELECT MAX(f2.report_date) FROM financial_history f2"
+                    "  WHERE f2.stock_code = ranked.stock_code))")
+            params.append(task)
+            params.extend(skip)
+        sql += f" GROUP BY stock_code HAVING {having} ORDER BY stock_code"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += [limit, offset]
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [(r["stock_code"], r["latest"]) for r in rows]
+
     def targets_missing_interest_coverage(self, limit: int | None = None,
                                           offset: int = 0, task: str | None = None,
                                           retry_no_data: bool = False,
