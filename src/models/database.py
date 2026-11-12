@@ -611,6 +611,8 @@ def init_database():
         # 已有库靠这两条 ALTER。
         _add_column_if_not_exists(conn, 'research_experiment', 'verdict', 'TEXT')
         _add_column_if_not_exists(conn, 'research_experiment', 'notes', 'TEXT')
+        # 批18-b/Q1：CI 判据预注册字段（老库补列；缺省 'none' 在 INSERT 侧给）
+        _add_column_if_not_exists(conn, 'research_hypothesis', 'ci_rule', 'TEXT')
         # 注：2026-09-15 的 M4a 纸盘列守卫已随路线调整删除（表不再建，守卫会 crash 新库）。
     print(f"[DB] 数据库初始化完成: {get_db_path()}")
 

@@ -228,6 +228,10 @@ class MarketState:
         )
 
 
+# CI 判据（预注册字段）：none = 只看轴估计；exclude_zero = CI 不覆盖 0 才 supported
+CI_RULES = ("none", "exclude_zero")
+
+
 @dataclass
 class Hypothesis:
     id: str
@@ -244,6 +248,7 @@ class Hypothesis:
     costs: dict[str, float]
     kill_criteria: list[str]
     status: str
+    ci_rule: str = "none"          # none | exclude_zero（预注册，锁定后不可改）
     owner: str = "human"
     created_at: str = ""
     locked_at: str = ""

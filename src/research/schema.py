@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS research_hypothesis (
     benchmark     TEXT,
     metric        TEXT,
     threshold     TEXT,
+    ci_rule       TEXT,                          -- none | exclude_zero（批18-b/Q1 裁定）
     regimes_json  TEXT,
     costs_json    TEXT,
     kill_criteria_json TEXT,

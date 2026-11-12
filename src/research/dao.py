@@ -39,14 +39,15 @@ class ResearchDAO:
             conn.execute("""
                 INSERT OR REPLACE INTO research_hypothesis
                 (id, version, prior, statement, universe, signal_json, horizon_days,
-                 benchmark, metric, threshold, regimes_json, costs_json,
+                 benchmark, metric, threshold, ci_rule, regimes_json, costs_json,
                  kill_criteria_json, status, owner, created_at, locked_at,
                  review_date, supersedes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 d["id"], d.get("version", 1), d.get("prior"), d.get("statement"),
                 d.get("universe"), _dumps(d.get("signal")), d.get("horizon_days"),
                 d.get("benchmark"), d.get("metric"), d.get("threshold"),
+                d.get("ci_rule", "none"),
                 _dumps(d.get("regimes")), _dumps(d.get("costs")),
                 _dumps(d.get("kill_criteria")), d.get("status"), d.get("owner", "human"),
                 d.get("created_at") or now_cn().isoformat(), d.get("locked_at"),

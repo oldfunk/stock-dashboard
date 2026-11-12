@@ -39,7 +39,7 @@ from typing import Any
 from src.models.database import db_conn, now_cn
 from src.research.dao import ResearchDAO
 from src.research.domain import (
-    Experiment, ExperimentResult, ExperimentStatus, next_id,
+    CI_RULES, Experiment, ExperimentResult, ExperimentStatus, next_id,
 )
 from src.research.quality import assess_dataset, evaluate, record_quality
 from src.research.snapshot import SnapshotManifest, verify_snapshot
@@ -62,6 +62,7 @@ class ExperimentPlan:
     metric: str
     threshold: str
     horizon_days: int
+    ci_rule: str = "none"          # none | exclude_zero；默认不看 CI，预注册可要求看
     regimes: list[str] = field(default_factory=list)
     costs: dict[str, float] = field(default_factory=dict)
     random_seed: int = 42
@@ -125,8 +126,22 @@ def _compare(value: float, threshold: str) -> bool | None:
     return None
 
 
+def _ci_covers_zero(ci_low: float | None, ci_high: float | None) -> bool | None:
+    """CI 是否覆盖 0；任一端缺失返回 None（未计算，不能声称"不覆盖"）。"""
+    if ci_low is None or ci_high is None:
+        return None
+    return ci_low <= 0.0 <= ci_high
+
+
 def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
-    """按计划的 metric/threshold 判定结论；数据不足或阈值不可解析 -> inconclusive。"""
+    """按计划的 metric/threshold 判定结论；数据不足或阈值不可解析 -> inconclusive。
+
+    ``ci_rule='exclude_zero'``（Q1 裁定，批18-b）：点估计满足阈值**且** CI 不覆盖 0
+    才判 supported；CI 覆盖 0 时判 inconclusive——这种结果排除不了"没有效果"，
+    落进 supported 正是 2026-11-12 合成库演示的缺陷（零关系库 CI [-0.38,1.16]
+    覆盖 0，旧逻辑仍给 supported）。``none``（默认）保持原语义：只看轴估计，
+    不让新老实验口径分叉。
+    """
     values = outcome.metric_values()
     if plan.metric not in values:
         return "inconclusive"
@@ -135,7 +150,18 @@ def derive_verdict(plan: ExperimentPlan, outcome: ExperimentOutcome) -> str:
     ok = _compare(values[plan.metric], plan.threshold)
     if ok is None:
         return "inconclusive"
-    return "supported" if ok else "rejected"
+    if not ok:
+        return "rejected"
+    rule = (plan.ci_rule or "none").strip() or "none"
+    if rule == "exclude_zero":
+        r = next((x for x in outcome.results if x.metric == plan.metric), None)
+        covers = _ci_covers_zero(getattr(r, "ci_low", None),
+                                 getattr(r, "ci_high", None))
+        if covers is None:
+            return "inconclusive"       # 没 CI 就不能声称"不覆盖 0"
+        if covers:
+            return "inconclusive"
+    return "supported"
 
 
 def inconclusive_reason(plan: ExperimentPlan, outcome: "ExperimentOutcome") -> str:
@@ -865,6 +891,9 @@ def main(argv: list[str] | None = None) -> int:
     p_create.add_argument("--benchmark", default="sh000300")
     p_create.add_argument("--metric", required=True, help="主指标名")
     p_create.add_argument("--threshold", required=True, help='判定阈值，如 ">0"')
+    p_create.add_argument("--ci-rule", default=None, choices=sorted(CI_RULES),
+                          help="CI 判据（预注册）：none=只看轴估计（默认）；"
+                               "exclude_zero=CI 不覆盖 0 才判 supported")
     p_create.add_argument("--horizon-days", type=int, required=True)
     p_create.add_argument("--regimes", default="all",
                           help="分域，逗号分隔（如 risk_on,neutral）")
@@ -912,11 +941,14 @@ def main(argv: list[str] | None = None) -> int:
         eid = args.id or next_id("E", now_cn().strftime("%Y-%m-%d"), existing)
         if eid in existing:
             raise ExperimentError(f"实验已存在（预注册不可覆盖）: {eid}")
+        # ci_rule 是预注册字段：显式 --ci-rule 优先，否则继承假设锁定的预注册值
+        hyp_row = dao.get_hypothesis(args.hypothesis) or {}
+        ci_rule = args.ci_rule or hyp_row.get("ci_rule") or "none"
         plan = ExperimentPlan(
             experiment_id=eid, hypothesis_id=args.hypothesis,
             data_snapshot_id=args.snapshot, dataset=args.dataset,
             universe=args.universe, benchmark=args.benchmark,
-            metric=args.metric, threshold=args.threshold,
+            metric=args.metric, threshold=args.threshold, ci_rule=ci_rule,
             horizon_days=args.horizon_days, regimes=regimes,
             costs=_parse_json_arg(args.costs, "costs"),
             random_seed=args.seed,

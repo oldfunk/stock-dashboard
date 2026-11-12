@@ -61,6 +61,7 @@ run(["-m", "src.research.experiment", "create",
      "--id", "E-SYN", "--hypothesis", "H-SYN", "--snapshot", ds_id,
      "--dataset", "analysis_outcome", "--universe", "A", "--benchmark", "sh000300",
      "--metric", "net_60_>=40_vs_<=0_risk_off", "--threshold", ">0",
+     "--ci-rule", "exclude_zero",
      "--horizon-days", "60", "--regimes", "all", "--costs", "{}",
      "--params", json.dumps({
          "start_date": "2025-07-01", "end_date": "2026-08-31",

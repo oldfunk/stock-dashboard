@@ -24,7 +24,7 @@ from typing import Any
 from src.models.database import db_conn, now_cn
 from src.research.dao import ResearchDAO
 from src.research.domain import (
-    Hypothesis, next_id, validate_transition,
+    CI_RULES, Hypothesis, next_id, validate_transition,
 )
 from src.research.registry import HypothesisRegistry
 
@@ -98,7 +98,7 @@ class HypothesisService:
                horizon_days: int, benchmark: str, metric: str, threshold: str,
                regimes: list[str], costs: dict, kill_criteria: list[str],
                hypothesis_id: str | None = None, review_date: str = "",
-               owner: str = "human") -> dict:
+               owner: str = "human", ci_rule: str = "none") -> dict:
         with db_conn() as conn:
             existing = [r["id"] for r in conn.execute(
                 "SELECT id FROM research_hypothesis")]
@@ -106,8 +106,8 @@ class HypothesisService:
         hypothesis = Hypothesis(
             id=hid, version=1, prior=prior, statement=statement, universe=universe,
             signal=signal, horizon_days=horizon_days, benchmark=benchmark,
-            metric=metric, threshold=threshold, regimes=regimes, costs=costs,
-            kill_criteria=kill_criteria, status="draft", owner=owner,
+            metric=metric, threshold=threshold, ci_rule=ci_rule, regimes=regimes,
+            costs=costs, kill_criteria=kill_criteria, status="draft", owner=owner,
             review_date=review_date)
         assert_hypothesis_readable(
             {"statement": statement, "prior": prior,
@@ -196,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     p_create.add_argument("--benchmark", default="sh000300")
     p_create.add_argument("--metric", default="excess")
     p_create.add_argument("--threshold", default=">0")
+    p_create.add_argument("--ci-rule", default="none", choices=sorted(CI_RULES),
+                          help="CI 判据（预注册）：none / exclude_zero")
     p_create.add_argument("--regimes", default="all")
     p_create.add_argument("--costs", default="{}")
     p_create.add_argument("--kill-criteria", default="")
@@ -221,7 +223,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark=args.benchmark, metric=args.metric, threshold=args.threshold,
             regimes=_parse_list(args.regimes), costs=_parse_json(args.costs),
             kill_criteria=_parse_list(args.kill_criteria),
-            hypothesis_id=args.id, review_date=args.review_date)
+            hypothesis_id=args.id, review_date=args.review_date,
+            ci_rule=args.ci_rule)
         print(row["id"])
     elif args.cmd == "lock":
         print(service.lock(args.hypothesis_id)["id"])
