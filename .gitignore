@@ -49,7 +49,7 @@ data/stock_dashboard.db
 # DB 备份
 /data/db/*.bak*
 /data/stock.db
-/data/stock_dashboard.db
+data/
 
 # Hermes 本机 verify 配方（含机器特定 basetemp 路径，不跨机）
 /.hermes/environment.json
