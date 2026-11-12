@@ -72,7 +72,11 @@ def test_missing_bj_row_is_not_invented(fetcher):
 
 
 def test_bj_codes_are_batched_like_everyone_else(fetcher):
-    """90 只（60 只 BJ + 30 只深）分两批：每批都发出去，一只不丢。"""
+    """90 只（60 只 BJ + 30 只深）分两批：每批都发出去，一只不丢。
+
+    单批失败会重试（2026-11-12 修 daily_close 缺口：11-10 缺的 80 只
+    正好一批），所以空响应下每批发 2 次、共 4 次请求——但**两批都发**。
+    """
     urls = []
 
     def fake(url, timeout=20):
@@ -82,9 +86,9 @@ def test_bj_codes_are_batched_like_everyone_else(fetcher):
     fetcher.curl_get = fake
     codes = [f"9200{i:02d}" for i in range(60)] + [f"000{i:03d}" for i in range(30)]
     assert fetcher.fetch_tencent_batch(codes) == []
-    assert len(urls) == 2
-    joined = "".join(urls)
+    assert len(urls) == 4, "2 批 × 2 次（含重试）"
     assert "bj920000" in urls[0], "第一批必须带 bj 前缀"
+    joined = "".join(urls)
     for c in codes:
         assert c in joined, f"{c} 没被发出去"
 
