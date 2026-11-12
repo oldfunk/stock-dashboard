@@ -154,15 +154,14 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
     logger.info("\n[财务历史] 拉取历史财务数据...")
     progress.update(run_id, 'history', '拉取历史财务数据...')
     try:
-        from datetime import datetime
         from src.collector.akshare_fetcher import (
             collect_historical_financial_data, rebuild_financial_summaries
         )
-        # 周六全量刷新，平日仅补充缺失或报告期过旧的股票
-        is_weekend_full = datetime.now().weekday() == 5
-        history_count = collect_historical_financial_data(
-            candidates, force_full=is_weekend_full
-        )
+        # 平日只增量。旧写法在这里判 weekday()==5 决定 force_full，而流水线只在
+        # 工作日 15:30 跑 → 那个条件永远 False（批19-b）。全量重拉已挪到周六维护
+        # 线程 src/collector/weekly_deep_refresh.py：限量/限时/进度表续跑，
+        # 不会一次性打 771×6 个上游请求。
+        history_count = collect_historical_financial_data(candidates)
         # 无论是否有新增数据，都重建汇总以反映最新财报
         rebuild_financial_summaries(candidates)
     except Exception as e:

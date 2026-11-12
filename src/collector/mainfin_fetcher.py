@@ -115,25 +115,17 @@ def clean_notice_date(report_date: str, notice: object) -> str | None:
     return text
 
 
-def fetch_mainfin_quarterly_notices(code: str, ps: int = 100, timeout: int = 15,
-                                    max_pages: int = MAINFIN_MAX_PAGES) -> dict:
-    """某股全部**季报**披露日：``{"notices": {报告期: 披露日}, "rejected": int,
-    "rows": int, "error": str | None}``。
+def _mainfin_pages(code: str, ps: int, timeout: int, max_pages: int):
+    """逐页产出 ``(reports, error)``——翻到"本页不满"为止，上限 ``max_pages``。
 
-    - **分页取到"本页不满"为止**（上限 ``max_pages``）。实测依据：``ps=100`` 时
-      600519 的 103 行第一页就给满，而 000001 库内有 86 个待填季度、第一页只覆盖
-      2002 年起的 75 个（只能填 87%）——不翻页就会把剩下的 11 行永久留在 NULL，
-      而这只票还被标成 done。3 页约等于 75 年的季度深度。
-    - ``error`` 非 None 表示这次**没取全**（网络/上游异常）。调用方必须按 partial
-      处理，不能把它当成"这只票没有季报披露日"——那会让下次续传直接跳过它。
-      第一页成功、后续页失败时同样带 error：已有结果仍然可用，但不算取全。
-    - ``rejected`` 是被清洗规则挡掉的不可能披露日（20 只票 1,177 条季报实测为 0，
-      闸门仍留着：上游哪天开始发占位值，这里要先看得见）。
+    实测依据：``ps=100`` 时 600519 的 103 行第一页就给满，而 000001 库内有 86 个
+    待填季度、第一页只覆盖 2002 年起的 75 个（只能填 87%）——不翻页就会把剩下的
+    11 行永久留在 NULL，而这只票还被标成 done。3 页约等于 75 年的季度深度。
+
+    某页请求失败时产出 ``([], error)`` 后停止：**已产出的页仍然可用，但这次不算
+    取全**，调用方必须按 partial 处理，不能当成"这只票没有数据"——那会让下次
+    续传直接跳过它。
     """
-    notices: dict[str, str] = {}
-    rejected = 0
-    rows_total = 0
-    error: str | None = None
     for page in range(1, max_pages + 1):
         url = (
             f"{_MAINFIN}?type=RPT_F10_FINANCE_MAINFINADATA&sty=ALL"
@@ -143,10 +135,32 @@ def fetch_mainfin_quarterly_notices(code: str, ps: int = 100, timeout: int = 15,
         try:
             data = _get_json(url, timeout=timeout, headers=_HEADERS)
         except Exception as e:  # noqa: BLE001 - 网络失败要回传给调用方定状态
-            logger.debug(f"[mainfin-季报] {code} 第 {page} 页请求失败: {e}")
-            error = f"{type(e).__name__}: {e}"
-            break
+            logger.debug(f"[mainfin] {code} 第 {page} 页请求失败: {e}")
+            yield [], f"{type(e).__name__}: {e}"
+            return
         reports = (data.get("result") or {}).get("data") or []
+        yield reports, None
+        if len(reports) < ps:
+            return
+
+
+def fetch_mainfin_quarterly_notices(code: str, ps: int = 100, timeout: int = 15,
+                                    max_pages: int = MAINFIN_MAX_PAGES) -> dict:
+    """某股全部**季报**披露日：``{"notices": {报告期: 披露日}, "rejected": int,
+    "rows": int, "error": str | None}``。
+
+    - 分页语义见 ``_mainfin_pages``（短页即停、上限 ``max_pages``、失败带 error）。
+    - ``rejected`` 是被清洗规则挡掉的不可能披露日（20 只票 1,177 条季报实测为 0，
+      闸门仍留着：上游哪天开始发占位值，这里要先看得见）。
+    """
+    notices: dict[str, str] = {}
+    rejected = 0
+    rows_total = 0
+    error: str | None = None
+    for reports, err in _mainfin_pages(code, ps, timeout, max_pages):
+        if err:
+            error = err
+            break
         rows_total += len(reports)
         for r in reports:
             if r.get("REPORT_TYPE") not in QUARTERLY_REPORT_TYPES:
@@ -160,7 +174,39 @@ def fetch_mainfin_quarterly_notices(code: str, ps: int = 100, timeout: int = 15,
                     rejected += 1
                 continue
             notices[rpt] = notice
-        if len(reports) < ps:
-            break
     return {"notices": notices, "rejected": rejected,
             "rows": rows_total, "error": error}
+
+
+# ── 利息保障倍数回填（批19-c，2026-11-12） ─────────────────────────────────
+
+def fetch_mainfin_interest_coverage(code: str, ps: int = 100, timeout: int = 15,
+                                    max_pages: int = MAINFIN_MAX_PAGES) -> dict:
+    """某股**全部报告期**（年报 + 三类季报）的利息保障倍数。
+
+    返回 ``{"values": {报告期: ic}, "rows": int, "error": str | None}``。
+
+    为什么走这个源而不是采集器那条 ``营业利润 / 利息费用``：
+    - 东财利润表的 ``INTEREST_EXPENSE`` 对非金融股恒为空（nec 实测 605259 0/31 期、
+      000983 0/108 期），``op / abs(ie)`` 算不出 ic——19-a 让缺口股进 todo 也只是
+      白发请求；
+    - 库内现有 34,509 条 ic 里 34,508 条与上游 ``INTSTCOVRATE`` **逐位相同**，
+      即历史值本来就是这个口径。用同一列回填才不会在一列里混两种算法。
+
+    **不加 REPORT_TYPE 过滤**：东财没有 '季报' 这个取值（见上），且本件要的就是
+    年报 + 季报全部报告期。分页语义见 ``_mainfin_pages``。
+    """
+    values: dict[str, float] = {}
+    rows_total = 0
+    error: str | None = None
+    for reports, err in _mainfin_pages(code, ps, timeout, max_pages):
+        if err:
+            error = err
+            break
+        rows_total += len(reports)
+        for r in reports:
+            rpt = str(r.get("REPORT_DATE") or "")[:10]
+            ic = _num(r.get("INTSTCOVRATE"))
+            if rpt and ic is not None:
+                values[rpt] = ic
+    return {"values": values, "rows": rows_total, "error": error}

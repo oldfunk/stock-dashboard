@@ -47,6 +47,7 @@ def weekly_probe(sched, monkeypatch):
 
     import src.collector.dividend_fetcher as df
     from src.collector import trading_calendar as fpc
+    from src.collector import weekly_deep_refresh as wdr
     import src.outcome_service as osvc
     import src.config as cmod
     monkeypatch.setattr(s.threading, "Thread", FakeThread)
@@ -58,6 +59,10 @@ def weekly_probe(sched, monkeypatch):
                         lambda cfg=None: called.append("bench"))
     monkeypatch.setattr(osvc, "refresh_outcomes",
                         lambda cfg=None: called.append("outcome"))
+    # 批19-b 新增的第五步（深层字段全量刷新）：同样换成记名字的假件，
+    # 否则这条用例会在空库上真跑一遍周刷新，断言就依赖"库刚好是空的"。
+    monkeypatch.setattr(wdr, "run_weekly_deep_refresh",
+                        lambda cfg=None: called.append("deep"))
     monkeypatch.setattr(cmod, "load_config", lambda: {"outcomes": {
         "refresh_weekday": 5, "refresh_time": "09:00", "enabled": True}})
     monkeypatch.setattr(s, "now_cn", lambda: _saturday_at())
@@ -75,14 +80,14 @@ def test_weekly_refresh_defers_body_to_a_thread(weekly_probe):
     assert m._weekly_in_progress is True, "进行中闸必须立刻置位，防 30 秒洪水"
 
 
-def test_thread_body_still_runs_all_three_steps(weekly_probe):
-    """后台体照旧执行全部三步，并在 finally 里清掉进行中标志。"""
+def test_thread_body_still_runs_all_steps(weekly_probe):
+    """后台体照旧执行全部维护步（批19-b 起含深层字段全量刷新），并在 finally 清标志。"""
     s, m, called, started = weekly_probe
     m._check_weekly_data_refresh()
     # 用 == 不用 is：每次取绑定方法都会新建对象
     assert started and started[0].target == m._run_weekly_refresh
     started[0].target(*started[0].args)
-    assert called == ["dividend", "calendar", "bench", "outcome"]
+    assert called == ["dividend", "calendar", "bench", "outcome", "deep"]
     assert m._weekly_in_progress is False
 
 

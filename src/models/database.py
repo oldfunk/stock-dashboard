@@ -1295,6 +1295,127 @@ class FinancialHistoryDAO:
                 touched += cur.rowcount
         return touched
 
+    def targets_missing_deep_fields(self, fields: tuple, window: int,
+                                    limit: int | None = None, offset: int = 0,
+                                    task: str | None = None,
+                                    retry_no_data: bool = False,
+                                    retry_partial: bool = False) -> list[tuple]:
+        """``[(股票代码, 最新报告期)]``——近 ``window`` 期里 ``fields`` 仍有 NULL 的股票。
+
+        窗口口径与采集侧 ``_em_sheets_needed`` 一致（都只看最近 window 个报告期，
+        老期缺口不绑架请求）；差别只在**不看冷却**：周六全量重拉就是给平日拉不上
+        的股票再一次机会（批19-b）。``window<=0`` 钳到 1 期，与批17-a H3 建议①同规矩。
+
+        ``fields`` 由调用方传（采集侧 ``EM_DEEP_FIELDS`` 单一来源）；列名要拼进 SQL，
+        所以逐个过 ``DEEP_FIELD_COLUMNS`` 白名单（批8 P1-2）。
+        """
+        unknown = [f for f in fields if f not in self.DEEP_FIELD_COLUMNS]
+        if unknown:
+            raise ValueError(f"非白名单深度字段：{unknown}")
+        cols = ", ".join(fields)
+        having = " OR ".join(f"SUM({f} IS NULL) > 0" for f in fields)
+        sql = f"""
+            WITH ranked AS (
+                SELECT stock_code, report_date, {cols},
+                       ROW_NUMBER() OVER (PARTITION BY stock_code
+                                          ORDER BY report_date DESC) AS rn
+                FROM financial_history)
+            SELECT stock_code, MAX(report_date) AS latest FROM ranked
+            WHERE rn <= ?"""
+        params: list = [max(1, int(window))]
+        if task:
+            skip = ["done"]
+            if not retry_no_data:
+                skip.append("no_data")
+            if not retry_partial:
+                skip.append("partial")
+            marks = ", ".join("?" for _ in skip)
+            sql += (" AND NOT EXISTS (SELECT 1 FROM backfill_progress p"
+                    " WHERE p.task = ? AND p.code = ranked.stock_code"
+                    f" AND p.status IN ({marks})"
+                    " AND COALESCE(p.covered_report_date, '') >="
+                    " (SELECT MAX(f2.report_date) FROM financial_history f2"
+                    "  WHERE f2.stock_code = ranked.stock_code))")
+            params.append(task)
+            params.extend(skip)
+        sql += f" GROUP BY stock_code HAVING {having} ORDER BY stock_code"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += [limit, offset]
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [(r["stock_code"], r["latest"]) for r in rows]
+
+    def targets_missing_interest_coverage(self, limit: int | None = None,
+                                          offset: int = 0, task: str | None = None,
+                                          retry_no_data: bool = False,
+                                          retry_partial: bool = False) -> list[tuple]:
+        """``[(股票代码, 该股最新报告期)]``——利息保障倍数回填的目标集（批19-c）。
+
+        入选条件：该股**任一报告期**（年报 + 季报都算）``interest_coverage`` 为 NULL。
+        与 ``targets_missing_notice_quarterly`` 的差别就在这一点：ic 的缺口在季报行
+        （产线 2026 三个季度全空），只筛 ``report_type='Q'`` 会漏掉年报里同样空的行，
+        只筛 ``'A'`` 则正好把派工单点名的那三格排除在外。
+
+        第二个返回值同时当进度表的 ``covered_report_date``：新报告期一到，
+        ``covered < 新报告期`` 自动重新入选，不会被进度表永久锁死。
+        """
+        sql = ("SELECT stock_code, MAX(report_date) AS latest FROM financial_history")
+        params: list = []
+        if task:
+            skip = ["done"]
+            if not retry_no_data:
+                skip.append("no_data")
+            if not retry_partial:
+                skip.append("partial")
+            marks = ", ".join("?" for _ in skip)
+            sql += (" WHERE NOT EXISTS (SELECT 1 FROM backfill_progress p"
+                    " WHERE p.task = ? AND p.code = financial_history.stock_code"
+                    f" AND p.status IN ({marks})"
+                    " AND COALESCE(p.covered_report_date, '') >="
+                    " (SELECT MAX(f2.report_date) FROM financial_history f2"
+                    "  WHERE f2.stock_code = financial_history.stock_code))")
+            params.append(task)
+            params.extend(skip)
+        sql += (" GROUP BY stock_code"
+                " HAVING SUM(interest_coverage IS NULL) > 0"
+                " ORDER BY stock_code")
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += [limit, offset]
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [(r["stock_code"], r["latest"]) for r in rows]
+
+    def fill_interest_coverage(self, code: str, values: dict,
+                               dry_run: bool = False) -> int:
+        """按 ``{报告期: ic}`` 只填 ``interest_coverage`` 为 NULL 的行，返回填进行数。
+
+        与 ``fill_quarterly_notice_dates`` 同口径，但**不限 report_type**：本件要修
+        的就是季报 + 年报两种行。已有值不覆盖（幂等、重跑安全）；报告期与数值全走
+        绑定参数；库里不存在的报告期命中 0 行——绝不因回填造出半截行。
+
+        ``ic == 0`` 是合法值（营业利润为零），所以判空用 ``is None`` 而不是真值判断。
+        ``dry_run=True`` 用**同一个谓词**数"这次能填几行"而不写，预测不会与写入漂移。
+        """
+        predicate = ("stock_code = ? AND report_date = ?"
+                     " AND interest_coverage IS NULL")
+        touched = 0
+        with db_conn() as conn:
+            for report_date, ic in values.items():
+                if ic is None:
+                    continue
+                if dry_run:
+                    touched += conn.execute(
+                        f"SELECT COUNT(*) FROM financial_history WHERE {predicate}",
+                        (code, report_date)).fetchone()[0]
+                    continue
+                cur = conn.execute(
+                    f"UPDATE financial_history SET interest_coverage = ?"
+                    f" WHERE {predicate}", (ic, code, report_date))
+                touched += cur.rowcount
+        return touched
+
     def get_codes_missing_extra(self, limit: int | None = None,
                                 offset: int = 0, task: str | None = None,
                                 retry_no_data: bool = False,
@@ -1491,6 +1612,48 @@ class FinancialHistoryDAO:
                 if r[f] is not None:
                     d[f].add(r['report_date'])
         return out
+
+    def get_report_dates(self, codes: list[str]) -> dict[str, list[str]]:
+        """批量返回每只股票库内**全部报告期**（新→旧）。
+
+        与 ``get_deep_field_dates`` 配对使用：后者给"哪些期已有深度字段"，
+        本方法给"这只票有哪些期"，两者一起才能判"近 N 期里有没有缺"
+        （批19-a 的 todo 判定）。一次查询取回，不在采集循环里逐只查。
+        """
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        out: dict[str, list[str]] = {}
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT stock_code, report_date FROM financial_history
+                    WHERE stock_code IN ({placeholders})
+                    ORDER BY stock_code, report_date DESC""",
+                codes,
+            ).fetchall()
+        for r in rows:
+            out.setdefault(r['stock_code'], []).append(r['report_date'])
+        return out
+
+    def get_backfill_marks(self, task: str, codes: list[str]) -> dict[str, dict]:
+        """批量取进度表标记 ``{code: {status, covered_report_date}}``。
+
+        增量采集用它做"同一报告期拉过就冷却"（母方 2026-11-05 EM 冷却裁定）：
+        上游确实供不出这个字段时，不冷却就会每天白拉同一只票。
+        """
+        if not codes:
+            return {}
+        placeholders = ','.join('?' * len(codes))
+        with db_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT code, status, covered_report_date
+                    FROM backfill_progress
+                    WHERE task = ? AND code IN ({placeholders})""",
+                [task, *codes],
+            ).fetchall()
+        return {r['code']: {'status': r['status'],
+                            'covered_report_date': r['covered_report_date']}
+                for r in rows}
 
 
 class FinancialSummaryDAO:
