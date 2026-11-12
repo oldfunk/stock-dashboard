@@ -11,8 +11,9 @@
 - **批19 已派**（Qoder，Issue #9 `6819599078`）：19-a 陈旧度规则考虑深层字段缺失、19-b 修 `force_full` 死条件、19-c 回填 2026 缺口；基线 `origin/main@933d256`。
 - **批19 已验收合并（今日）**：gate **1300 → 1388**（+88 用例），main=`f47334c`，双服务 200。EM F10 缺口修复：19-a 陈旧度规则收录"近 8 期深层字段缺失"+EM 冷却、19-b `force_full` 死条件→周六维护线程真的全量（限量/限时/进度表）、19-c mainfin 回填（只填 NULL）。**Qoder 纠正派工单两处**（是 NULL 不是 0；真实历史写入方是 `backfill_financial_full.py` 的 mainfin）**并挖出第三层根因**：采集器算 ic 用 `INTEREST_EXPENSE`（金融股专用列），非金融股恒为 nan。**产线实跑**：干跑 20 只/66 行、小批 50 只/256 行（0 失败）、验收 SQL 2026 三期 filled **0→8**；全量回填在跑（剩余 4,804 只）。
 - **开发期加速规程（今日，用户指令）**：项目近 6 个月不稳定，生产级纪律在功能未成熟期是自欺欺人。**开发期用本机并行门禁**（`python -m pytest -n auto -q`，2151 例 2.5 分钟）+ **合成库验证研究线**；**生产门禁/同步只在发布期跑**（每周或功能完成时）。见 `docs/development-workflow.md`。合成库实测：真库净增量 18.39pp（理论 18pp）CI 不覆盖 0；零关系库 CI 覆盖 0。
-- **批18-b 核心已落地（今日）**：`ci_rule` 预注册（none/exclude_zero）+ Q2 Bonferroni + Q3 result verdict。**H-002b 复判（真实数据）**：净增量 +3.83pp，CI [-3.10,10.48] 覆盖 0 → **inconclusive（不支持）**，与预期一致；E-H002 frozen 记录不改。
-- **批18-a/b/c/e 仍未交付**（19-a 已吸收批18-d EM 冷却）。
+- **批18-b 全部四项已落地（今日）**：`ci_rule`（预注册，none/exclude_zero）+ Q2 Bonferroni + Q3 result verdict 只填判据 + **Q4 参数敏感性邻域**（tier ±10pp / horizon 邻近档 / 基准换 sh000922，符号翻转即不晋升）。**H-002b 复判（真实数据）**：净增量 +3.83pp，CI [-3.10,10.48] 覆盖 0 → **inconclusive（不支持）**，与预期一致；E-H002 frozen 记录不改。**Q4 合成库实测**：真库 base 17.70，5 个邻域 9.10–23.67 全为正 → robust。
+- **批20 已派**（Qoder，Issue #9 `6827476231`）：qfq 锚点周期接线（20-a 接线 / 20-b 节奏 / 20-c 配置）；并请它评估批18-a/c/e 的收尾。
+- **批18-a/b/c/e 仍未交付**（19-a 已吸收批18-d EM 冷却；b 已由母方做完）。
 - **CI 口径分歧待复核**：`h001_regime_check.py` 离线 CI（疑似按行重抽）vs runner 股票分块——以 runner 为准，请 Qoder 复核离线脚本。
 - **生产纪律提请（用户协调）**：母仓库目录（/home/nec/stock-dashboard）不得跑非母项目进程（Hermes agent 的旧 main.py 曾抢占 9527 致母服务重启循环）；端口 9527/8081/8080 各归其主。
 
