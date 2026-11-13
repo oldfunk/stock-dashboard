@@ -56,6 +56,13 @@ DEFAULT_SLEEP = 0.4
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
 
 
+#: 周六 EM 段只对 fcf 负责（2026-11-13 实测修）。
+#: ic 由 ic 段（mainfin INTSTCOVRATE）单独回填；而 EM 的 INTEREST_EXPENSE
+#: 对非金融股恒空 → 把 ic 留在 EM 段判据里，这些票会**永远 no_data**、
+#: 每周重复白拉（实测 27/27 no_data、写 0 行、吃满 900s 预算）。
+EM_WEEKLY_FIELDS = ("fcf",)
+
+
 def _still_missing(dao: FinancialHistoryDAO, code: str, fields: tuple) -> bool:
     """这次拉完之后，该股**任一报告期**是否还缺这些字段（判 done / no_data）。"""
     periods = set(dao.get_report_dates([code]).get(code, []))
@@ -70,12 +77,12 @@ def run_em_full_refresh(limit: int = DEFAULT_EM_BATCH,
                         task: str = TASK_EM_FULL) -> dict:
     """对近窗口仍缺深层字段的股票逐只 ``force_full=True`` 重拉（限量/限时/续跑）。"""
     from src.collector.akshare_fetcher import (
-        EM_DEEP_FIELDS, EM_DEEP_WINDOW, collect_historical_financial_data,
+        EM_DEEP_WINDOW, collect_historical_financial_data,
     )
 
     dao = FinancialHistoryDAO()
     targets = dao.targets_missing_deep_fields(
-        EM_DEEP_FIELDS, EM_DEEP_WINDOW, limit=limit, task=task)
+        EM_WEEKLY_FIELDS, EM_DEEP_WINDOW, limit=limit, task=task)
     summary = {"task": task, "targets": len(targets), "processed": 0,
                "status_counts": {"done": 0, "partial": 0, "no_data": 0},
                "errors": [], "budget_hit": False, "aborted": False}
@@ -91,7 +98,7 @@ def run_em_full_refresh(limit: int = DEFAULT_EM_BATCH,
             # 骨架没出数 = 这次没取到（不是"上游没有"）→ partial，不写 covered
             status = "partial"
             error = error or "骨架无数据（这次没取到）"
-        elif _still_missing(dao, code, EM_DEEP_FIELDS):
+        elif _still_missing(dao, code, EM_WEEKLY_FIELDS):
             status = "no_data"
         else:
             status = "done"
@@ -119,7 +126,7 @@ def run_em_full_refresh(limit: int = DEFAULT_EM_BATCH,
 
     summary["elapsed_seconds"] = round(time.monotonic() - started, 2)
     summary["remaining"] = len(dao.targets_missing_deep_fields(
-        EM_DEEP_FIELDS, EM_DEEP_WINDOW, task=task))
+        EM_WEEKLY_FIELDS, EM_DEEP_WINDOW, task=task))
     summary["progress"] = dao.backfill_progress_summary(task)
     logger.info("[周刷新EM] 目标 %s 只、处理 %s 只（done %s / partial %s / no_data %s），"
                 "剩余 %s 只，耗时 %ss",

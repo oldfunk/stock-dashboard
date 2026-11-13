@@ -171,7 +171,7 @@ def em(db, monkeypatch):
 def test_weekly_em_really_calls_force_full(em):
     mod, calls, state = em
     dates = _dates(4)
-    _seed("600519", dates, ic=False)
+    _seed("600519", dates, fcf=False)
     _seed("000001", dates, fcf=False)
     state["fill"] = {"600519", "000001"}
     result = mod.run_em_full_refresh(sleep=0)
@@ -181,11 +181,27 @@ def test_weekly_em_really_calls_force_full(em):
     assert result["status_counts"] == {"done": 2, "partial": 0, "no_data": 0}
 
 
+def test_em_stage_ignores_ic_only_gap(em):
+    """EM 段只对 fcf 负责：只缺 ic（非金融股常态）的票不该被反复拉。
+
+    产线实测（2026-11-13）：EM 的 INTEREST_EXPENSE 对非金融股恒空 →
+    ic 永远填不上；把 ic 留在 EM 段判据里会让这些票每周重复白拉。
+    ic 由 ic 段（mainfin）单独回填。
+    """
+    mod, calls, state = em
+    dates = _dates(3)
+    _seed("600519", dates, ic=False)      # 只缺 ic，fcf 齐
+    state["fill"] = {"600519"}
+    result = mod.run_em_full_refresh(sleep=0)
+    assert result["targets"] == 0 and result["processed"] == 0
+    assert calls == []
+
+
 def test_daily_cooldown_does_not_block_the_weekly_full_pull(em):
     """平日冷却（em_deep_gap=no_data）的股票，周六仍要给一次全量机会。"""
     mod, calls, state = em
     dates = _dates(4)
-    _seed("600519", dates, ic=False)
+    _seed("600519", dates, fcf=False)
     db_mod.FinancialHistoryDAO().mark_backfill_done(
         "em_deep_gap", "600519", 0, "no_data", dates[0])
     state["fill"] = {"600519"}
@@ -197,7 +213,7 @@ def test_batch_limit_bounds_upstream_requests(em):
     mod, calls, state = em
     dates = _dates(2)
     for i in range(10):
-        _seed(f"60000{i}", dates, ic=False)
+        _seed(f"60000{i}", dates, fcf=False)
     result = mod.run_em_full_refresh(limit=3, sleep=0)
     assert result["targets"] == 3 and result["processed"] == 3
     assert len(calls) == 3
@@ -208,7 +224,7 @@ def test_time_budget_stops_gracefully(em):
     mod, calls, state = em
     dates = _dates(2)
     for i in range(5):
-        _seed(f"60000{i}", dates, ic=False)
+        _seed(f"60000{i}", dates, fcf=False)
     real = time.monotonic
     with patch.object(mod.time, "monotonic",
                       side_effect=[real()] + [real() + 100] * 20):
@@ -220,7 +236,7 @@ def test_progress_marks_make_it_resumable(em):
     mod, calls, state = em
     dates = _dates(2)
     for i in range(4):
-        _seed(f"60000{i}", dates, ic=False)
+        _seed(f"60000{i}", dates, fcf=False)
     state["fill"] = {f"60000{i}" for i in range(4)}
     first = mod.run_em_full_refresh(limit=2, sleep=0)
     assert first["processed"] == 2 and first["remaining"] == 2
@@ -239,7 +255,7 @@ def test_progress_marks_make_it_resumable(em):
 def test_status_matrix_and_covered(em, mode, expect_status, expect_covered):
     mod, calls, state = em
     dates = _dates(3)
-    _seed("600519", dates, ic=False)
+    _seed("600519", dates, fcf=False)
     if mode != "none":
         state[mode if mode != "fill" else "fill"] = {"600519"}
     result = mod.run_em_full_refresh(sleep=0)
@@ -253,7 +269,7 @@ def test_aborts_after_consecutive_failures(em):
     mod, calls, state = em
     dates = _dates(2)
     for i in range(6):
-        _seed(f"60000{i}", dates, ic=False)
+        _seed(f"60000{i}", dates, fcf=False)
     state["boom"] = {f"60000{i}" for i in range(6)}
     result = mod.run_em_full_refresh(sleep=0, max_consecutive_failures=3)
     assert result["aborted"] is True and result["processed"] == 3
@@ -264,7 +280,7 @@ def test_elapsed_is_reported_for_pacing(em):
     """派工单要"测速"：耗时/只数必须能读到，批大小才有调整依据。"""
     mod, calls, state = em
     dates = _dates(2)
-    _seed("600519", dates, ic=False)
+    _seed("600519", dates, fcf=False)
     state["fill"] = {"600519"}
     logged = []
 
@@ -322,7 +338,7 @@ def test_zero_batch_turns_off_the_em_stage(db, monkeypatch):
     monkeypatch.setattr(af, "collect_historical_financial_data",
                         lambda *a, **k: calls.append(a))
     dates = _dates(2)
-    _seed("600519", dates, ic=False)
+    _seed("600519", dates, fcf=False)
     monkeypatch.setattr(mod.ic_backfill, "run", lambda **kw: {"filled": 0})
     out = mod.run_weekly_deep_refresh({"deep_refresh": {"em_batch": 0}})
     assert out["em"]["processed"] == 0 and calls == []
