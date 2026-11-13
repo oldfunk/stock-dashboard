@@ -30,13 +30,18 @@ def _annual(code):
 
 
 def _no_network(monkeypatch):
-    """底层取数一旦被调用就红：证明守卫在 akshare/sleep 之前就抛出。"""
+    """底层取数一旦被调用就红：证明守卫在 akshare/sleep 之前就抛出。
+
+    批20-a：Sina 双拉已下沉 `src/collector/sina_price.py`，patch 点跟着走——
+    脚本侧只是 re-export，patch 脚本模块的属性打不到真身（会假绿）。
+    """
     from scripts import backfill_price_history as s
+    from src.collector import sina_price as sp
     calls = []
-    monkeypatch.setattr(s, "_sina_daily",
+    monkeypatch.setattr(sp, "_sina_daily",
                         lambda *a, **k: calls.append(a) or [])
     sleeps = []
-    monkeypatch.setattr(s.time, "sleep", lambda x: sleeps.append(x))
+    monkeypatch.setattr(sp.time, "sleep", lambda x: sleeps.append(x))
     return s, calls, sleeps
 
 
@@ -51,6 +56,7 @@ def test_bj_raises_capability_boundary_before_any_network(monkeypatch):
 
 def test_sh_and_sz_still_pull_usually(monkeypatch):
     """守卫只挡 BJ：沪深仍走原路（两拉 + 三列模型），不能顺手把老逻辑改坏。"""
+    from src.collector import sina_price as sp
     s, calls, _ = _no_network(monkeypatch)
 
     def fake(code, adjust, start_date, end_date=None):
@@ -63,7 +69,7 @@ def test_sh_and_sz_still_pull_usually(monkeypatch):
                 {"trade_date": "2020-01-03", "open": 110.0, "close": 110.0,
                  "high": 120.0, "low": 100.0}]
 
-    monkeypatch.setattr(s, "_sina_daily", fake)
+    monkeypatch.setattr(sp, "_sina_daily", fake)
     rows = s.fetch_kline_sina_adjusted("600519", "2020-01-01")
     assert [r["close"] for r in rows] == [10.0, 11.0]
     assert [c[1] for c in calls] == ["", "hfq"], "不复权 + 后复权两拉不变"

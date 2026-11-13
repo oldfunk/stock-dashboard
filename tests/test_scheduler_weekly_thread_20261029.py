@@ -31,7 +31,7 @@ def sched(tmp_path, monkeypatch):
 
 @pytest.fixture
 def weekly_probe(sched, monkeypatch):
-    """三步维护体换成"记名字"的假件；Thread 被拦下不真起线程。"""
+    """维护体各步换成"记名字"的假件；Thread 被拦下不真起线程。"""
     s, m = sched
     called = []
     started = []
@@ -46,6 +46,7 @@ def weekly_probe(sched, monkeypatch):
             started.append(self)
 
     import src.collector.dividend_fetcher as df
+    from src.collector import qfq_anchor as qa
     from src.collector import trading_calendar as fpc
     from src.collector import weekly_deep_refresh as wdr
     import src.outcome_service as osvc
@@ -55,12 +56,16 @@ def weekly_probe(sched, monkeypatch):
                         lambda cfg=None: called.append("dividend"))
     monkeypatch.setattr(fpc, "backfill_trading_calendar",
                         lambda: (called.append("calendar"), {"future": 1})[1])
+    # 批20-b 新增的 qfq 重锚段：同样换成记名字的假件，否则会在空库上真跑一遍。
+    monkeypatch.setattr(qa, "run_weekly_qfq_anchor",
+                        lambda cfg=None: (called.append("qfq"),
+                                          {"anchor": "2026-11-11", "done": 0,
+                                           "partial": 0, "remaining": 0})[1])
     monkeypatch.setattr(osvc, "refresh_benchmarks",
                         lambda cfg=None: called.append("bench"))
     monkeypatch.setattr(osvc, "refresh_outcomes",
                         lambda cfg=None: called.append("outcome"))
-    # 批19-b 新增的第五步（深层字段全量刷新）：同样换成记名字的假件，
-    # 否则这条用例会在空库上真跑一遍周刷新，断言就依赖"库刚好是空的"。
+    # 批19-b 新增的深层字段全量刷新段：同理。
     monkeypatch.setattr(wdr, "run_weekly_deep_refresh",
                         lambda cfg=None: called.append("deep"))
     monkeypatch.setattr(cmod, "load_config", lambda: {"outcomes": {
@@ -74,20 +79,25 @@ def test_weekly_refresh_defers_body_to_a_thread(weekly_probe):
     """核心断言：到点时维护体**不得**在调度线程里同步执行。"""
     s, m, called, started = weekly_probe
     m._check_weekly_data_refresh()
-    assert called == [], "三步维护被同步执行 = 调度线程冻结数小时"
+    assert called == [], "维护体被同步执行 = 调度线程冻结数小时"
     assert len(started) == 1, "应恰好起一个后台线程"
     assert started[0].daemon is True and started[0].name == "weekly-refresh"
     assert m._weekly_in_progress is True, "进行中闸必须立刻置位，防 30 秒洪水"
 
 
 def test_thread_body_still_runs_all_steps(weekly_probe):
-    """后台体照旧执行全部维护步（批19-b 起含深层字段全量刷新），并在 finally 清标志。"""
+    """后台体照旧执行全部维护步，并在 finally 清标志。
+
+    顺序不是随意排的（批20-b）：qfq 重锚必须在 outcome **之前**——前向收益用
+    kline 的 close 算且算出即冻结不重算，价格口径要先统一；分红会移动锚点，
+    所以重锚又在 dividend 之后。深层字段最贵，放最后。
+    """
     s, m, called, started = weekly_probe
     m._check_weekly_data_refresh()
     # 用 == 不用 is：每次取绑定方法都会新建对象
     assert started and started[0].target == m._run_weekly_refresh
     started[0].target(*started[0].args)
-    assert called == ["dividend", "calendar", "bench", "outcome", "deep"]
+    assert called == ["dividend", "calendar", "qfq", "bench", "outcome", "deep"]
     assert m._weekly_in_progress is False
 
 
