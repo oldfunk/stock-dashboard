@@ -156,22 +156,34 @@ def assess_dataset(dataset: str, trade_date: str,
 
 def assess_analysis_outcome(trade_date: str,
                             dao: ResearchDAO | None = None) -> dict[str, Any]:
-    """评估 analysis_outcome（截至 trade_date 的累积覆盖/缺失/异常/PIT）。"""
+    """评估 analysis_outcome（截至 trade_date 的累积覆盖/缺失/异常/PIT）。
+
+    日期比较统一 ``SUBSTR(analysis_date, 1, 10)``（批18-c）。``analysis_date``
+    是 TEXT，裸 ``<= '2026-11-12'`` 一旦碰上带时间分量的写入就会把**同日行整批
+    漏掉**（字符串比较下 ``'2026-11-12T15:00:00' > '2026-11-12'``），覆盖率与
+    异常值计数随之偏低，质量门却照样判 pass。研究域正确性优先，本表量级小
+    （产线 782 行），放弃索引区间全扫便宜。
+
+    反过来，产线翻页接口 ``src/web/data_api.py`` **保留裸比较**以走
+    ``idx_analysis_outcome_date``，代价是只支持 YYYY-MM-DD（那边已注明）。
+    两处口径是有意分开的，别"顺手统一"。
+    """
     dao = dao or ResearchDAO()
     with db_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS n FROM analysis_outcome WHERE analysis_date <= ?",
+            "SELECT COUNT(*) AS n FROM analysis_outcome "
+            "WHERE SUBSTR(analysis_date, 1, 10) <= ?",
             (trade_date,)).fetchone()["n"]
         if total == 0:
             return {"coverage": 0.0, "missing_rate": 1.0, "outliers": 0,
                     "pit_violations": 0, "details": {"rows": 0}}
         filled = conn.execute(
             "SELECT COUNT(*) AS n FROM analysis_outcome "
-            "WHERE analysis_date <= ? AND ret_20 IS NOT NULL "
+            "WHERE SUBSTR(analysis_date, 1, 10) <= ? AND ret_20 IS NOT NULL "
             "AND excess_20 IS NOT NULL", (trade_date,)).fetchone()["n"]
         outliers = conn.execute(
             "SELECT COUNT(*) AS n FROM analysis_outcome "
-            "WHERE analysis_date <= ? AND ABS(excess_20) > ?",
+            "WHERE SUBSTR(analysis_date, 1, 10) <= ? AND ABS(excess_20) > ?",
             (trade_date, EXCESS_OUTLIER_PP)).fetchone()["n"]
         # 注：analysis_outcome 无可判定的 PIT 违规（entry_date 本就是 T+1），
         # 不编造检查项；pit_violations 恒为 0，由其它数据集（如特征）承担 PIT 检查。
@@ -186,7 +198,17 @@ register_assessor("analysis_outcome", assess_analysis_outcome)
 
 def assess_kline_daily(trade_date: str,
                        dao: ResearchDAO | None = None) -> dict[str, Any]:
-    """评估 kline_daily（某日）：覆盖/缺失/负价异常。"""
+    """评估 kline_daily（某日）：覆盖/缺失/负价异常。
+
+    这里的 ``trade_date = ?`` **不跟着批18-c 套 SUBSTR**：kline_daily.trade_date
+    是纯日期（产线实测 5,307 个不同值全为 10 位），等值比较既正确又能走
+    ``idx_kline_trade_date``；套上函数只会白丢索引，换不来任何正确性。
+    量级依据：产线 kline_daily **1,526 万行**，本函数一次评估跑 4 条这样的查询，
+    套 SUBSTR 等于每个新交易日首次评估付 4 趟千万行全扫（调用点
+    ``research/experiment.py`` 的质量记录补写分支）。
+    与上面 analysis_outcome 的区别在于那边是 ``<=`` 累积窗口、表仅 782 行、
+    且写入侧可能带时间分量，这边是单日等值。
+    """
     dao = dao or ResearchDAO()
     with db_conn() as conn:
         total = conn.execute(

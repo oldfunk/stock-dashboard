@@ -189,7 +189,16 @@ def market_index() -> dict:
 @router.get("/outcomes")
 def outcomes(code: str = "", start: str = "", end: str = "",
              limit: int = Query(200, ge=1, le=2000)) -> dict:
-    """前向收益验证（analysis_outcome）：信号/置信/安全边际/各窗口收益与超额。"""
+    """前向收益验证（analysis_outcome）：信号/置信/安全边际/各窗口收益与超额。
+
+    ``start`` / ``end`` **仅支持 YYYY-MM-DD**（批18-c 裁定）。这里刻意保留裸
+    ``analysis_date >= / <= ?`` 而不套 SUBSTR：产线翻页要靠
+    ``idx_analysis_outcome_date`` 做区间 SEARCH，套函数会退化成全索引 SCAN。
+    代价是若 analysis_date 带上时间分量，同日行会被字符串比较漏掉——研究域
+    （``src/research/quality.py``）正确性优先，那边已统一 SUBSTR，两处口径
+    有意分开。写入侧目前全为 10 位纯日期（产线 782/782），改动写入格式前
+    必须先看这条注释。
+    """
     sql = ("SELECT stock_code, analysis_date, signal, confidence, mos_at_entry, "
            "ret_20, ret_60, ret_120, excess_20, excess_60, excess_120 "
            "FROM analysis_outcome WHERE 1=1")
