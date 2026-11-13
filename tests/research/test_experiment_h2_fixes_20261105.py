@@ -87,8 +87,8 @@ def test_snapshot_only_on_or_before_the_analysis_date_is_usable(db):
     - B 快照 2026-11-01（分析日之后）→ 旧实现拿它把 7 月的分析判成 large，
       PIT 口径下这条标签当时还不存在 → unknown。
     """
-    _snap("A", "2026-07-08", 5e8)
-    _snap("B", "2026-11-01", 2e10)
+    _snap("A", "2026-07-08", 5.0)
+    _snap("B", "2026-11-01", 200.0)
     _insert([("A", "2026-07-08", 30.0, 0.03, 0.05),
              ("B", "2026-07-08", 30.0, 0.09, 0.05)])
     m = _metric(_run(_plan(splits=("size",))))
@@ -138,9 +138,14 @@ def test_size_bucket_is_not_invented_when_the_snapshot_has_no_cap(db):
 
 
 @pytest.mark.parametrize("cap,expect", [
-    (None, None), (0, None), (-1.0, None), (5e8, "small"),
-    (1e9, "mid"), (9.9e9, "mid"), (1e10, "large")])
+    (None, None), (0, None), (-1.0, None), (50.0, "small"),
+    (100.0, "mid"), (999.0, "mid"), (1000.0, "large"), (31418.21, "large")])
 def test_size_bucket_never_invents_a_class(cap, expect):
+    """单位是**亿元**（2026-11-13 裁定 2）：与 stock_snapshot.market_cap 同源。
+
+    旧夹具写的是元（5e8/1e9/1e10），产线写入侧却是亿元 → 5,217 只全落 small。
+    夹具必须跟着改，否则"测试绿"只说明夹具自洽、不说明产线对。
+    """
     from src.research.experiment import _size_bucket
     assert _size_bucket(cap) == expect
 

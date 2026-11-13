@@ -490,18 +490,28 @@ def _join_regime(rows: list[dict]) -> None:
             row["regime"] = hit["regime"] if hit else None
 
 
+SIZE_LARGE_CAP = 1000.0   # 亿元（与 stock_snapshot.market_cap 同单位）
+SIZE_MID_CAP = 100.0      # 亿元
+
+
 def _size_bucket(cap) -> str | None:
-    """市值（元）→ 大小盘分档。
+    """市值（**亿元**）→ 大小盘分档。
 
     P1-H2-1 的另一半：**没有市值就是 None**。旧写法 `(cap or 0) >= 1e10 ...`
     一路落到 else，把"取不到市值"归成 `small`——退市股/未覆盖股会被算进小盘组，
     而小盘组恰恰是这类实验里最容易出"高收益"的桶。
+
+    单位口径（2026-11-13 裁定 2，批18-a 前置）：写入侧（``akshare_fetcher``
+    的 `price * total_shares / 1e8`、腾讯 `parts[45]`、``stock_snapshot.market_cap``）
+    全是**亿元**，而本函数旧阈值是**元**（1e10/1e9）→ 产线 5,217 只全部落 small
+    （建设银行 31,418 亿也落 small），size 分域形同虚设。改阈值与写入侧同源，
+    不动写入侧（那会作废历史快照且牵着初筛/展示/子项目）。
     """
     if not cap or cap <= 0:
         return None
-    if cap >= 1e10:
+    if cap >= SIZE_LARGE_CAP:
         return "large"
-    return "mid" if cap >= 1e9 else "small"
+    return "mid" if cap >= SIZE_MID_CAP else "small"
 
 
 def _join_sector_size(rows: list[dict]) -> None:

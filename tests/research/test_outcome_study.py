@@ -108,13 +108,13 @@ def test_event_study_splits(db):
     ])
     db_mod.StockSnapshotDAO().save_batch([
         {"code": "A", "name": "A", "market": "A", "sector": "白酒", "pe": 20.0,
-         "pb": 3.0, "ps": 1.0, "market_cap": 2e10, "circulating_cap": 2e10,
+         "pb": 3.0, "ps": 1.0, "market_cap": 200.0, "circulating_cap": 200.0,
          "roe": 10.0, "revenue": 1.0, "revenue_growth": 5.0, "profit": 1.0,
          "profit_growth": 5.0, "debt_ratio": 30.0, "current_price": 1.0,
          "high_52w": 1.0, "low_52w": 1.0, "is_st": False,
          "list_date": "2010-01-01", "snapshot_date": "2026-07-08"},
         {"code": "B", "name": "B", "market": "A", "sector": "银行", "pe": 8.0,
-         "pb": 0.8, "ps": 1.0, "market_cap": 5e8, "circulating_cap": 5e8,
+         "pb": 0.8, "ps": 1.0, "market_cap": 5.0, "circulating_cap": 5.0,
          "roe": 10.0, "revenue": 1.0, "revenue_growth": 5.0, "profit": 1.0,
          "profit_growth": 5.0, "debt_ratio": 90.0, "current_price": 1.0,
          "high_52w": 1.0, "low_52w": 1.0, "is_st": False,
@@ -133,7 +133,8 @@ def test_event_study_splits(db):
     outcome = OutcomeEventStudyRunner().run(plan, manifest)
     splits = {r.metric: r for r in outcome.results}["excess_20_20~40"].splits
     assert set(splits["sector"]) == {"白酒", "银行"}
-    assert set(splits["size"]) == {"large", "small"}
+    # 市值单位是亿元（裁定 2）：A=200 亿→mid，B=5 亿→small
+    assert set(splits["size"]) == {"mid", "small"}
 
 
 def test_event_study_holdout(db):
