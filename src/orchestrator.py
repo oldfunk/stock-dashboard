@@ -59,14 +59,17 @@ def run_collect_and_screen(config: dict) -> tuple[list[dict], str, str, int]:
     返回 (top_stocks, run_id, run_date, total_stocks)。
     top_stocks 为空表示流水线失败/无候选。
     """
+    run_id = now_cn().strftime("%Y%m%d_%H%M%S")
+    run_date = now_cn().strftime("%Y-%m-%d")
+    # 先落 run_log 再惰性 import：import 抛错时 run_daily_pipeline 的兜底只能按
+    # "最新一条 running"归属错误，本次没有行就会把当日错误记到历史僵尸 run 上
+    # （产线只读实测 18 条僵尸，2026-10-15..10-29），当日失败反而无迹可查。
+    RunLogDAO().start_run(run_id)
+
     from src.collector.akshare_fetcher import run_collect_pipeline
     from src.screener.value_screener import run_screener
 
-    run_id = now_cn().strftime("%Y%m%d_%H%M%S")
-    run_date = now_cn().strftime("%Y-%m-%d")
     progress = PipelineProgressDAO()
-
-    RunLogDAO().start_run(run_id)
     logger.info("\n[1/3] Data collection pipeline")
     progress.init_run(run_id, 'collecting', '采集全A股...', total=0, ai_total=0)
 
