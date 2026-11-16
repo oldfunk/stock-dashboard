@@ -22,13 +22,24 @@ logger = logging.getLogger(__name__)
 
 
 def _prices(code: str) -> list[tuple[str, float]]:
-    """估值分位用**不复权**价（与当期 EPS/BVPS 同口径；旧数据回退 close）。"""
+    """估值分位用**不复权**价（与当期 EPS/BVPS 同口径；旧数据回退 close）。
+
+    2026-11-16：kline 全市场增量只写观察池+Top25，大多数票最新 kline 停在
+    10-30 → 分位的"当前值"陈旧两周。daily_close 覆盖层有全市场当日不复权
+    收盘，按日期并入（同日期 kline 优先，避免双点；两者本同为 raw 口径）。
+    """
     from src.models.database import db_conn
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT trade_date, COALESCE(close_raw, close) AS px "
-            "FROM kline_daily WHERE code=? "
-            "ORDER BY trade_date ASC", (code,)
+            "SELECT trade_date, px FROM ("
+            "  SELECT trade_date, px, ROW_NUMBER() OVER ("
+            "    PARTITION BY trade_date ORDER BY prio) AS rn FROM ("
+            "    SELECT trade_date, COALESCE(close_raw, close) AS px, 0 AS prio "
+            "    FROM kline_daily WHERE code=?"
+            "    UNION ALL"
+            "    SELECT trade_date, close, 1 FROM daily_close "
+            "    WHERE code=? AND close IS NOT NULL"
+            "  )) WHERE rn = 1 ORDER BY trade_date ASC", (code, code)
         ).fetchall()
     return [(r["trade_date"], r["px"]) for r in rows if r["px"] is not None]
 

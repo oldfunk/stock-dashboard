@@ -99,3 +99,34 @@ def test_shares_at_prefers_derived_historical_shares():
 
 def test_insufficient_data_returns_empty(db):
     assert compute_percentiles("999999") == {}
+
+
+def test_current_price_uses_daily_close_overlay(db):
+    """kline 停在 10-30 时，分位"当前值"取 daily_close 覆盖层的最新价。
+
+    产线复核（2026-11-16）：全市场 kline 增量只写观察池+Top25，大多数票
+    最新 kline 止于 10-30 → 分位当前值陈旧两周；daily_close 有全市场
+    当日不复权收盘（raw 口径一致），同日期 kline 优先。
+    """
+    from datetime import date, timedelta
+
+    from src.models.database import DailyCloseDAO
+    prices = []
+    day = date(2026, 9, 1)
+    i = 0
+    while len(prices) < 39:
+        if day.weekday() < 5:
+            prices.append((day.isoformat(), round(6.0 + i * 0.4, 2)))
+            i += 1
+        day += timedelta(days=1)
+    prices.append(("2026-10-30", 20.0))
+    _kline("600519", prices)
+    _report("600519", "2025-12-31", eps=1.0, shares=100, equity=500,
+            notice="2026-01-01")
+    _div("600519", 0.05)
+    DailyCloseDAO().upsert_batch([{"code": "600519", "close": 5.0}],
+                                 "2026-11-16")
+    out = compute_percentiles("600519")
+    # 历史 5..20.2 升序，当前 5 是最低 → PE 分位 1/41=2.4；
+    # 若仍用 10-30 的 20 则约 97.6
+    assert out["5"]["pe_pct"] == 2.4
