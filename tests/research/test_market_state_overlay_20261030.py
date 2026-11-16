@@ -103,6 +103,51 @@ def test_no_overlay_rows_behavior_unchanged(db):
     assert v.metrics.get("pct_above_ma60") is None
 
 
+def test_window_overlay_extends_kline_history(db):
+    """覆盖层扩展到窗口：kline 止于 10-30 的票靠 daily_close 续上 → MA20 全市场。
+
+    产线复核（2026-11-16）：kline 全市场回填止于 10-30，每日增量只写
+    观察池+Top25 → 61 日窗口里大多数票只有 10-30 一个点，广度实际只代表
+    那 ~77 只。窗口覆盖层让 MA20 立即全市场（MA60 随覆盖层累积自愈）。
+    """
+    from datetime import date, timedelta
+
+    from src.models.database import DailyCloseDAO
+    from src.research.market_state import compute_vector
+
+    D = "2026-11-06"
+    hist = [(date(2026, 8, 20) + timedelta(days=i)).isoformat() for i in range(45)]
+    for code in ("000001", "000002", "000003"):
+        _seed_kline(code, adj=10.0, raw=5.0, dates=hist)
+    for d in ("2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"):
+        DailyCloseDAO().upsert_batch([
+            {"code": "000001", "close": 6.0},
+            {"code": "000002", "close": 4.0},
+            {"code": "000003", "close": 5.5},
+        ], d)
+    v = compute_vector(D)
+    assert v.metrics["pct_above_ma20"] == pytest.approx(66.6667, abs=0.01)
+    assert v.metrics.get("pct_above_ma60") is None, "45+5=50 点 < 60，MA60 fail-closed"
+    assert v.quality["breadth_n"] == 3
+    assert v.quality["breadth_n_60"] == 0
+
+
+def test_window_overlay_skips_kline_covered_cells(db):
+    """窗口覆盖层只补 kline 缺行的格子（三列契约为准，不顶替）。"""
+    from src.models.database import DailyCloseDAO
+    from src.research.market_state import _load_overlay_window, _read_txn
+    _seed_kline("000001", adj=10.0, raw=5.0, dates=HIST + [D])
+    _seed_kline("000002", adj=20.0, raw=10.0, dates=HIST)
+    DailyCloseDAO().upsert_batch([
+        {"code": "000001", "close": 4.0},
+        {"code": "000002", "close": 6.0},
+    ], D)
+    with _read_txn() as conn:
+        overlay, n = _load_overlay_window(conn, D, sorted(set(HIST) | {D}))
+    assert set(overlay) == {"000002"}
+    assert n == 1
+
+
 def test_daily_close_dao_key_variants(db):
     """主路径 current_price / 兜底 price / 直给 close 三种键名都收；closes_for 可读。"""
     dao = db_mod.DailyCloseDAO()

@@ -317,49 +317,93 @@ def _block_liquidity(conn, trade_date: str) -> dict[str, float | None]:
     return metrics
 
 
+def _load_overlay_window(conn, trade_date: str,
+                         dates: list[str]) -> tuple[dict[str, dict[str, float]], int]:
+    """窗口内覆盖层折算成 close_adj 口径：{code: {date: adj}}，只含 kline 缺行的格子。
+
+    ``dates`` 是广度/波动率的窗口（kline 交易日 ∪ daily_close 交易日）。
+    比率统一取 **trade_date 之前**最近一条两列俱全的 kline 行——整个窗口
+    同一尺度（除权日之间比值恒定），与 ``_load_overlay`` 的当日口径一致。
+
+    为什么需要窗口而不只是当日（2026-11-16 产线复核）：kline 全市场回填止于
+    10-30，之后每日增量只写观察池+Top25（~77 只/日）→ 61 日窗口里大多数票
+    只有 10-30 一个点，MA20/MA60 实际只代表那 77 只。daily_close 覆盖层
+    有全市场当日收盘，把它扩展到窗口后：MA20 立即全市场；MA60 随覆盖层
+    逐日累积自愈（约 3 个月后满窗）。
+    """
+    if not dates:
+        return {}, 0
+    ph = ",".join("?" * len(dates))
+    rows = conn.execute(
+        f"SELECT dc.code, dc.trade_date, dc.close FROM daily_close dc "
+        f"WHERE dc.trade_date IN ({ph}) AND dc.close IS NOT NULL "
+        f"  AND NOT EXISTS (SELECT 1 FROM kline_daily k "
+        f"                  WHERE k.code = dc.code AND k.trade_date = dc.trade_date "
+        f"                    AND k.close_adj IS NOT NULL)",
+        dates).fetchall()
+    ratios = {r["code"]: r["ratio"]
+              for r in conn.execute(_RATIO_SQL, (trade_date,))}
+    out: dict[str, dict[str, float]] = {}
+    for r in rows:
+        ratio = ratios.get(r["code"])
+        if not ratio:
+            continue
+        out.setdefault(r["code"], {})[r["trade_date"]] = r["close"] * ratio
+    return out, len(rows)
+
+
 def _block_breadth(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
     """广度：MA20/MA60 占比、涨跌比（窗口 61 个交易日）。
 
-    优化：先取最近 61 个交易日，只扫这些行（避免全表窗口函数）。
+    窗口 = kline 最近 61 个交易日 ∪ daily_close 全部交易日（覆盖层可能带来
+    kline 尚未覆盖的最近日期）。MA20/MA60 **分别**要求 20/60 点、分母分开：
+    覆盖层只有近 12 天时 MA20 已全市场、MA60 随覆盖层累积自愈（2026-11-16）。
     """
+    kline_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT trade_date FROM kline_daily WHERE trade_date <= ? "
+        "ORDER BY trade_date DESC LIMIT 61", (trade_date,))]
+    dc_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT trade_date FROM daily_close WHERE trade_date <= ?",
+        (trade_date,))]
+    window = sorted(set(kline_dates) | set(dc_dates))[-61:]
+    ph = ",".join("?" * len(window))
     rows = conn.execute(
-        "SELECT code, trade_date, close_adj FROM kline_daily "
-        "WHERE close_adj IS NOT NULL AND trade_date IN ("
-        "  SELECT DISTINCT trade_date FROM kline_daily "
-        "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 61)",
-        (trade_date,)).fetchall()
+        f"SELECT code, trade_date, close_adj FROM kline_daily "
+        f"WHERE close_adj IS NOT NULL AND trade_date IN ({ph})",
+        window).fetchall()
     series: dict[str, list[tuple[str, float]]] = {}
     for r in rows:
         series.setdefault(r["code"], []).append((r["trade_date"], r["close_adj"]))
-    # 覆盖层补当日全市场收盘（kline 当日行只有观察池+Top25 的 ~21 只，
-    # 直接算会让 pct_above_ma* 只代表那 21 只——coverage 还是 1.0 的假象）
-    overlay, overlay_n = _load_overlay(conn, trade_date)
-    for code, o in overlay.items():
-        pts = series.get(code)
-        if pts is not None:
-            pts.append((trade_date, o["adj"]))
-    above20 = above60 = adv = dec = total = 0
+    # 覆盖层补窗口内缺行的全市场收盘（kline 历史止于 10-30 的票靠这层续上；
+    # 直接只用 kline 会让 pct_above_ma* 只代表观察池+Top25 那 ~77 只）
+    overlay, overlay_n = _load_overlay_window(conn, trade_date, window)
+    for code, m in overlay.items():
+        series.setdefault(code, []).extend(m.items())
+    above20 = above60 = adv = dec = total20 = total60 = 0
     for pts in series.values():
         pts.sort()   # 窗口查询是 DESC，这里升序以便取最新
-        if len(pts) < 60 or pts[-1][0] != trade_date:
-            continue   # 窗口不足 60 日 -> 不计算（不做过短均线的近似）
-        total += 1
+        if len(pts) < 2 or pts[-1][0] != trade_date:
+            continue   # 窗口末端不是当日 -> 不计算（不做过短均线的近似）
         last = pts[-1][1]
-        ma20 = sum(p[1] for p in pts[-20:]) / 20
-        ma60 = sum(p[1] for p in pts[-60:]) / 60
-        if last > ma20:
-            above20 += 1
-        if last > ma60:
-            above60 += 1
+        if len(pts) >= 20:
+            total20 += 1
+            ma20 = sum(p[1] for p in pts[-20:]) / 20
+            if last > ma20:
+                above20 += 1
+        if len(pts) >= 60:
+            total60 += 1
+            ma60 = sum(p[1] for p in pts[-60:]) / 60
+            if last > ma60:
+                above60 += 1
         if last > pts[-2][1]:
             adv += 1
         elif last < pts[-2][1]:
             dec += 1
     return ({
-        "pct_above_ma20": round(100.0 * above20 / total, 4) if total else None,
-        "pct_above_ma60": round(100.0 * above60 / total, 4) if total else None,
+        "pct_above_ma20": round(100.0 * above20 / total20, 4) if total20 else None,
+        "pct_above_ma60": round(100.0 * above60 / total60, 4) if total60 else None,
         "adv_dec_ratio": round(adv / dec, 4) if dec else None,
-    }, {"breadth_n": total, "overlay_n": overlay_n})
+    }, {"breadth_n": total20, "breadth_n_60": total60, "overlay_n": overlay_n})
 
 
 def _block_volatility(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
@@ -370,12 +414,18 @@ def _block_volatility(conn, trade_date: str) -> tuple[dict[str, float | None], d
     组成切换会造出伪收益污染波动率；改为每股对自身昨收算日收益（组成
     切换不产生跳变），再按日等权平均。
     """
+    kline_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT trade_date FROM kline_daily WHERE trade_date <= ? "
+        "ORDER BY trade_date DESC LIMIT 21", (trade_date,))]
+    dc_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT trade_date FROM daily_close WHERE trade_date <= ?",
+        (trade_date,))]
+    window = sorted(set(kline_dates) | set(dc_dates))[-21:]
+    ph = ",".join("?" * len(window))
     rows = conn.execute(
-        "SELECT code, trade_date, close_adj FROM kline_daily "
-        "WHERE close_adj IS NOT NULL AND trade_date IN ("
-        "  SELECT DISTINCT trade_date FROM kline_daily "
-        "  WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 21)",
-        (trade_date,)).fetchall()
+        f"SELECT code, trade_date, close_adj FROM kline_daily "
+        f"WHERE close_adj IS NOT NULL AND trade_date IN ({ph})",
+        window).fetchall()
     kline_codes = conn.execute(
         "SELECT COUNT(DISTINCT code) AS n FROM kline_daily "
         "WHERE trade_date = ?", (trade_date,)).fetchone()["n"]
@@ -383,14 +433,12 @@ def _block_volatility(conn, trade_date: str) -> tuple[dict[str, float | None], d
     per_code: dict[str, dict[str, float]] = {}
     for r in rows:
         per_code.setdefault(r["code"], {})[r["trade_date"]] = r["close_adj"]
-    # 覆盖层补当日收盘（同 breadth）：缺当日 bar 的票拿折算后的 adj 收盘
-    # 参与"对昨收的日收益"，组成与 breadth 同源
-    overlay, overlay_n = _load_overlay(conn, trade_date)
-    for code, o in overlay.items():
-        m = per_code.get(code)
-        if m is not None:
-            m[trade_date] = o["adj"]
-    if overlay_n and trade_date not in dates:
+    # 覆盖层补窗口内缺行的收盘（同 breadth 的窗口口径）：缺 bar 的票拿折算后
+    # 的 adj 收盘参与"对昨收的日收益"，组成与 breadth 同源
+    overlay, overlay_n = _load_overlay_window(conn, trade_date, window)
+    for code, m in overlay.items():
+        per_code.setdefault(code, {}).update(m)
+    if trade_date not in dates:
         dates.append(trade_date)   # kline 当日无行时窗口也要含当日
     day_rets: dict[str, list[float]] = {}
     for m in per_code.values():
