@@ -73,10 +73,10 @@ def default_rules() -> list[RegimeRule]:
                    risk_on_threshold=60.0, risk_off_threshold=40.0,
                    direction="higher_better",
                    description="站上 60 日均线占比 >=60% 看多，<=40% 看空"),
-        RegimeRule("valuation", "valuation", "pe_percentile_5y",
-                   risk_on_threshold=20.0, risk_off_threshold=80.0,
-                   direction="lower_better",
-                   description="PE 5 年分位 <=20% 看多，>=80% 看空"),
+        # valuation/pe_percentile_5y 规则 2026-11-16 移除：该字段在
+        # StateSchema 里 implemented=False（无生产者），规则永远拿不到数据
+        # ——与 style/value_vs_growth 假门同族（2026-10-29 先例）。字段保留
+        # 注册，等 5 年市场 PE 序列有生产者了再恢复规则。
         RegimeRule("volatility", "liquidity", "volatility_20d",
                    risk_on_threshold=0.15, risk_off_threshold=0.30,
                    direction="lower_better",
