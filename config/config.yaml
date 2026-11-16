@@ -67,9 +67,12 @@ ai:
   api_base: "https://opencode.ai/zen/v1"
   model: "deepseek-v4-flash-free"   # 默认模型（该模型已下线；本地分析停用，此值暂不生效）
   temperature: 0.3
-  # 推理模型（nemotron 等）会把大量预算给 reasoning_content：实测 6000 会
-  # content=None（finish=length），16000 起正常。留给 20000 余量。
-  max_tokens: 20000
+  # GLM-4.7-Flash：上下文 200K / 最大输出 128K，且**全免费**。实测 6000 会
+  # 截断（有组用到 6328 tokens），给 16000 余量；推理模型（nemotron）更吃预算。
+  max_tokens: 16000
+  # 官方 JSON 模式（response_format=json_object）：实测不开启时约半数输出
+  # 带 markdown/前言导致 json.loads 失败（靠兜底提取），开启后稳定合法。
+  json_mode: true
   # 免 Key 备用通道：主池全灭时每只股票兜底（默认 Pollinations，可配其它 OpenAI 兼容源）
   fallback:
     enabled: true

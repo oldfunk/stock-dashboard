@@ -888,6 +888,16 @@ class AiAnalyzer:
         self.model = os.getenv('STOCK_AI_MODEL') or cfg.get('model') or DEFAULT_MODEL
         self.temperature = cfg.get('temperature', 0.3)
         self.max_tokens = cfg.get('max_tokens', 6000)
+        # 推理模型（nemotron 等）会把大量预算给 reasoning_content：6000 会
+        # content=None。GLM-4.7-Flash 上限 128K、且免费，给 16000 余量。
+        # 上游若有限额可自行调小。
+        try:
+            self.max_tokens = int(self.max_tokens)
+        except (TypeError, ValueError):
+            self.max_tokens = 16000
+        # JSON 模式：官方 response_format=json_object 保证合法 JSON（实测
+        # 不开启时约半数输出带 markdown/前言，靠兜底提取）。
+        self._json_mode = bool(cfg.get('json_mode', True))
         # 上游 RPM 上限（0=不限）。所有调用路径共用进程级限速器。
         try:
             self._rpm_limit = int(cfg.get('rpm_limit', 0) or 0)
@@ -1161,6 +1171,8 @@ class AiAnalyzer:
                 'temperature': self.temperature,
                 'max_tokens': self.max_tokens,
             }
+            if self._json_mode:
+                payload['response_format'] = {'type': 'json_object'}
 
             try:
                 with httpx.Client(timeout=240.0) as client:
