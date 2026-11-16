@@ -51,10 +51,9 @@ ai:
   # 每日流水线后自动触发 AI 分析（2026-11-16 恢复；false = 只保留面板手动队列）
   enabled: true
   # 每日自动分析的并发与下发间隔（面板手动队列不受影响）。
-  # 硬上限：智谱 API 只允许 **1 并发**（用户 2026-11-16 告知）→ 并发必须为 1，
-  # 否则触发 429（实测 4 并发 30 分钟丢 4 只）。串行 20 只约 83 分钟。
-  # 换模型后若新上游允许更高并发，再调大 daily_concurrency。
-  daily_concurrency: 1
+  # 上游 RPM=40（NVIDIA），进程级限速器保证合计不超；并发 4 时实际约
+  # 12 RPM（下发间隔 5s），远低于上限。旧上游（智谱 1 并发）时这里要写 1。
+  daily_concurrency: 4
   daily_interval_seconds: 5
   # 上游 RPM 上限（NVIDIA integrate.api.nvidia.com，用户 2026-11-16 告知 =40）。
   # 进程级限速器装在 analyze_stock 入口：自动批次 + 面板手动队列合计也不超。
