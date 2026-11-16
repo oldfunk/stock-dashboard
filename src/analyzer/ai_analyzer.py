@@ -1179,9 +1179,15 @@ class AiAnalyzer:
                         time.sleep(2)
                         continue
                     if not content or len(content) < 10:
+                        # 推理模型（如 nemotron）会把 token 预算全给 reasoning_content，
+                        # 此时 content 为 None 且 finish_reason=length —— 这不是"模型烂"，
+                        # 而是 max_tokens 不够（2026-11-16 实测 6000 → None，16000 起正常）。
                         logger.warning(
-                            "[AI分析] 响应内容过短(%s字符, %s), 轮换模型重试...",
-                            len(content), current_model)
+                            "[AI分析] 响应内容过短(%s字符, finish=%s, %s), 轮换模型重试...",
+                            len(content) if content else 0,
+                            (data.get('choices', [{}])[0].get('finish_reason')
+                             if isinstance(data.get('choices'), list) else '?'),
+                            current_model)
                         self._mark_model_dead(current_model)
                         current_model = self._resolve_model()
                         consecutive_timeouts = 0

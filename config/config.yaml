@@ -66,7 +66,9 @@ ai:
   api_base: "https://opencode.ai/zen/v1"
   model: "deepseek-v4-flash-free"   # 默认模型（该模型已下线；本地分析停用，此值暂不生效）
   temperature: 0.3
-  max_tokens: 6000
+  # 推理模型（nemotron 等）会把大量预算给 reasoning_content：实测 6000 会
+  # content=None（finish=length），16000 起正常。留给 20000 余量。
+  max_tokens: 20000
   # 免 Key 备用通道：主池全灭时每只股票兜底（默认 Pollinations，可配其它 OpenAI 兼容源）
   fallback:
     enabled: true
