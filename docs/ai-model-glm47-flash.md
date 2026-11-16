@@ -10,9 +10,9 @@
 |---|---|
 | 价格 | **全免费**（输入/输出/缓存命中/缓存存储均免费） |
 | 上下文 | 200K |
-| 最大输出 | **128K** |
+| 最大输出 | 模型标称 128K；**API 实际限制 `max_tokens ∈ [1, 98304]`** |
 | 尺寸/定位 | 30B 级 SOTA，Agentic Coding 强化（SWE-bench、τ²-Bench 同尺寸开源 SOTA） |
-| 思考模式 | **GLM-4.7 系列默认开启 Thinking**（不像 4.6 是"混合自动"） |
+| 思考模式 | **GLM-4.7 系列默认开启 Thinking**（不像 4.6 是"混合自动"）；我们仍显式传 `thinking={"type":"enabled"}` |
 | 结构化输出 | 支持 `response_format={"type":"json_object"}` |
 | 其他能力 | 流式、Function Calling、上下文缓存、MCP |
 | 推荐场景 | Agentic Coding、复杂问题协作、长文本、中文写作/翻译 |
@@ -23,7 +23,9 @@
 ## 2. 我们踩过的两个坑（实测）
 
 1. **max_tokens=6000 会截断**：同一 prompt 实测单组 completion 用到
-   **6328** tokens（>6000）。上限是 128K 且免费，没理由卡 6000。
+   **6328** tokens（>6000）。模型标称 128K、免费，没理由卡 6000。
+   ⚠️ 但 API 实际上限是 **98304**（`131072` 会报 `400 code=1210
+   max_tokens参数非法：限制数值范围[1,98304]`）——别按标称 128K 填。
 2. **不开 JSON 模式时输出不合法**：约半数响应带 markdown 前言/尾注，
    `json.loads` 直接失败，只能靠兜底提取（`_extract_json`）。开启官方
    `response_format=json_object` 后稳定合法。
@@ -47,7 +49,8 @@
 
 | 项 | 值 | 位置 |
 |---|---|---|
-| `max_tokens` | 16000 | config.yaml（nec local.yaml 同步） |
+| `max_tokens` | **98304**（API 上限；模型标称 128K 但参数被拒） | config.yaml（nec local.yaml 同步） |
+| `thinking` | **true**（显式 `thinking={"type":"enabled"}`） | config.yaml |
 | `json_mode` | true（`response_format=json_object`） | config.yaml，可关 |
 | `temperature` | 0.3 | config.yaml |
 | `daily_concurrency` | 1 | config.yaml（**上游 glm 并发上限=1**） |
