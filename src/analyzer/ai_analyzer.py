@@ -887,13 +887,14 @@ class AiAnalyzer:
             self.api_base = self.api_base[:-len('/chat/completions')]
         self.model = os.getenv('STOCK_AI_MODEL') or cfg.get('model') or DEFAULT_MODEL
         self.temperature = cfg.get('temperature', 0.3)
-        # 上限取模型最大值（GLM-4.7-Flash = 128K）：max_tokens 只是"允许上限"，
-        # 不是目标长度；免费模型没理由卡小。推理模型（nemotron）会把预算给
-        # reasoning_content，卡小会 content=None。
+        # 上限取 API 允许的最大值：GLM-4.7-Flash 模型标称 128K，但 API 限制
+        # max_tokens ∈ [1, 98304]（实测 131072 → 400 code=1210）。它只是
+        # "允许上限"不是目标长度；免费模型没理由卡小，卡小只会截断
+        # （实测 6000 会截断；推理模型更吃预算）。
         try:
-            self.max_tokens = int(cfg.get('max_tokens', 131072) or 131072)
+            self.max_tokens = int(cfg.get('max_tokens', 98304) or 98304)
         except (TypeError, ValueError):
-            self.max_tokens = 131072
+            self.max_tokens = 98304
         # 思考模式：投资分析必须开。GLM-4.7 系列默认开启，但显式声明
         # （防上游默认变化）；关闭只会更快、更浅。
         self._thinking = bool(cfg.get('thinking', True))

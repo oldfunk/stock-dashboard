@@ -51,9 +51,10 @@ def test_max_tokens_uses_config(monkeypatch):
     assert p["max_tokens"] == 16000
 
 
-def test_max_tokens_default_is_model_ceiling(monkeypatch):
+def test_max_tokens_default_is_api_ceiling(monkeypatch):
     p = _payload(monkeypatch, {})
-    assert p["max_tokens"] == 131072, "上限应取模型最大值 128K，不卡小"
+    # GLM-4.7-Flash 模型标称 128K，但 API 限制 [1, 98304]（131072 → 400）
+    assert p["max_tokens"] == 98304
 
 
 def test_thinking_enabled_by_default(monkeypatch):
