@@ -192,6 +192,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **生产事件**：deploy 重启窗口内 :9527 被 Hermes 常驻 agent 起的 `python main.py`（nec 目录旧应用）+多进程子进程占用 → 母服务重启循环 http:500；清理占用者后恢复（16:03 main/parent 200）。**跨团队约定提请**：母仓库目录不跑非母项目进程；端口各归其主。
 - **门禁**：1235 → **1299**（母）/ vendor 772（记录）。
 
+### 2026-11-16（晚：换 NVIDIA nemotron 模型 + RPM 限速 + 推理模型适配）
+
+- **换模型**（用户手动改 nec 的 `config/local.yaml` + `.env`）：zhipu/glm-4.5-flash → **NVIDIA `nvidia/nemotron-3.5-super-vl-120b-a12b`**（integrate.api.nvidia.com）。
+- **RPM 限速器（`6fb304d`）**：用户告知上游 **RPM=40**。新增 `src/ai_rate.py` 进程级令牌间隔限速器，装在 `AiAnalyzer.analyze_stock` 唯一入口——**自动批次 + 面板手动队列合计**也不超；`ai.rpm_limit`（出厂 40，0=不限）。
+- **推理模型适配（`d0f3a15`）**：实测 nemotron 会把 token 预算全给 `reasoning_content` → `content=None`（finish=length）：max_tokens **6000 → None，16000 起正常**（content ~5.4k 字符）。旧代码在"内容过短"分支的日志里又调 `len(content)` → `TypeError` 被宽 except 吞掉、掩盖真因；已修（安全记 0 字符 + finish_reason），`max_tokens` 提到 **20000**。
+- **并发提速（`6daa0a5`）**：`daily_concurrency` 1→4（限速器保证不超 40 RPM；实测 4 并发约 1.4 RPM，下发间隔 5s）。
+- **实测（完整 20 只，走调度器触发路径）**：**7 分 42 秒、20/20 成功、0 失败、0 重复**（串行 83 分钟 → 7.7 分钟，约 11 倍；单只 ~96s，也比智谱 ~4.2 分钟快）。
+
 ### 2026-11-16（周一复核：周六首跑三项验证 + EM 段判据第二层修复 `c93591d`）
 
 - **周六（11-14）首跑三项验证**：1) **qfq 锚点**——锚点 2026-11-13、目标 60（多锚 9）、重锚 60 只 / 0 partial / 写 3540 行 / 188.6s，进度表 `last_upd 09:03:46`、60 只 covered=11-13 ✓；2) **前向收益**——benchmark_daily 跟上 11-13 ✓；3) **深层刷新**——ic 填 172 行（剩余 0 只）、EM 段 25 只（done 2 / no_data 23）、剩余 258 只；覆盖率大升（09-30 fcf 25%→**94%**、ic→91%）。
@@ -202,7 +210,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **估值分位当前价修复（`b54dfc1`）**：`valuation_percentile` 用 kline `close_raw` 当"当前价"，而大多数票 kline 停在 10-30 → 详情页 PE/PB/股息率分位陈旧两周。修复：`_prices` 用 UNION 并入 daily_close（全市场当日不复权收盘，同 raw 口径），同日期 kline 优先。**生产复验**：600519 价格序列最新到 2026-11-16（1453.9）。
 - **P1 恢复 AI 分析自动触发（`f4cd7fd` + `ecb766e`）**：断链两层——① 调度器触发自 2026-09-21 被注释停用；② **服务进程（systemd）不加载 `.env`**，只有 CLI 脚本各自 load_dotenv 所以手动能跑。修复：恢复触发（开关 `ai.enabled`，默认 true）+ `src/config.py` 的 `load_config` 统一 `load_dotenv(override=False)`。**生产实测**：调度器路径分析 000792/002192 入库（glm-4.5-flash 200 OK）。
 - **P1b AI 分析历史去重（`a24a7b1`）**：`stock_analysis_history.save` 是纯 INSERT → 同批次"失败标记 + 成功行"积重复（实录 40 条）。改为同 `(stock_code, run_id)` 先删后插，跨 run_id 历史累积不变；生产已清理本次 20 条失败标记。
-- **P1c 每日 AI 分析提速（`9fd1518` + `5513c8c`）**：串行 20 只 **83 分钟、0 失败**；改 `analyze_batch_parallel` 后 **4 并发 30 分钟但 4/20 限流失败**（上游 429，退避+模型轮换仍丢 4 只）→ 降到 **2 并发**（约 35-40 分钟、避开限流）。参数 `ai.daily_concurrency` / `ai.daily_interval_seconds`，面板手动队列不受影响。今日 4 只限流失败已串行补跑。
+- **P1c 每日 AI 分析提速（`9fd1518` + `5513c8c` + `6daa0a5`）**：串行 20 只 **83 分钟、0 失败**；换 NVIDIA nemotron 后单只 ~96s，4 并发 **完整 20 只 7 分 42 秒、20/20、0 失败**。限速器保 RPM≤40（实测 ~1.4）。参数 `ai.daily_concurrency` / `ai.daily_interval_seconds` / `ai.rpm_limit`。
 - **P2 全市场日线轮换（`f4cd7fd`）****：实测单只增量 ~4.3s → 全市场 5400 只约 **6.4 小时**，每日全量不可行。改为**限量限时 + 最陈旧优先的每日轮换**（活跃池观察池+Top25 每日必刷；其余 `kline.full_market_daily_limit=600` / `full_market_max_seconds=1500`，config.yaml），停更跨度有上界且天然续跑。研究域广度/估值分位已由 daily_close 覆盖层兜住全市场。
 - **P3 移除 regime 死规则（`3fc595a`）**：`pe_percentile_5y` 在 StateSchema `implemented=False`（无生产者），valuation 规则永远拿不到数据——按 style 规则先例移除（行为不变）。字段保留注册，待 5 年市场 PE 序列有生产者再恢复。
 - **审计结论（数据/算法成熟度）**：服务三 200、24h 零 ERROR、流水线每交易日 completed（5527→20）；全市场年报 5526、ic 91%、fcf 94%、快照每日 5527、daily_close 每日全市场。**两个硬缺口**：① AI 分析写入停滞（`ai_analysis_log` 最后 09-29、`stock_analysis_history` 11 月 1 条、`analysis_outcome` 最新 11-05）→ 研究样本不增长；② 全市场日线近 12 日只有 daily_close（kline 停 10-30），已用覆盖层缓解研究域，但 kline 本身对大多数票仍停 10-30。
