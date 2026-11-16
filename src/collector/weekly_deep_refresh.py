@@ -63,9 +63,17 @@ DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
 EM_WEEKLY_FIELDS = ("fcf",)
 
 
-def _still_missing(dao: FinancialHistoryDAO, code: str, fields: tuple) -> bool:
-    """这次拉完之后，该股**任一报告期**是否还缺这些字段（判 done / no_data）。"""
-    periods = set(dao.get_report_dates([code]).get(code, []))
+def _still_missing(dao: FinancialHistoryDAO, code: str, fields: tuple,
+                   window: int) -> bool:
+    """这次拉完之后，该股**近 ``window`` 期**是否还缺这些字段（判 done / no_data）。
+
+    必须与目标集同窗口（``targets_missing_deep_fields`` 按最近 window 期挑）：
+    全历史判据会让老期缺口（如 000001 的 2008 年前 fcf，上游永不提供）
+    永远判 no_data（2026-11-16 产线实证：周六 49 只 no_data 里 000001
+    近 8 期全齐、缺口全在 2008 年前）。
+    """
+    dates = sorted(dao.get_report_dates([code]).get(code, []), reverse=True)
+    periods = set(dates[:max(1, int(window))])
     filled = dao.get_deep_field_dates([code], fields).get(code, {})
     return any(periods - set(filled.get(f) or ()) for f in fields)
 
@@ -98,7 +106,7 @@ def run_em_full_refresh(limit: int = DEFAULT_EM_BATCH,
             # 骨架没出数 = 这次没取到（不是"上游没有"）→ partial，不写 covered
             status = "partial"
             error = error or "骨架无数据（这次没取到）"
-        elif _still_missing(dao, code, EM_WEEKLY_FIELDS):
+        elif _still_missing(dao, code, EM_WEEKLY_FIELDS, EM_DEEP_WINDOW):
             status = "no_data"
         else:
             status = "done"

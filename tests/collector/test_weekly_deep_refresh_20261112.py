@@ -197,6 +197,21 @@ def test_em_stage_ignores_ic_only_gap(em):
     assert calls == []
 
 
+def test_status_window_ignores_ancient_gaps(em):
+    """判 done/no_data 只看近 8 期：老期缺口（上游永不提供）不许永远 no_data。
+
+    产线实证（2026-11-16）：000001 近 8 期 fcf 全齐、缺口全在 2008 年前，
+    却被全历史判据标 no_data（周六 49 只 no_data 的主要成分）。
+    """
+    mod, calls, state = em
+    dates = _dates(12)              # 近 8 期 + 4 期更早，全部缺 fcf
+    _seed("600519", dates, fcf=False)
+    state["fill"] = {"600519"}
+    result = mod.run_em_full_refresh(sleep=0)
+    assert result["status_counts"]["done"] == 1
+    assert result["status_counts"]["no_data"] == 0
+
+
 def test_daily_cooldown_does_not_block_the_weekly_full_pull(em):
     """平日冷却（em_deep_gap=no_data）的股票，周六仍要给一次全量机会。"""
     mod, calls, state = em
