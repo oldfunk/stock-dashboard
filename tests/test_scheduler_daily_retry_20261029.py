@@ -200,3 +200,48 @@ def test_kline_rotation_budget_stops(sched, monkeypatch):
     m._rotate_stale_kline(dao, lambda code, start_date=None: calls.append(code),
                           af.SourceUnsupportedError, limit=600, budget=0)
     assert calls == [], "预算 0 应一只都不跑"
+
+
+def test_ai_daily_params_defaults_and_config(sched):
+    """并发/间隔来自 config，缺省 4/10s（面板手动队列不受影响）。"""
+    s, m = sched
+    assert m._ai_daily_params({}) == (4, 10)
+    assert m._ai_daily_params({"ai": {"daily_concurrency": 6,
+                                      "daily_interval_seconds": 3}}) == (6, 3)
+    assert m._ai_daily_params({"ai": {"daily_concurrency": "x"}}) == (4, 10)
+
+
+def test_ai_trigger_uses_parallel_with_config(sched, monkeypatch):
+    """每日触发走并发版 analyze_batch_parallel，参数取自 config。"""
+    import threading
+    import src.ai_queue as aq
+    import src.orchestrator as o
+    from src.models.database import RunLogDAO, ScreeningResultDAO
+
+    RunLogDAO().start_run("r1")
+    RunLogDAO().complete_run("r1", 5527, 1, 0)
+    ScreeningResultDAO().save_batch([{"run_id": "r1", "run_date": "2026-11-16",
+                                      "code": "600519", "name": "贵州茅台",
+                                      "score": 90.0}])
+    seen = {}
+
+    def fake(stocks, run_id, interval_seconds=60, max_workers=2, **kw):
+        seen.update(n=len(stocks), interval=interval_seconds, workers=max_workers)
+        return len(stocks), 0
+
+    monkeypatch.setattr(aq, "analyze_batch_parallel", fake)
+    threads = []
+    orig = threading.Thread
+
+    class Capture(orig):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            threads.append(self)
+
+    monkeypatch.setattr(threading, "Thread", Capture)
+    s, m = sched
+    s.MarketScheduler._trigger_ai_analysis_async(m, {
+        "ai": {"daily_concurrency": 5, "daily_interval_seconds": 2}})
+    for t in threads:
+        t.join(timeout=30)
+    assert seen == {"n": 1, "interval": 2, "workers": 5}

@@ -734,13 +734,31 @@ class MarketScheduler:
         finally:
             self._review_in_progress = False
 
+    @staticmethod
+    def _ai_daily_params(config: dict) -> tuple[int, int]:
+        """每日自动分析的 ``(并发, 下发间隔秒)``；config 缺省 = 4 / 10s。
+
+        实测（2026-11-16）：串行版 20 只约 83 分钟（~4.2 分钟/只，LLM 调用
+        占大头、60s 间隔占小头）。改并发后总时长≈批数×单只耗时，4 并发约
+        15-20 分钟。面板手动队列不受这两个键影响。
+        """
+        ai = (config or {}).get("ai", {}) or {}
+        try:
+            workers = int(ai.get("daily_concurrency", 4))
+        except (TypeError, ValueError):
+            workers = 4
+        try:
+            interval = int(ai.get("daily_interval_seconds", 10))
+        except (TypeError, ValueError):
+            interval = 10
+        return max(1, workers), max(0, interval)
+
     def _trigger_ai_analysis_async(self, config: dict):
         """在后台线程中异步触发 AI 分析（全量模式）"""
         import threading
         
         def _run_ai_analysis():
             try:
-                from src.analyzer.ai_analyzer import analyze_batch
                 from src.models.database import (
                     ScreeningResultDAO, RunLogDAO, PipelineProgressDAO
                 )
@@ -776,8 +794,14 @@ class MarketScheduler:
                         ai_failed=ai_failed
                     )
                 
-                analyzed_ok, analyzed_failed = analyze_batch(
-                    stocks, run_id, interval_seconds=60, on_progress=on_progress
+                from src.ai_queue import analyze_batch_parallel
+
+                workers, interval = self._ai_daily_params(config)
+                logger.info(f"[调度器] AI 分析（并发 {workers}，间隔 {interval}s）"
+                            f"{len(stocks)} 只股票...")
+                analyzed_ok, analyzed_failed = analyze_batch_parallel(
+                    stocks, run_id, interval_seconds=interval,
+                    max_workers=workers, on_progress=on_progress
                 )
                 logger.info(f"[调度器] AI 分析完成: 成功 {analyzed_ok}/{len(stocks)}（失败 {analyzed_failed}）")
                 

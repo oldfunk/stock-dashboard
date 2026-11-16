@@ -50,6 +50,10 @@ screener:
 ai:
   # 每日流水线后自动触发 AI 分析（2026-11-16 恢复；false = 只保留面板手动队列）
   enabled: true
+  # 每日自动分析的并发与下发间隔（面板手动队列不受影响）。实测串行 20 只
+  # 约 83 分钟；4 并发约 15-20 分钟。
+  daily_concurrency: 4
+  daily_interval_seconds: 10
   # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
   # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
   provider: "opencode-zen"           # OpenCode Zen（已不可用，保留作记录）
