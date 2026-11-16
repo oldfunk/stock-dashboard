@@ -50,11 +50,12 @@ screener:
 ai:
   # 每日流水线后自动触发 AI 分析（2026-11-16 恢复；false = 只保留面板手动队列）
   enabled: true
-  # 每日自动分析的并发与下发间隔（面板手动队列不受影响）。实测：串行 20 只
-  # 约 83 分钟 0 失败；4 并发 30 分钟但触发上游 429（4/20 失败）。取 2 并发
-  # （约 35-40 分钟、避开限流），失败再靠面板重试兜。
-  daily_concurrency: 2
-  daily_interval_seconds: 10
+  # 每日自动分析的并发与下发间隔（面板手动队列不受影响）。
+  # 硬上限：智谱 API 只允许 **1 并发**（用户 2026-11-16 告知）→ 并发必须为 1，
+  # 否则触发 429（实测 4 并发 30 分钟丢 4 只）。串行 20 只约 83 分钟。
+  # 换模型后若新上游允许更高并发，再调大 daily_concurrency。
+  daily_concurrency: 1
+  daily_interval_seconds: 5
   # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
   # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
   provider: "opencode-zen"           # OpenCode Zen（已不可用，保留作记录）
