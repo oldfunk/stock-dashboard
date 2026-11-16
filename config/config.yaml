@@ -56,6 +56,10 @@ ai:
   # 换模型后若新上游允许更高并发，再调大 daily_concurrency。
   daily_concurrency: 1
   daily_interval_seconds: 5
+  # 上游 RPM 上限（NVIDIA integrate.api.nvidia.com，用户 2026-11-16 告知 =40）。
+  # 进程级限速器装在 analyze_stock 入口：自动批次 + 面板手动队列合计也不超。
+  # 0 = 不限速。
+  rpm_limit: 40
   # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
   # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
   provider: "opencode-zen"           # OpenCode Zen（已不可用，保留作记录）

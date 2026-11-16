@@ -22,6 +22,8 @@ from typing import Optional, Callable
 
 import httpx
 
+from src.ai_rate import get_limiter
+
 logger = logging.getLogger(__name__)
 
 
@@ -886,6 +888,11 @@ class AiAnalyzer:
         self.model = os.getenv('STOCK_AI_MODEL') or cfg.get('model') or DEFAULT_MODEL
         self.temperature = cfg.get('temperature', 0.3)
         self.max_tokens = cfg.get('max_tokens', 6000)
+        # 上游 RPM 上限（0=不限）。所有调用路径共用进程级限速器。
+        try:
+            self._rpm_limit = int(cfg.get('rpm_limit', 0) or 0)
+        except (TypeError, ValueError):
+            self._rpm_limit = 0
 
         self.api_key = os.getenv('STOCK_AI_API_KEY') or os.getenv('OPENAI_API_KEY')
         self._is_free_model = self.model.endswith('-free')
@@ -928,6 +935,9 @@ class AiAnalyzer:
             logger.error("[AI分析] 无 API Key，跳过分析")
             self._last_error = '未配置 API Key'
             return None
+
+        # 限速：所有调用路径（自动批次 / 面板队列 / 重试）合计不超上游 RPM。
+        get_limiter(self._rpm_limit).wait()
 
         # 计算派生指标
         mc = stock.get('market_cap', 'N/A')
