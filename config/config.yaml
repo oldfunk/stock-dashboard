@@ -48,6 +48,8 @@ screener:
 
 # -------- AI 分析配置（本地触发已停用，见 scheduler；分析由外部 AI 执行） --------
 ai:
+  # 每日流水线后自动触发 AI 分析（2026-11-16 恢复；false = 只保留面板手动队列）
+  enabled: true
   # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
   # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
   provider: "opencode-zen"           # OpenCode Zen（已不可用，保留作记录）
@@ -63,6 +65,14 @@ ai:
     temperature: 0.3
     max_tokens: 6000
     retries: 2
+
+# -------- K 线全市场轮换（2026-11-16）--------
+kline:
+  # 每日轮换补全市场的批量上限（0=关闭）。活跃池（观察池+Top25）不受此限制，
+  # 每日必刷；其余票按"最陈旧优先"轮转，停更跨度约 ceil(5400/limit) 个交易日。
+  full_market_daily_limit: 600
+  # 轮换时间预算（秒）：到点就停，剩下明天接着从最陈旧开始（天然续跑）。
+  full_market_max_seconds: 1500
 
 # -------- Web 服务配置 --------
 web:

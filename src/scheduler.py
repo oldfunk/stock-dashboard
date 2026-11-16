@@ -339,7 +339,7 @@ class MarketScheduler:
             # 不阻断其后的温度计快照——2026-11-03 实录：能力边界异常逃逸
             # 让快照整天缺席）
             try:
-                self._fetch_kline_daily()
+                self._fetch_kline_daily(config)
             except Exception as e:
                 logger.warning(f"[调度器] K线增量阶段异常（不阻断快照）: {e}")
 
@@ -356,9 +356,16 @@ class MarketScheduler:
             except Exception as e:
                 logger.warning(f"[调度器] market_state 快照失败: {e}")
 
-            # AI 分析改由外部 AI 执行（读 API/库 → 写笔记），面板不再本地触发
-            # （2026-09-21 方向；本地 Zen/备用通道已确认不可用，触发只会空转失败）
-            # self._trigger_ai_analysis_async(config)
+            # AI 分析：自带 Key（config/local.yaml + .env，zhipu/glm-4.5-flash）
+            # 已配置，恢复每日自动触发（2026-11-16 用户指令）。此前 2026-09-21
+            # 因免费通道（Zen/Pollinations）死亡而停用；现走用户 Key，实测链路
+            # 通（生产 000792 分析入库）。开关 ai.enabled（默认 true）；
+            # 未配置 Key 时 analyze_batch 落失败记录、不空转。
+            if config.get("ai", {}).get("enabled", True):
+                try:
+                    self._trigger_ai_analysis_async(config)
+                except Exception as e:
+                    logger.warning(f"[调度器] AI 分析触发失败（不阻断流水线）: {e}")
         except Exception as e:
             logger.warning(f"[调度器] 每日流水线失败: {e}")
 
@@ -454,13 +461,20 @@ class MarketScheduler:
         finally:
             self._weekly_in_progress = False
 
-    def _fetch_kline_daily(self):
-        """每日拉取观察池+候选股的K线数据（增量更新）
+    def _fetch_kline_daily(self, config: dict | None = None):
+        """每日拉取观察池+候选股的K线数据（增量更新），并轮换补全市场陈旧票。
 
         单只失败不中止整个阶段（2026-11-03 实录）：北交所代码进入增量范围后，
         腾讯/新浪路径抛 ``SourceUnsupportedError``（能力边界，非"没数据"）逃逸出
         循环 → 整个阶段中止、其后的温度计快照也被跳过。现在：能力边界→跳过
         计数；网络/源异常→告警计数；两者都不影响其余代码与后续阶段。
+
+        全市场轮换（2026-11-16 用户指令"市场日线保持新鲜"）：活跃池（观察池+
+        Top25）每日必刷；**其余票按"最陈旧优先"每天补一批**（限量+限时）。
+        实测单只增量 ~4.3s（东财失败退腾讯），全市场 5400 只约 6.4 小时，
+        每日全量不可行；轮换让"停更跨度"有上界（约 ceil(5400/日批) 个交易日），
+        且天然续跑——今天没轮到的明天仍是最陈旧。开关见 config.yaml
+        ``kline.full_market_daily_limit`` / ``kline.full_market_max_seconds``。
         """
         from src.models.database import KlineDAO
         from src.collector.akshare_fetcher import (
@@ -478,17 +492,30 @@ class MarketScheduler:
         except Exception:
             pass
 
-        if not codes:
-            logger.info("[调度器] K线拉取：无待拉取股票")
-            return
-
         dao = KlineDAO()
+        if codes:
+            self._refresh_kline_codes(codes, dao, fetch_kline_data,
+                                      SourceUnsupportedError,
+                                      label="活跃池")
+        kline_cfg = (config or {}).get("kline", {}) or {}
+        try:
+            limit = int(kline_cfg.get("full_market_daily_limit", 600))
+            budget = float(kline_cfg.get("full_market_max_seconds", 1500))
+        except (TypeError, ValueError):
+            limit, budget = 0, 0.0
+        if limit > 0:
+            self._rotate_stale_kline(dao, fetch_kline_data,
+                                     SourceUnsupportedError, limit, budget)
+
+    def _refresh_kline_codes(self, codes, dao, fetch_kline_data,
+                             source_unsupported, label):
+        """按代码集合增量补 K 线（活跃池用）；失败/能力边界不中止整批。"""
         success = skipped = failed = 0
         for code in codes:
             latest = dao.get_latest_date(code)
             try:
                 records = fetch_kline_data(code, start_date=latest)
-            except SourceUnsupportedError as e:
+            except source_unsupported as e:
                 skipped += 1
                 logger.info(f"[调度器] K线拉取跳过（源能力边界）{code}: {e}")
                 continue
@@ -499,8 +526,51 @@ class MarketScheduler:
             if records:
                 dao.upsert_many(code, records)
                 success += 1
-        logger.info(f"[调度器] K线拉取完成: {success}/{len(codes)} 只成功"
+        logger.info(f"[调度器] K线拉取完成({label}): {success}/{len(codes)} 只成功"
                     f"（跳过 {skipped} 能力边界 / 失败 {failed}）")
+
+    def _rotate_stale_kline(self, dao, fetch_kline_data, source_unsupported,
+                            limit: int, budget: float):
+        """全市场轮换：最陈旧的 ``limit`` 只增量补，最多跑 ``budget`` 秒。"""
+        import time
+
+        from src.models.database import db_conn
+        with db_conn() as conn:
+            end = conn.execute("SELECT MAX(trade_date) AS d FROM kline_daily"
+                               ).fetchone()["d"]
+            if not end:
+                return
+            rows = conn.execute(
+                "SELECT code FROM kline_daily GROUP BY code "
+                "HAVING MAX(trade_date) < ? ORDER BY MAX(trade_date) ASC LIMIT ?",
+                (end, limit)).fetchall()
+        targets = [r["code"] for r in rows]
+        if not targets:
+            logger.info("[调度器] K线全市场轮换：无陈旧票")
+            return
+        started = time.monotonic()
+        done = skipped = failed = 0
+        for code in targets:
+            if time.monotonic() - started > budget:
+                logger.info("[调度器] K线全市场轮换达时间预算（已补 %s/%s 只）",
+                            done, len(targets))
+                break
+            latest = dao.get_latest_date(code)
+            try:
+                records = fetch_kline_data(code, start_date=latest)
+            except source_unsupported:
+                skipped += 1
+                continue
+            except Exception as e:
+                failed += 1
+                logger.warning(f"[调度器] K线轮换失败（下轮自愈）{code}: {e}")
+                continue
+            if records:
+                dao.upsert_many(code, records)
+                done += 1
+        logger.info(f"[调度器] K线全市场轮换: 补 {done}/{len(targets)} 只"
+                    f"（跳过 {skipped} / 失败 {failed}），耗时 "
+                    f"{time.monotonic() - started:.0f}s")
 
     def _check_news_jobs(self):
         """新闻后台轮询 + AI 舆情摘要（节奏见 config.yaml news 段）。

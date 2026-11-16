@@ -31,6 +31,9 @@ def sched(tmp_path, monkeypatch):
     m = s.MarketScheduler()
     monkeypatch.setattr(s, "now_cn", lambda: _weekday_at())
     monkeypatch.setattr(m, "_fetch_kline_daily", lambda: None)
+    # 默认不让用例真的拉起 AI 分析线程（用例 2026-11-16 恢复自动触发，
+    # 见下方两个专用用例；其余用例不涉及该路径）
+    monkeypatch.setattr(m, "_trigger_ai_analysis_async", lambda config: None)
     m._last_daily_date = None
     return s, m
 
@@ -120,3 +123,80 @@ def test_weekend_and_premarket_never_consume_budget(sched, monkeypatch):
                             lambda: datetime.combine(saturday, time(16, 0)))
         m._check_daily_pipeline()
     assert calls == [] and m._daily_attempts == 0
+
+
+def test_ai_analysis_triggered_after_pipeline(sched, monkeypatch):
+    """流水线成功后自动触发 AI 分析（2026-11-16 恢复；ai.enabled 默认 true）。"""
+    s, m = sched
+    import src.orchestrator as o
+    from src.research import market_state as ms
+    monkeypatch.setattr(o, "run_daily_pipeline", lambda config=None: True)
+    monkeypatch.setattr(ms, "snapshot_day", lambda d: None)
+    calls = []
+    monkeypatch.setattr(m, "_trigger_ai_analysis_async",
+                        lambda config: calls.append(1))
+    m._check_daily_pipeline()
+    assert calls == [1], "自带 Key 已配置，流水线完成后应自动分析当日候选"
+
+
+def test_ai_analysis_disabled_by_config(sched, monkeypatch):
+    """ai.enabled=false 时只保留面板手动队列，不自动触发。"""
+    s, m = sched
+    import src.config as cmod
+    import src.orchestrator as o
+    from src.research import market_state as ms
+    monkeypatch.setattr(o, "run_daily_pipeline", lambda config=None: True)
+    monkeypatch.setattr(ms, "snapshot_day", lambda d: None)
+    monkeypatch.setattr(cmod, "load_config", lambda: {"ai": {"enabled": False}})
+    calls = []
+    monkeypatch.setattr(m, "_trigger_ai_analysis_async",
+                        lambda config: calls.append(1))
+    m._check_daily_pipeline()
+    assert calls == []
+
+
+def test_kline_rotation_stale_first_and_limited(sched, monkeypatch):
+    """全市场轮换：最陈旧优先、限量；锚点日（最新）的票不参与。"""
+    s, m = sched
+    import src.collector.akshare_fetcher as af
+    from src.models.database import KlineDAO
+
+    dao = KlineDAO()
+    for code, d in (("000001", "2026-10-01"), ("000002", "2026-10-20"),
+                    ("000003", "2026-11-10")):
+        dao.upsert_many(code, [{
+            "trade_date": d, "open": 1.0, "close": 1.0, "high": 1.0,
+            "low": 1.0, "volume": 1.0, "amount": 1.0, "turnover": 0.1,
+            "close_adj": 1.0, "close_raw": 1.0}])
+    calls = []
+
+    def fake_fetch(code, start_date=None):
+        calls.append(code)
+        return [{"trade_date": "2026-11-13", "open": 1.0, "close": 1.0,
+                 "high": 1.0, "low": 1.0, "volume": 1.0, "amount": 1.0,
+                 "turnover": 0.1, "close_adj": 1.0, "close_raw": 1.0}]
+
+    m._rotate_stale_kline(dao, fake_fetch, af.SourceUnsupportedError,
+                          limit=2, budget=100)
+    assert calls == ["000001", "000002"], "最陈旧优先；000003 是锚点日不参与"
+
+
+def test_kline_rotation_budget_stops(sched, monkeypatch):
+    """时间预算到点即停（剩下明天接着最陈旧轮转）。"""
+    s, m = sched
+    import src.collector.akshare_fetcher as af
+    from src.models.database import KlineDAO
+
+    dao = KlineDAO()
+    dao.upsert_many("000001", [{
+        "trade_date": "2026-10-01", "open": 1.0, "close": 1.0, "high": 1.0,
+        "low": 1.0, "volume": 1.0, "amount": 1.0, "turnover": 0.1,
+        "close_adj": 1.0, "close_raw": 1.0}])
+    dao.upsert_many("000002", [{
+        "trade_date": "2026-11-10", "open": 1.0, "close": 1.0, "high": 1.0,
+        "low": 1.0, "volume": 1.0, "amount": 1.0, "turnover": 0.1,
+        "close_adj": 1.0, "close_raw": 1.0}])
+    calls = []
+    m._rotate_stale_kline(dao, lambda code, start_date=None: calls.append(code),
+                          af.SourceUnsupportedError, limit=600, budget=0)
+    assert calls == [], "预算 0 应一只都不跑"
