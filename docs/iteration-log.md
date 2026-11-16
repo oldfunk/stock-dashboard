@@ -198,6 +198,9 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **EM 段判据第二层修复（`c93591d`，本机门禁 2227）**：周六 23/25 no_data 抽查 000001——**近 8 期 fcf 全齐、缺口全在 2008 年前**（上游永不提供），全历史判据让它永远 no_data、每周白拉。修复：`_still_missing` 改为只看近 `EM_DEEP_WINDOW` 期（与目标集 `targets_missing_deep_fields` 同口径），新增 `test_status_window_ignores_ancient_gaps`。**这是 11-13 判据修复（ic→fcf）的第二层**：第一层去掉填不上的 ic，第二层去掉够不着的老期。
 - **周五 19:10 定时重启已执行**（19:10:01 Started，三服务 200）；本次修复已 pull 到 nec、冒烟 ✓，**19:10 再重启一次生效**（排 `sd-restart-mon1910`）。
 - **既有 vendor 失败记录（非本次引入）**：`paper_trading/tests/test_raw_feed.py::test_sync_raw_end_to_end_with_injected_sources` 稳定失败（written 1≠2），stash 对比确认与本次改动无关；vendor 层按协议不阻塞，记此待查。
+- **全项目状态审计 + 研究域广度修复（`a51b7a2`）**：审计发现 kline 全市场回填止于 10-30，之后每日增量只写观察池+Top25（~77 只/日）→ 61 日窗口里大多数票只有 10-30 一个点，`pct_above_ma20/60` 实际只代表那 77 只（10-30 全量日 breadth_n=5463 vs 11-16 的 77）。修复：新增 `_load_overlay_window`（覆盖层从当日扩展到窗口，比率统一取 trade_date 前最近一条两列俱全的 kline 行）；广度/波动率窗口 = kline 近 61 日 ∪ daily_close 全部交易日，MA20/MA60 分别要求 20/60 点、分母分开。**生产复验**：11-16 breadth_n **77 → 5514**、breadth_n_60 5468、regime 置信 **0.5 → 1.0**；近 10 个交易日已用新口径重算。
+- **估值分位当前价修复（`b54dfc1`）**：`valuation_percentile` 用 kline `close_raw` 当"当前价"，而大多数票 kline 停在 10-30 → 详情页 PE/PB/股息率分位陈旧两周。修复：`_prices` 用 UNION 并入 daily_close（全市场当日不复权收盘，同 raw 口径），同日期 kline 优先。**生产复验**：600519 价格序列最新到 2026-11-16（1453.9）。
+- **审计结论（数据/算法成熟度）**：服务三 200、24h 零 ERROR、流水线每交易日 completed（5527→20）；全市场年报 5526、ic 91%、fcf 94%、快照每日 5527、daily_close 每日全市场。**两个硬缺口**：① AI 分析写入停滞（`ai_analysis_log` 最后 09-29、`stock_analysis_history` 11 月 1 条、`analysis_outcome` 最新 11-05）→ 研究样本不增长；② 全市场日线近 12 日只有 daily_close（kline 停 10-30），已用覆盖层缓解研究域，但 kline 本身对大多数票仍停 10-30。
 
 ### 2026-11-05（vendor：子项目 paper-trading v0.8.0 合并部署；v0.6.9 → v0.8.0，11 个 tag）
 
