@@ -51,13 +51,15 @@ ai:
   # 每日流水线后自动触发 AI 分析（2026-11-16 恢复；false = 只保留面板手动队列）
   enabled: true
   # 每日自动分析的并发与下发间隔（面板手动队列不受影响）。
-  # 上游 RPM=40（NVIDIA），进程级限速器保证合计不超；并发 4 时实际约
-  # 12 RPM（下发间隔 5s），远低于上限。旧上游（智谱 1 并发）时这里要写 1。
-  daily_concurrency: 4
+  # ⚠️ 上游账号并发上限：glm（智谱）= **1**，所以这里是 1——别改大，否则 429。
+  # 面板手动队列的并发是另一个键 ai.concurrency（/api/llm/concurrency 设置），
+  # 别混淆：那个不影响每日批次，这个不影响面板。
+  # 上游 RPM 上限由 ai.rpm_limit 兜（进程级限速器，批次+面板合计不超）。
+  daily_concurrency: 1
   daily_interval_seconds: 5
-  # 上游 RPM 上限（NVIDIA integrate.api.nvidia.com，用户 2026-11-16 告知 =40）。
-  # 进程级限速器装在 analyze_stock 入口：自动批次 + 面板手动队列合计也不超。
-  # 0 = 不限速。
+  # 上游 RPM 上限（0=不限）。进程级限速器装在 analyze_stock 入口：自动批次
+  # + 面板手动队列合计也不超。当前 glm 无明显 RPM 限制，留 40 作兜底；
+  # 换到有限额的上游时按实际填。
   rpm_limit: 40
   # LLM API 配置 (OpenAI 兼容)。本地 Zen 免费通道 2026-09-07 起服务端不可用（403），
   # 备用 Pollinations 通道 2026-09-18 起同样失败；本段仅供手动脚本（retry_ai.py 等）使用。
