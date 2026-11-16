@@ -49,3 +49,18 @@ def test_json_mode_can_be_disabled(monkeypatch):
 def test_max_tokens_uses_config(monkeypatch):
     p = _payload(monkeypatch, {"max_tokens": 16000})
     assert p["max_tokens"] == 16000
+
+
+def test_max_tokens_default_is_model_ceiling(monkeypatch):
+    p = _payload(monkeypatch, {})
+    assert p["max_tokens"] == 131072, "上限应取模型最大值 128K，不卡小"
+
+
+def test_thinking_enabled_by_default(monkeypatch):
+    p = _payload(monkeypatch, {})
+    assert p.get("thinking") == {"type": "enabled"}, "投资分析必须开思考"
+
+
+def test_thinking_can_be_disabled(monkeypatch):
+    p = _payload(monkeypatch, {"thinking": False})
+    assert "thinking" not in p
