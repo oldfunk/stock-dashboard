@@ -48,6 +48,24 @@ def _load_config_from_disk() -> dict:
     return config
 
 
+def _load_env_file() -> None:
+    """把项目根 ``.env`` 读进进程环境（``override=False``：真实环境变量优先）。
+
+    2026-11-16：AI 分析停滞的真因之一——``run_ai_analysis.py`` 等 CLI 各自
+    ``load_dotenv``，而服务进程（systemd）不加载 ``.env`` → 调度器里
+    ``AiAnalyzer`` 读不到 ``STOCK_AI_API_KEY``，只会报"未设置 API Key"。
+    统一在 ``load_config`` 入口加载，CLI / 调度器 / Web 三条路径一致。
+    """
+    env_path = _PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(env_path, override=False)
+
+
 def load_config() -> dict:
     """加载主配置 + local.yaml 覆盖。失败时返回空 dict 而非抛异常。
 
@@ -56,6 +74,7 @@ def load_config() -> dict:
     global _config_cache, _config_mtime
 
     with _config_lock:
+        _load_env_file()
         # 检查文件是否有变化
         current_mtime = 0
         if _CONFIG_PATH.exists():

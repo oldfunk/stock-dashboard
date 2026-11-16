@@ -57,3 +57,21 @@ def test_hot_reload_still_applies(tmp_config):
     st = tmp_config.stat()
     os.utime(tmp_config, ns=(st.st_atime_ns + 10 ** 9, st.st_mtime_ns + 10 ** 9))
     assert cfgmod.load_config()["ai"]["temperature"] == 0.9
+
+
+def test_env_file_loaded_without_override(tmp_path, monkeypatch):
+    """项目根 .env 进进程环境，且不覆盖已存在的真实环境变量（2026-11-16）。
+
+    真因：服务进程（systemd）不加载 .env → 调度器里 AiAnalyzer 读不到
+    STOCK_AI_API_KEY；而 CLI 脚本各自 load_dotenv 所以手动能跑。
+    """
+    env = tmp_path / ".env"
+    env.write_text("STOCK_AI_API_KEY=from-dotenv\n", encoding="utf-8")
+    monkeypatch.setattr(cfgmod, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("STOCK_AI_API_KEY", raising=False)
+    cfgmod._load_env_file()
+    assert os.environ["STOCK_AI_API_KEY"] == "from-dotenv"
+
+    monkeypatch.setenv("STOCK_AI_API_KEY", "real-env")
+    cfgmod._load_env_file()
+    assert os.environ["STOCK_AI_API_KEY"] == "real-env", "真实环境变量必须优先"
