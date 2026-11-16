@@ -1079,6 +1079,12 @@ class StockAnalysisHistoryDAO:
              ai_analysis: str, ai_trade_strategy: str, model: str = None):
         now = now_cn().isoformat()
         with db_conn() as conn:
+            # 同一 (股票, 批次) 只留一条：失败标记后又成功、或重跑同一批次时
+            # 不累积重复行（2026-11-16 实录：未配 Key 的失败标记与修复后的
+            # 成功行并存 20 条）。跨 run_id 的历史累积不受影响。
+            conn.execute(
+                "DELETE FROM stock_analysis_history "
+                "WHERE stock_code = ? AND run_id = ?", (stock_code, run_id))
             conn.execute("""
                 INSERT INTO stock_analysis_history
                 (stock_code, run_id, analysis_date, score, ai_analysis, ai_trade_strategy, model, created_at)
