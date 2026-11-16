@@ -192,6 +192,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **生产事件**：deploy 重启窗口内 :9527 被 Hermes 常驻 agent 起的 `python main.py`（nec 目录旧应用）+多进程子进程占用 → 母服务重启循环 http:500；清理占用者后恢复（16:03 main/parent 200）。**跨团队约定提请**：母仓库目录不跑非母项目进程；端口各归其主。
 - **门禁**：1235 → **1299**（母）/ vendor 772（记录）。
 
+### 2026-11-16（周一复核：周六首跑三项验证 + EM 段判据第二层修复 `c93591d`）
+
+- **周六（11-14）首跑三项验证**：1) **qfq 锚点**——锚点 2026-11-13、目标 60（多锚 9）、重锚 60 只 / 0 partial / 写 3540 行 / 188.6s，进度表 `last_upd 09:03:46`、60 只 covered=11-13 ✓；2) **前向收益**——benchmark_daily 跟上 11-13 ✓；3) **深层刷新**——ic 填 172 行（剩余 0 只）、EM 段 25 只（done 2 / no_data 23）、剩余 258 只；覆盖率大升（09-30 fcf 25%→**94%**、ic→91%）。
+- **EM 段判据第二层修复（`c93591d`，本机门禁 2227）**：周六 23/25 no_data 抽查 000001——**近 8 期 fcf 全齐、缺口全在 2008 年前**（上游永不提供），全历史判据让它永远 no_data、每周白拉。修复：`_still_missing` 改为只看近 `EM_DEEP_WINDOW` 期（与目标集 `targets_missing_deep_fields` 同口径），新增 `test_status_window_ignores_ancient_gaps`。**这是 11-13 判据修复（ic→fcf）的第二层**：第一层去掉填不上的 ic，第二层去掉够不着的老期。
+- **周五 19:10 定时重启已执行**（19:10:01 Started，三服务 200）；本次修复已 pull 到 nec、冒烟 ✓，**19:10 再重启一次生效**（排 `sd-restart-mon1910`）。
+- **既有 vendor 失败记录（非本次引入）**：`paper_trading/tests/test_raw_feed.py::test_sync_raw_end_to_end_with_injected_sources` 稳定失败（written 1≠2），stash 对比确认与本次改动无关；vendor 层按协议不阻塞，记此待查。
+
 ### 2026-11-05（vendor：子项目 paper-trading v0.8.0 合并部署；v0.6.9 → v0.8.0，11 个 tag）
 
 - 子项目独立版漫长迭代后稳定，按单向 tag 流合并入母树：`git subtree pull --prefix=paper_trading paper-upstream v0.8.0 --squash`（`8078f5f`+`912d70c`，零冲突——接缝修复此前已随 tag 回流）。
