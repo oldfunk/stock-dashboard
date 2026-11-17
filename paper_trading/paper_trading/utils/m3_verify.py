@@ -24,7 +24,11 @@ MONEY_TOL = 0.01
 
 #: 收盘 NAV 的"到点"时刻（T54 NEC 预跑照出来的盘中假红）：旧线由 16-18 点的
 #: `agent tick` 收盘窗口写 NAV（crontab `*/5 16-18 * * 1-5`），给 5 分钟尾巴。
-CLOSE_NAV_DUE = (18, 5)
+#: 2026-11-17 调整：现网收盘 NAV 由 `rq nav-close`（cron 20:50，紧跟 20:40 的
+#: raw 定稿采集）负责——旧的 18:05 会在 18:05–20:50 之间把"还没到点"报成
+#: **钱类红 + 要求回退**（实测：20:27 手动核对时 nav 红、rollback_required=true）。
+#: 到点取 21:10（20:50 + 20 分钟余量），早于它只判 warn 并写清到点时间。
+CLOSE_NAV_DUE = (21, 10)
 #: 影子对账留痕的"到点"时刻：runbook §3 的 15:40 影子 cron + 5 分钟尾巴。
 #: 未到点时"今天没有 parity:diff"是**正常**，文案不许指控"cron 没跑"。
 PARITY_DUE = (15, 45)
@@ -123,7 +127,8 @@ def check_t_plus_one(conn, today: str) -> dict:
                 money=True, on_red="回退")
 
 
-def check_nav(conn, today: str, now: Optional[datetime] = None) -> dict:
+def check_nav(conn, today: str, now: Optional[datetime] = None,
+              data_db=None) -> dict:
     """收盘 NAV：当天必须恰 1 行，且 `total_value = cash + market_value` 自洽。
 
     T54（NEC 预跑照出来的）：**盘中查今天**必然 0 行——旧线的收盘 NAV 由
@@ -162,9 +167,70 @@ def check_nav(conn, today: str, now: Optional[datetime] = None) -> dict:
                     f"total≠cash+市值：{json.dumps(bad[0], ensure_ascii=False)[:160]}",
                     money=True, on_red="回退")
     days = {_day(r["timestamp"]) for r in rows}
+    # 恰 1 行还不够：那一行必须是**收盘口径**（T85/Q8）。现网 11-12 的唯一一行
+    # 是 09:30 `ai:decide` 写的盘中快照——用昨日收盘价估值、且早于当日全部成交，
+    # 而 Q7-D1 的统一让位判据又把它当成"今天已记过"，收盘 NAV 从此写不进来。
+    # 只数行数的话这种"绿着的假账"看不见（纪律 4：报警不许失真）。
+    from paper_trading.integration.rq_engine.queue import CLOSE_TIME
+
+    row = todays[0]
+    ts = str(row["timestamp"])
+    last_fill = ""
+    if _has_table(conn, "fills"):
+        f = _rows(conn, "SELECT timestamp FROM fills WHERE substr(timestamp,1,10)=?"
+                        " ORDER BY timestamp DESC LIMIT 1", (today,))
+        last_fill = str(f[0]["timestamp"]) if f else ""
+    intraday = ts[11:16] < CLOSE_TIME
+    pre_fill = bool(last_fill) and ts < last_fill
+    if intraday or pre_fill:
+        why = []
+        if intraday:
+            why.append(f"时刻 {ts[11:16]} 早于收盘 {CLOSE_TIME}")
+        if pre_fill:
+            why.append(f"早于当日最后一笔成交 {last_fill[11:19]}")
+        tn = now or datetime.now()
+        not_due = (today == tn.date().isoformat()
+                   and (tn.hour, tn.minute) < CLOSE_NAV_DUE)
+        msg = (f"{today} 唯一一行 NAV 不是收盘口径（{'、'.join(why)}）"
+               f"——净值/回撤基线按盘中价失真")
+        if not_due:
+            return item("nav", "NAV 收盘记录", "warn",
+                        msg + f"；收盘窗口未过（{CLOSE_NAV_DUE[0]:02d}:"
+                              f"{CLOSE_NAV_DUE[1]:02d} 之后才该有收盘行），当前 {tn:%H:%M}",
+                        money=True, on_red="见 questions.md Q8")
+        return item("nav", "NAV 收盘记录", "red", msg, money=True,
+                    on_red="见 questions.md Q8：盘中快照抢占了收盘 NAV 的让位闸")
+    # D3（2026-11-16）：**值复算**——total_value 必须等于 cash + Σ(当日 raw
+    # 收盘 × total_volume)。此前只验行数与"cash+市值"自洽，11-16 的行
+    # （计划窗口用 stale daily_bars 定价，高估 2,120 元）照样全绿——
+    # 行数对、数值错的洞只有这条断言能照出来。raw 未入库（盘后 20:40 前）
+    # 时不判（归 raw_gate），也不阻塞已有结论。
+    if data_db is not None and _has_table(conn, "positions"):
+        pos = _rows(conn, "SELECT symbol, total_volume FROM positions"
+                        " WHERE total_volume>0")
+        if pos:
+            expected = float(row["cash"])
+            missing_raw: list[str] = []
+            for p in pos:
+                sym = str(p["symbol"]).split(".")[0][:6].zfill(6)
+                bars = data_db.get_raw_bars(sym, start=f"{today}T00:00:00",
+                                            end=f"{today}T23:59:59", limit=1)
+                if not bars:
+                    missing_raw.append(sym)
+                    continue
+                expected += float(bars[-1].close) * int(p["total_volume"])
+            if not missing_raw:
+                drift = abs(float(row["total_value"]) - expected)
+                if drift > MONEY_TOL:
+                    return item("nav", "NAV 收盘记录", "red",
+                                f"{today} NAV 值与当日 raw 复算不符：账面 "
+                                f"{float(row['total_value']):.2f} vs 复算 "
+                                f"{expected:.2f}（差 {drift:.2f}）——价格源/公式失真，"
+                                f"净值与回撤基线被污染", money=True,
+                                on_red="回退（钱类口径）")
     return item("nav", "NAV 收盘记录", "green",
-                f"{today} 恰 1 行且自洽；库里共 {len(days)} 个净值日", money=True,
-                on_red="回退")
+                f"{today} 恰 1 行且自洽（收盘口径 {ts[11:16]}）；库里共 {len(days)} 个净值日",
+                money=True, on_red="回退")
 
 
 def check_duplicate_fills(conn, today: str) -> dict:
@@ -183,6 +249,32 @@ def check_duplicate_fills(conn, today: str) -> dict:
                     money=True, on_red="回退")
     return item("duplicate_fills", "旧新双线未双活", "green", "无重复成交", money=True,
                 on_red="回退")
+
+
+#: 母库参照滞后的分档（Q5 批复：0/2/8 三档 = ≤2 green / >2 warn / >5 红）。
+#: 没有阈值之前，"母库按发布节奏晚 1–2 天"与"真的断了 20 天"长得一模一样
+#: （都是 `warn waiting_days=N`），11-04 现网 19 只挂 2 天 = 长期黄灯壁纸；
+#: 下一次真断供时没人再看它（纪律 4：报警本身不许失真）。
+#:
+#: 2026-11-16 用户裁决 A 修正：**母库参照分支不再出红**。子项目独立部署时
+#: （NEC）不依赖母库——引擎实际价源=本地 raw，本函数第一段已验其新鲜完整；
+#: 母库参照只是"独立第二把尺子"的校验辅助，它的缺失是"少了一层交叉验证"，
+#: 不是"我们自己的数据坏了"。>5 天从红降为 warn（并写明裁决与依据）；
+#: 母库恢复发布后自动回绿。Q5 的三档语义仅保留在测试里作历史对照。
+WAIT_GREEN_MAX = 2
+WAIT_RED_MIN = 5
+
+
+def waiting_grade(max_waiting_days: int) -> str:
+    """母库参照滞后（交易日）→ 灯色。`green` 也要在 detail 里把天数写出来。
+
+    裁决 A（2026-11-16）：>WAIT_RED_MIN 从 red 改为 warn——断供是母库侧问题，
+    子项目独立部署、价源完整；red 只留给"我们自己的行情/台账坏了"。
+    """
+    n = int(max_waiting_days or 0)
+    if n > WAIT_GREEN_MAX:
+        return "warn"
+    return "green"
 
 
 def check_raw_gate(db, symbols, today, days: int = 60) -> dict:
@@ -215,13 +307,29 @@ def check_raw_gate(db, symbols, today, days: int = 60) -> dict:
         return item("raw_gate", "行情口径与新鲜度闸", "red",
                     "；".join(bits) + "——引擎会对这些标的 fail-closed 拒单",
                     on_red="回退（价都不对，账不可能对）")
-    if not flip["audit_complete"] or flip["waiting_days"]:
+    # 母库参照滞后：按**单只最大滞后天数**分档（不是合计——合计会把"19 只各
+    # 滞后 2 天"和"1 只滞后 38 天"混成同一个数字，那正是壁纸化的成因）。
+    waits = {str(s): int((v.get("daily") or {}).get("waiting_days") or 0)
+             for s, v in (flip.get("per_symbol") or {}).items()}
+    max_wait = max(waits.values(), default=0)
+    n_wait = sum(1 for w in waits.values() if w > 0)
+    grade = waiting_grade(max_wait)
+    wait_note = (f"母库参照滞后 {max_wait} 个交易日（×{n_wait} 只，"
+                 f"合计 waiting_days={flip['waiting_days']}）")
+    if grade == "warn":
         return item("raw_gate", "行情口径与新鲜度闸", "warn",
-                    f"waiting_days={flip['waiting_days']} "
+                    f"{wait_note}（裁决 A 2026-11-16：母库参照源断更是母库侧问题，"
+                    f"子项目独立部署、本地 raw 价源完整新鲜[第一段已验证]——"
+                    f"独立参照价缺失降为 warn；母库恢复发布即回绿）",
+                    on_red="归因")
+    if not flip["audit_complete"]:
+        return item("raw_gate", "行情口径与新鲜度闸", "warn",
                     f"incomplete_days={flip['incomplete_days']} "
                     f"complete={flip['audit_complete']}", on_red="归因")
     return item("raw_gate", "行情口径与新鲜度闸", "green",
-                f"{len(symbols)} 只全部新鲜且逐日台账完整", on_red="回退")
+                f"{len(symbols)} 只全部新鲜且逐日台账完整"
+                + (f"；{wait_note} ≤{WAIT_GREEN_MAX} 属母库发布节奏" if n_wait else ""),
+                on_red="回退")
 
 
 def check_minute_feed(data_db, symbols, today: str, now: Optional[datetime] = None,
@@ -301,7 +409,13 @@ def check_intent_queue(conn, today: str, now: Optional[datetime] = None,
     for r in rows:
         by[r["status"]] = by.get(r["status"], 0) + 1
     phantom = [r["biz_id"] for r in rows
-               if r["status"] == "executed" and "order_id" not in str(r.get("result") or "")]
+               if r["status"] == "executed"
+               and "order_id" not in str(r.get("result") or "")
+               # 幂等命中（同日同款已成交的二次触发被拦）不带 order_id 是
+               # 设计行为——它的一致性由 daily-check 的 intent_chain 单独断言
+               # （账本当日必须有同款成交），这里不再当"假账"报红（2026-11-13
+               # 现网：000426 重触发被正确拦，却把核对染红）。
+               and "幂等命中" not in str(r.get("result") or "")]
     tn = now or datetime.now()
     stale_pending = []
     for r in rows:
@@ -378,7 +492,8 @@ def check_audit_trail(conn, today: str) -> dict:
     acts = _rows(conn, """SELECT action, COUNT(*) n FROM op_log
                           WHERE substr(timestamp,1,10)=?
                             AND (action LIKE '%:buy' OR action LIKE '%:sell'
-                                 OR action IN ('agent:tick','ai:decide','m3:switch','parity:diff'))
+                                 OR action IN ('agent:tick','ai:decide','m3:switch',
+                                               'parity:diff','rq:fill'))
                           GROUP BY action""", (today,))
     fills = int(n_fill[0]["c"]) if n_fill else 0
     if fills and not acts:
@@ -500,7 +615,7 @@ def verify_all(*, broker, data_db, symbols: list, today: str,
         items = [
             check_fees(conn, cfg, today),
             check_t_plus_one(conn, today),
-            check_nav(conn, today, now=now),
+            check_nav(conn, today, now=now, data_db=data_db),
             check_duplicate_fills(conn, today),
             check_raw_gate(data_db, symbols, today, days=days),
             check_minute_feed(data_db, symbols, today, now=now, executor=executor),

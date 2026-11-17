@@ -138,6 +138,54 @@ def test_nav_green(conn):
     assert mv.check_nav(conn, TODAY)["status"] == "green"
 
 
+def test_nav_warn_before_2110_and_red_after(conn):
+    """到点口径跟现网 nav-close（20:50）对齐：18:30 只许 warn，21:30 才红。
+
+    旧口径 18:05 会在 18:05–20:50 把"还没到点"报成钱类红并要回退
+    （2026-11-17 20:27 实测），那是假警报——收工时间没变，是判据没跟上。
+    """
+    add_nav(conn, ts="2026-10-28T15:30:00")       # 有历史行、今天还没行
+    r = mv.check_nav(conn, TODAY, now=datetime(2026, 10, 29, 18, 30))
+    assert r["status"] == "warn" and "未过" in r["detail"]
+    r2 = mv.check_nav(conn, TODAY, now=datetime(2026, 10, 29, 21, 30))
+    assert r2["status"] == "red" and r2["money"]
+
+
+# ---------- NAV 值复算（D3，2026-11-16：行数对≠数值对）----------
+def _add_pos(conn, symbol="000651", vol=200):
+    conn.execute("""INSERT INTO positions (symbol, total_volume, available_volume,
+                    avg_cost, last_update, entry_day, peak_price)
+                    VALUES (?, ?, 0, 37.58, ?, ?, 0)""",
+                 (symbol, vol, f"{TODAY}T15:00:00", TODAY))
+    conn.commit()
+
+
+def _add_raw_today(data_db, symbol="000651", close=37.58):
+    data_db.upsert_raw_bars([Bar(symbol=symbol,
+                                 timestamp=datetime(2026, 10, 29, 15, 0),
+                                 open=close, high=close, low=close,
+                                 close=close, volume=1000)])
+
+
+def test_nav_value_red_when_drift_from_raw_recompute(conn, data_db):
+    """账面 NAV 与"cash+Σ(raw×量)"不符 ⇒ 钱类红（11-16 stale 价高估 2,120
+    元就是被这条断言的形状漏掉的——此前只验行数与自洽）。"""
+    _add_pos(conn)
+    _add_raw_today(data_db)
+    add_nav(conn, cash=50000.0, mv_=8000.0, total=58000.0)   # 应 57,516
+    r = mv.check_nav(conn, TODAY, data_db=data_db)
+    assert r["status"] == "red" and r["money"]
+    assert "复算" in r["detail"]
+
+
+def test_nav_value_green_when_matches_raw_recompute(conn, data_db):
+    _add_pos(conn)
+    _add_raw_today(data_db)
+    add_nav(conn, cash=50000.0, mv_=7516.0, total=57516.0)   # 50000+200×37.58
+    r = mv.check_nav(conn, TODAY, data_db=data_db)
+    assert r["status"] == "green", r["detail"]
+
+
 # ---------- 双活检测 ----------
 def test_duplicate_fills_red_when_both_lines_executed(conn):
     add_fill(conn)
@@ -247,6 +295,55 @@ def test_raw_gate_green_when_all_checked(data_db):
 
 def test_raw_gate_skip_without_symbols():
     assert mv.check_raw_gate(None, [], TODAY)["status"] == "skip"
+
+
+# ---------- 母库参照滞后分档（Q5 批复：0/2/8 三档；2026-11-16 裁决 A：>5 降为 warn）----------
+@pytest.mark.parametrize("days_ago,status", [
+    (0, "green"), (2, "green"), (3, "warn"), (5, "warn"), (6, "warn"), (8, "warn")])
+def test_waiting_grade_breaks_at_2_and_5(days_ago, status):
+    assert mv.waiting_grade(days_ago) == status
+
+
+def test_waiting_grade_never_red_after_ruling_a():
+    """裁决 A：母库参照分支不许出红——断供是母库侧问题，子项目独立部署。"""
+    for days in (10, 30, 90, 365):
+        assert mv.waiting_grade(days) == "warn"
+
+
+def _stub_flip(monkeypatch, waiting_days):
+    """把逐日台账换成"只有滞后天数"的假象：闸的其余分支不是本测试的对象。"""
+    from paper_trading.data import raw_feed
+
+    monkeypatch.setattr(raw_feed, "flip_watch_with_mother", lambda *a, **k: {
+        "violations": [], "warnings": [], "waiting_days": waiting_days,
+        "incomplete_days": 0, "no_reference_days": 0, "audit_complete": True,
+        "per_symbol": {"000651": {"daily": {"waiting_days": waiting_days}}}})
+
+
+def test_raw_gate_green_writes_the_lag_even_when_green(data_db, monkeypatch):
+    """≤2 是母库发布节奏：绿，但**必须把天数写在 detail 里**（不许假装没事）。"""
+    _stub_flip(monkeypatch, 2)
+    r = mv.check_raw_gate(data_db, ["000651"], "2026-10-29", days=10)
+    assert r["status"] == "green", r["detail"]
+    assert "滞后 2 个交易日" in r["detail"]
+
+
+def test_raw_gate_warn_when_lag_between_3_and_5(data_db, monkeypatch):
+    _stub_flip(monkeypatch, 3)
+    r = mv.check_raw_gate(data_db, ["000651"], "2026-10-29", days=10)
+    assert r["status"] == "warn" and "滞后 3 个交易日" in r["detail"]
+
+
+def test_raw_gate_warn_when_mother_reference_really_broke(data_db, monkeypatch):
+    """裁决 A（2026-11-16）：真断供 8 天 → **warn**（不是 red）。
+
+    子项目独立部署、价源=本地 raw；母库参照缺失是"少一层交叉验证"，
+    红只留给我们自己的数据/台账坏了。detail 必须写明裁决与依据。
+    """
+    _stub_flip(monkeypatch, 8)
+    r = mv.check_raw_gate(data_db, ["000651"], "2026-10-29", days=10)
+    assert r["status"] == "warn" and "裁决 A" in r["detail"]
+    assert "滞后 8 个交易日" in r["detail"]
 
 
 # ---------- 汇总 ----------

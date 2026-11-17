@@ -527,6 +527,48 @@ def test_nav_close_idempotent_for_explicit_past_day(tmp_path):
     assert len(b.get_nav_history()) == 1
 
 
+def _held_bridge(monkeypatch, tmp_path):
+    """买出 100 股持仓的 bridge（D3 用例共用）。"""
+    from paper_trading.llm import provider as prov
+
+    plan = {"actions": [{"action": "buy", "symbol": "600519",
+                         "volume": 100, "price": None, "reason": "t"}],
+            "summary": "持仓后测 raw 闸"}
+    monkeypatch.setattr(prov, "chat", lambda cfg, m, system="": json.dumps(plan))
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    t.run(["600519"])
+    assert b.broker.get_position("600519").total_volume == 100
+    return b, t
+
+
+def test_close_nav_skips_when_today_raw_missing(monkeypatch, tmp_path):
+    """D3（2026-11-16）：当日 raw 未入库 ⇒ 整笔跳过。
+
+    旧实现拿 bar_source "最新一根"（不限日期）——11-16 计划窗口给 5/6 持仓
+    用了上一交易日价（NAV 高估 2,120 元）。收盘 NAV 只认当日 raw 定稿价。
+    """
+    b, t = _held_bridge(monkeypatch, tmp_path)
+    today = datetime.now().date().isoformat()
+    t._snapshot_close_nav(["600519"], today)
+    assert len(b.get_nav_history()) == 0     # 等 20:50 nav-close 用定稿价补写
+
+
+def test_close_nav_writes_with_today_raw(monkeypatch, tmp_path):
+    """D3 正向：当日 raw 在库 ⇒ 写入，且值=现金+持仓×当日 raw 收盘。"""
+    b, t = _held_bridge(monkeypatch, tmp_path)
+    today = datetime.now().date().isoformat()
+    ts = datetime.now().replace(hour=15, minute=0, second=0, microsecond=0)
+    b.data_db.upsert_raw_bars([Bar(symbol="600519", timestamp=ts,
+                                   open=12.0, high=12.5, low=11.5,
+                                   close=12.0, volume=1000)])
+    t._snapshot_close_nav(["600519"], today)
+    navs = b.get_nav_history()
+    assert len(navs) == 1
+    cash = b.broker.get_cash()
+    assert abs(float(navs[-1]["total_value"]) - (cash + 100 * 12.0)) < 0.01
+
+
 def test_plan_exists_still_snapshots_close_nav(tmp_path):
     """计划已存在（其他入口写入/上次快照失败）时仍要补记当日 NAV。"""
     from paper_trading.utils.trading_calendar import next_trading_day

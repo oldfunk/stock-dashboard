@@ -1,4 +1,4 @@
-# M3 切换 runbook：旧自研执行线 → rqalpha 常驻线（2026-10-29）
+# M3 切换 runbook：旧自研执行线 → rqalpha 队列模式（2026-10-29；2026-11-05 对齐实现）
 
 > **背景**：M2 双轨影子对照已经在现网跑通（T39 首跑 + T42 验证日，
 > `cash/fee/fill_delta` 全零，首个现网 `op_log[parity:diff]` 已落库）。
@@ -20,8 +20,8 @@
 
 **如果主 AI 决定 G1/G2 暂不补**，那 M3 的语义就必须改写成
 "影子期正式化（新线只对照、旧线继续下单）"——这与 `refactor-plan-open-source.md:98`
-M3 行写的"cron 切 rqalpha 常驻（一天一进程）"**不一致**，请显式改计划文本，
-别让 cron 和实现各说一套。本文余下章节按"要真切换"来写。
+M3 行写的"cron 切 rqalpha 队列模式（`engine --once` 判定入队 → `rq tick` 消费）"
+**不一致**，请显式改计划文本，别让 cron 和实现各说一套。本文余下章节按"要真切换"来写。
 
 ### 0.1 T47 实现落点（`worker/t47` 待 review ⇒ **缺口尚未关闭**，这里只给"工具长什么样"）
 
@@ -48,7 +48,7 @@ M3 行写的"cron 切 rqalpha 常驻（一天一进程）"**不一致**，请显
 | NAV/账本 | `paper_account.db` 全表 | **当前不写**（G1/G2） | 缺口 |
 | 幂等/续跑 | `run_lock` + `op_log` 同日判重 | `SessionGate` + `session_fingerprint`（**含费率**，T38） | 新线更严，副作用见 §5.3 |
 | 失败面 | 拒单原因只进日志（`paper_broker.py:291-293`，`_reject` 只有 `logger.warning`） | 拒单原因进 `evidence.rejects`（G-T13-8） | 新线更好，但旧线侧仍是 `see_logger` |
-| 运行形态 | 每分钟 cron tick（`agent tick`/`engine --once`） | **一天一进程**（G-T13-9，`_SESSION_USED` 拒进程内重入） | cron 形状要重写（§3） |
+| 运行形态 | 每分钟 cron tick（`agent tick`/`engine --once`） | **队列模式**（engine 每分钟判定入队 + `rq tick` 每 5 分钟分钟会话；§5.10。原设计"一天一进程 G-T13-9"已被实现偏离取代） | cron 形状已按队列模式重写（§3） |
 
 ## 2. 已拍板（原文引用，避免我替主 AI 解释）
 
@@ -80,7 +80,7 @@ M3 行写的"cron 切 rqalpha 常驻（一天一进程）"**不一致**，请显
 | 12 | venv | `~/paper-trading/venv`（akshare，无 rqalpha） | **+** `/home/nec/venvs/rq-engine`（rqalpha 6.4.2 + numpy 2.3.5） | **绝不合并两份 venv**（`requirements-rqalpha.lock.txt` 头部）；跨机/跨架构拷贝 venv 禁止（migration-nec.md:28） |
 | 13 | bundle | 无 | `~/.rqalpha/bundle`（202610，sha256 记录在 report-t39 §3） | 月度快照月中"日线不完整"是预期；复权因子同源 ⇒ 跨除权日跑历史前先更新 |
 | 14 | state 目录 | 无 | `/home/nec/rq_state/<date>/` | 指纹含费率与 db/bundle 绝对路径 ⇒ 换机/换路径会被判漂移（§5.3） |
-| 15 | 锁 | `paper_trading.lock`（下单类）/`paper_trading.event.lock` | 新线单独一把（`--lock-file var/rq.lock`） | 别和旧线共用：旧线一天多轮、新线一天一进程，共用会互相挡 |
+| 15 | 锁 | `paper_trading.lock`（下单类）/`paper_trading.event.lock` | 新线单独一把（`--lock-file var/rq.lock`） | 别和旧线共用：旧线一天多轮、新线每 5 分钟一跳的分钟会话，共用会互相挡 |
 | 16 | 本地覆盖文件 | `engine.local.yaml`、`strategy.local.yaml`、`secrets.local.json` | **carry-over** | 与 migration-nec.md:118-119 同规则：一并带上、`.bak*` 不迁 |
 | 17 | 方案（scheme） | `strategy.local.yaml` 的 `active_name`（`strategy/schemes.py:118-123`）；`--scheme` 只作覆盖 | **保留原方案** | mother 方案依赖母项目可读性（schemes.py:132-165），切换日别顺手换方案 |
 | 18 | logrotate | `/etc/logrotate.d/paper-trading` | **改路径/加新日志** | 仓库模板 `deploy/logrotate.paper-trading:6` 仍写 `/home/pi/paper-trading/*.log`（**已知过时**），要加 `rq_day.log`/`shadow.log`/`raw_fetch.log`/`gate.log` |
@@ -122,6 +122,22 @@ M3 行写的"cron 切 rqalpha 常驻（一天一进程）"**不一致**，请显
 - 第一小时 / 第一天 / 第一周逐项跑 `docs/m3-checklist.md`（T46 产出），
   **任何钱类项红 ⇒ 立即回退并归因**（§5.6 原文）。
 - 影子对账建议第一周继续跑：它是"新线是否漂移"唯一的外部对照（G-T13 家族）。
+- **每日核对（T80）**：`python -m paper_trading.cli m3 daily-check --json`（只读），
+  观察报告按下列模板记入 `docs/worker/observation-m3-<date>.md`：
+
+  ```
+  ## <日期>（第 N 个交易日）
+  - 盘前：cron 正常；var/rq_state/live 无旧空仓状态；engine.enabled=<值>
+  - 首跳：init_align.kept/dropped；frozen_align.applied/closable；有无 InitPositionError
+  - 盘中：新意图数 / 成交笔数 / 拒单原因；重复 NAV；intent_ledger_conflict
+  - 盘后：m3 verify 绿/黄/红（红项逐条归因）；daily-check 结论
+  - 异常：时间、证据（evidence/op_log/账本行）、处置、是否回退
+  - 结论：绿 / 黄（可观察）/ 红（已回退或待裁决）
+  ```
+
+  判别力口径：**绿** = 钱类全绿且无未归因异常；**黄** = 非钱类告警或已知发布节奏
+  （如母库参照滞后 ≤2 日）且有解释；**红** = 钱类红、未归因成交/拒单、NAV 双写、
+  框架/账本脱钩。红必须写事故报告并触发回退评估。
 
 ## 5. 回退方案
 
@@ -306,3 +322,37 @@ portfolio 快照留着，下一次 `rq tick` 的 `intraday_resume` 就会把它�
 available 仍是 0），`intent_ledger_conflict` 2 条（10-30 切换日的两条 002192
 BUY_100 意图标 rejected 写着“no ledger fill”，而订单 #13 / 成交 #12 就躺在账里）。
 这两类都是“先裁决、后清理”的形状，`reset-state` 不会替人按下删除键。
+
+---
+
+## M3 签字（2026-11-16 · 主 AI）
+
+> 验收口径：`refactor-plan §5`「一周观察 + 面板/审计完整」；Batch 20 定稿五条件。
+> 签字人已知悉并逐条核销，结论：**签字通过**（附如实记录的三条限定）。
+
+### 五条件逐条核销
+
+| # | 条件 | 状态 | 依据 |
+|---|---|---|---|
+| ① | 观察期通过（无未归因异常） | ✅（限定见下） | 新代码完整交易日 **2 天**（11-13、11-16）：成交/幂等/T+1/费用全链正常，0 未归因异常；此前"一周"窗口（11-06…11-12）跑在旧代码上（T83 报告），其暴露的全部结构性缺陷已修复并有实证（报告 §9.2 四洞表） |
+| ② | 每日核对全绿 | ✅（限定见下） | daily-check 自 11-16 起 cron 自动实跑；终态 `0 红 / 5 黄 / rollback_required=false`（`logs/daily_check.jsonl`）；5 黄全部时序内或经裁决接受（nav 待 20:50、母库断源经裁决 A、parity 影子 cron 未排程、计划待窗口、心跳不在时段） |
+| ③ | parity/verify 进 CI | ✅ | T78：`ci_gate_selfcheck` + `wiring_audit` 独立步骤（T84 核验 #1 PASS） |
+| ④ | 文档闭环 | ✅ | T79 + T84 补审：残留 2 处矛盾（migration-m3.md:51/:83）已于本次修正，复验 0 命中 |
+| ⑤ | T81 无 P0 | ✅ | T81 交付时即无 P0；P2 五项由 T85 收口、T84 复核全部处置 |
+
+### 三条如实限定（写进记录，便于追溯）
+
+1. **观察时长**：新代码观察 2 个完整交易日而非原计划 5 天——用户 11-16 明确
+   拍板压缩（理由：所有结构性缺陷已在第 1-2 天全部现形并当日修复；继续等的
+   边际收益低）。"一周"的原始目的（让集成缺陷现形）已达成。
+2. **母库参照缺口（裁决 A，2026-11-16）**：母项目 raw 发布中断（Q9），
+   `raw_gate` 母库参照分支降为 warn 并注明依据——子项目独立部署，引擎实际
+   价源=本地 raw（同检查第一段验证新鲜完整）。母库恢复发布即回绿。
+3. **形式件确认时点**：签字时今晚的 cron 时序确认（16:30 计划窗口→11-17
+   计划；20:40 raw + 20:50 nav-close→今日 NAV 行）尚未到点，由后台守夜
+   验证自动补报；两条路径均已各自手动实证过（11-13 晚 nav-close 首跑成功；
+   计划流程在切换前长期运行）。若结果异常，按 §5.6 评估线处理。
+
+**回退路径不变**：`engine.local.yaml` 改 `executor: legacy` + 删 tick cron 行
+（migration-m3 §4）。**M4 随之完成**（parity 门禁/文档/运维文档均闭环）。
+

@@ -1312,3 +1312,296 @@ T9/T10 结果裁决与 M1 门禁签核（§5.1 不绿不合）、P0 事故响应
 - [x] T69（Hermes 审查）三条建议全部回执：让位检查 fail-open 补 warn、LIKE 前缀口径复核、
       顺手把同形的"冷却时间戳读失败静默放行"也改成 warn（那道闸正是 11-04 P0 的唯一防线）
 
+
+---
+
+## Batch 17 · 11-05 现网 P0 跟进（主 AI 派发 · 观察期第 3 天抓出）
+
+> 11-05 现网发现 **P0**：tick 的 `state_dir = state_root/today`（每日新建）
+> ⇒ 框架每天空账户重启、不知道账本历史持仓（002192 卖单被"仓位不足"拒）。
+> 主 AI 已修（dd0c2c4：固定 `live` state + init_positions 从账本导入）。
+> 002192 意图已入队，**明天开盘验证执行**。
+
+- [ ] **T71（Qoder，P1·边界工具化）**：
+  - [ ] **决策时点门边界测试**：盘后入队意图（decided_at > 15:00）→ 当日
+    全部 WAITING（不成交）→ **次日 bar 提交**（转次日语义）——构造测试锁定
+    （防未来把"转次日"改坏成"当日强交"或"永不执行"）
+  - [ ] **state 重建的 T+1 对齐**：`init_positions` 导入的持仓框架视为可卖——
+    账本 `available_volume=0` 的持仓（如 300390，11-04 买）需要在框架 state
+    里设 `_non_closable`——写对齐工具（重建后跑）+ 测试；本次 300390 明天
+    解冻自动一致，但**工具是未来重建 state 的必需件**
+  - [ ] `report-t71.md`
+- [ ] **T72（Hermes，P1）**：审 T71（决策时点门测试的完备性 + T+1 对齐的
+  fail-closed 语义——重建时对齐失败必须拒跑，不许"先跑着再说"）
+
+
+## Batch 18 · init_positions 最后一环（主 AI 派发 2026-11-05 · 今日第 6 层）
+
+> 今日已修（全部上线）：① state 连续（每日→固定 live）② 现金基线 ③ T+1 冻结对齐
+> ④ 1d get_bar 分钟聚合（bundle 落后致 init 失败）⑤ date→datetime 归一
+> ⑥ datetime 模块别名。**仍未通**：init_positions 导入的持仓在框架里为空
+> （C 场景 002192 卖单仍被"仓位不足"拒）——聚合 get_bar 单测通过、key 格式
+> 正确，**怀疑 Portfolio 构建时用的 data_source 不是我们的**（顺序/注册时机）。
+
+- [ ] **T73（Qoder，P0·最后一环）**：
+  - [ ] **取证**：rqalpha `main.py` 的 mod start_up 与 `Portfolio(...)` 构建的
+    **先后顺序**（文件:行）——确认 Portfolio 构建时 `env.data_source` 是不是
+    我们注册的 PaperDataSource；若不是，**注册时机**怎么提前（更早的钩子/
+    mod 装载顺序/config 层注入）
+  - [ ] **修复 + 四场景测试锁定**（用现网库副本，主 AI 已建
+    `spikes/_p0_scene.py` + 四场景脚本）：A T+1 冻结拒 / B 超支拒 /
+    C 正常卖成交 / D 正常买成交——**四场景全绿 = 修复完成**
+  - [ ] **回归**：全量测试 + 把四场景固化为 `tests/test_init_positions_e2e.py`
+    （子进程、库副本，不碰生产）
+  - [ ] `report-t73.md`
+- [ ] **T74（Hermes，P0）**：审 T73（顺序取证的正确性 + 四场景的判别力）
+'@; git add -A; git commit -m "chore(worker): Batch 18 - T73 init_positions last mile (Portfolio/data_source order forensics + 4-scene lock-in), T74 review; today's 6 fixes all deployed" 2>&1 | Select-Object -Last 1; git push origin main 2>&1 | Select-Object -Last 1
+
+
+## Batch 17/18 交付核销（Qoder · 2026-11-05，分支 `worker/t71-t73-init-positions`）
+
+对照派发原文逐条核销（基准=Batch 17/T71、Batch 18/T73 原文与 11-04 的 Q1-Q5 批复，
+不是我的实现）。细节与证据在 `report-t73.md` / `report-t71.md`。
+
+- [x] **T73（P0·最后一环）**：
+  - [x] **取证（文件:行）**：`main.py:147 mod_handler.start_up()` → `:150-151`（我们已
+        设过 data_source，`BaseDataSource` 兜底不进）→ `:155 set_data_proxy(env.data_source)`
+        → `:171 INIT_PORTFOLIO`（全包无监听者，`set_portfolio` 只在 `:174`）→
+        `:172-176 Portfolio(config.base.init_positions)`；mod 排序见 `mod/__init__.py:68`。
+        **结论：Portfolio 构建时用的就是我们的 `PaperDataSource`，"顺序/注册时机"排除。**
+  - [x] **真因（不是顺序）**：`utils/config.py:213` 必经 `parse_init_positions`，而它
+        `:271` 对非字符串一律返回 `[]`——引擎 venv 实测
+        `parse_init_positions({'002192.XSHE':100}) == []`。`build_config` 一直给 dict
+        ⇒ 框架每次建空仓账户。顺带解释了 ③④⑤ 的 `get_bar` 修复为何"单测过、现网无效"：
+        `portfolio/account.py:90` 那句在生产路径上从未被执行。
+  - [x] **修复**：形态（`init_positions_arg`）+ 复发哨兵（`reconcile_init_positions`/
+        `InitPositionError`）+ 一条口径（`ledger_init_state`，9 项里含 `920156.BJ` 的
+        交易所映射）+ T+1 冻结时机（`t1_plan`/`POST_BEFORE_TRADING`/`POST_SYSTEM_RESTORED`）
+        + 指纹豁免账本派生量（Hermes T74-P1）+ 供给并集 + `prev_close` 有限性
+        （Hermes T74-P2）+ `RqAttrDict` 回读陷阱 + `reset-state` 认 `live` 目录。
+  - [x] **四场景全绿**（NEC 现网库副本 + 引擎 venv 子进程，`ledger=False`）：
+        A 冻结拒（框架看得见 200 股、`closable=0`、拒单原文"可平仓/行权量为 0.0"）/
+        B 超支拒（"当前资金: 50000.00，所需 52583.67"——用的账本现金不是框架默认 10 万）/
+        C 卖成交（002192 100@47.30，费用三分量齐）/ D 买成交（000858 100@75.10）。
+        另加"同状态目录跑第二遍 ⇒ 框架比账本少仓就拒开"一条（T72 的 fail-closed 审点）。
+  - [x] **回归 + 固化**：`tests/test_init_positions_e2e.py`（一份代码两跑法：pytest 与
+        脚本；无 rqalpha 即 skip，子进程 + 账本副本，不碰生产）、
+        `tests/test_init_align_t73.py`（15）、`tests/test_decision_gate_t71.py`（5+9）、
+        Q5（9）、Q1（1，做过变异验证）。全量 **806 passed / 11 skipped**，
+        `wiring_audit` 退出码 0。
+  - [x] `report-t73.md`
+- [x] **T71（P1·边界工具化）**：
+  - [x] **决策时点门边界测试**：当日不强交 / 到点必须交（含 5 分钟对齐空档）/
+        决定后无 bar 保持 WAITING / `now == decided_at` 边界 / 解不出时刻不门控。
+        派发设想的"次日提交"半段**与 `expire_stale` 打架**，按现状钉住并上报 **Q6**
+        （现网 `002192_SELL_100@15:09:20` 明天会被 expired，不是被执行）。
+  - [x] **state 重建的 T+1 对齐**：做成"会话内自动对齐 + 三道 fail-closed"而不是
+        "重建后记得跑的工具"（工具有被忘记的固有概率）：`t1_freeze_plan` 只加不减、
+        `T1FreezeMissing` 会话闸（无留痕就不落账）、事件挂不上就拒开、
+        少仓就拒开；运维侧 `ledger reset-state --only rq_session_state` 现在会挪开 `live`。
+  - [x] `report-t71.md`
+- [x] **11-04 批复里"已批未做"三件（本轮一并落地）**：
+  - [x] **Q1（批：改）**：`engine/runner.py` 预算改每条意图现读；测试
+        `test_daily_budget_applies_inside_the_same_round` 在旧实现下实测变红
+        （两笔 BUY 都成交），改后 13 passed。
+  - [x] **Q4（批：跑）**：补齐"大上下文 × max_tokens=1200"格（1 次云端请求、
+        `provider._request` 直调、账本副本、不写 op_log，md5 前后同值）
+        ⇒ 66.5s / prompt 45,364 / completion 512 / `finish=stop`。
+        **它修正了 T63 的结论**：固定小预算下大/小上下文差 38.2s（-57%），
+        不是"上下文不是主因"——两个变量都真实，小预算下上下文的影响才被暴露。
+  - [x] **Q5（批：给）**：`m3_verify.waiting_grade` 0/2/8 取样、阈值 ≤2 green /
+        >2 warn / >5 red，按**单只最大滞后天数**判；green 也写天数与只数。
+- [ ] **等主 AI 的 1 件**：**Q6**（`questions.md` 2026-11-05 节）——盘后做出的决定
+  次日到底执行还是过期。改了交易语义，我不擅自动手；批"转次日"我就按 Q6 里的
+  改法落地，批"维持过期"我一字不改，**但 Batch 17 那句"明天开盘验证执行"需要换成
+  "明天盘中重新入队验证"**。
+- **另外两件是告知**：① 部署前必须先停 `rq tick` cron 再挪开 `var/rq_state/live`
+  （`init_positions` 只对新建 state 生效，续跑跳恢复的是那本空仓账户；现在这条会**响**
+  而不是静默）；② `docs/WORKER.md` 末尾混进了一段 PowerShell 派发命令文本
+  （`'@; git add -A; git commit -m "chore(worker): Batch 18 …`），是 Batch 18 那次
+  heredoc 收尾泄漏，属主 AI 的派发记录，我没代改。
+
+---
+
+## Batch 19 · T73 后收尾（主 AI 派发 2026-11-05 晚）
+
+- [ ] **T75（Qoder，P2）T74 残留两项**：① 1d 聚合 prev_close 的 NaN 断言
+  （回退前一日日线）；② 代码→交易所映射前缀覆盖测试（6/0/3/688/8——
+  北交所当前不在池，防未来纳池踩坑）。`report-t75.md`
+- [ ] **T76（Hermes，P1）**：审 T75 + **明天生产验证的观察清单**
+  （002192 顺延执行/新意图/四场景在生产 tick 的表现）——产出
+  `report-t76.md`（开盘后跑）
+- [ ] **T77（Qoder，P1·明天开盘验证件）**：生产 tick 首跑后核对：
+  ① 002192 顺延意图的执行结果（成交/拒单及原因）；② init 修复后框架
+  持仓对齐（m3 verify 全项）；③ 当日新意图全链。**只读核对 + 报告**
+  （不改生产）
+
+
+---
+
+## Batch 20 · M4 收尾全部排布（主 AI 派发 2026-11-05 晚 · 用户指示"收尾交给员工"）
+
+> **M3 验收标准（文档 §5）**：一周观察 + 面板/审计完整。当前观察期第 4 天。
+> **M4 验收标准（主 AI 定，全部满足才签字关闭 M3）**：
+> ① 观察期通过（连续 5 个交易日无未归因异常，或用户批准的压缩口径）；
+> ② 每日核对全绿（T77/T80 的核对清单：002192 顺延执行/init 对齐/新意图全链）；
+> ③ **parity/verify 永久门禁进 CI**（独立步骤、退出码可见）；
+> ④ 文档闭环（§5.10 对齐 + AGENTS + migration-m3 + 观察报告）；
+> ⑤ T81 审查无 P0。
+
+- [ ] **T78（Qoder，P0·M4-③）永久门禁进 CI**：`m3 verify` + `test_init_positions_e2e`
+  四场景 + wiring_audit 固化为 `.github/workflows/test.yml` 的**独立步骤**
+  （退出码非 0 直接告警）；`report-t78.md`（CI 配置 diff + 本地复跑证据）
+- [ ] **T79（Hermes，P0·M4-④）文档闭环**：
+  - [ ] `refactor-plan` §5 M3 行**对齐实现**（文档写"rqalpha 常驻一天一进程"，
+    实现是**队列模式**：engine 每分钟判定入队 + rq tick 每 5 分钟执行——
+    写明偏离原因（R2 裁决：1d 会话做不了盘中实时）+ 新增 §5.10 实现现状）
+  - [ ] AGENTS 部署节更新（rqalpha 底座的操作面：rq tick/意图队列/m3 verify/
+    回退开关一行说明）
+  - [ ] `migration-m3.md` 补"观察期每日核对记录"模板 + 观察报告框架
+  - [ ] `report-t79.md`（改动清单 + 无矛盾自查）
+- [ ] **T80（Qoder，P1·M4-②）每日核对自动化**：T77 的核对项做成
+  `cli m3 daily-check`（只读：002192 顺延执行结果/init 对齐/新意图全链/
+  m3 verify 全项）+ 每日 cron 或手动清单；`report-t80.md`
+- [ ] **T81（Hermes，P0·M4-⑤）收尾审查**：审 T78/T79/T80——门禁**真跑**
+  （不是"配置写了"）、文档**无矛盾**（refactor-plan/AGENTS/migration-m3 三处
+  对同一事实的表述一致）、观察报告框架的**判别力**（红/绿/黄的口径）；
+  `report-t81.md`，P0 → questions.md
+'@; git add -A; git commit -m "chore(worker): Batch 20 - M4 wrap-up fully assigned (T78 CI gate, T79 doc closure incl M3 queue-mode alignment, T80 daily-check automation, T81 review); M3 sign-off criteria fixed" 2>&1 | Select-Object -Last 1; git push origin main 2>&1 | Select-Object -Last 1
+
+
+## Batch 19/20 交付核销（Qoder · 2026-11-05 晚，分支 `worker/t75-t80-wrapup`）
+
+对照派发原文逐条核销（基准=Batch 19 的 T75/T77、Batch 20 的 T78/T80 与 M4 五条验收标准、
+`questions.md` 11-04 的 Q6 批复），不是拿我的实现反推拍板。
+证据在 `report-t75.md` / `report-t78.md` / `report-t80.md`。
+
+- [x] **T75（P2·T74 残留两项）**：
+  - [x] ① **prev_close 的 NaN 断言（回退前一日日线）**：新增纯函数
+        `store.aggregate_day_from_minutes`（`data_source.get_bar` 的 1d 分支只剩一次调用），
+        非有限 ⇒ 回退"上一交易日末根分钟 close"+ 同一个 `bands.limit_prices` 现算带；
+        退无可退才失败并写 `store.problems`。测试 4 条（含"回退值必须是上一交易日的
+        末根"与"不许返回全零假 bar"）。抽到 `store.py` 的唯一理由：那里不 import
+        rqalpha，CI 里能真测——否则这条永远只有生产机能碰。
+  - [x] ② **前缀覆盖测试（6/0/3/688/8）**：`test_order_book_id_prefix_coverage` 把
+        Hermes 点名的六个前缀 + 北交所 920 段钉在 `store.to_order_book_id` 与
+        `markets.order_book_id` **同值**上；另加 `test_bj_symbol_survives_the_init_chain_loudly`
+        （实测 bundle `.BJ`=0 只 ⇒ 期初如实 `unsupported` 剔除并留名字，
+        同时被 `T1FreezeMissing` 与 daily-check 豁免，不产生假红）。
+  - [x] `report-t75.md`
+- [x] **T78（P0·M4-③）永久门禁进 CI**：
+  - [x] `.github/workflows/test.yml` 新增三步（`daily-check` 门禁自检 / 钱类合规契约 /
+        四场景步骤），每步独立退出码；wiring_audit 保持原独立一步。
+  - [x] `m3 verify` 侧：新增 `tests/ci_gate_selfcheck.py`——跑真 CLI、真退出码，
+        四条断言含"健康基线必须无红"与"**造一个必须红的现场 ⇒ 非零退出**"
+        （门禁不会失败就不是门禁）。
+  - [x] `test_init_positions_e2e` 四场景：CI 里跑不动是事实（rqalpha/bundle/当日分钟线
+        三样都没有，硬塞只得到"永远 skip 的绿色步骤"=假绿），因此挂在**生产机每日实跑**
+        （`deploy/daily-check.sh`，`PT_RUN_SCENES=1` 默认开）；CI 仍保留该步并用 `-rs`
+        把 skip 原因打出来。边界与若要真进 CI 的代价写在 `report-t78.md` §5。
+  - [x] 彩排证据（现网候选树、只读）：`daily_check exit=3 / scenes exit=0`，
+        两本生产库 md5 前后同值；彩排本身抓出两个"门禁谎报"洞（JSONL 全 null、
+        成功时仍报 1），都已修并各自成一条 commit。
+  - [x] `report-t78.md`（含 CI diff + 本地/NEC 复跑输出）
+- [x] **T80（P1·M4-②）每日核对自动化**：
+  - [x] `paper_trading/utils/daily_check.py` + `cli m3 daily-check`：m3 verify 全套
+        + `init_align`（框架账户=账本同源）/ `carry_over`（Q6 顺延有没有兑现）/
+        `intent_chain`（当日意图闭环）；退出码 0/1/3 与 `m3 verify` §5.6 同一把尺子。
+        队列空时 `init_align` 判 **skip 不判红**（报警不许失真）。
+  - [x] cron 草稿 + `deploy/daily-check.sh`（JSONL 一天两行，供 T79 观察报告聚合）。
+        **crontab 一行都没动**，装法写在报告里。
+  - [x] 现网只读实跑（§2 of report-t80）：`init_align` 如实红——现网跑的是 main
+        `7cd31a5`，**T73 修复尚未部署**，15:52 那份 live evidence 里没有对齐留痕。
+  - [x] `report-t80.md`
+- [ ] **T77（P1·明天开盘验证件）**：**必须等 11-06 开盘后有真会话才能核**，
+  今晚能交付的是命令与判据（都已就绪并彩排过）：
+  `deploy/daily-check.sh`（或 `cli m3 daily-check --json`）看 `init_align` 是否转绿、
+  `carry_over` 里 `002192_SELL_100@2026-11-05T15:09:20` 的结论、
+  `intent_chain` 当日分布。**前提是主 AI 先部署本分支并把 `var/rq_state/live` 挪开**
+  （`init_positions` 只对新 state 生效；不挪则每一跳都会被少仓校验响亮拒跑）。
+- [x] **Q6 批复落地（盘后决定转次日）**：`queue.is_carried` —— `created_at` 时刻
+  `>15:00` 且 `day` 正是那天的**下一个交易日**才顺延；日历答不出⇒不顺延（保守）。
+  `expire_stale` 改成同一判据的单一口径，`carried_ids` 供报告，`rq tick` 输出
+  `carried` 字段（顺延必须说出来，不能悄悄留着）。测试 4 条：盘后转次日 /
+  盘中照旧过期 / 只顺一天 / 日历不可信时不过期；`tests/test_decision_gate_t71.py`
+  的文件头也随之改成"四向都钉住"。
+- [ ] **新发现待裁决 Q7（钱类）**：`nav_history` 同一业务日被写两行
+  （现网 11-05：`rq-nav` 09:32 + `nav:close` 16:30；11-04 只有 09:32 那一行）。
+  两条缺陷互相绊脚：D1 幂等标记不统一（旧线只查 `nav:close`，不看 `rq-nav`/
+  `nav_history` 当天有行）；D2 `rq tick` 盘中任意一跳就写"收盘 NAV"，价取
+  `daily_bars_raw` 里 ≤今日的**最后一根**（盘中⇒昨天收盘）⇒ 净值序列里出现
+  按昨价估的"收盘"行，而回撤基线读的就是它。
+  **为什么我不各修一半**：只修 D1 会让盘中那条昨价行成为当日唯一 NAV，
+  16:30 的收盘 NAV 反而被让位闸挡掉——比现在更糟。三个可选项与倾向写在
+  `questions.md` Q7。现在 `m3 daily-check` 每天会把它报成钱类红（退出码 3），
+  所以这条不会烂在没人看见的地方。
+
+---
+
+## Batch 21 · 收尾冲刺（主 AI 派发 2026-11-12 · 目标：尽快稳定、无缺漏）
+
+> 现状：M3 观察期第 5 个交易日（明天"一周"达标）；Q6（转次日）+Q7（NAV 双写）
+> 已修并部署（920aaa3）；T75/T78/T79/T80/T81 已交付（836 passed）；
+> daily-check cron 已装（15:30）。**M3 签字四条件**：① 观察期通过
+> ② 每日核对全绿 ③ 门禁进 CI ④ 文档闭环（T79）⑤ T81 无 P0。
+
+- [x] **T82（Qoder，P0·验证件）明日开盘验证**：**主 AI 补做完成**
+  （Qoder 用量耗尽后由主 AI 接管验证；证据见 `m3-observation-report.md` §9）：
+  - [x] **意图执行恢复**（Q6）：11-13 三条 executed、11-16 两条 executed——
+    11-06 以来首次真实盘中执行成功
+  - [x] **NAV 单行**（Q7）：11-13 nav_history 恰 1 行 97,934.65（D2 漏洞当天
+    修复后结构生效；中途暴露的查错库/残留标记两洞同批清理）
+  - [x] **daily-check 全项**：11-16 15:30 cron 自动实跑 rc=1（唯一红 raw_gate，
+    裁决 A 后降 warn）→ 复跑 **0 红 / rollback_required=false**
+  - [x] **新意图全链**：入队→分钟会话→落账→rq:fill 留痕全通（11-13/11-16）
+- [ ] **T83（Qoder，P0·M4-④）观察报告**：`docs/m3-observation-report.md`——
+  一周观察的数据汇总（每日 verify/daily-check 结果、成交/意图统计、
+  异常与关闭）+ **M3 验收结论**（对照 §5 验收标准"一周观察 + 面板/审计完整"）
+- [x] **T84（Hermes，P0·终审）M4 无缺漏终审**：**2026-11-16 补做完成**
+  （Hermes 未交付，主 AI 派子代理只读核查）——7 项核查全 PASS，2 个 PARTIAL
+  已闭环（migration-m3 残留"一天一进程"×2 已修；init_positions e2e 本地
+  skip 属环境性、生产 daily-check 实跑四场景全绿）。产出 `report-t84.md`
+- [x] **T85（Qoder，P1）T81 P2 三项收口**：daily-check 判别力补强
+  （check_intent_chain 的一致性断言 / carry_over 的未顺延过期意图 /
+  第三项按 T81 报告）——已交付（`report-t85.md`，`test_t85_check_power.py`）
+
+## 2026-11-17 · 突击修复（主 AI 亲做，签字后第 2 个交易日）
+
+- [x] **T86 条件单队列闭环（P0·钱类相邻）**：`queued_rq` 不在 `STATUSES`
+  ⇒ 每次触发抛 `ValueError`（生产 250 次），条件单停在 armed（次日重复买入）、
+  同跳后续条件被跳过、成交后不落定。修复：白名单 + `apply_outcomes` 闭环
+  （executed⇒filled / rejected⇒rejected）+ 面板标签 + daily-check 两项
+  （`cond_loop` 红 / `engine_crash` 黄）——`7d35292`；生产 #98 按 `fills#32`
+  补记 filled（`op_log[cond:close]` 留痕，备份 `cond-close-backup-20261117.db`）
+- [x] **收盘 NAV 到点判据对齐现网（假红）**：`CLOSE_NAV_DUE` 18:05 → **21:10**
+  （nav-close cron 20:50）——此前 18:05–20:50 每次核对都报钱类红+要求回退
+  （11-17 20:27 实测）——`ef0a18d`
+
+## Batch 22 · 独立运行能力（M3 签字后第一个里程碑）
+
+> 用户方向（2026-11-16）：子项目应独立于母库工作——内置基础交易策略
+> （不依赖母库/不依赖 AI 计划也能决策），同时兼容自定义交易策略
+> （BaseStrategy 子类 + 配置注入）。现状：`BaseStrategy`/`MACrossStrategy`
+> 已在，但**装配是硬编码**（`cli.py:196`、`main.py:50`），无注册表/无参数注入/
+> 无自定义加载契约；规则引擎+队列模式已让系统无计划独立成交（11-16 实证）。
+
+- [ ] **T87 策略契约与注册表**：`BaseStrategy` 明确 `params_schema`（类型/默认/
+  范围）+ `name` 唯一性；新增 `paper_trading/strategy/registry.py`：
+  `build(spec)` 按 `{class, params}` 构造，未知类/参数越界 **fail-closed**
+  （返回错误并留痕，不许静默用默认值）。验收：单测覆盖正常/未知类/坏参数。
+- [ ] **T88 配置注入与默认装配**：`strategy.local.yaml` 支持
+  `strategies: [{name, class, params, enabled}]`；`cli.TradingBridge` 与
+  `main.py` 不再硬编码 `MACrossStrategy`，改为注册表装配；空配置 ⇒ 内置默认
+  （MA5/20）；坏配置 ⇒ 启动即失败并写 `op_log[strategy:config]`。
+  验收：配置优先级（local > 默认）、禁用策略不产生信号。
+- [ ] **T89 自定义策略加载契约**：允许 `class: mypkg.MyStrategy`（仅限已安装
+  包/`PAPER_TRADING_STRATEGY_PATH` 白名单目录）；导入失败/非 BaseStrategy 子类
+  ⇒ 拒绝并留痕；文档写明"自定义策略不得直接下单"（只产 `Signal`，执行仍走风控+
+  队列）。验收：临时模块加载成功 + 三类坏输入被拒。
+- [ ] **T90 内置基础策略集与"无 AI 也能决策"**：除 MA 交叉外补一个不依赖母库的
+  基础组合（例：`Breakout` 20 日高突破 + `StopLoss` 已有规则、`RSI` 区间），
+  全部只吃本地 `daily_bars_raw`；给出"断网 + 无 LLM key"的独立运行日配置样例。
+  验收：离线 dry-run 一日产生可解释信号。
+- [ ] **T91 文档与回归**：`docs/strategy-contract.md`（契约/参数表/示例/禁用与
+  回滚）；`tests/test_strategy_registry_t87.py`；CI 门禁含新增测试；
+  文档写明"策略只做判定，L1 执行与钱类口径不变"。

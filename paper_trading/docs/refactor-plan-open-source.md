@@ -95,7 +95,7 @@ op_log、cron 运维、**安全门禁**（尺度闸/执行价偏离闸/条件单
 | **M0 技术验证**（先决，1-2 天） | ① 本地/Pi 建 Python 3.13 venv：装 vnpy 4.5（研究 **--no-deps 去 GUI** 或独立安装法）+ rqalpha 6.4.2；② Pi arm64 headless spike：vnpy 撮合 hello（下单→成交→T+1 冻结→账户）；③ rqalpha 用本地 SQLite 数据适配器跑通 MA5/20 回测 | **Pi 侧 ✅ 完成（`docs/spike-m0-pi.md`：双框架 arm64 可用、MainEngine headless 实例化成功）**；桌面侧/数据适配/模拟撮合载体定位（M0b）待续 | 未动生产任何文件 |
 | **M1 回测替换** | rqalpha 接管日线回测；与现 Backtester 做 **parity 对照**（同规则/同费用/同窗口 → 成交数/费用/收益对齐，容差书面化） | parity 报告 + 现 306 测试中回测相关转为对照测试 | 回测入口双轨，旧 `backtest.py` 保留 |
 | **M2 交易线替换**（拍板 2026-10-29，依 T13 取证，详见 §5.4） | rqalpha 模拟线接管交易执行（T13 原型产品化：DayBarStore 喂 **close_raw** + FilePersistProvider 断点续跑 + 9 条 G-T13 门禁）；**双轨影子对照**（rqalpha 状态 vs `paper_account.db` 每日对账 cash/qty/费用，差异>阈值告警停线）；L2（AI/门禁/审计/面板）**全程不动** | §5.4 验收单全绿（含 T+1 写死、gate-8 适配器 sanity、双轨对账连续一周零未归因分歧） | 切回旧账本开关（config） |
-| **M3 切换** | 账本归档+切换日新开账、cron 切 rqalpha 常驻（一天一进程）、旧模块下线（只读保留一个版本周期） | 一周观察 + 面板/审计完整 | git tag 回退 + 账本归档恢复 |
+| **M3 切换** | 账本归档+切换日新开账、cron 切 **rqalpha 队列模式**（`engine --once` 每分钟判定入队 → `rq tick` 每 5 分钟消费执行；非常驻一天一进程）、旧模块下线（只读保留一个版本周期） | 一周观察 + 面板/审计完整 | git tag 回退 + 账本归档恢复 |
 | **M4 收尾** | parity 测试永久门禁、AGENTS/founding-mandate 闭环记录、Pi 运维文档 | 文档全量更新 | — |
 
 ### 5.2 M1 归口裁决（主 AI，2026-10-28；依据 T7/T9/T10 取证）
@@ -370,3 +370,54 @@ op_log、cron 运维、**安全门禁**（尺度闸/执行价偏离闸/条件单
 - **R1（overlay 续跑不装）**：M3a 日终首跑不触发（before_trading 正常），
   但**必须修**（防御同日重跑与 M3b）——T55；**R3 跨日解冻取证**并入 T55；
   **R4 symbol[:6] 归一**写进 M3b 实现要求。
+
+### 5.9 切换后观察期 bug 清单与关闭状态（2026-11-05 落档 · 进度证据）
+
+> 用户感知"换引擎后一直在修 bug"——本表是**全部已修项的关闭证据**（每项有
+> 现网实证或测试锁定）。分两类：**切换设计债**（10-30 赶工欠的）与
+> **框架集成边界**（rqalpha 隐藏约束，真跑才暴露）。
+
+**切换设计债（10-30 我的欠账）**：
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| 1 | state 每日重建 → 框架空账户 | 固定 live state | T73 四场景 + 生产 |
+| 2 | rq 分叉漏 mark_order → 重复入队 19 次/日 | 入队即 mark | 7 回归测试（T69） |
+| 3 | NAV 双写（RunDaily 无 op_log 留痕） | 让位查 nav_history | d1a487d + 现网 |
+| 4 | 现金基线（框架 10 万 vs 账本 6.7 万） | init_cash 从账本读 | 四场景 B |
+| 5 | T+1 冻结（init 持仓全可卖） | init_frozen 设 _non_closable | 四场景 A |
+
+**框架集成边界（rqalpha 隐藏约束）**：
+| # | 问题 | 修复 | 证据 |
+|---|---|---|---|
+| 6 | init_positions 要 prev_date bar（bundle 落后） | 1d 聚合分钟 bar | test_getbar + T73 |
+| 7 | date 无 hour（convert 崩） | date→datetime 归一 | 94dcc50 |
+| 8 | datetime 类名冲突 | 模块别名 | dd76601 |
+| 9 | **parse_init_positions 只认字符串** | init_positions_arg 转换 | T73 + 806 测试 |
+
+**数据供给**：分钟线盘中采集 cron（11-03 装）、raw 日线采集（11-04 装）。
+
+**剩余**：T75（P2 两项）/T76/T77（明天开盘验证）——**全是收尾级**。
+**结论：切换债与集成边界共 9 层，已修 9 层**（每层有实证/测试）；观察期
+第 3-5 天暴露的都是"真跑才现形"的集成细节——**不是设计错误，是集成深度**。
+
+### 5.10 M3 实现现状：队列模式（2026-11-05 对齐）
+
+> 本节记录**实现与早期文档表述的偏离**。早期 §5 表格/§5.8 写"rqalpha 常驻一天一进程"，
+> 实际落地是**队列模式**：判定与执行分离，`engine --once` 每分钟只判定并把意图入队，
+> `rq tick` 每 5 分钟起一个 rqalpha 会话消费队列并落账。
+
+- **为什么不是常驻**：R2 裁决已明确 1d 会话不能做每分钟跳（未来函数 + 无盘中语义）；
+  分钟会话全量接管（M3b 原设想）需要盘中分钟线持续供给与更重的常驻进程。
+  队列模式用"判定在 L2、执行在框架"满足硬规则 0，同时避开 1d 未来函数与常驻复杂度。
+- **数据流**：`engine/rules.evaluate()` → `EngineRunner._execute()` → `rq_engine.queue.enqueue()`
+  → `rq_intents`（pending/queued）→ `rq tick` 子进程 `run_session(frequency="1m")`
+  → 框架撮合/费用/T+1 → `ledger_apply` → `paper_account.db` + `op_log[rq:fill/rq:nav]`。
+- **幂等**：`executed_ids` 从账本当日 orders 取（`symbol[:6]_side_volume` 归一）；
+  `SessionGate` 同日 + 指纹一致才允许 `intraday_resume`；盘后意图按 Q6 顺延一个交易日。
+- **状态目录**：固定 `var/rq_state/live`（不再按日新建），期初持仓/现金/冻结从账本读，
+  会话内 `POST_BEFORE_TRADING`/`POST_SYSTEM_RESTORED` 对齐 T+1 冻结。
+- **验证入口**：`m3 verify`（钱类红即回退）、`cli m3 daily-check`（观察期每日核对）、
+  `tests/test_init_positions_e2e.py`（四场景 + 脱钩拒跑）。
+- **回退**：`engine.local.yaml` 的 `executor` 切回 `legacy`（或注释 cron 中的 `rq tick` 行），
+  旧线只读封存；切换/回退都必须先停 cron，避免双活。
+

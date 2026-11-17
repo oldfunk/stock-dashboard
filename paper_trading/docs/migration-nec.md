@@ -120,3 +120,22 @@
 - **凭证提醒**（T21 P1-4）：admin_token 在浏览器 localStorage——NEC 面板
   `http://192.168.50.71:8080/` 首次写操作前需用已存 API Key 重新保存一次
 - 观察期末：Pi（冻结值） vs NEC（新增量） 差值 = 观察期新增行数，逐表核对
+
+---
+
+## 附：Pi 残留自启服务退役（2026-11-17）
+
+迁移后 Pi 上仍留有一个 **enabled + Restart=always** 的系统级面板服务
+`paper-trading-dashboard.service`（:8080，只读、指向 Pi 本地 10-28 冻结库），
+每次开机自启——易被误认为"第二台生产在跑"。2026-11-17 用户拍板彻底关闭：
+
+```
+sudo systemctl disable --now paper-trading-dashboard.service
+```
+
+现状：`is-enabled=disabled`、`is-active=inactive`、无残留进程、
+`multi-user.target.wants` 中已无 paper 项；`paper-trading-parent.service`
+（:8081）此前即 disabled+dead。**Pi 自此无任何自活的 paper-trading 组件**，
+仅保留冻结的旧快照目录 `~/paper-trading`（历史留存，勿参考其数据）。
+stock-dashboard 按原迁移范围继续留在 Pi，不受影响。
+

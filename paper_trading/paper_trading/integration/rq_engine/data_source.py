@@ -10,14 +10,18 @@
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
 from rqalpha.const import INSTRUMENT_TYPE, MARKET
 from rqalpha.data.base_data_source.data_source import BaseDataSource
 
+from paper_trading.utils import get_logger
+
 from .store import RawDayBarStore
+
+logger = get_logger(__name__)
 
 
 class PaperDataSource(BaseDataSource):
@@ -33,17 +37,36 @@ class PaperDataSource(BaseDataSource):
     def get_bar(self, instrument, dt, frequency):
         """M3b：开源 BaseDataSource 对 `frequency != '1d'` 直接
         NotImplementedError（`base_data_source/data_source.py:232`，分钟查询
-        只在商业版 rqdatac 数据源里）——子类覆盖为从我们的分钟 store 查询
-        （`datetime <= dt` 的最后一根，分钟 bar 的标准 ≤ 语义，返回 numpy 行
-        与基类一致，由 data_proxy 包 BarObject）。日线走基类。"""
-        if frequency == "1d" or not self._minute:
-            return super().get_bar(instrument, dt, frequency)
+        只在商业版 rqdatac 数据源里）——子类覆盖为从我们的 store 查询。
+        **1d 也覆盖**（2026-11-05）：init_positions 导入期初持仓时框架取
+        `prev_date` 的 1d bar 作成本价——bundle 月末落后（无近日 bar）⇒ NaN
+        ⇒ 期初持仓**静默导入失败**（框架空仓，卖单全被拒）。分钟 store 有
+        当日 48 根分钟 bar ⇒ 按日聚合出等价日线（OHLC/量额求和）。"""
         import numpy as np
+        import datetime as _dtm
         from rqalpha.utils.datetime_func import convert_dt_to_int
+        # init_positions 的 prev_date 是 date（无时分）——convert 需要 datetime
+        if isinstance(dt, _dtm.date) and not isinstance(dt, _dtm.datetime):
+            dt = _dtm.datetime(dt.year, dt.month, dt.day)
         bars = self._pt_store.get_bars(instrument.order_book_id)
         if bars is None or len(bars) == 0:
             return None
         dt_int = convert_dt_to_int(dt)
+        if frequency == "1d":
+            # 分钟 bar 按日聚合（口径与 prev_close 回退都在 `store.aggregate_day_from_minutes`，
+            # 那里不 import rqalpha，CI 里能直接测）
+            from .store import aggregate_day_from_minutes, to_symbol
+
+            row, note = aggregate_day_from_minutes(
+                bars, str(dt_int)[:8], to_symbol(instrument.order_book_id))
+            if note:
+                problems = getattr(self._pt_store, "problems", None)
+                if isinstance(problems, list):
+                    problems.append(note)
+                logger.warning(note)
+            return row
+        if not self._minute:
+            return super().get_bar(instrument, dt, frequency)
         i = int(np.searchsorted(bars["datetime"], dt_int, side="right")) - 1
         if i < 0:
             return None

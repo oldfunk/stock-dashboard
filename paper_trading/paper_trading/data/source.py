@@ -66,6 +66,18 @@ class BarSource:
             if b.get("available") and b.get("bars"):
                 bars = [_to_bar(symbol, x) for x in b["bars"]]
                 bars.sort(key=lambda x: x.timestamp)   # 母库返回倒序，统一升序
+                # Q10（2026-11-12）：新鲜度 fail-closed——`auto` 模式"母库优先"
+                # 的前提是母库**不落后**。母库有数据但停在旧日（观察期实况：
+                # asof 10-30/11-11，本地有 11-12）⇒ 永不回退 = 计划做不出 +
+                # 估值用旧价。本地有更晚的行 ⇒ 回退本地。
+                if self.source == "auto":
+                    try:
+                        local_bars = self.db.get_bars(symbol, limit=limit)
+                        if local_bars and bars and \
+                                local_bars[-1].timestamp > bars[-1].timestamp:
+                            return local_bars[-int(limit):]
+                    except Exception:                   # noqa: BLE001
+                        pass
                 return bars[-int(limit):]
         except Exception:                           # noqa: BLE001 - 回退本地
             pass

@@ -22,7 +22,7 @@ from paper_trading.utils import fees
 
 from . import costs
 from .provider import SessionGate, SessionGateError, config_fingerprint
-from .store import to_order_book_id
+from .store import to_order_book_id, to_symbol
 
 PKG_DIR = Path(__file__).resolve().parent
 
@@ -74,6 +74,141 @@ class IdleSpinError(RuntimeError):
     """G-T13-7：会话没跑到 handle_bar，或计划下单却既无成交也无拒单原因。"""
 
 
+class InitPositionError(RuntimeError):
+    """期初持仓没能进到框架里（框架静默吞掉配置）——**不许继续开会话**。
+
+    11-05 现网 P0 的复发哨兵：账本有仓、框架空仓时，卖单会被"仓位不足"拒、
+    买单按虚高现金校验。两种都是钱类错误，而日志上看起来像"市场不给成交"。
+    """
+
+
+def init_positions_arg(init_positions: Optional[dict]) -> str:
+    """账本持仓 dict → rqalpha 唯一认得的那种形态（一个字符串）。
+
+    `utils/config.py:271 parse_init_positions` 只接受 `"002192.XSHE:100,..."`，
+    对 dict/list 一律 **返回 `[]`**（6.4.2 实测：`parse_init_positions({'002192.XSHE':
+    100}) == []`）。11-05 那轮"期初持仓从账本导入框架"的修复之所以全线无效，
+    就是这个形态差：我们 `build_config` 里给的是 dict，框架解析成空列表，
+    Portfolio 建出来空仓 ⇒ 002192 卖单被"仓位不足"拒（现网实测）。
+
+    排序是为了**指纹稳定**：dict 的插入序随 sqlite 返回序变，而 `session_fingerprint`
+    把这项算进会话指纹，序一变就被判"配置漂移"拒续跑。
+    """
+    parts = []
+    for obid, qty in sorted((init_positions or {}).items()):
+        if "." not in str(obid):
+            raise ValueError(
+                f"init_positions 的键要 order_book_id（600519.XSHG），收到 {obid!r}"
+                "——挂错交易所的合约框架查不到，期初持仓会整只消失")
+        q = int(qty)
+        if q != qty:
+            raise ValueError(f"init_positions[{obid}] 数量必须是整数，收到 {qty!r}")
+        if q == 0:
+            continue        # 清仓后账本里留着 total_volume=0 的行，是常态不是异常
+        if q < 0:
+            raise ValueError(
+                f"init_positions[{obid}] 出现负数持仓 {q}——股票账本不会做空，"
+                "这行是脏数据，导入框架会变成一笔凭空的可卖仓")
+        parts.append(f"{obid}:{q}")
+    return ",".join(parts)
+
+
+def reconcile_init_positions(expected: dict, parsed: Any, known) -> dict:
+    """核对"我们喂的期初持仓"与"框架解析后的期初持仓"，缺的分两类处置。
+
+    `parsed` = rqalpha 解析后的 `config.base.init_positions`（`[(obid, float), ...]`）；
+    `known(obid)` = 该合约在数据源里是否存在（`data_proxy.instruments(obid) is not None`）。
+
+    * `unsupported`：合约本数据源没有（开源 bundle 里根本没有北交所 `.BJ`）
+      ⇒ 从期初里**剔除后照常开会话**——这只仓框架本来就交易不了，
+      runner 侧会以 `INSTRUMENT_UNAVAILABLE` 归因说清楚，不伪装成"导入成功"；
+    * `dropped_silently`：合约在、数量却对不上 ⇒ 配置被静默吞了
+      （形态错、解析规则变、框架改版），**调用方必须停线**（InitPositionError）。
+
+    返回 `{kept, unsupported, dropped_silently}`，`kept` 是可直接写回
+    `config.base.init_positions` 的 `[(obid, int), ...]`。
+    """
+    parsed_map: dict[str, float] = {}
+    for obid, qty in (parsed or []):
+        parsed_map[str(obid)] = float(qty)
+    kept, unsupported, dropped = [], [], []
+    for obid, qty in sorted((expected or {}).items()):
+        ob = str(obid)
+        if float(qty) == 0:
+            continue
+        if not known(ob):
+            unsupported.append({"symbol": ob, "volume": int(qty)})
+            continue
+        if ob not in parsed_map or abs(parsed_map[ob] - float(qty)) > 1e-9:
+            dropped.append({"symbol": ob, "expected": int(qty),
+                            "parsed": parsed_map.get(ob)})
+            continue
+        kept.append((ob, int(qty)))
+    return {"kept": kept, "unsupported": unsupported, "dropped_silently": dropped}
+
+
+def ledger_init_state(account_db) -> dict:
+    """账本 → 框架期初三件套（现金 / 持仓 / T+1 冻结），**唯一口径**。
+
+    为什么收成一条函数：`rq tick`、`spikes/_p0_scene.py` 与四场景 e2e 原先各抄
+    一遍交易所映射（`f"{code}.{'XSHG' if code[0] in '69' else 'XSHE'}"`）——那是
+    纪律 7 的第二/第三处真相源，而 `920156` 这类北交所代码会被拼成
+    `920156.XSHG`（框架标的表里没有）⇒ 那笔仓"静默消失"，正是 T74 审查 P2 的根。
+    映射统一走 `utils/markets.order_book_id`（T60 收敛过一次，别再散）。
+
+    读不出账本就抛：调用方拿它当会话起点，"读不到 ⇒ 空账户"是 11-05 P0 的
+    另一半（框架按空仓拒卖、按虚高现金放行买单）。
+    """
+    import contextlib
+    import sqlite3
+
+    out = {"cash": None, "positions": {}, "frozen": {}}
+    with contextlib.closing(sqlite3.connect(
+            f"file:{account_db}?mode=ro", uri=True)) as c:
+        row = c.execute("SELECT cash FROM account ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            raise ValueError(f"账本 {account_db} 里读不到 account.cash")
+        out["cash"] = float(row[0])
+        for sym, tot, avail in c.execute(
+                "SELECT symbol, total_volume, available_volume FROM positions"
+                " WHERE total_volume > 0 ORDER BY symbol"):
+            ob = to_order_book_id(sym)
+            tot_i, avail_i = int(tot), int(avail)
+            out["positions"][ob] = tot_i
+            if tot_i > avail_i:
+                out["frozen"][ob] = tot_i - avail_i
+    return out
+
+
+def t1_freeze_plan(frozen: Optional[dict], framework: Optional[dict]) -> list:
+    """账本的 T+1 冻结量 → 框架里该改哪些仓的 `_non_closable`（**只加不减**）。
+
+    `framework` = `{order_book_id: {"quantity": int, "non_closable": int}}`。
+
+    为什么"只加不减"：`_non_closable` 调小 = 解锁 T+0 卖出，那是把合规闸拆掉。
+    日内多跳时框架自己给"当天买入"记的冻结（`position_model.py:176-177`）可能
+    比账本期初的冻结更大，期初数只是**下限**；而"账本已解冻、框架还冻着"
+    最多让人错过一次卖出，反过来是让违规成交落进账本。两种错的代价不对等。
+
+    返回 `[{symbol, from, to, quantity}, ...]`（含无需改动的项，便于审计
+    "这只为什么没冻"），调用方按 `to > from` 才真去写框架。
+    """
+    out = []
+    for ob, qty in sorted((frozen or {}).items()):
+        q = int(qty)
+        if q <= 0:
+            continue
+        have = (framework or {}).get(str(ob)) or {}
+        total = int(have.get("quantity", 0))
+        cur = int(have.get("non_closable", 0))
+        if total == 0:
+            continue        # 框架没这只仓：少仓的已在 POST_SYSTEM_INIT 停线
+        want = min(q, total)     # 冻结不可能超过持仓，超过就全冻
+        out.append({"symbol": str(ob), "from": cur, "to": max(want, cur),
+                    "quantity": total, "changed": want > cur})
+    return out
+
+
 def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
                  init_cash: float = INIT_CASH_DEFAULT,
                  state_dir: str = "", evidence: str = "",
@@ -84,6 +219,8 @@ def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
                  require_today_reference: bool = True,
                  ledger: bool = False,
                  frequency: str = "1d",           # M3b："1m" = 5 分钟 bar 驱动分钟会话
+                 init_positions: Optional[dict] = None,   # M3b：期初持仓（账本对齐）
+                 init_frozen: Optional[dict] = None,      # M3b：期初冻结量（T+1 对齐）
                  extra: Optional[dict] = None) -> dict:
     """一个模拟日的 rqalpha 配置（纯函数，便于离线测试）。
 
@@ -97,11 +234,22 @@ def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
     fee_map = fees.as_fee_dict(fee)
     transfer_fee_rate = fee_map.pop("transfer_fee_rate")
     cost_cfg = costs.stock_cost_mod_config(**fee_map)
+    # 供给并集：store 的标的 = 意图标的 ∪ 期初持仓标的。
+    # 只按意图给会踩空（`rq tick` 现网形状：symbols 来自 intents，init_positions
+    # 来自整本账）：Portfolio 建期初仓时要按 `prev_date` 取每只的 1d bar 当成本价
+    # （`portfolio/account.py:88`），store 里没这只 ⇒ 取不到价 ⇒
+    # `invalid init position …: no valid price` ⇒ 整个会话起不来。
+    supply = sorted({str(s) for s in (symbols or [])}
+                    | {to_symbol(str(k)) for k in (init_positions or {})})
     cfg = {
         "base": {
             "start_date": today,
             "end_date": today,
             "accounts": {"STOCK": float(init_cash)},
+            # M3b：期初持仓（账本对齐）——切换/重建 state 时把账本持仓作为
+            # 框架的期初持仓。**必须是字符串**：`parse_init_positions` 对 dict
+            # 一律返回 []（11-05 P0 的最后一环，见 init_positions_arg）。
+            "init_positions": init_positions_arg(init_positions),
             "frequency": frequency,      # M3b："1m" 分钟会话（5 分钟 bar 驱动）
             "data_bundle_path": bundle,
             "capital_gain_tax_rate": 0.0,
@@ -136,7 +284,7 @@ def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
                 "db": str(Path(data_db).resolve()),
                 "bundle": bundle,
                 "today": today,
-                "symbols": list(symbols),
+                "symbols": supply,
                 "require_bands": require_bands,
                 "override_available_range": override_available_range,
                 "state_dir": state_dir,
@@ -146,6 +294,10 @@ def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
                 "require_today_reference": bool(require_today_reference),  # T50-C
                 "ledger": bool(ledger),                   # T47-G1/G3：会话成交是否落现网账本
                 "frequency": frequency,                   # M3b：mod 按此选日线/分钟 store
+                "init_frozen": dict(init_frozen or {}),   # M3b：期初 T+1 冻结量
+                # 给 mod 复核用：base.init_positions 会被框架的 parse 改写形态，
+                # 拿原始 dict 对一遍才知道"有没有被静默吞掉"（InitPositionError）
+                "init_positions": dict(init_positions or {}),
             },
         },
     }
@@ -158,12 +310,17 @@ def build_config(*, today: str, data_db: str, bundle: str, symbols: list,
 def session_fingerprint(cfg: dict, intraday: bool = False) -> str:
     """会改变账本语义的配置指纹（漂移即拒续，G-T13-5）。
 
-    `intraday=True`（M3b 日内多跳）：**排除 symbols**——每跳意图决定标的，
-    池集合天然不同，不改账本语义（init_cash/费率/口径才是语义）。
+    `intraday=True`（M3b 日内多跳）：**排除 symbols 与三个"从账本现读的期初量"**
+    （`accounts` 现金 / `init_positions` / `init_frozen`）。每跳意图决定标的，
+    而现金与持仓在**第一跳成交后必然变**（`rq tick` 每一跳都从当前账本重读
+    `get_cash()`/positions 再传进来）——把它们留在指纹里，日内第二跳起就会被
+    自己的漂移判据拒跑（T74 前置审查 P1，11-05）。
+    这不是放松守卫：续跑时这三项**根本不生效**（Portfolio 从 state 恢复，
+    `init_positions` 只在建仓那一刻用），把它们算进"语义"是把派生量当锚点。
+    真正的语义锚（费率/撮合口径/frequency/落不落账/数据文件）一个都没排除。
     """
     base = cfg["base"]
     payload = {
-        "accounts": base["accounts"],
         "run_type": base["run_type"],
         "frequency": base["frequency"],   # 1d 与 1m 的成交语义完全不同（R2）
         "capital_gain_tax_rate": base["capital_gain_tax_rate"],
@@ -180,15 +337,21 @@ def session_fingerprint(cfg: dict, intraday: bool = False) -> str:
         "db": cfg["mod"]["ptpaper"]["db"],
         "require_bands": cfg["mod"]["ptpaper"]["require_bands"],
     }
-    if not intraday:
+    if intraday:
+        payload["_intraday_exempt"] = ["accounts", "symbols", "init_positions",
+                                       "init_frozen"]
+    else:
+        payload["accounts"] = base["accounts"]
         payload["symbols"] = sorted(cfg["mod"]["ptpaper"]["symbols"])
+        payload["init_positions"] = base.get("init_positions") or ""
+        payload["init_frozen"] = cfg["mod"]["ptpaper"].get("init_frozen") or {}
     return config_fingerprint(payload)
 
 
 def check_session_gates(evidence: dict, plan: list, *, handler_calls: int,
                         settle_expected: int = 1,
                         expect_transfer_fee: bool = False,
-                        settled_biz=()) -> dict:
+                        settled_biz=(), init_frozen=None) -> dict:
     """会话后置门禁（纯函数，可离线测）。"""
     counts = evidence.get("event_counts") or {}
     trades = evidence.get("trades") or []
@@ -216,6 +379,20 @@ def check_session_gates(evidence: dict, plan: list, *, handler_calls: int,
         if not cost.get("wrapped"):
             errors.append("TransferFeeNotInstalled: 配了过户费率，但没有一个合约 decider "
                           f"被套上 overlay（cost={cost}）")
+    # T71/T72 的 fail-closed 半段：账本说"这些仓今天不能平"，会话结束时必须能
+    # 拿出"框架确实冻了"的留痕。事件没发（框架改版）/挂在错误的时刻上（11-05
+    # 第一版就是）都会让对齐静默消失，而静默消失的 T+1 对齐 = 框架允许 T+0 卖出。
+    frozen = dict(init_frozen or {})
+    if frozen:
+        applied = {(a.get("symbol")): a for a in
+                   ((evidence.get("frozen_align") or {}).get("applied") or [])}
+        dropped = {str(u.get("symbol")) for u in
+                   (evidence.get("init_align") or {}).get("unsupported") or []}
+        miss = sorted(s for s, v in frozen.items()
+                      if int(v) > 0 and str(s) not in applied and str(s) not in dropped)
+        if miss:
+            errors.append(f"T1FreezeMissing: 账本冻结 {miss} 在框架里没有对齐留痕"
+                          f"（applied={sorted(applied)}）——本会话不落账")
     settlement = counts.get("SETTLEMENT", 0)
     warn = []
     if settlement > settle_expected:
@@ -258,7 +435,9 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
                 fee: Any = None, require_today_reference: bool = True,
                 ledger: bool = False, frequency: str = "1d",
                 intraday_resume: bool = False,
-                executed_ids: Optional[set] = None) -> dict:
+                executed_ids: Optional[set] = None,
+                init_positions: Optional[dict] = None,
+                init_frozen: Optional[dict] = None) -> dict:
     """跑一个模拟日（**G-T13-9：一个进程只允许一次**）。
 
     `intraday_resume=True`（M3b 日内多跳）：同日续跑放行（SessionGate intraday）。
@@ -282,7 +461,9 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
                        evidence=evidence_path, require_bands=require_bands,
                        matching_type=matching_type, fee=fee,
                        require_today_reference=require_today_reference,
-                       ledger=ledger, frequency=frequency)
+                       ledger=ledger, frequency=frequency,
+                       init_positions=init_positions,
+                       init_frozen=init_frozen)
     fp = session_fingerprint(cfg, intraday=intraday_resume)
 
     gate = SessionGate(state_dir) if state_dir else None
@@ -311,7 +492,13 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
     verdict = check_session_gates(evidence, plan, handler_calls=len(st.handler_dates),
                                   settle_expected=1 if not state_dir else 1,
                                   expect_transfer_fee=cfg["mod"]["ptpaper"]["transfer_fee_rate"] > 0,
-                                  settled_biz=settled_biz)
+                                  settled_biz=settled_biz,
+                                  # 用**入参**那份原始 dict，不从 cfg 里读回来：
+                                  # rqalpha 的 `ModHandler.set_env` 会把
+                                  # `config.mod.ptpaper` 换成 `RqAttrDict`
+                                  # （只给属性访问、不可下标），读回来就 `TypeError`
+                                  # ——现网四场景第一跑就是这么炸的（T73 实测）
+                                  init_frozen=init_frozen)
     done = False
     if gate and err is None and verdict["ok"]:
         gate.mark_done(date.fromisoformat(today), fp,

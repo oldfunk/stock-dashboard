@@ -142,3 +142,18 @@ def test_scanner_bites_but_ignores_history(tmp_path):
     aging = {a["date"] for a in rows["aging"]}
     assert aging == {near}, f"扫描器抓错：{aging}"
     assert rows["reads_wall_clock"] is True and rows["risks"], rows
+
+
+def test_ci_gate_selfcheck_is_scanned_and_clean():
+    """门禁自检不叫 `test_*`，曾被扫描集合漏掉 ⇒ 写死的 fixture 日期一路老化。
+
+    实证：`ci_gate_selfcheck.py` 的 raw bar 写死 11-02/03/04，而它把
+    `date.today()` 当基准日喂给 daily-check ⇒ 11-06 起 raw_gate 天天红，
+    M4-③ 的"永久门禁"变成永久红（11-12 在 main 上复现）。
+    这里既钉"扫描集合必须含它"，也钉"它自己不许再有近今天的写死日期"。
+    """
+    scanner = _load_scanner()
+    gate = ROOT / "tests" / "ci_gate_selfcheck.py"
+    assert gate in scanner.scan_files(), "门禁自检又漏出扫描集合了"
+    row = scanner.classify(gate, date.today())
+    assert row["verdict"] == "SAFE", row

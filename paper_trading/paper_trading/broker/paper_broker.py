@@ -680,6 +680,33 @@ class PaperBroker:
             ).fetchone()
         return bool(row)
 
+    def has_nav_for_day(self, day: str) -> bool:
+        """NAV 幂等的**统一判据**（Q7-D1，2026-11-12）：三条并查。
+
+        1. `nav_history` 当天有行（**timestamp** 当天）——RunDaily 每日首笔
+           直接写 nav_history 且不留 op_log，只靠这条看见它；
+        2. `op_log` 的 `nav:close`（旧线，业务日补记在 result.date）；
+        3. `op_log` 的 `rq-nav`（新线）。
+
+        此前 rq 侧查三条、旧线只查第 2 条 ⇒ rq 先写后旧线看不见 ⇒ 同日两行。
+        `ledger.record_close_nav` 与 `agent/loop._snapshot_close_nav` 共用本方法。
+        """
+        try:
+            import sqlite3
+            c = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+            try:
+                n = c.execute(
+                    "SELECT COUNT(*) FROM nav_history WHERE timestamp LIKE ?",
+                    (f"{day}%",)).fetchone()[0]
+                if n > 0:
+                    return True
+            finally:
+                c.close()
+        except Exception:                  # noqa: BLE001 - 查不到继续查 op_log
+            pass
+        return self.has_operation("nav:close", day) or \
+            self.has_operation("rq-nav", day)   # 与 ledger.NAV_BIZ_PREFIX 同值
+
     def has_operation(self, action: str, day: str) -> bool:
         """某业务日是否已记录某类操作（每日一次快照的幂等标记）。
 
