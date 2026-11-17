@@ -297,6 +297,15 @@ static_dir = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(templates_dir))
 
 
+def _inject_globals():
+    """给所有模板注入版本号（页脚展示），单一来源 src/version.py。"""
+    from src.version import __version__
+    templates.env.globals["app_version"] = __version__
+
+
+_inject_globals()
+
+
 def static_url(name: str) -> str:
     """静态资源 URL + 文件 mtime 版本号（2026-10-25）。
 
