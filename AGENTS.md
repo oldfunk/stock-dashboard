@@ -50,6 +50,8 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 **绝不**：在本地 main 上直接 commit（合并的 ff 前进除外）；手改 `paper_trading/` 内任何文件（上游漂移则以后 pull 冲突）。合并后同步生产服务器并验证运行（`git pull` + gate + 改 routes/模板/采集则重启 `stock-dashboard.service` + 确认运行正常）。
 
+**推送一律从本地开发机发起**（用户约定，2026-11-17）：生产服务器 nec **只 `git pull`、绝不 push**（它虽有 origin 的 push 权限，但推送到远端只会从本地做，更干净、可审计）。nec 上不得留未提交改动——那会挡住 `git pull`（曾因手动 scp 改动静默失败，导致部署没生效）；pull 后必须核对 `git log --oneline -1` 确认真的前进。
+
 ## 冒烟测试
 
 改完代码后在生产服务器冒烟（本地环境不全，验证以生产服务器为准；改动先同步到生产服务器；目标值见 `deploy.local.md`）：`ssh <生产服务器> "cd <部署目录> && .venv/bin/python -c 'import 改动的模块'"` 确认无 import 错误。
