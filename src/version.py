@@ -4,4 +4,4 @@
 `tests/test_version_sync.py` 会强制两者同步（发版只改这两处 + README 状态行）。
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"

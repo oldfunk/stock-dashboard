@@ -192,12 +192,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **生产事件**：deploy 重启窗口内 :9527 被 Hermes 常驻 agent 起的 `python main.py`（nec 目录旧应用）+多进程子进程占用 → 母服务重启循环 http:500；清理占用者后恢复（16:03 main/parent 200）。**跨团队约定提请**：母仓库目录不跑非母项目进程；端口各归其主。
 - **门禁**：1235 → **1299**（母）/ vendor 772（记录）。
 
-### 2026-11-17（子项目 vendor v0.9.0 合流 + v2.1.0 发版准备 + 数字抽检修误报）
+### 2026-11-17（v2.2.0：子项目 v0.9.0 合流 + 母侧下单验证 + 发版）
 
-- **v2.1.0 发布（tag + GitHub Release）**：15:30 首跑验证通过后打 annotated tag `v2.1.0` 并发布 GitHub Release（Latest），main=`e9b39f2`。首跑证据：`run_log` id=865 `completed`、`analyzed_count=20`；20 条分析 15:47–16:33 全为 glm-4.5-flash、0 失败；数字抽检新口径 10 处/20 只 = **0.5 处/只**（旧抽检器 1.0–2.0），说明"41% 是误报"的修复在真实数据上生效。kline：活跃池 23/23、全市场轮换 600/600（400s，零失败）。门禁：本机母 1486 / vendor 886；生产 gate 1495（基线 1463→1495、vendor 772→886）。
+- **母侧子项目可用/可下单验证（v0.9.0 合流后）**：① 线上 :8081（母树合并版面板）根页与读接口全 200；写路径实测——挂条件单成功（`armed=1`）、撤销成功（`cancelled`）、无口令写 403（口令门禁）。② 隔离库（`/tmp` 复制 `data.db` + `paper_account.db`，不碰生产账本）用母项目 `.venv` 跑 CLI：买 100 股 000792 @20.01 成交（佣金 5.00、过户费 0.02、印花税 0），持仓 400→500 且**可用仍 400**（T+1 冻结），同日卖 500 被风控拒、卖 400 成交；面板 `/api/status` 同步（现金 78955.79→76949.77）。③ 同代码树 `m3 daily-check` / `nav-close` 入口存在但属 rq 侧，母侧不跑（无 cron/无 rqalpha），符合接缝分工。
+- **v2.2.0 发布**：版本号 2.1.0 → **2.2.0**（`src/version.py`/`pyproject.toml`/README 同步，守卫用例通过），annotated tag `v2.2.0` + GitHub Release。本机全量门禁 **2372 passed / 0 failed**（母 1486 + vendor 886），部署重启后页脚显示 v2.2.0。
+- **v2.1.0 发布（同日早些时候）**：15:30 首跑验证通过后打 annotated tag `v2.1.0` 并发布 GitHub Release，main=`e9b39f2`。首跑证据：`run_log` id=865 `completed`、`analyzed_count=20`；20 条分析 15:47–16:33 全为 glm-4.5-flash、0 失败；数字抽检新口径 10 处/20 只 = **0.5 处/只**（旧抽检器 1.0–2.0），说明"41% 是误报"的修复在真实数据上生效。kline：活跃池 23/23、全市场轮换 600/600（400s，零失败）。门禁：本机母 1486 / vendor 886；生产 gate 1495（基线 1463→1495、vendor 772→886）。
 - **子项目 vendored v0.8.0 → v0.9.0（`subtree pull --squash`，零冲突）**：`8078f5f` 之后首次跟 tag。53 文件 +5789/−87，**无依赖变更、无 schema 迁移**（dashboard 旧库可直接用）。v0.9.0 内容据 tag：M3 观察期签字（5 条件核销 + 3 条如实限定）、M4 钱类加固（D3 收盘 NAV 只认当日 raw 定稿价；D4 决策路径不写 nav_history；nav 值复算断言）、T86 条件单 `queued_rq` 状态闭环、Q6/Q7/Q10/Q11（盘后意图顺延、NAV 幂等统一、母库陈旧回退本地、面板健康 5 分钟时效）、`m3 daily-check` 与 `rq nav-close` 新入口。**接缝核对**：母侧只引用 `/paper` 跳转与只读数据 API（未改）；vendored dashboard 不 import rqalpha（`mod_entry.py` 仅 rq 会话使用）；母库参照走只读 SQLite（`mother.py`），路径未变。**验证**：vendor 886 passed / 0 failed（此前 3 个既存失败已被上游修好）；:8081 重启后 `/`、`/api/status`、`/api/engine`、`/api/positions`、`/api/cond`、`/api/schemes`、`/api/quotes` 全 200，新 Q11 健康时效判据生效（超龄快照落 probe）；:8080 独立版与 5 条 cron 未受影响。
-
-
 - **数字抽检修误报（`a784844`）**：prompt 喂了 10 年均值/波动/改善，抽检字段表只有 5 年字段 → 模型引系统给的数字被判偏离。离线复算 44 条：76→45，**消除 31 处误报（41%）**。文档记录：**偏离率以库内实算为准**（离线复算有日期错置，PE/PB 逐日变、5 年均值是滚动窗口）。
 - **GLM-4.7-Flash 调优（`5f64413`/`0db8d0c`/`43ab96d`）**：官方规格（免费、200K 上下文、标称 128K 输出、默认 thinking、json_object）；实测 4 组参数 → 开 `response_format=json_object`（不开启约半数 JSON 非法）；`max_tokens` 6000 会截断，提到 **98304**（API 上限，131072 报 400 code=1210）；thinking 显式开启。
 - **v2.1.0 发版准备（`f9b24c0`）**：版本号单一来源 `src/version.py`（2.1.0）+ pyproject + README 状态行 + `tests/test_version_sync.py`；面板页脚显示版本号。**tag 等 15:30 首跑验证后打。**
