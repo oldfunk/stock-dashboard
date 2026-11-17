@@ -398,6 +398,37 @@ class TestNumericCitations:
                           self._stock(net_margin_5y_avg=-1.72))
         assert len(mm2) == 1
 
+    # ── 2026-11-17：系统喂了 10 年均值/波动/改善，引用它们不算偏离 ──────────
+
+    def test_ten_year_roe_citation_not_mismatch(self):
+        """实测 000792：正文引 roe_10y_avg=23.37，旧抽检拿 roe_5y_avg=44.03
+        比对 → 误报。10 年均值是 prompt 明确喂的。"""
+        mm = self._check('10年均ROE达到23.37%，长期盈利能力不错。',
+                         self._stock(roe_10y_avg=23.37, roe_5y_avg=44.03))
+        assert mm == []
+
+    def test_ten_year_net_margin_and_roic(self):
+        mm = self._check('10年净利率 -6.89%，ROIC 仅 4.01%。',
+                         self._stock(net_margin_10y_avg=-6.89,
+                                      roic_10y_avg=4.01))
+        assert mm == []
+
+    def test_volatility_label_not_captured_by_bare_roe(self):
+        """"ROE波动很大（标准差35.64）" 归 roe_volatility，不被裸 ROE 抢配。"""
+        mm = self._check('ROE波动很大（标准差35.64）。',
+                         self._stock(roe_volatility=35.64, roe_5y_avg=44.03))
+        assert mm == []
+
+    def test_improvement_label(self):
+        mm = self._check('ROE改善度 -1.86。',
+                         self._stock(roe_improvement=-1.86))
+        assert mm == []
+
+    def test_intcov_ten_year(self):
+        mm = self._check('利息保障倍数 65.43。',
+                         self._stock(intcov_10y_avg=65.43, intcov_5y_avg=109.64))
+        assert mm == []
+
 
 class TestLingPriority:
     """ling 金融模型优先 + 故障轮换（fallback 契约）。"""

@@ -380,17 +380,24 @@ def _check_output_consistency(result: dict) -> list[tuple]:
 # ---------------------------------------------------------------------------
 
 # 标签 → stock 字段（按优先序；命中任一即自洽，未命中记首字段为参照）
+# 2026-11-17：补齐系统实际喂给模型的 10 年均值与波动/改善指标——此前只比
+# 5 年字段，模型引 "10年均ROE 23.37%"（= roe_10y_avg，系统给的）会被误判成
+# 偏离（实测 000792：23.37 vs roe_5y_avg 44.03 → 误报）。
+# 顺序有讲究：带修饰的标签（ROE波动/ROE改善）在前，先占用匹配，裸 ROE 不再
+# 抢配 "ROE波动很大（标准差35.64"。
 _NUMERIC_LABEL_FIELDS = [
-    (('ROE', '净资产收益率'), ('roe_5y_avg', 'roe')),
+    (('ROE波动', 'ROE标准差', 'ROE 波动', 'ROE 标准差'), ('roe_volatility',)),
+    (('ROE改善', 'ROE提升', 'ROE 改善', 'ROE 提升'), ('roe_improvement',)),
+    (('ROE', '净资产收益率'), ('roe_5y_avg', 'roe_10y_avg', 'roe')),
     (('PE', '市盈率'), ('pe',)),
     (('PB', '市净率'), ('pb',)),
     (('毛利率',), ('gross_margin_5y_avg', 'gross_margin')),
-    (('净利率',), ('net_margin_5y_avg', 'net_margin')),
-    (('ROIC',), ('roic_5y_avg',)),
+    (('净利率',), ('net_margin_5y_avg', 'net_margin_10y_avg', 'net_margin')),
+    (('ROIC',), ('roic_5y_avg', 'roic_10y_avg')),
     (('资产负债率', '负债率'), ('debt_ratio',)),
     (('市值',), ('market_cap',)),
-    (('股本稀释', '股本扩张'), ('share_dilution_5y',)),
-    (('利息覆盖', '利息保障'), ('intcov_5y_avg',)),
+    (('股本稀释', '股本扩张'), ('share_dilution_5y', 'share_dilution_10y')),
+    (('利息覆盖', '利息保障'), ('intcov_5y_avg', 'intcov_10y_avg')),
 ]
 
 # 数字形态：可选符号位 + 千分位逗号/中文逗号/小数点
@@ -443,6 +450,7 @@ def _check_numeric_citations(analysis_text, stock: dict) -> list:
     if not isinstance(stock, dict):
         return []
     mismatches = []
+    consumed: list[tuple[int, int]] = []      # 已被带修饰标签占用的区间
     for labels, fields in _NUMERIC_LABEL_FIELDS:
         refs = [(_ref_float(stock, f)) for f in fields]
         refs = [r for r in refs if r is not None]
@@ -456,9 +464,13 @@ def _check_numeric_citations(analysis_text, stock: dict) -> list:
             r'\s*(%|％|[xX倍]|亿)?'
         )
         for m in pat.finditer(analysis_text):
+            # 与已占用区间重叠 → 让位给更具体的标签（如 ROE波动 优先于 ROE）
+            if any(not (m.end() <= s or m.start() >= e) for s, e in consumed):
+                continue
             cited = _clean_cited_num(m.group(1))
             if cited is None:
                 continue
+            consumed.append((m.start(), m.end()))
             if any(math.isclose(cited, r, rel_tol=0.02, abs_tol=0.1)
                    for r in refs):
                 continue
