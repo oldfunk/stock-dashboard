@@ -192,6 +192,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **生产事件**：deploy 重启窗口内 :9527 被 Hermes 常驻 agent 起的 `python main.py`（nec 目录旧应用）+多进程子进程占用 → 母服务重启循环 http:500；清理占用者后恢复（16:03 main/parent 200）。**跨团队约定提请**：母仓库目录不跑非母项目进程；端口各归其主。
 - **门禁**：1235 → **1299**（母）/ vendor 772（记录）。
 
+### 2026-11-17（v2.1.0 发版准备 + 数字抽检修误报）
+
+- **数字抽检修误报（`a784844`）**：prompt 喂了 10 年均值/波动/改善，抽检字段表只有 5 年字段 → 模型引系统给的数字被判偏离。离线复算 44 条：76→45，**消除 31 处误报（41%）**。文档记录：**偏离率以库内实算为准**（离线复算有日期错置，PE/PB 逐日变、5 年均值是滚动窗口）。
+- **GLM-4.7-Flash 调优（`5f64413`/`0db8d0c`/`43ab96d`）**：官方规格（免费、200K 上下文、标称 128K 输出、默认 thinking、json_object）；实测 4 组参数 → 开 `response_format=json_object`（不开启约半数 JSON 非法）；`max_tokens` 6000 会截断，提到 **98304**（API 上限，131072 报 400 code=1210）；thinking 显式开启。
+- **v2.1.0 发版准备（`f9b24c0`）**：版本号单一来源 `src/version.py`（2.1.0）+ pyproject + README 状态行 + `tests/test_version_sync.py`；面板页脚显示版本号。**tag 等 15:30 首跑验证后打。**
+- **部署纪律修正**：nec `git pull` 曾被本地 scp 改动挡住的静默失败（`tail -1` 掩盖退出码）→ 部分部署未生效；已拉平并改为核对 `git log -1`。
+
 ### 2026-11-16（晚：换 NVIDIA nemotron 模型 + RPM 限速 + 推理模型适配）
 
 - **换模型**（用户手动改 nec 的 `config/local.yaml` + `.env`）：zhipu/glm-4.5-flash → **NVIDIA `nvidia/nemotron-3.5-super-vl-120b-a12b`**（integrate.api.nvidia.com）。
