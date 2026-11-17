@@ -3,7 +3,9 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-17 v2.1.0 发版准备完成；等 15:30 首跑验证后打 tag）
+## 最后状态（2026-11-17 晚：子项目 v0.9.0 已合流；v2.1.0 发版准备完成）
+
+- **子项目 vendored v0.8.0 → v0.9.0（`subtree pull --squash`，零冲突）**：53 文件 +5789/−87，无依赖/schema 变更；vendor 用例 **886 passed / 0 failed**（此前 3 个既存失败已由上游修好，`gate-baseline-vendor.txt` 772→886）。:8081（母侧合并树面板）已按新代码重启验证。
 
 - **版本**：v2.1.0（沿用仓库版本线 v1.0.0→v2.0.0→**v2.1.0**）。版本号单一来源 `src/version.py` + `pyproject.toml` + README 状态行，`tests/test_version_sync.py` 强制同步；面板页脚已显示 v2.1.0。
 - **AI 模型**：glm-4.5-flash（→4.7-flash）。设置：max_tokens **98304**（API 上限，131072 被拒）、**thinking 显式开启**、json_mode 开、并发 1、rpm_limit 40。数字抽检器已修（41% 误报）。
@@ -35,7 +37,7 @@
 - **EM 依赖补数待解封**：301139（10-30 备源救回后 qfq 锚点轮再失败）与 920305（partial）等 push2his 解封后 `--source akshare` 手动补。
 - **BJ 财务复扫与归因器新桶**：321 只中 128 已有年报、其余待二次放行/上游真无；`audit_no_data` 的规则集还没有"有行情缺财务"桶（192 只暂列 unattributed 触发 exit 1——机器断言在正确工作，桶要加）。
 - **close_adj 修复仍手动**：增量已由 U9-A 供给、回填由 Sina 三列，但修残缺仍靠手动 `fix_close_adj_nulls`（无调度）。
-- **既有 vendor 用例失败待查（非本次引入）**：`paper_trading/tests/test_raw_feed.py::test_sync_raw_end_to_end_with_injected_sources` 稳定失败（written 1≠2），stash 对比确认与本次改动无关；vendor 层按协议不阻塞，但需给个说法（子项目域内或本地环境差异）。
+- ~~既有 vendor 用例失败待查~~：**2026-11-17 已消除**——v0.9.0 上游修复后 vendor 套件 886 passed / 0 failed（含此前失败的 `test_raw_feed` 与 `test_minute_supply_t59`），vendor 基线升到 886。
 - **生产纪律提请（用户协调，未决）**：母仓库目录（/home/nec/stock-dashboard）不得跑非母项目进程（Hermes agent 的旧 main.py 曾抢占 9527 致母服务重启循环）；端口 9527/8081/8080 各归其主。
 - **MOS 存量值是旧前视口径算的**：N7 修后只补空位不重算（"冻结"约定）；H-001 若用存量 mos_at_entry 分层，旧值含前视污染——跑前先决定重算或只用新样本（256 行有 ret_60；`research_result` 0 行无连带）。
 - **N22 历史 eps 存量两位小数**：前向修复已合入，已入库历史值仍被截断，估值分位的股本反推受污染——与 `000001` 历史重抓并批处理（涉生产写+上游限流），未排期。
@@ -47,7 +49,7 @@
 - **`analysis_outcome` 写入方停滞（2026-11-12）**：10 月 0 条、11 月仅 1 条（9 月 73 条）。非重复行（双基准是设计）。外部 AI 分析写入方，待查。
 - **`daily_close` 间歇缺口（2026-11-12）**：11-10 缺 80 只（603/605 开头）、11-12 缺 7 只（3016xx/3021xx）；缺失代码均 active 且其它日有数据。疑腾讯批查漏拉/停牌，待查。
 - **`market_state` 覆盖虚高（2026-11-12）**：每日 pass、coverage=1.0，但 `pe_percentile_5y` 缺失；11-09/10/11 三天指标完全一致（疑似同一份快照）。
-- **母仓库 `paper-trading` remote 指向本地 `/home/nec/paper-trading`**：`subtree pull` 是只读拉取（不写 nec），但母树 vendor 子树停在 `v0.8.0`，而 nec 独立版 `main` 已到 `920aaa3`（T71-T80 领先）——母树 vendor 副本陈旧，下次跟 tag 时注意。
+- **母仓库 `paper-trading` remote 指向本地 `/home/nec/paper-trading`**：`subtree pull` 是只读拉取（不写 nec）。**2026-11-17 已把 vendored 树从 v0.8.0 拉到 v0.9.0**（M3 观察期签字 + M4 钱类加固），此前"vendor 副本陈旧"的隐患已解除；下次跟新 tag 时同样只读拉取。
 - **nec 独立版框架状态与账本曾脱节（2026-11-12 修复）**：`portfolio.state` 停在 11-06（2 仓 vs 账本 8 仓）。修复用 `ledger reset-state --only rq_session_state`；若再出现 `InitPositionError`，同样处置。
 
 ## 历史交接区（追加，不删）
