@@ -3,7 +3,14 @@
 与普通委托的区别：现在不成交，只**挂条件**。满足触发价时由引擎按
 同一套风控与撮合口径下单（fail-closed 复用 RiskManager/PaperBroker）。
 
-状态机：armed → filled / cancelled / expired / rejected
+状态机：armed → queued_rq（rq 执行器：已交意图队列）→ filled / rejected；或
+        armed → filled / cancelled / expired / rejected（legacy 直撮）
+
+`queued_rq`（2026-11-17 补）：队列模式下触发只是**入队**，成交要等 ≤5 分钟的
+`rq tick`。此前这条路径调 `mark(..., "queued_rq")` 而白名单里没有该状态 ⇒
+抛 `ValueError: 非法状态`（11-17 生产 250 次）⇒ 条件单留在 armed ⇒ 每个 tick
+重复入队、次日再买一次、且后续 armed 条件在同跳全被跳过。闭环由
+`queue.apply_outcomes` 负责：意图成交 → filled；意图被拒 → rejected。
 """
 from __future__ import annotations
 
@@ -16,7 +23,7 @@ from typing import Iterator, Optional
 
 CONDITION_TYPES = ("price_below", "price_above", "pct_below", "pct_above")
 
-STATUSES = ("armed", "filled", "cancelled", "expired", "rejected")
+STATUSES = ("armed", "queued_rq", "filled", "cancelled", "expired", "rejected")
 
 
 class ConditionalOrders:
@@ -195,7 +202,7 @@ class ConditionalOrders:
             cur = conn.execute(
                 "UPDATE conditional_orders SET status = 'expired',"
                 " detail = COALESCE(detail, '{\"why\":\"有效期已过\"}')"
-                " WHERE status = 'armed' AND expiry <= ?",
+                " WHERE status IN ('armed', 'queued_rq') AND expiry <= ?",
                 (now.isoformat(timespec="minutes"),))
             return cur.rowcount or 0
 

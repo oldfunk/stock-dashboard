@@ -110,6 +110,34 @@ def post_session(broker, evidence: dict, *, today: str, fp: str = "",
             "ok": not errors, "today": today}
 
 
+def _is_today(day: str) -> bool:
+    from datetime import date as _d
+    return str(day) == _d.today().isoformat()
+
+
+def _raw_has_today(broker, symbol: str, day: str) -> bool:
+    """该标的当日是否有 raw 日线行（Q7-D2 的数据驱动判据）。
+
+    注意：raw 表在 **data.db**（不是账本 paper_account.db）——查错库会
+    异常→按"有"返回→拦不住（2026-11-13 现网 09:32 盘中行就是这么漏写的）。
+    """
+    try:
+        import sqlite3
+        from pathlib import Path as _P
+        data_db = _P(broker.db_path).parent / "data.db"
+        c = sqlite3.connect(f"file:{data_db}?mode=ro", uri=True)
+        try:
+            n = c.execute(
+                "SELECT COUNT(*) FROM daily_bars_raw WHERE symbol=? AND"
+                " substr(timestamp,1,10)=?",
+                (str(symbol).zfill(6), str(day))).fetchone()[0]
+            return n > 0
+        finally:
+            c.close()
+    except Exception:                  # noqa: BLE001
+        return True                    # 查不到按"有"（宁可多写，不让断供）
+
+
 def _nav_history_has_today(broker, today: str) -> bool:
     """nav_history 当天是否已有行（RunDaily 等无 op_log 的写入路径的让位依据）。
 
@@ -147,16 +175,20 @@ def record_close_nav(broker, prices: dict, *, today: str, fp: str = "") -> dict:
     """
     cash = float(broker.get_cash())
     positions = {p.symbol: p for p in broker.get_all_positions()}
+    # Q7-D2（2026-11-12）：收盘 NAV 必须用**当日定稿价**——盘中跳（当天日线
+    # raw 未出）取到的是昨日价 ⇒ "以昨价估今日"的行进序列、喂大回撤基线。
+    # require_today=True：当日 raw 缺行的标的**不返回**（missing 检查拦截，
+    # 不写、返回 price_missing/close_bar_not_final）。
+    prices = {s: p for s, p in prices.items()
+              if _raw_has_today(broker, s, today)}
     missing = [s for s in positions if not prices.get(s)]
     if missing:
-        return {"recorded": False, "reason": "price_missing",
+        return {"recorded": False,
+                "reason": "close_bar_not_final" if _is_today(today)
+                          else "price_missing",
                 "symbols": sorted(missing)[:10]}
-    # 让位检查三条：op_log 的 rq-nav / 旧线 nav:close / **nav_history 当天已有行**
-    # （2026-11-04 现网双写事故：RunDaily 每日首笔直接写 nav_history 且不留
-    # op_log ⇒ 前两条看不见它，rq-nav 让位失败，同日 2 行 NAV 触发 m3 verify 红）
-    if broker.has_operation(NAV_BIZ_PREFIX, today) or \
-            broker.has_operation("nav:close", today) or \
-            _nav_history_has_today(broker, today):
+    # 让位检查统一判据（Q7-D1）：nav_history 当天有行（两边写入路径共用）
+    if broker.has_nav_for_day(today):
         return {"recorded": False, "reason": "already_recorded", "today": today}
     snap = broker.get_nav(prices)
     broker.record_nav(snap)

@@ -13,4 +13,18 @@ jobs:
       # "配置接了线却没人读"——后者是会被当普通红忽略掉的那类问题（llm_timeout 那次）。
       - name: wiring audit (配置接线门禁)
         run: python tests/wiring_audit.py --quiet
+      # T78（M4-③）：每日核对**工具本身**进门禁。跑的是真 CLI、真退出码，
+      # 不是"workflow 里写了一行"：健康合成库必须全绿退出 0，
+      # 而"该有会话留痕却没有"的现场必须把退出码打到非零（门禁得会失败）。
+      - name: m3 daily-check gate (每日核对门禁自检)
+        run: python tests/ci_gate_selfcheck.py
+      # T78：钱类契约单独一步——期初持仓形态/复核、T+1 只加不减、账本口径、
+      # 决策时点门、1d 聚合回退。这些红=钱/合规语义变了，不该混在 800 条测试里被忽略。
+      - name: money & compliance contract tests (钱类/合规契约)
+        run: >-
+          python -m pytest tests/test_init_align_t73.py tests/test_t75_hardening.py
+          tests/test_decision_gate_t71.py tests/test_daily_check_t80.py
+          tests/test_m3_verify_t46.py tests/test_engine_behavior_t68.py -q
+      - name: init_positions 四场景（CI 无 rqalpha 会 skip，见 report-t78 §4）
+        run: python -m pytest tests/test_init_positions_e2e.py -q -rs
       - run: python -m pytest tests/ -q

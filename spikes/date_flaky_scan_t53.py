@@ -27,6 +27,8 @@ TESTS = ROOT / "tests"
 RISK_WINDOW_DAYS = 30
 #: 超过这个年纪的日期当作历史数据，不再算风险
 SAFE_AGE_DAYS = 180
+#: 不叫 test_* 却也是"每天在 CI 里跑"的测试文件（漏扫 = 老化无人发现）
+EXTRA_FILES = ("ci_gate_selfcheck.py",)
 
 DATE_RE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
 CLOCK_RE = re.compile(r"date\.today\(\)|datetime\.now\(\)|time\.time\(\)|\.today\(\)")
@@ -110,9 +112,20 @@ def classify(path: Path, today: date) -> dict:
             "verdict": ("RISK" if risks else "SAFE")}
 
 
+def scan_files() -> list[Path]:
+    """扫描集合 = `test_*.py` + 不叫 test 但同样每天在 CI 里跑的测试。
+
+    `ci_gate_selfcheck.py` 曾被漏扫：它写死 11-02/03/04 的 raw bar，运行日一走远
+    就"落后 N 个交易日"，N 每天 +1 ⇒ M4-③ 的永久门禁从 11-06 起天天红（11-12 实测）。
+    """
+    out = sorted(TESTS.glob("test_*.py"))
+    out += [TESTS / n for n in EXTRA_FILES if (TESTS / n).exists()]
+    return out
+
+
 def main() -> int:
     today = date.today()
-    rows = [classify(p, today) for p in sorted(TESTS.glob("test_*.py"))]
+    rows = [classify(p, today) for p in scan_files()]
     risky = [r for r in rows if r["verdict"] == "RISK"]
     print(f"扫描日（真实今天）：{today}   文件：{len(rows)}   有风险：{len(risky)}")
     for r in risky:

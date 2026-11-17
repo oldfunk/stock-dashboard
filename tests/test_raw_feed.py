@@ -107,7 +107,10 @@ def test_sync_raw_end_to_end_with_injected_sources(db):
                "600519": [mkbar("600519", days[0], 1349.98)]}
     refs = {"000792": {"2026-10-26": {"close_raw": 22.24}, "2026-10-27": {"close_raw": 22.21}},
             "600519": {"2026-10-26": {"close_raw": 9999.0}}}   # 故意不一致 → 拒收
+    # start/end 显式钉住窗口：否则 days=5 相对真实今天滚动，写死的 10 月
+    # 夹具日期迟早被挤出窗口（2026-11-16 复现过：written 2→1）。
     res = raw_feed.sync_raw(db, ["000792", "600519"], days=5,
+                            start=date(2026, 10, 25), end=date(2026, 10, 28),
                             fetch=lambda s, d: fetched[s],
                             reference=lambda s, d: refs)
     assert res["written"] == 2 and res["rejected"] == ["600519"]

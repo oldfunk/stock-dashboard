@@ -120,6 +120,20 @@ def test_max_orders_per_day_stops_the_second_order(bridge, live_quotes):
     assert len(tick(bridge, max_orders_per_day=2)["fired"]) == 1
 
 
+def test_daily_budget_applies_inside_the_same_round(bridge, live_quotes):
+    """Q1（11-04 批复）：`max_orders_per_day` 是"**当日** N 单"，不是"每轮 N 单"。
+
+    旧实现在循环外读一次预算快照 ⇒ 同轮两条规则都对着 `orders=0` 判定，
+    预算 1 也能一轮灌进 2 单（`bump_budget` 其实每次都写了状态，只是没人再读）。
+    这条用两条规则、一轮、预算=1 把它钉住：第二条必须被"日内笔数上限"挡下。
+    """
+    two = [RULE, dict(RULE, id="buy-test-2", symbol="600519")]
+    out = tick(bridge, max_orders_per_day=1, rules=two)
+    assert len(out["fired"]) == 1, out
+    assert any("日内笔数上限" in s.get("why", "") for s in out["skipped"]), out["skipped"]
+    assert orders_of(bridge) == 1, "落账笔数必须与 fired 一致（预算挡不住就是钱类错误）"
+
+
 def test_per_symbol_cooldown_blocks_the_repeat(bridge, live_quotes):
     assert len(tick(bridge, per_symbol_cooldown_sec=0)["fired"]) == 1
     again = tick(bridge, per_symbol_cooldown_sec=900)

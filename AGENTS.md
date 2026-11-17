@@ -64,10 +64,24 @@ python -m paper_trading.cli data compare --symbols 600036 --json
 # 事件驱动复盘（盘中每分钟检查，避开整点/错开 tick；无异动/冷却/预算用完时零 LLM 调用）
 (crontab -l 2>/dev/null; echo "1-59 9-11,13-14 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli agent event --json >> agent.log 2>&1") | crontab -
 # 规则引擎 + 条件单（每分钟单轮；engine.enabled=false 时只判定并落 blocked_disabled）
+# M3 队列模式：本行只判定并写入 rq_intents，不直接成交；成交由下面的 rq tick 消费。
 (crontab -l 2>/dev/null; echo "* 9-15 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.engine --once --json >> engine.log 2>&1") | crontab -
+# rqalpha 执行器（每 5 分钟消费 rq_intents；frequency=1m，固定 state_dir=var/rq_state/live）
+(crontab -l 2>/dev/null; echo "2-59/5 9-15 * * 1-5 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli rq tick --json >> rq-tick.log 2>&1") | crontab -
 # 交易日历（每周同步一次未来交易日到 var/trading_calendar.json，只留最近 45 天+未来；失败回退周末）
 (crontab -l 2>/dev/null; echo "0 10 * * 6 cd /home/nec/paper-trading && venv/bin/python -m paper_trading.cli calendar sync --json >> calendar.log 2>&1") | crontab -
 ```
+
+**rqalpha 底座操作面（M3）**：
+
+- 判定与执行分离：`engine --once` 每分钟跑规则/条件单，只把意图入队 `rq_intents`；
+  `rq tick` 每 5 分钟起 rqalpha 会话（`frequency=1m`）消费队列、撮合、落账。
+- 状态目录固定 `var/rq_state/live`；期初现金/持仓/T+1 冻结从 `paper_account.db` 读，
+  会话内 `POST_BEFORE_TRADING`/`POST_SYSTEM_RESTORED` 对齐冻结。
+- 每日核对：`python -m paper_trading.cli m3 daily-check --json`（只读）；
+  钱类红用 `python -m paper_trading.cli m3 verify --json`，红即按 §5.1 回退。
+- 回退开关：`engine.local.yaml` 的 `executor` 切回 `legacy`，或注释 cron 里的
+  `rq tick` 行；切换/回退必须先停 cron，禁止双活。
 
 `run_lock` 会检查锁文件里的 PID 与进程启动标识：进程被 SIGKILL/断电后残留的锁会自动接管，不需要人工删 `paper_trading.lock`；仍在运行的守护进程（`engine --interval` 会全天持锁）不会被等待方误删。akshare 日线/名称/日历调用都有硬超时，网络 stall 时按失败返回，不会长期持锁拖死盘中止损。
 

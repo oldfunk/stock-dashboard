@@ -212,7 +212,10 @@ class EngineRunner:
             return out
 
         fired_today = self.state.fired_rules(day)
-        budget = self.state.budget(day)
+        # 预算**每条意图现读**（Q1 批复：11-04）。`max_orders_per_day` 的键名本意
+        # 是"当日 N 单"，但旧写法在循环外读一次快照 ⇒ 同一轮里前几单都对着
+        # 同一个 `orders=0` 判定，实际变成"每轮 N 单"（`bump_budget` 入队时就写
+        # 了状态，只是没人再读回来）。轮内重读不是放松：同轮第 2 单被挡才是"当日"。
         cooldown = int(self.cfg.get("per_symbol_cooldown_sec") or 0)
         min_ticket = float(self.cfg.get("min_ticket_cny") or 0.0)
         max_orders = int(self.cfg.get("max_orders_per_day") or 0)
@@ -238,9 +241,10 @@ class EngineRunner:
                     continue
                 if not intent:
                     continue
-                res = self._execute(rule, intent, q, now, day, budget,
-                                     cooldown, min_ticket, max_orders,
-                                     max_turnover, prices)
+                res = self._execute(rule, intent, q, now, day,
+                                    self.state.budget(day),
+                                    cooldown, min_ticket, max_orders,
+                                    max_turnover, prices)
                 (out["fired"] if res.get("ok") else out["skipped"]).append(
                     {"rule": rid, "symbol": sym, "side": intent.side,
                      "reason": intent.reason, **res})

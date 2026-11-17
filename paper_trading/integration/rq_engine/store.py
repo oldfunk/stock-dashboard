@@ -232,6 +232,58 @@ def _dt2i_minute(ts: str) -> int:
     return int(d) * 1_000_000 + int(hm) * 100
 
 
+def aggregate_day_from_minutes(bars, day_key: str, symbol: str) -> tuple:
+    """把某日的分钟 bar 聚合成等价日线；返回 `(row, note)`。
+
+    为什么要这条（2026-11-05）：`init_positions` 导入期初持仓时框架要按
+    `prev_date` 取一根 **1d** bar 当成本价（`portfolio/account.py:90`），而开源
+    bundle 的日线落后到月末 ⇒ `BaseDataSource` 给 NaN ⇒ 那只仓**静默导入失败**
+    （框架空仓、卖单被"仓位不足"拒，就是 11-05 的 P0）。分钟库里有当日 48 根
+    5 分钟 bar ⇒ 自己聚合出等价日线（OHLC 首开/最高/最低/末收，量额求和）。
+
+    `prev_close/limit_up` 非有限时（T74 审查 P2 → T75 落地）**回退**：
+    `prev_close(D)` 的定义就是"上一交易日收盘"，即本序列里比 D 更近那一天的
+    末根 close；band 用同一个 `bands.limit_prices` 现算（不留第二份档表）。
+    退无可退才返回 `(None, note)`——让调用方明确报错，而不是拿 NaN 建一仓
+    看不见的成本（band 是撮合判涨跌停的唯一依据 `matcher/base.py:207-218`）。
+
+    note 非空 ⇒ 走了回退/失败路径，调用方要把它写进 `store.problems` 留痕。
+    """
+    sel = [b for b in bars if str(int(b["datetime"]))[:8] == str(day_key)]
+    if not sel:
+        return None, f"1d 聚合失败：{symbol} {day_key} 当日无分钟 bar"
+    row = np.zeros(1, dtype=bars.dtype)[0]
+    row["datetime"] = int(day_key) * 1_000_000
+    row["open"] = float(sel[0]["open"])
+    row["high"] = float(max(b["high"] for b in sel))
+    row["low"] = float(min(b["low"] for b in sel))
+    row["close"] = float(sel[-1]["close"])
+    row["volume"] = float(sum(b["volume"] for b in sel))
+    row["total_turnover"] = float(sum(
+        b["total_turnover"] for b in sel
+        if np.isfinite(b["total_turnover"]))) or np.nan
+    pc = float(sel[0]["prev_close"])
+    lu = float(sel[0]["limit_up"])
+    if np.isfinite(pc) and np.isfinite(lu) and pc > 0:
+        row["prev_close"] = pc
+        row["limit_up"] = lu
+        row["limit_down"] = float(sel[0]["limit_down"])
+        return row, ""
+    earlier = [b for b in bars if str(int(b["datetime"]))[:8] < str(day_key)]
+    if earlier:
+        last_day = str(int(earlier[-1]["datetime"]))[:8]
+        prev = [b for b in earlier if str(int(b["datetime"]))[:8] == last_day]
+        cand = float(prev[-1]["close"]) if prev else float("nan")
+        if np.isfinite(cand) and cand > 0:
+            row["prev_close"] = cand
+            row["limit_up"], row["limit_down"] = limit_prices(cand, symbol)
+            return row, (f"1d 聚合回退：{symbol} {day_key} 日线 raw 的 "
+                         f"prev_close/带非有限（pc={pc} limit_up={lu}），"
+                         f"改用上一交易日({last_day})分钟收盘 {cand}")
+    return None, (f"1d 聚合失败：{symbol} {day_key} prev_close/带非有限"
+                  f"（pc={pc} limit_up={lu}）且无上一交易日可退")
+
+
 class RawMinuteBarStore:
     """`AbstractDayBarStore` 的分钟版鸭子实现（接口同名 get_bars）。
 

@@ -1518,6 +1518,25 @@ def main() -> None:
                            help="只看钱类项（切换日第一小时用）")
     m3_verify.add_argument("--json", action="store_true")
 
+    # T80（M4-②）：每日核对全绿是 M3 关闭条件之一，所以要一条"跑一次出一个码"的命令
+    m3_daily = m3_sub.add_parser(
+        "daily-check", help="每日核对（只读）：m3 verify 全套 + 框架对齐/顺延落地/"
+                            "意图全链；红=退出码非 0，可直接挂 cron 或 CI")
+    m3_daily.add_argument("--today", default=None)
+    m3_daily.add_argument("--symbols", nargs="*")
+    m3_daily.add_argument("--pool-from", default="config")
+    m3_daily.add_argument("--pool-limit", type=int, default=20)
+    m3_daily.add_argument("--pool-tag", default="")
+    m3_daily.add_argument("--no-picks", action="store_true")
+    m3_daily.add_argument("--days", type=int, default=60)
+    m3_daily.add_argument("--heartbeat", default=None)
+    m3_daily.add_argument("--state-dir", default=None,
+                          help="会话留痕目录（默认 var/rq_state/live）")
+    m3_daily.add_argument("--expect-work", choices=["yes", "no", "auto"],
+                          default="auto",
+                          help="今日是否应有会话留痕：no=队列空（无留痕不算红）")
+    m3_daily.add_argument("--json", action="store_true")
+
     # ledger（T47-G3/G4：执行底座可见性 + 切换前的冷备归档/新开账）
     ledger_parser = subparsers.add_parser(
         "ledger", help="账本底座工具（executor 只读查看；archive 冷备旧账后新开；"
@@ -1607,6 +1626,14 @@ def main() -> None:
     rq_state.add_argument("--today", default=None)
     rq_state.add_argument("--days", type=int, default=260)
     rq_state.add_argument("--json", action="store_true")
+
+    # M4 收盘 NAV 独立入口（2026-11-13）：当日 raw bar 20:40 才入库，而 tick
+    # 窗口 09:02-15:57 已收 ⇒ 收盘 NAV 曾永远 close_bar_not_final（T83 点名的
+    # 结构性缺口）。cron 20:50（周中，紧跟 20:40 raw 采集）。
+    rq_nav = rq_sub.add_parser(
+        "nav-close", help="M4：收盘 NAV 独立入口（幂等+数据驱动，raw 入库后跑）")
+    rq_nav.add_argument("--today", default=None)
+    rq_nav.add_argument("--json", action="store_true")
 
     # M3b tick：消费 rq_intents 队列的分钟会话（cron 每 5 分钟；切换后的执行入口）
     rq_tick = rq_sub.add_parser(
@@ -2060,6 +2087,34 @@ def main() -> None:
 
             cmd = getattr(args, "rq_command", None)
             plan = _json.loads(args.plan) if hasattr(args, "plan") else []
+            if cmd == "nav-close":
+                # M4 收盘 NAV（G2）独立入口：与 _ledger_apply 共用同一把尺子
+                # （close_prices + record_close_nav，D2 数据驱动 + has_nav_for_day
+                # 幂等）。executor 互锁与 tick 同款——非 rqalpha 底座拒跑，防双活。
+                from datetime import date as _date
+
+                from paper_trading.engine.config import load_engine_config
+                from paper_trading.integration.rq_engine import ledger as _ld
+
+                try:
+                    _ex = _ld.executor_from_config(
+                        load_engine_config(getattr(bridge, "config_path", None)))
+                except ValueError as exc:
+                    emit({"ok": False, "error": f"底座配置非法：{exc}"})
+                    sys.exit(2)
+                if _ex != "rqalpha":
+                    emit({"ok": False,
+                          "error": "engine.executor 非 rqalpha，nav-close 拒跑（防双活）"})
+                    sys.exit(2)
+                today = str(getattr(args, "today", "") or _date.today().isoformat())
+                positions = [p.symbol for p in bridge.broker.get_all_positions()
+                             if p.total_volume]
+                prices = _ld.close_prices(bridge.data_db, positions, today)
+                out = _ld.record_close_nav(bridge.broker, prices, today=today)
+                emit({"ok": True, "today": today, "nav": out})
+                ok = bool(out.get("recorded")) or \
+                    out.get("reason") == "already_recorded"
+                sys.exit(0 if ok else 1)
             if cmd == "tick":
                 # M3b 执行入口：消费意图队列 → 分钟会话（1m+日内续跑）→ ledger 落账
                 from datetime import date as _date
@@ -2090,6 +2145,9 @@ def main() -> None:
                 # 跨日未执行的意图先过期：意图是"某日某分钟的决定"，隔日补执行
                 # 等于拿昨天的决定交易今天的价格（不可归因），宁可让规则重触发。
                 expired = _q.expire_stale(acct_db, today)
+                # Q6（11-05 批复）：盘后做出的决定顺延一个交易日，本跳要把它
+                # **说出来**而不是悄悄留着——明天开盘验证件走的正是这条路。
+                carried = _q.carried_ids(acct_db, today)
                 intents = _q.pending(acct_db)[: int(args.limit)]
 
                 def _beat(detail: str) -> None:
@@ -2101,7 +2159,7 @@ def main() -> None:
                 if not intents:
                     _beat("idle")
                     emit({"ok": True, "idle": True, "why": "队列空，本跳无事",
-                          "expired": len(expired)})
+                          "expired": len(expired), "carried": carried})
                     sys.exit(0)
                 executed = _q.executed_keys_from_ledger(acct_db, today)
                 syms = sorted({i["symbol"] for i in intents})
@@ -2115,8 +2173,23 @@ def main() -> None:
                 feed = ensure_today_minutes(bridge.data_db, syms, now=_dt.now())
                 if feed.get("errors"):
                     logger.warning(f"rq tick 分钟线供给异常：{feed['errors']}")
-                state_root = _P(args.state_root or "var/rq_state")
-                state_dir = str(state_root / today)
+                # M3b P0 修复（2026-11-05）：state 必须**连续**（固定目录）——
+                # 原实现 `state_root/today` 每天新建 state ⇒ 框架空账户重启，
+                # 不知道账本历史持仓（002192 卖单被"仓位不足"拒，现网实测）。
+                # 期初持仓从账本读出作 init_positions（框架账户=账本）。
+                state_dir = str(_P(args.state_root or "var/rq_state") / "live")
+                # 期初三件套（现金/持仓/T+1 冻结）从账本读，口径收在
+                # `runner.ledger_init_state`（交易所映射只判一次）。读不出就拒开
+                # 会话：拿"空账户"去交易是 11-05 P0 的另一半。
+                try:
+                    st0 = _rq.ledger_init_state(acct_db)
+                except Exception as exc:            # noqa: BLE001
+                    emit({"ok": False,
+                          "error": f"账本期初读不出，rq tick 拒绝开会话："
+                                   f"{type(exc).__name__}: {exc}"})
+                    sys.exit(1)
+                init_pos, init_frozen, _cash = (st0["positions"], st0["frozen"],
+                                                st0["cash"])
                 plan = [{"biz_id": i["biz_id"], "symbol": i["symbol"],
                          "action": i["action"], "volume": i["volume"],
                          "decided_at": i.get("decided_at")}
@@ -2126,7 +2199,9 @@ def main() -> None:
                     symbols=syms, plan=plan, state_dir=state_dir,
                     workdir=state_dir, fee=bridge.broker.config,
                     frequency="1m", intraday_resume=True,
-                    executed_ids=executed, ledger=True)
+                    executed_ids=executed, ledger=True,
+                    init_positions=init_pos, init_cash=_cash,
+                    init_frozen=init_frozen)
                 trades = res.get("evidence", {}).get("trades") or []
                 led = None
                 posting_ok = True
@@ -2148,6 +2223,7 @@ def main() -> None:
                 st = verdict["stats"]
                 res["intent_outcomes"] = {
                     "in": len(intents), "expired": len(expired),
+                    "carried": carried,
                     "executed": st.get("executed", 0) + st.get("executed_idempotent", 0),
                     "rejected": st.get("rejected", 0), "kept_queued": st.get("kept", 0),
                     "waiting_decision": len(waiting),
@@ -2258,18 +2334,47 @@ def main() -> None:
             from paper_trading.integration.rq_engine import ledger as _ld
             from paper_trading.utils import m3_verify as _m3
 
-            if (getattr(args, "m3_command", None) or "verify") != "verify":
+            m3_cmd = getattr(args, "m3_command", None) or "verify"
+            if m3_cmd not in ("verify", "daily-check"):
                 parser.print_help()
                 sys.exit(2)
             today = args.today or _date.today().isoformat()
             syms, note, _, _ = _resolve_syms(bridge, args)
             hb_path = getattr(args, "heartbeat", None) or None
+            executor = _ld.executor_from_config(
+                load_engine_config(getattr(bridge, "config_path", None)))
+            if m3_cmd == "daily-check":
+                from paper_trading.utils import daily_check as _dc
+
+                state_dir = str(args.state_dir or "var/rq_state/live")
+                expect = args.expect_work
+                if expect == "auto":
+                    from paper_trading.integration.rq_engine import queue as _qq
+
+                    expect = "no" if not _qq.pending(str(bridge.broker.db_path)) else "yes"
+                res = _dc.daily_check(
+                    broker=bridge.broker, data_db=bridge.data_db,
+                    account_db=str(bridge.broker.db_path), symbols=syms,
+                    today=today, cfg=bridge.broker.config, days=args.days,
+                    heartbeat_path=(_PP(hb_path) if hb_path else None),
+                    executor=executor, state_dir=state_dir,
+                    work_expected=(expect == "yes"))
+                res["pool_source"] = note
+                res["state_dir"] = state_dir
+                if getattr(args, "json", False):
+                    emit(res)
+                else:
+                    print(_m3.format_text(res))
+                if res["rollback_required"]:
+                    sys.exit(3)
+                if res["red"]:
+                    sys.exit(1)
+                sys.exit(0)
             res = _m3.verify_all(broker=bridge.broker, data_db=bridge.data_db,
                                  symbols=syms, today=today,
                                  cfg=bridge.broker.config, days=args.days,
                                  heartbeat_path=(_PP(hb_path) if hb_path else None),
-                                 executor=_ld.executor_from_config(
-                                     load_engine_config(getattr(bridge, "config_path", None))))
+                                 executor=executor)
             res["pool_source"] = note
             if getattr(args, "money_only", False):
                 res["items"] = [i for i in res["items"] if i["money"]]

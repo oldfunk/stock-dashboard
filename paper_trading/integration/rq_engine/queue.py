@@ -106,20 +106,65 @@ def backlog(db_path: str | Path) -> dict:
     return {"exists": True, "by_status": dist, "oldest_pending": oldest}
 
 
+#: A 股收盘时刻（Q6 批复用）：`created_at` 的时刻**晚于**它 = 盘后做出的决定。
+CLOSE_TIME = "15:00"
+
+
+def is_carried(created_at: str, day: str) -> bool:
+    """这条昨天(+)的意图是不是"盘后做出的决定、该顺延到今天执行"（Q6，11-05 批复）。
+
+    原口径（`expire_stale` 按日期一刀切）有一条死分支：**收盘后**做出的决定，
+    当天已经没有 bar 可以执行（cron 只在 `9-15` 点跑，重放的 bar 全在 15:00 前，
+    决策时点门一律 `wait`），到次日一早又被过期——等于"盘后决定的东西永远不可能被执行"。
+    批复的口径：按**决策时刻**分，不按日期一刀切。
+
+    规则：`created_at` 的日期早于 `day`、时刻晚于 15:00、且 `day` 正是那天的
+    **下一个交易日** ⇒ 顺延（只顺一天，隔天以上照样过期）。
+    日历答不出（离线/未覆盖）⇒ **不顺延**，维持旧的保守行为：多过期一次只是漏机会，
+    多执行一天就是拿两天前的决定交易今天的价格。
+    """
+    d, target = str(created_at)[:10], str(day)[:10]
+    if not d or d >= target or len(str(created_at)) < 16:
+        return False
+    if str(created_at)[11:16] <= CLOSE_TIME:
+        return False
+    try:
+        from paper_trading.utils.trading_calendar import next_trading_day
+
+        return next_trading_day(d).isoformat() == target
+    except Exception:                    # noqa: BLE001 - 日历不可信就按旧行为过期
+        return False
+
+
+def carried_ids(db_path: str | Path, day: str) -> list[str]:
+    """只读：本次会因"盘后决定"被顺延的意图（`rq tick`/daily-check 报告用）。"""
+    with _conn(db_path) as c:
+        rows = c.execute("SELECT biz_id, created_at FROM rq_intents"
+                         " WHERE status IN ('pending','queued')").fetchall()
+    return [b for b, ca in rows if is_carried(ca, day)]
+
+
 def expire_stale(db_path: str | Path, day: str) -> list[str]:
     """把**早于今天**的未决意图标 expired 并返回其 biz_id。
 
     规则：意图是"某个交易日的某个分钟做出的决定"，隔日再执行就是用昨天的决定
     交易今天的价格 ⇒ 宁可过期让规则重新触发，也不跨日补执行（跨日补单是不可归因的）。
+
+    **例外（Q6 批复 11-05）**：盘后（`>15:00`）做出的决定顺延一个交易日——
+    它当天本就没有可执行的 bar，见 `is_carried`。
     """
     with _conn(db_path) as c:
         rows = c.execute(
-            "SELECT biz_id FROM rq_intents WHERE status IN ('pending','queued')"
-            " AND substr(created_at,1,10) < ?", (day,)).fetchall()
-        ids = [r[0] for r in rows]
-        for b in ids:
+            "SELECT biz_id, created_at FROM rq_intents"
+            " WHERE status IN ('pending','queued')").fetchall()
+        ids = []
+        for b, ca in rows:
+            if str(ca)[:10] >= str(day)[:10] or is_carried(ca, day):
+                continue
+            ids.append(b)
             c.execute("UPDATE rq_intents SET status='expired', result=? WHERE biz_id=?",
-                      (json.dumps({"reason": "跨日未执行，过期（决策只在当日内有效）",
+                      (json.dumps({"reason": "跨日未执行，过期（盘中决策只在当日内有效；"
+                                             "盘后决定按 Q6 顺延一个交易日）",
                                    "expired_on": day}, ensure_ascii=False), b))
     return ids
 
@@ -217,11 +262,59 @@ def resolve_outcomes(intents: list[dict], posted: list[dict], orders: list[dict]
             "waiting": sorted(waiting)}
 
 
+def _close_conditional(c: sqlite3.Connection, biz_id: str, status: str,
+                       result: dict) -> None:
+    """条件单闭环（2026-11-17）：触发→入队→成交/被拒，条件单必须跟着落定。
+
+    此前队列模式只把条件单标成 armed（`queued_rq` 曾抛 ValueError），成交后
+    也没人回收 ⇒ 面板一直显示"待触发"、次日同条件再买一次、`cond_chain`
+    检查（标了 triggered/executed 必须有成交）因状态没推进而看不见。
+    """
+    try:
+        row = c.execute("SELECT rule_ref, detail FROM rq_intents WHERE biz_id=?",
+                        (biz_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return
+    ref = str((row[0] if row else "") or "")
+    if not ref.startswith("cond:"):
+        return
+    cid = ref[5:].strip()
+    if not cid.isdigit():
+        return
+    try:                                  # 账本里可能没有条件单表（老库/最小夹具）
+        c.execute("SELECT 1 FROM conditional_orders LIMIT 1")
+    except sqlite3.OperationalError:
+        return
+    why = str(result.get("reason") or result.get("order_status") or "")[:160]
+    prev: dict = {}
+    if row and row[1]:
+        try:
+            prev = json.loads(row[1]) or {}
+        except Exception:                # noqa: BLE001 - 旧格式坏了就只写新信息
+            prev = {}
+    detail = json.dumps({**prev, "rq_intent": biz_id, "why": why},
+                        ensure_ascii=False)
+    if status == "executed":
+        c.execute(
+            "UPDATE conditional_orders SET status='filled',"
+            " filled_at=COALESCE(filled_at, ?),"
+            " filled_price=COALESCE(?, filled_price),"
+            " detail=?"
+            " WHERE id=? AND status IN ('armed','queued_rq')",
+            (datetime.now().isoformat(timespec="seconds"),
+             result.get("price"), detail, int(cid)))
+    elif status in ("rejected", "failed"):
+        c.execute(
+            "UPDATE conditional_orders SET status='rejected', detail=?"
+            " WHERE id=? AND status IN ('armed','queued_rq')", (detail, int(cid)))
+
+
 def apply_outcomes(db_path: str | Path, updates: list[dict]) -> dict:
     """按会话/落账结果精确推进队列状态（M3 接管②，修 P0-3 的"按标的批量标"）。
 
     只承认调用方给的**逐笔**结果：`{biz_id, status, result}`。
     没有结果的意图保持原状态（未决），绝不因为"同标的成交过"就顺带完成。
+    条件是 `rule_ref=cond:<id>` 的意图会同时推进对应条件单状态（闭环）。
     """
     done = {"executed": 0, "rejected": 0, "kept": 0}
     with _conn(db_path) as c:
@@ -229,9 +322,11 @@ def apply_outcomes(db_path: str | Path, updates: list[dict]) -> dict:
             st = str(u.get("status") or "")
             if st not in ("executed", "rejected", "failed"):
                 continue
+            res = u.get("result") or {}
             c.execute("UPDATE rq_intents SET status=?, result=? WHERE biz_id=?",
-                      (st, json.dumps(u.get("result") or {}, ensure_ascii=False),
+                      (st, json.dumps(res, ensure_ascii=False),
                        u.get("biz_id")))
+            _close_conditional(c, str(u.get("biz_id") or ""), st, res)
             done[st] = done.get(st, 0) + 1
     return done
 

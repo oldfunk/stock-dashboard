@@ -596,8 +596,8 @@ const RULE_CN={ma_cross:"均线金叉/死叉",rsi_zone:"RSI 超买超卖区",pri
   pct_change:"涨跌幅阈值",trailing_stop:"移动止损",time_stop:"持仓时限",
   vwap_dev:"偏离当日均价",intraday_pullback:"日内冲高回落",minute_ma_cross:"分钟均线交叉"};
 const COND_CN={price_below:"价跌破",price_above:"价升破",pct_below:"日内跌超%",pct_above:"日内涨超%"};
-const COND_ST={armed:["待触发","tag"],filled:["已成交","ok"],cancelled:["已撤销","mut"],
-  expired:["已过期","mut"],rejected:["被拒","bad"]};
+const COND_ST={armed:["待触发","tag"],queued_rq:["已交框架","tag"],filled:["已成交","ok"],
+  cancelled:["已撤销","mut"],expired:["已过期","mut"],rejected:["被拒","bad"]};
 async function engineStatus(){
   try{
     const r=await get("/api/engine");const d=(r&&r.data)||{};
@@ -1087,9 +1087,9 @@ class Handler(BaseHTTPRequestHandler):
                 # 只读看门狗状态（var/health_status.json + 实时心跳体检），不碰账本
                 from paper_trading.utils import heartbeat as hb
 
-                st = hb.read_status()
-                if not st:
-                    st = hb.probe()      # 没人跑过 check：直接按心跳现状判一次
+                st = hb.read_status(max_age_sec=300)   # Q11：快照超 5 分钟=无效
+                if not st:                             # → 落 probe() 实时判
+                    st = hb.probe()
                 self._json({"ok": True, "data": st})
             elif u.path == "/api/status":
                 from paper_trading.cli import TradingBridge

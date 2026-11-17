@@ -75,7 +75,7 @@ def test_nav_before_close_window_is_warn_not_money_red(conn):
 def test_nav_after_close_window_missing_is_red(conn):
     """过了收盘窗口还没有 ⇒ 真断供，必须红（这条不许被上面的放宽吞掉）。"""
     add_nav(conn, PAST)
-    r = mv.check_nav(conn, TODAY, now=at("18:30"))
+    r = mv.check_nav(conn, TODAY, now=at("21:30"))
     assert r["status"] == "red" and r["money"] is True
 
 

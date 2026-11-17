@@ -71,9 +71,9 @@ TARGETS: tuple[Target, ...] = (
     Target("cond_armed", "已挂条件单", "conditional_orders(status=armed)", KIND_GHOST,
            "条件单的价位与金额是按旧账的仓位/现金设的，重置后触发就是拿旧决定下单",
            "逐条标 cancelled（想留的价挂单请在重置后重挂）", True),
-    Target("rq_session_state", "引擎会话状态目录", "var/rq_state/<日>", KIND_GHOST,
+    Target("rq_session_state", "引擎会话状态目录", "var/rq_state/{live,<日>}", KIND_GHOST,
            "同日续跑会恢复旧账的 portfolio/universe/挂单，新账直接接上旧持仓继续撮合",
-           "整目录改名 <日>.pre-reset-<时刻> 挪开（不删：钱类件的可恢复性优先）", True),
+           "整目录改名 <名>.pre-reset-<时刻> 挪开（不删：钱类件的可恢复性优先）", True),
     Target("engine_fired", "规则当日已触发标记", "engine_state.fired:<日>",
            KIND_THROTTLE,
            "规则被记成「今天已经动过」，新账同一分钟再触发会被静默吞掉",
@@ -201,6 +201,23 @@ def _money_snapshot(conn) -> dict:
     return snap
 
 
+def _state_dirs(ctx: dict) -> list:
+    """当前在用的引擎会话状态目录：`<root>/live` 与 `<root>/<今日>`。
+
+    11-05 之前每跳用 `var/rq_state/<日>`，重置只要挪开当日目录；M3b 改成**固定
+    `live` 目录**（连续状态，否则框架天天空账户重启）之后，"当日"这一条就探不到
+    真在用的那本状态了——重置工具会报"没有要清的"，而 contaminated 的 portfolio.state
+    正躺在 live 里。两个名字都认，存在才算，别的子目录（历史日/归档）一律不碰。
+    """
+    root = Path(ctx["state_root"])
+    out = []
+    for name in ("live", ctx["today"]):
+        d = root / name
+        if d.is_dir() and d not in out:
+            out.append(d)
+    return out
+
+
 def _probe(target: Target, conn, ctx: dict) -> dict:
     """返回 `{count, samples[, note]}`；samples 只带够人眼判断的量。"""
     tid = target.id
@@ -227,10 +244,12 @@ def _probe(target: Target, conn, ctx: dict) -> dict:
                 "samples": [f"#{r[0]} {r[1]} {r[2]} {r[3]}={r[4]} 到期{r[5]}"
                             for r in rows[:6]]}
     if tid == "rq_session_state":
-        d = Path(ctx["state_root"]) / ctx["today"]
-        if not d.is_dir():
-            return {"count": 0, "samples": [], "note": f"{d} 不存在"}
-        return {"count": 1, "samples": [f"{d}（{len(list(d.iterdir()))} 个文件）"]}
+        dirs = _state_dirs(ctx)
+        if not dirs:
+            return {"count": 0, "samples": [],
+                    "note": f"{Path(ctx['state_root'])} 下没有 live/<日> 状态目录"}
+        return {"count": len(dirs),
+                "samples": [f"{d}（{len(list(d.iterdir()))} 个文件）" for d in dirs]}
     if tid == "t1_unfreeze_overdue":
         if not _has_table(conn, "t1_freeze"):
             return {"count": 0, "samples": []}
@@ -314,15 +333,19 @@ def _clear(target: Target, conn, ctx: dict) -> dict:
                              "cancelled_on": ctx["now"]}, ensure_ascii=False), r["id"]))
         return {"cleared": len(rows), "before": rows, "after": "cancelled"}
     if tid == "rq_session_state":
-        src = Path(ctx["state_root"]) / ctx["today"]
-        if not src.is_dir():
+        moved = []
+        for src in _state_dirs(ctx):
+            dst = src.with_name(f"{src.name}.pre-reset-{ctx['stamp']}")
+            if dst.exists():
+                raise RuntimeError(f"改名目标已存在，拒绝覆盖：{dst}（给 --stamp 换个值）")
+            src.rename(dst)
+            moved.append([str(src), str(dst)])
+        if not moved:
             return {"cleared": 0, "before": []}
-        dst = src.with_name(f"{src.name}.pre-reset-{ctx['stamp']}")
-        if dst.exists():
-            raise RuntimeError(f"改名目标已存在，拒绝覆盖：{dst}（给 --stamp 换个值）")
-        src.rename(dst)
-        ctx["moved"].append([str(src), str(dst)])
-        return {"cleared": 1, "before": [str(src)], "after": str(dst)}
+        for s, d in moved:
+            ctx["moved"].append([s, d])
+        return {"cleared": len(moved), "before": [s for s, _ in moved],
+                "after": [d for _, d in moved]}
     raise KeyError(f"只报不清的项不能执行清理：{tid}")
 
 

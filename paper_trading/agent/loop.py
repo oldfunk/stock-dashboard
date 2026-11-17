@@ -495,9 +495,35 @@ class AgentTrader:
         b = self.bridge
         day = day or today_str()
         try:
-            if b.broker.has_operation("nav:close", day):
+            # Q7-D1（2026-11-12）：统一判据——nav_history 当天有行（旧线看不见
+            # rq-nav ⇒ 曾同日两行）。与 ledger.record_close_nav 共用同一判据。
+            if b.broker.has_nav_for_day(day):
                 return
-            snap = b.portfolio.record_nav(b.price_map(symbols))
+            # D3（2026-11-16）：价格必须与 rq 侧同尺——**当日 raw 收盘**，
+            # 当日 raw 未入库就整笔跳过（等 20:50 `rq nav-close` 用定稿价补写）。
+            # 旧实现拿 bar_source "最新一根"（不限日期）⇒ 11-16 计划窗口 16:35
+            # 给 5/6 持仓用了 11-13 的价（NAV 高估 2,120 元），且当时 raw
+            # 定稿(20:40)未到，写了也无法复算——这正是 nav 值断言缺失放过的洞。
+            from paper_trading.integration.rq_engine import ledger as _ld
+
+            held = [p.symbol for p in b.broker.get_all_positions() if p.total_volume]
+            raw = _ld.close_prices(b.data_db, held, day)
+            prices: dict[str, float] = {}
+            for s in held:
+                key = s if s in raw else str(s).zfill(6)
+                if key not in raw:
+                    continue
+                bars = b.data_db.get_raw_bars(
+                    key, start=f"{day}T00:00:00", end=f"{day}T23:59:59", limit=1)
+                if bars:
+                    prices[key] = raw[key]
+            want = {str(s).zfill(6) for s in held}
+            if set(prices) != want:
+                miss = sorted(want - set(prices))
+                logger.info(f"close nav {day} skipped：当日 raw 未入库 {miss[:5]}"
+                            f"（等 20:50 nav-close 用定稿价补写）")
+                return
+            snap = b.portfolio.record_nav(prices)
             b.broker.log_operation("nav:close", {"symbols": len(symbols)}, True,
                                    {"date": day, "nav": round(snap.total_value, 2)},
                                    snap.cash, snap.total_value)
@@ -683,6 +709,16 @@ class AgentTrader:
                     "timestamp": t.isoformat(), "symbols": symbols}
         pending = b.broker.get_pending_plan(today)
         action = due_action(t, pending_plan=bool(pending), force=force)
+        # 心跳在 tick 入口统一 touch（2026-11-13）：此前只有完整 decide 才 touch，
+        # 早退分支（outside-runtime-window/no-fresh-data/min-interval/…）全都不写
+        # ⇒ cron 每 5 分钟都在跑、心跳却停在数小时前，看门狗报"应跳未跳"（Q11
+        # 的姊妹缺陷：daily-check 2026-11-13 红的正是它）。
+        try:
+            from paper_trading.utils import heartbeat as _hb
+
+            _hb.touch("agent", ok=True, detail=f"tick action={action}")
+        except Exception:                       # noqa: BLE001 - 心跳不拖垮决策链
+            pass
         if action == "execute_plan":
             logger.info(f"Runtime open execution: plan {pending['id']}")
             res = self.run(symbols, candidates=candidates,
@@ -1175,8 +1211,12 @@ class AgentTrader:
         cond_res = self._arm_conditions(conditions or [], actions=actions,
                                         dry_run=dry_run)
         cond_res["parse_rejected"] = conditions_rejected or []
-        if not dry_run:
-            b.portfolio.record_nav(latest)
+        # D4（2026-11-16）：决策路径不再写 nav_history。旧实现在每次 run() 末尾
+        # `record_nav(latest)` 写一行**盘中快照**——它与收盘口径争抢同一个幂等闸
+        # （has_nav_for_day）：一旦盘中写过，当晚 _snapshot_close_nav 会被让位
+        # 跳过，NAV 序列永久停在早盘估值（计划开始执行后会立即触发这条路径）。
+        # 每日 NAV 由收盘计划窗口（_snapshot_close_nav）或 20:50 `rq nav-close`
+        # 专门负责；这里只算不写。
         nav2 = b.broker.get_nav(latest)
         b.broker.log_operation(
             "ai:decide", {"symbols": symbols, "mode": mode, "from_plan": from_plan,

@@ -47,7 +47,13 @@ ENGINE_DUE = (9 * 60, 15 * 60 + 59)
 AGENT_DUE_AFTER_MIN = 16 * 60 + 30 + 240      # 20:30
 
 #: 面板服务的两种可能形态（systemd --user 或系统级 unit），逐个探测，任一 active 即算活着
-DASHBOARD_UNITS = ("paper-dashboard.service", "paper-dashboard")
+DASHBOARD_UNITS = (
+    # nec 生产实际是系统级 unit（/etc/systemd/system/），不是 Pi 时代的 user unit
+    "paper-trading-dashboard.service",
+    "paper-trading-parent.service",
+    "paper-dashboard.service",
+    "paper-dashboard",
+)
 SYSTEMCTL_PROBES = (
     ["systemctl", "is-active"],
     ["systemctl", "--user", "is-active"],
@@ -209,13 +215,30 @@ def write_status(status: dict, path: Optional[Path] = None) -> bool:
         return False
 
 
-def read_status(path: Optional[Path] = None) -> dict:
+def read_status(path: Optional[Path] = None,
+                max_age_sec: Optional[float] = None) -> dict:
+    """读心跳快照；`max_age_sec` 给出时效判据（Q11，2026-11-12）。
+
+    此前无时效判据：文件存在就永远返回旧快照 ⇒ 面板健康区恒绿——观察期
+    一场 4 天停摆（389 次 fail-closed 拒单）全程被掩盖。超龄返回 `{}`，
+    调用方（dashboard `/api/health`）即落 `probe()` 实时判。
+    """
     p = Path(path) if path else default_path(STATUS_REL)
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return d if isinstance(d, dict) else {}
+    if not isinstance(d, dict):
+        return {}
+    if max_age_sec is not None:
+        try:
+            from datetime import datetime
+            checked = datetime.fromisoformat(str(d.get("checked_at") or ""))
+            if (datetime.now() - checked).total_seconds() > float(max_age_sec):
+                return {}
+        except Exception:              # noqa: BLE001 - 时间戳坏了同按无效
+            return {}
+    return d
 
 
 def transitioned(prev: dict, cur: dict) -> Optional[str]:
