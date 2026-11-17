@@ -194,7 +194,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ### 2026-11-17（子项目 vendor v0.9.0 合流 + v2.1.0 发版准备 + 数字抽检修误报）
 
-- **子项目 vendored v0.8.0 → v0.9.0（`subtree pull --squash`，零冲突）**：`8078f5f` 之后首次跟 tag。53 文件 +5789/−87，**无依赖变更、无 schema 迁移**（dashboard 旧库可直接用）。v0.9.0 内容据 tag：M3 观察期签字（5 条件核销 + 3 条如实限定）、M4 钱类加固（D3 收盘 NAV 只认当日 raw 定稿价；D4 决策路径不写 nav_history；nav 值复算断言）、T86 条件单 `queued_rq` 状态闭环、Q6/Q7/Q10/Q11（盘后意图顺延、NAV 幂等统一、母库陈旧回退本地、面板健康 5 分钟时效）、`m3 daily-check` + `rq nav-close` 新入口。**接缝核对**：母侧只引用 `/paper` 跳转与只读数据 API（未改），vendored dashboard 不 import rqalpha（`mod_entry.py` 仅 rq 会话使用）。**vendor 用例 886 passed / 0 failed**（此前 3 个既存失败已被上游修好），基线 772 → 886。:8081 母侧面板已重启验证。
+- **v2.1.0 发布（tag + GitHub Release）**：15:30 首跑验证通过后打 annotated tag `v2.1.0` 并发布 GitHub Release（Latest），main=`e9b39f2`。首跑证据：`run_log` id=865 `completed`、`analyzed_count=20`；20 条分析 15:47–16:33 全为 glm-4.5-flash、0 失败；数字抽检新口径 10 处/20 只 = **0.5 处/只**（旧抽检器 1.0–2.0），说明"41% 是误报"的修复在真实数据上生效。kline：活跃池 23/23、全市场轮换 600/600（400s，零失败）。门禁：本机母 1486 / vendor 886；生产 gate 1495（基线 1463→1495、vendor 772→886）。
+- **子项目 vendored v0.8.0 → v0.9.0（`subtree pull --squash`，零冲突）**：`8078f5f` 之后首次跟 tag。53 文件 +5789/−87，**无依赖变更、无 schema 迁移**（dashboard 旧库可直接用）。v0.9.0 内容据 tag：M3 观察期签字（5 条件核销 + 3 条如实限定）、M4 钱类加固（D3 收盘 NAV 只认当日 raw 定稿价；D4 决策路径不写 nav_history；nav 值复算断言）、T86 条件单 `queued_rq` 状态闭环、Q6/Q7/Q10/Q11（盘后意图顺延、NAV 幂等统一、母库陈旧回退本地、面板健康 5 分钟时效）、`m3 daily-check` 与 `rq nav-close` 新入口。**接缝核对**：母侧只引用 `/paper` 跳转与只读数据 API（未改）；vendored dashboard 不 import rqalpha（`mod_entry.py` 仅 rq 会话使用）；母库参照走只读 SQLite（`mother.py`），路径未变。**验证**：vendor 886 passed / 0 failed（此前 3 个既存失败已被上游修好）；:8081 重启后 `/`、`/api/status`、`/api/engine`、`/api/positions`、`/api/cond`、`/api/schemes`、`/api/quotes` 全 200，新 Q11 健康时效判据生效（超龄快照落 probe）；:8080 独立版与 5 条 cron 未受影响。
 
 
 - **数字抽检修误报（`a784844`）**：prompt 喂了 10 年均值/波动/改善，抽检字段表只有 5 年字段 → 模型引系统给的数字被判偏离。离线复算 44 条：76→45，**消除 31 处误报（41%）**。文档记录：**偏离率以库内实算为准**（离线复算有日期错置，PE/PB 逐日变、5 年均值是滚动窗口）。
