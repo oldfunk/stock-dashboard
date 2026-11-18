@@ -12,11 +12,16 @@
   - **回流上游**：同一套经验整理成通用版 `deploy/install-instance-cron.sh` + `docs/second-instance.md`，已提 [paper-trading#4](https://github.com/oldfunk/paper-trading/pull/4)（只加部署/文档、不改运行时；用假 crontab 验证了 check→install→check→幂等）。
   - **待观察**：今日 16:30–18:30 应生成 11-20 的 pending 计划；明日 09:30–10:00 应执行。验收命令见 `docs/architecture.md` §9.7。
 
+- **母侧纸盘两个窗口已用隔离库端到端预演（2026-11-19 凌晨）**：生产账本 `sqlite .backup` 到 `/tmp/pt-sim`，直接调用 `AgentTrader.tick` 注入时刻，不碰生产：
+  - 计划窗口（模拟 11-19 16:45，`force` 越过"定稿到今天"检查）：**LLM 真实调用**，plan **#15** 落库、`plan_date=2026-11-20`、`asof=2026-11-18`，约 2 分钟。
+  - 执行窗口（造 11-19 pending 计划，模拟 09:35）：`BUY 100 000792 @21.590` 成交，佣金 **5.00**（地板）、过户费 0.0216、印花税 0；持仓 400→500、**可用仍 400**（T+1）；现金 78955.79→76791.77。
+  - 结论：计划/执行链路的代码路径已验证；真实 cron 的两个窗口仍需到点复核（用下面的体检命令）。
+- **新增 `scripts/check_paper_agent.py`（一次性体检，不是守护进程）**：cron 三条是否齐全 + 收盘窗口后有没有下一交易日计划 + 开盘窗口后今天的计划是否 `done`；休市日只查 cron。只读账本、不调 LLM、不下单。实测：实际时刻/09:35 绿；`--now 10:30` 红（"今天没有任何计划"）、`--now 18:50` 红（"没有 2026-11-20 的计划"）——正好是本次停摆的形状。
 - **`audit_no_data` 按任务语义归类（`ccbde24`，main）**：生产库 3209 条 no_data 里 **3193 条 unattributed** 全部是"有行情也有财务"，按形态永远分不出来。改为看 `backfill_progress.task`：
   - `price_depth` + 有行情 → **`no_early_history`**（2911 条）：早段窗口取不到更早行情（上市晚于目标起点/源无早段），限流会记 partial 重试。
   - 财务三任务（`em_deep_gap`/`em_full_gap`/`interest_coverage_backfill`）+ 有行情有财务 → **`financial_partial`**（282 条）：目标字段上游不提供。
   - 未登记任务仍 `unattributed` → **exit 1 不变**（fail-closed）。
-  - 验证：真实库 **unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；全量 gate 母 **1502 passed**（基线 1495→1502）。
+  - 验证：真实库 **unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；当批 gate 母 **1502 passed**（基线 1495→1502；现基线 **1513**，含今晚体检脚本 +11）。
 - **muse 分支审查（`origin/muse/stock-dashboard-fixes`，2 commit，均未合）**：
   - `fe4bfbd`（加"有行情缺财务"桶）**不改**：真实库 **0 命中**，退出码仍 1；它引用的"192 只"是 `coverage_gaps()` 里批10-c 的跨库缺口数（今天为 0），不是 no_data 计数。
   - `58ac76d`（`TradingBridge` CWD 错位拒绝建空库）**逻辑有效**（实测旧代码静默建 61KB 空库、新代码报错不落盘、正确 CWD 与全新安装不受影响），但改的是 vendored `paper_trading/`，按协议只能走上游 issue + tag；当前 :8081 用绝对路径、:8080 CWD 正确、cron 均 `cd` 在先，无现网暴露。
@@ -49,7 +54,7 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **今日（11-19）两个窗口观察母侧纸盘**：16:30–18:30 应出现 11-20 的 pending 计划（`sqlite3 paper_trading/paper_account.db "select id,plan_date,status from agent_plans order by id desc limit 3"`）；次日 09:30–10:00 应执行并转 `done`。`dash` 面板 `/api/status` 的 pending 计划、`logs/agent.log` 同步看。
+1. **今日（11-19）两个窗口观察母侧纸盘**：16:30–18:30 应出现 11-20 的 pending 计划（`sqlite3 paper_trading/paper_account.db "select id,plan_date,status from agent_plans order by id desc limit 3"`）；次日 09:30–10:00 应执行并转 `done`。`dash` 面板 `/api/status` 的 pending 计划、`logs/agent.log` 同步看。**一键结论**：`python scripts/check_paper_agent.py`（18:45 后、10:15 后各跑一次；0=绿，红会直接说缺什么）。
 2. **上游跟踪（已提 issue `paper-trading#3`）**：① `TradingBridge` CWD 守卫 + `load_config` 静默回退；② `test_minute_supply_t59` 两例依赖墙钟。母仓不落地，等上游 tag。
 3. **今日 15:30 复验（母项目流水线）**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换（补几只/耗时）。
 4. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
@@ -60,8 +65,8 @@
 
 ## 已知隐患
 
-- **生产树有 11-05 的旧应用残留（未跟踪，2026-11-18 清点）**：`main.py`（旧 Hermes 入口，跑起来会抢 9527）、`src/app.py`、`src/database.py`、`templates/`、`.venvdeb/`、`nightly-report.md`、`paper_trading/data.db.pre-t35.bak`。它们不挡 `git pull`，但**绝不能被启动**；清理需用户确认（建议 `mv` 到 `/home/nec/attic/` 而非删除）。
-- **`sse-starlette` 约束与 venv 漂移（2026-11-18 发现，未修）**：`pyproject.toml` 写 `sse-starlette>=2.0,<3`，但 nec venv 实装 **3.6.0**，且 `src/` 里**零引用**（疑似废弃依赖）。后果：在 nec 上跑 `pip install -e .`（或 `-e ".[dev]"`）会把它降到 2.4.1 并重装本包——**生产只单独装测试插件，别用 `-e`**。清理方向：确认无用后删依赖或放宽上限，需单独一批。
+- ~~生产树 11-05 的旧应用残留~~：**2026-11-19 已清出**——`main.py`/`src/app.py`/`src/database.py`/`templates/`/`.venvdeb/`/`nightly-report.md`/`paper_trading/data.db.pre-t35.bak` 全部 `mv` 到 `/home/nec/attic/20261119-old-hermes/`，附 `MANIFEST.txt`（sha256 + 原路径，可逆）。移动前确认：无进程占用、全仓零引用、根 `templates/` 不是 `src/web/templates`。生产树现在 `git status` 干净。
+- ~~`sse-starlette` 约束与 venv 漂移~~：**2026-11-19 已解决**——全仓（src/tests/scripts/vendor）零引用，已从 `pyproject.toml` 删除；生产 venv 里已装的 3.6.0 不动（没有代码引用）。`pip install -e .` 不会再因 `<3` 约束降级它。
 - **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把三条任务写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。

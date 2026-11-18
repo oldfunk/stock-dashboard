@@ -340,6 +340,7 @@ pending、三周零流水）。任务、命令与路径的真相源是
 - `engine.enabled=false` 是发布默认：母侧路线是"收盘计划 + 开盘执行"一日一决策，
   不跑盘中规则引擎/条件单成交；独立版 :8080 的 cron 与此互不影响。
 - 两条实例共用母库只读接口，但**账户、DB、var、日志各自独立**；改动任一侧不得改另一侧。
-- 验收：`bash scripts/install_mother_agent_cron.sh --check` 退出 0；`logs/agent.log`
-  在计划窗口出现 tick 流水；`agent_plans` 出现目标日为下一交易日的 pending 行。
+- 验收：`bash scripts/install_mother_agent_cron.sh --check` 退出 0；`python scripts/check_paper_agent.py`
+  退出 0（收盘窗口后要求下一交易日有计划、开盘窗口后要求当天计划已 `done`，休市日只查 cron）；
+  `logs/agent.log` 在计划窗口出现 tick 流水；`agent_plans` 出现目标日为下一交易日的 pending 行。
 
