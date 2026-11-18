@@ -1,6 +1,6 @@
 # Stock Dashboard — 系统架构
 
-> 创建：2026-09-12 · 更新：2026-10-26（价格三列 / 全市场年报回填 / UI 单一事实源） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
+> 创建：2026-09-12 · 更新：2026-11-19（流水线实际步骤 / 表清单补全 / 门禁基线改引文件 / 母侧纸盘运行契约 §9.7） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
 > 改本系统前先读本文件。模块边界变更必须同步更新本文件 + 对应单测。
 
 ## 0. 术语表（开工前先读）
@@ -61,20 +61,41 @@ flowchart LR
     B --> C[pre_filter_stocks<br/>PE/PB/市值/ST 过滤]
     C --> D[enrich_financial_data<br/>yjbb + 摘要 + C2兜底]
     D --> E[stock_snapshot<br/>落库]
-    E --> F[collect_historical_financial_data<br/>摘要+利润表+现金流+C2.5兜底]
-    F --> G[financial_history 落库]
-    G --> H[rebuild_financial_summaries<br/>5y/10y 均值]
-    H --> I[financial_summary 落库]
+    E --> F[候选/钉选 enrich 回写<br/>+ S8 行业回填]
+    F --> G[股息率回填<br/>+ 连续分红年数]
+    G --> H[collect_historical_financial_data<br/>摘要+利润表+现金流+C2.5兜底]
+    H --> I[rebuild_financial_summaries<br/>5y/10y 均值]
     I --> J{质量闸<br/>ROE覆盖≥50%}
     J -->|通过| K[run_screener<br/>7门 + 五维打分 Top20]
     J -->|不通过| Z[中断 + 告警]
     K --> L[screening_result 落库]
-    L --> N[K线拉取<br/>池 + Top25]
+    L --> M[K线增量<br/>活跃池 + 全市场轮换]
+    M --> N[market_state 日频快照]
+    N --> O[AI 分析后台触发<br/>自带 Key + 队列]
 ```
+
+实际顺序以 `src/orchestrator.py::run_collect_and_screen` + `src/scheduler.py::_check_daily_pipeline`
+为准（上图 2026-11-19 按代码核对；括号内为失败语义）：
+
+1. 采集：大盘指数、全市场行情、预过滤、财务增强、`stock_snapshot` 落库。
+2. 候选回写 + 钉选补 enrich（钉选股被预过滤剔掉时单独拉一次腾讯行情）。
+3. S8 行业回填（失败不清旧值）。
+4. 股息率回填（年报分红 × 现价）；周六额外刷多年分红历史，再回填连续分红年数。
+5. 历史财务增量 + 汇总重建（`financial_history` / `financial_summary`）。
+6. 质量闸：候选 ROE 覆盖率 < 50% 则中止本次，保留上次结果。
+7. 价值筛选（可选多策略三池并集），`screening_result` 落库。
+8. K 线增量：活跃池 + 全市场轮换（失败不阻断后面的快照）。
+9. `market_state` 日频快照（失败可 `backfill_market_state --force` 补算）。
+10. AI 分析后台触发（`ai.enabled`，未配 Key 时落失败记录、不空转）。
 
 AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板只负责展示数据与 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（定时节奏见 `ai_review.days/time`，默认周六 00:00；硬规则 + 监控条件本地执行；LLM 决议走用户 Key → `ai_watchlist` / `ai_journal`）。
 
-2026-10-21 起，采集流水线在财务增强前 `ensure_dividend_data`（7 天缓存），增强后 `attach_dividends` 计算股息率/分红率并随快照/筛选结果落库；周六 09:00 另跑股息 + 基准 + 前向收益维护（`src/outcome_service.py`，默认 `outcomes.refresh_weekday=5` / `refresh_time=09:00`）。
+2026-10-21 起，采集流水线在财务增强前 `ensure_dividend_data`（7 天缓存），增强后 `attach_dividends` 计算股息率/分红率并随快照/筛选结果落库。
+
+**周六维护班车**（`src/scheduler.py::_run_weekly_refresh`，`outcomes.refresh_time` 默认 09:00）顺序固定：
+分红 → 交易日历未来段 → **qfq 锚点重锚** → 基准日线 + 前向收益 → 深层字段全量（ic/EM）。
+顺序原因：分红会移动复权锚点；前向收益算出即冻结，必须在重锚之后；深层字段最贵放最后。
+执行在后台线程，不阻塞实时行情与当日 15:30 流水线的时点判定。
 
 ## 3. 模块边界（跨层调用禁令）
 
@@ -87,33 +108,76 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.9.0**（2026-11-17 合流，单向 tag 流；M3 观察期签字 + M4 钱类加固/自主运维闭环）；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.9.0**（2026-11-17 合流，单向 tag 流；M3 观察期签字 + M4 钱类加固/自主运维闭环）；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的三条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
+
+> 2026-11-19 按生产库 `sqlite_master` 全量核对（**48 张**）。**0 行的表是"脚手架已建、尚未启用"，
+> 不要当成已上线能力**；行数随时间变化，以库为准。
+
+### 4.1 行情与基础主数据
 
 | 表 | 写者 | 读者 | 说明 |
 |---|---|---|---|
 | `market_index` | 采集 | 首页 | 大盘指数，保留 30 天 |
 | `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据）；**只支持当日**——每日覆盖写、不保留历史截面（2026-10-29 P0-3 用户拍板 b），历史状态向量走 `market_state_daily`（F6 逐 code PIT），需要逐股历史截面时再议版本化 |
-| `financial_history` | 采集/回填 | 汇总重建/详情页/估值/回测 | 年报明细；全市场回填进行中（2026-10-26 起） |
+| `daily_close` | 采集（覆盖层） | market_state 广度/估值分位 | 全市场当日收盘覆盖层；腾讯当日 bar 晚于 15:30 时由次日自愈 |
+| `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；四列价格 `close_raw`（不复权，估值）/`close_adj`（后复权，回测）/`close_qfq`（前复权，子项目契约）/`close`（展示，= `close_qfq`）+ `shares`（每日流通股本） |
+| `trading_calendar` | 周六维护（S15） | 调度/子项目契约/T+1 | 历史尾部 + 未来交易日；**源覆盖到哪写到哪**，覆盖外不臆造（子项目 fail-closed 依赖） |
+| `benchmark_daily` | 收益维护 | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数 |
+| `instrument` | 初始化/迁移 | 研究 OS/回测 | 证券主数据（`instrument_id`，2026-10-26 迁移后 0 空值） |
+| `market` | 迁移 | 研究 OS | 市场主数据（A 股 = 1 行） |
+| `data_quality_daily` | 数据体检 | 运维 | 每日数据质量结论 |
+
+### 4.2 财务与分红
+
+| 表 | 写者 | 读者 | 说明 |
+|---|---|---|---|
+| `financial_history` | 采集/回填（S11–S13 + mainfin） | 汇总重建/详情页/估值/回测 | 年报明细；含 `notice_date`（防前视）；全市场回填已收官，余量是上游真无 |
 | `financial_summary` | 重建 | 筛选/详情页 | 5y/10y 均值（ROE/毛利/FCF/ROIC…） |
+| `dividend_annual` | 股息维护（S9） | 筛选/快照/AI prompt | 年报现金分红；每股/股息率/分红率，缺数据 NULL |
+
+### 4.3 候选、分析与笔记
+
+| 表 | 写者 | 读者 | 说明 |
+|---|---|---|---|
 | `screening_result` | 筛选 | 候选页/池 | 每轮 Top + AI 分析回写 + 策略标签/股息字段 |
 | `stock_analysis_history` | 自带 Key 分析 + 外部写回兼容 | 时间线/复盘 | 每次 AI 分析快照 |
 | `ai_analysis_log` | 自带 Key 分析（用量记账） + 外部写回兼容 | 成本统计 | token 用量 |
-| `ai_watchlist` | 周复盘 | 首页 | 当前 5 只池股 |
+| `ai_watchlist` | 周复盘 | 首页 | 当前观察池 |
 | `ai_watchlist_history` | 周复盘 | 变更追踪 | 每次调仓记录 |
 | `ai_journal` | 周复盘 | 笔记页 | 复盘纪要 |
-| `news_item` | 新闻采集 | 首页滚动条 | 个股/市场新闻，URL+标题幂等 |
-| `news_digest` | 新闻摘要 | 笔记页 | 每日 AI 日报，与复盘分开 |
-| `news_fetch_log` | 新闻采集 | 调度冷却 | 抓取尝试记录（含市场级伪代码 `__market__`） |
 | `watchlist` | 用户钉选 | 钉选 tab | 用户手工池 |
-| `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；四列价格 `close_raw`（不复权，估值）/`close_adj`（后复权，回测）/`close_qfq`（前复权，子项目契约）/`close`（展示，= `close_qfq`）+ `shares`（每日流通股本） |
-| `backfill_progress` | 回填脚本 | 回填脚本 | `(task, code)` 进度 + `covered_report_date`；断点续跑/重试 |
-| `benchmark_daily` | 收益维护 | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数 |
-| `dividend_annual` | 股息维护 | 筛选/快照/AI prompt | 年报现金分红；每股/股息率/分红率，缺数据 NULL |
+| `watchlist_notes` | 用户/面板 | 钉选 tab | 钉选笔记（表已建，当前 0 行） |
+| `watchlist_thesis` | 周复盘/面板 | 钉选 tab | 钉选论点（持久，当前 24 行） |
+| `news_item` / `news_digest` / `news_fetch_log` | 新闻采集/摘要 | 首页滚动条/笔记页/调度冷却 | URL+标题幂等；市场级伪代码 `__market__` |
 | `analysis_outcome` | 收益维护 | `/outcomes` | 每条有 Signal 分析 × 基准 × horizon 的前向收益；非空后冻结 |
-| `run_log` | 编排 | 状态栏 | 每轮运行状态 |
-| `deep_research` | —（已删除） | 无 | 2026-09-23 用户批准删除，5 行已备份，勿重建 |
+
+### 4.4 研究 OS（判据链）
+
+| 表 | 说明 |
+|---|---|
+| `research_hypothesis` / `research_experiment` / `research_result` | 预注册假设、实验定义、结论与 `splits_json`（每桶带 `{mean,n}`） |
+| `market_state_daily` | 日频市场状态向量（F2/F6；`pe_percentile_5y` 尚有缺口） |
+| `feature_definition` / `stock_feature_daily` / `universe_membership` | 特征与股票池脚手架（当前 0 行） |
+| `llm_task` / `llm_run` / `prompt_registry` | 研究线 LLM 任务/运行/提示词登记（当前 0 行） |
+| `fx_rate_daily` | 汇率日频（研究 OS 脚手架，当前 0 行） |
+| `decision_log` / `strategy_version` / `strategy_deployment` / `strategy_attribution` | 策略与决策脚手架（当前 0 行） |
+
+### 4.5 运维与进度
+
+| 表 | 写者 | 读者 | 说明 |
+|---|---|---|---|
+| `run_log` | 编排 | 状态栏 | 每轮运行状态（当日失败按最新 running 归属，避免记到僵尸 run） |
+| `pipeline_progress` | 编排 | 面板进度条 | 采集/筛选/AI 的实时进度 |
+| `backfill_progress` | 回填脚本 | 回填脚本 / `audit_no_data` | `(task, code)` 进度 + `covered_report_date`；断点续跑/重试；`task` 决定 no_data 语义 |
+
+### 4.6 遗留（勿用）
+
+| 表 | 状态 |
+|---|---|
+| `paper_account` / `paper_nav` / `paper_orders` / `paper_positions` / `paper_trades` | M4a 自研虚拟盘遗留，**0 行**；现行纸盘在 `paper_trading/` 的独立库（`paper_account.db` / `data.db`），与本库无关 |
+| `deep_research` | 2026-09-23 用户批准删除，5 行已备份，勿重建 |
 
 ## 5. 数据源适配层规范（防 AKShare 式遗失）
 
@@ -153,7 +217,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；母项目基线 **704**、vendor **242**（2026-10-26），只升不降——下限记录 `scripts/gate-baseline*.txt`，由 gate.sh 自动强制（按测试规则本机不跑 pytest）。
+- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-19）：母 **1502**、vendor **886**——本条不复制数字为准，改基线时以文件为准。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
@@ -171,12 +235,12 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ## 6. 架构演进方向
 
-- **P1 面板深化**（目标 11 月）：评分体系透明化、AI 笔记增强、时间线交互、详情页体验优化
-- **P2 体验优化**（目标 12 月）：移动端适配、快捷切换、财务指标高亮、搜索排序
+- **P1 面板深化**：✅ 收尾（评分透明化 / AI 笔记增强 / 时间线交互 / 详情页体验均已完成）
+- **P2 体验优化**：⛔ 冻结（2026-09-23 维护模式归档，移动端/快捷切换/指标高亮/搜索排序不再投入）
 - **AI 分析**：用用户自带 Key（`/llm` 配置 + 队列执行），面板只负责展示数据与 AI 笔记
-- **已删除**：`src/analyzer/` 保留（本地触发已停用，仅手动脚本可用；原 `src/paper/` M4a 已删，见下）
-- **量化交易系统**：M4a/原生包已归档；2026-09-29 起由 M6 全量合并接替（顶层 `paper_trading/` + `/paper` 嵌原面板；Universe 走母筛选 + AI 用我们的 Key；:8081 面板独立服务）
-- **研究分析层（2026-10-26）**：SQLite 业务事实源 + Parquet 研究快照 + DuckDB 嵌入式分析；不引入数据库服务；向量检索后期用 `sqlite-vec`。详见 `docs/research-os.md` §19–20。
+- **本地分析代码**：`src/analyzer/` 保留（pipeline 不再触发，仅手动脚本可用）；`src/paper/`（M4a 自研虚拟盘）已删除
+- **量化交易系统**：M4a/原生包已归档；2026-09-29 起由 M6 全量合并接替（顶层 `paper_trading/` + `/paper` 嵌原面板；Universe 走母筛选 + AI 用我们的 Key；:8081 面板独立服务，运行契约见 §9.7）
+- **研究分析层（2026-10-26 起，11 月扩展为判据链）**：SQLite 业务事实源 + Parquet 研究快照 + DuckDB 嵌入式分析；不引入数据库服务；判据链（预注册 → CI 规则 → Bonferroni → 参数敏感性 → 结论）落在 `src/research/`。详见 `docs/research-os.md` §19–20。
 
 ## 7. 方法论与内化避坑（2026-09-22 定稿）
 
@@ -210,7 +274,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ## 9. 价格模型 / 主键 / 子项目数据契约（2026-10-27）
 
-> 背景：子项目 `paper-trading`（tag v0.7.2）执行侧已切"母库优先"（`config.data.daily_source=auto`），
+> 背景：子项目 `paper-trading`（本仓 vendored **v0.9.0**；下列契约自 v0.7.2 起沿用）执行侧已切"母库优先"（`config.data.daily_source=auto`），
 > 只读母库 SQLite（`mode=ro`），缺标的回退本地 akshare 前复权日线。以下契约来自子项目 Issue #4–#8。
 
 ### 9.1 复权口径（`kline_daily`）
