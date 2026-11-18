@@ -16,7 +16,13 @@
 | `ambiguous` | 以上都不满足（行情 0 行但名称不带"退"） | 单靠库内证据分不开"停止交易"与"采集失败" -> 需要 `--verify-live` |
 | `stopped_trading` | ambiguous 桶里，新浪末根日线早于 `--fresh-days` | 事实性无数据，末根日期即停止交易日 |
 | `live_but_no_data` | ambiguous 桶里，末根日线仍新鲜 | **采集缺陷**（限流/空响应被误记 no_data 后会被进度表永久排除） |
-| `unattributed` | 落不进任何一类 | 非空即 exit 1 —— "100% 归因"是机器断言，不是我的口头承诺 |
+| `no_early_history` | 任务 `price_depth` 且库内有行情（`kline_rows > 0`） | 事实性无数据：早段窗口（早于库内最早日）取不到更早行情——上市晚于目标起点或源无早段数据；限流会记 `partial` 重试，落不到这里 |
+| `financial_partial` | 任务属财务三兄弟（`em_deep_gap` / `em_full_gap` / `interest_coverage_backfill`），且库内有行情、有部分财务 | 事实性无数据：该任务的**目标字段**上游不提供（有财务但字段缺） |
+| `unattributed` | 落不进任何一类（含未登记的新任务） | 非空即 exit 1 —— "100% 归因"是机器断言，不是我的口头承诺 |
+
+**分类按任务语义，不按数据形态**（2026-11-19）：同一条 `no_data` 记录，含义由它属于
+哪个任务决定。曾经按"有行情缺财务"的形态加桶，实测 0 命中——那种形态是**跨库覆盖缺口**
+（见下方 `coverage_gaps()`），根本不是 `no_data` 记录；未登记的任务仍然落 `unattributed`。
 
 另有两个**不算 no_data** 的覆盖缺口桶（`--format md` 会一起打出来，不影响退出码）：
 有行情缺财务 / 有财务缺行情。它们是"回填任务的目标集本身没盖到"
@@ -54,7 +60,14 @@ SINA_HEADERS = {"User-Agent": "Mozilla/5.0",
                 "Referer": "https://finance.sina.com.cn/"}
 
 CATEGORIES = ("bj_unmapped", "delisted", "stopped_trading", "live_but_no_data",
-              "ambiguous", "unattributed")
+              "ambiguous", "no_early_history", "financial_partial",
+              "unattributed")
+
+# 任务 -> no_data 语义（2026-11-19）。实测库里 3193 条 unattributed 全是"有行情也
+# 有财务"，单看形态永远只能猜；`backfill_progress.task` 才直接说明是哪个任务、
+# 该任务在做什么。未登记的任务不在这里，仍落 unattributed（fail-closed）。
+PRICE_DEPTH_TASK = "price_depth"
+FINANCIAL_TASKS = ("em_deep_gap", "em_full_gap", "interest_coverage_backfill")
 
 
 def sina_sina_symbol(code: str) -> str:
@@ -82,6 +95,17 @@ def classify(fact: dict) -> tuple[str, str]:
         return ("ambiguous",
                 f"行情 0 行却有 {fact['fin_rows']} 条财务（末次覆盖 "
                 f"{fact.get('covered_report_date') or '-'}）、名称不带退字")
+    task = fact.get("task") or ""
+    if task == PRICE_DEPTH_TASK and fact.get("kline_rows"):
+        return ("no_early_history",
+                f"行情 {fact['kline_rows']} 行（末 {fact.get('kline_last') or '-'}）；"
+                "price_depth 记 no_data = 早段窗口取不到更早行情（上市晚于目标起点"
+                "或源无早段数据）——限流记 partial 重试，不是采集缺陷")
+    if task in FINANCIAL_TASKS and fact.get("kline_rows") and fact.get("fin_rows"):
+        return ("financial_partial",
+                f"财务 {fact['fin_rows']} 行（末次覆盖 "
+                f"{fact.get('covered_report_date') or '-'}）；{task} 记 no_data = "
+                "该任务的目标字段上游不提供（有财务、字段缺）")
     return ("unattributed",
             f"kline={fact.get('kline_rows')} fin={fact.get('fin_rows')} name={name!r}"
             " —— 现有判据都盖不住，需要新增规则")

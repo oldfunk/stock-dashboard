@@ -24,8 +24,8 @@ def db(tmp_path, monkeypatch):
 
 
 def _fact(code="600123", name="退市某某", kline_rows=0, fin_rows=10,
-          in_snapshot=True, cov="2025-12-31"):
-    return {"task": "price_history", "code": code, "name": name, "market": "A",
+          in_snapshot=True, cov="2025-12-31", task="price_history"):
+    return {"task": task, "code": code, "name": name, "market": "A",
             "in_snapshot": in_snapshot, "kline_rows": kline_rows,
             "kline_last": None, "fin_rows": fin_rows, "fin_last": "2025-12-31",
             "covered_report_date": cov, "written_rows": 0, "recorded_at": "2026-10-28"}
@@ -113,6 +113,57 @@ def test_bj_code_with_financial_rows_is_not_called_unmapped():
     from scripts.audit_no_data import classify
     category, _ = classify(_fact(code="920001", name="纬达光电", fin_rows=5))
     assert category == "ambiguous"
+
+
+# ── 1b. 任务语义：no_data 的含义由任务决定（2026-11-19） ──────────────────
+# 背景：真实库里 3193 条 unattributed 全是"有行情也有财务"。单看形态只能猜，
+# 而 backfill_progress.task 直接说明是哪个任务——按任务归类才可核查。
+
+def test_classify_price_depth_gap_is_not_unattributed():
+    """price_depth 的 no_data = 早段窗口没有更早行情，不能算"归因失败"。"""
+    from scripts.audit_no_data import classify
+    category, evidence = classify(_fact(task="price_depth", code="000001",
+                                        name="平安银行", kline_rows=3000,
+                                        fin_rows=40))
+    assert category == "no_early_history"
+    assert "早段" in evidence
+
+
+def test_classify_price_depth_without_kline_stays_unattributed():
+    """任务对但一行行情都没有：不是"早段无数据"，仍是未知形态，必须报出来。"""
+    from scripts.audit_no_data import classify
+    category, _ = classify(_fact(task="price_depth", code="600999",
+                                 name="正常名字", kline_rows=0, fin_rows=0))
+    assert category == "unattributed"
+
+
+def test_classify_financial_task_partial():
+    """财务任务的 no_data = 目标字段上游没有；有部分财务行 -> financial_partial。"""
+    from scripts.audit_no_data import classify
+    for task in ("em_deep_gap", "em_full_gap", "interest_coverage_backfill"):
+        category, evidence = classify(_fact(task=task, code="600000",
+                                            name="浦发银行", kline_rows=1000,
+                                            fin_rows=20))
+        assert category == "financial_partial", task
+        assert task in evidence
+
+
+def test_classify_financial_task_without_financials_stays_unattributed():
+    """财务任务但一条财务行都没有：与"字段缺"不是一回事，不许被新桶吞掉。"""
+    from scripts.audit_no_data import classify
+    category, _ = classify(_fact(task="em_full_gap", code="600999",
+                                 name="正常名字", kline_rows=1000, fin_rows=0))
+    assert category == "unattributed"
+
+
+def test_classify_unknown_task_stays_unattributed():
+    """没登记的任务：保持 fail-closed，逼人来加规则，而不是按形态猜。"""
+    from scripts.audit_no_data import classify
+    category, evidence = classify(_fact(task="financial_extra", code="600001",
+                                        name="正常名字", kline_rows=10,
+                                        fin_rows=10))
+    assert category == "unattributed"
+    assert "需要新增规则" in evidence
 
 
 def test_sina_symbol_prefixes():
@@ -243,6 +294,52 @@ def test_cli_exit_zero_when_every_code_attributed(db, capsys):
     assert aud.main(["--format", "md"]) == 0
     out = capsys.readouterr().out
     assert "| bj_unmapped |" in out and "600999" not in out
+
+
+def _seed_task_shapes(include_unknown=True):
+    """任务语义的真实形态：price_depth / 财务任务各一条（有行情），可选未登记任务。"""
+    bars = [{"trade_date": "2016-01-04", "open": 10.0, "close": 10.0,
+             "high": 10.0, "low": 10.0, "volume": 1.0, "amount": 1e4,
+             "turnover": 0.1}]
+    shapes = [("601000", "price_depth", False), ("601001", "em_full_gap", True)]
+    if include_unknown:
+        shapes.append(("601002", "financial_extra", True))
+    for code, task, has_fin in shapes:
+        db_mod.KlineDAO().upsert_many(code, bars)
+        with db_mod.db_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO stock_snapshot (code, name, market,"
+                " snapshot_date) VALUES (?, '正常名字', 'A', '2026-11-19')", (code,))
+            conn.execute(
+                "INSERT OR REPLACE INTO backfill_progress (task, code, updated_rows,"
+                " status, covered_report_date, updated_at)"
+                " VALUES (?, ?, 0, 'no_data', '2025-12-31', '2026-11-19')",
+                (task, code))
+            if has_fin:
+                conn.execute(
+                    "INSERT OR REPLACE INTO financial_history (stock_code,"
+                    " report_date, report_type, created_at)"
+                    " VALUES (?, '2025-12-31', 'A', '2026-10-01')", (code,))
+
+
+def test_cli_attributes_task_gaps_but_still_flags_unknown_task(db, capsys):
+    """已知任务的 no_data 落新桶；**未登记任务仍 exit 1**——断言没被稀释。"""
+    import scripts.audit_no_data as aud
+    _seed_task_shapes(include_unknown=True)
+    assert aud.main([]) == 1
+    payload = _stdout_json(capsys)
+    assert payload["summary"]["by_category"]["no_early_history"] == 1
+    assert payload["summary"]["by_category"]["financial_partial"] == 1
+    assert payload["summary"]["unattributed_codes"] == ["601002"]
+
+
+def test_cli_exit_zero_when_only_known_task_gaps(db, capsys):
+    """只剩已知任务形态时归因 100% 成立，退出码 0；两个新桶都要出现在表里。"""
+    import scripts.audit_no_data as aud
+    _seed_task_shapes(include_unknown=False)
+    assert aud.main(["--format", "md"]) == 0
+    out = capsys.readouterr().out
+    assert "| no_early_history |" in out and "| financial_partial |" in out
 
 
 def test_audit_never_writes(db):
