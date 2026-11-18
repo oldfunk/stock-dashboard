@@ -65,26 +65,26 @@
 > 用户 2026-10-26 指令：价格模型与限速、全市场财务抓取、数据意义、子项目合并、个股 UI 统一、全代码审计与文档更新。
 > 规则：每项单独验证；长任务先入档再跑；不确定就暂停并记录。
 
-- [ ] **B1 价格复权模型 + 限速抓取**（模型完成，全市场回填收尾中）：三列 `close_raw`（估值）/`close_adj`（回测）/`close`（正数前复权展示）；Sina raw+hfq 各一次。`--all` 4,172 只（原覆盖 959/5527=17.4%）断点续传：Pi 上跑到 3,757/4,172 因生产迁移中断，nec 续跑收尾。契约列存量已归零（close_qfq 21→0 / close_adj 21→0 / instrument_id+market 7,089→0）。
-- [ ] **B2 全市场年报抓取**（抓取中）：mainfin 一次取全基础指标；`backfill_financial_full.py`（进度/锁/限速）。目标 4568 只，万科 A 实测 34 年完整；15:11 启动，约 12h。完成后核对 5527 覆盖与 notice/fcf。
-- [ ] **B3 数据意义校验**（财务侧中期完成，价格侧待 B1 收尾）：财务侧——负价/零价/重复行=0；异常值（gm -5678%、roe -266264%）定性为真实财务事件非数据错误；历史股本 4,759 只多年同值（已知上游盖值，A6 净利/EPS 反推绕过）。价格侧全市场复核等回填完成后做。
-- [ ] **B4 子项目 v0.6.9 合并**（待办）：Issue #2/NAV 幂等/token/认证/日历；subtree pull + 契约核对 + 门禁。
+- [x] **B1 价格复权模型 + 限速抓取**（已完成）：三列 `close_raw`（估值）/`close_adj`（回测）/`close`（正数前复权展示）；Sina raw+hfq 各一次。生产实测 `price_history` **5514 done / 12 no_data / 1 partial**；深度段 `price_depth` **2602 done / 2911 no_data**（上市晚于 2016，归因器记为 `no_early_history`）/ 1 partial。契约列存量已归零。
+- [x] **B2 全市场年报抓取**（已完成）：mainfin 一次取全基础指标；`backfill_financial_full.py`（进度/锁/限速）。生产实测 `financial_full` **4566 done**（目标 4568），`financial_history` 15.2 万行；余量为上游真无。
+- [ ] **B3 数据意义校验**（部分完成）：财务侧——负价/零价/重复行=0；异常值（gm -5678%、roe -266264%）定性为真实财务事件非数据错误；历史股本 4,759 只多年同值（已知上游盖值，A6 净利/EPS 反推绕过）。价格侧随 B1 完成，尚未做全市场复核。
+- [x] **B4 子项目合并**（已超期完成）：v0.6.9 → … → **v0.9.0**（2026-11-17 合流，单向 tag 流）；母侧运行契约见 `architecture.md` §9.7。
 - [x] **B5 个股 UI 全面统一**（`58e4f74`…`15f3d7e`，gate 691）：候选/AI 观察池/钉选共用 `_stock_card.html`；钉选服务端渲染；计数并入标签；浏览器实测三视图一致。
-- [ ] **B6 全代码审计 + 文档更新**（待办）：逐项审计 + README/architecture/handoff；一次一件。
+- [ ] **B6 全代码审计 + 文档更新**（进行中，2026-11-19）：architecture（流水线/48 张表/基线）、handoff、iteration-log、roadmap、subproject-protocol、development-workflow 已校准；剩余：`agent-api.md`、`research-os-tasklist.md` 进度回填、历史 audit 报告的"归档"标注。
 
-## Phase 8 — Research OS（2026-10-26 设计，未实现）
+## Phase 8 — Research OS（2026-10-26 设计；R0–R2 已落地，R3–R6 未启用）
 
 > 目标：从"一套固定策略"升级为"市场状态 → 假设 → 实验 → 版本化策略 → 部署归因 → 决策账本"的研究操作系统；价值投资只是先验。
 > 设计：`docs/research-os.md`；任务：`docs/research-os-tasklist.md`。
 > 顺序：先 R0 框架（表/注册表/版本/质量门/LLM 契约），再 R1 市场状态 → R2 假设实验 → R3 策略归因 → R4 LLM → R5 UI → R6 最小闭环。
 
-- [ ] R0 框架（11 项）
-- [ ] R1 市场状态
-- [ ] R2 假设与实验
-- [ ] R3 策略与归因
-- [ ] R4 LLM 研究助手
-- [ ] R5 研究界面/API
-- [ ] R6 最小闭环试点
+- [x] R0 框架（11 项）— 2026-10-26 完成（表/注册表/质量门/LLM 契约）
+- [x] R1 市场状态 — 2026-10-27 完成（`market_state_daily`，F2/F6）
+- [x] R2 假设与实验 — 2026-11 完成（预注册 → `ci_rule` → Bonferroni → 参数敏感性 → verdict；合成库双验）
+- [ ] R3 策略与归因 — 表已建（`strategy_*` / `decision_log`，0 行），未启用
+- [ ] R4 LLM 研究助手 — 表已建（`llm_task` / `llm_run` / `prompt_registry`，0 行），未启用
+- [ ] R5 研究界面/API — JSON API 已可用（`/api/data/research/*`）；HTML 研究页批21 在途（Issue #9）
+- [ ] R6 最小闭环试点 — 未开始
 
 ## 已完成（本文件历史）
 
