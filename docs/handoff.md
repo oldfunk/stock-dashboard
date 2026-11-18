@@ -8,6 +8,7 @@
 - **母侧子项目（:8081）AI 交易员断档三周，已恢复（`751bb7f`）**：用户观察"10 月底后没跑过计划和交易"，取证确认——`agent_plans` 最后一条 **10-26 一直 pending**、`op_log` 最后一条 **10-23 16:47**、`fills` 停在 10-08；nec crontab 里只剩独立版 :8080 的任务。**根因**：母侧运行时配置只存在于 crontab，10-23 后一次重写把三条任务全丢了，面板仍 200 所以完全静默。
   - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"。
   - 路径/口径：CWD=`paper_trading/`、母 `.venv`、`--scheme mother --pool-from screening --pool-limit 15`；`calendar sync` 已跑（母库日历覆盖到 2026-12-31）；LLM 连通性实测（`llm models` 与一次 `llm ask` 均 ok）。
+  - **回流上游**：同一套经验整理成通用版 `deploy/install-instance-cron.sh` + `docs/second-instance.md`，已提 [paper-trading#4](https://github.com/oldfunk/paper-trading/pull/4)（只加部署/文档、不改运行时；用假 crontab 验证了 check→install→check→幂等）。
   - **待观察**：今日 16:30–18:30 应生成 11-20 的 pending 计划；明日 09:30–10:00 应执行。验收命令见 `docs/architecture.md` §9.7。
 
 - **`audit_no_data` 按任务语义归类（`ccbde24`，main）**：生产库 3209 条 no_data 里 **3193 条 unattributed** 全部是"有行情也有财务"，按形态永远分不出来。改为看 `backfill_progress.task`：

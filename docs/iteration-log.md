@@ -172,6 +172,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **vendor 两条用例依赖墙钟（发现并定性）**：夜间 gate 出现 `test_minute_supply_t59` 两例失败（vendor 884），复跑与源码核对后确认：用例依赖 `completed_slots(now)` 非空，**00:50 跑必红**（当日 0 个已完成时段，`needed=false`，假源没被调用）、**22:55 跑必绿**（48 个时段），同代码同命令只差时刻。非母侧回归；vendor 基线仍记 886，不降；需上游给测试注入 `now`。
 
 - **母侧子项目（:8081）AI 交易员断档三周，已恢复（`751bb7f`）**：用户观察到"10 月底后没有计划和交易"。取证：`agent_plans` 最后一条 **10-26（10-23 16:47 生成）一直 pending**、`op_log` 最后一条 **10-23 16:47**、`fills` 停在 10-08；nec crontab 只剩独立版 :8080 的任务。**根因**：母侧运行时配置只存在于 crontab，10-23 后一次重写把三条任务全丢；面板一直 200，因此静默三周。**修复**：新增 `scripts/install_mother_agent_cron.sh`（三条任务入库、幂等安装、`--check` 核对、改动前备份），nec 实测"删一条→check 报缺 exit 1→install 补回→check 通过"；`calendar sync` 已跑（母库日历覆盖到 2026-12-31）；LLM 连通性实测（`llm models` 与一次 `llm ask` 均 ok）。**待观察**：11-19 16:30–18:30 生成 11-20 计划、11-20 09:30–10:00 执行。
+  - **回流上游**：同一套经验整理成通用版 `deploy/install-instance-cron.sh` + `docs/second-instance.md`，已提 [paper-trading#4](https://github.com/oldfunk/paper-trading/pull/4)（只加部署/文档、不改运行时；用假 crontab 验证了 check→install→check→幂等）。
 - **事件收尾**：`origin/muse/stock-dashboard-fixes` 已删除（其代码 **0 行合入**，证据留在本账本与 handoff）；两条 vendor 发现问题 + 一条测试墙钟问题转上游 issue [paper-trading#3](https://github.com/oldfunk/paper-trading/issues/3)，附实测输出、提案补丁与"现网无暴露"的边界说明。
 
 ### 2026-11-18（门禁加固：pytest-timeout 单条用例超时，挂起能报出用例名）
