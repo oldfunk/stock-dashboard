@@ -19,6 +19,15 @@ dependencies = [
     "duckdb>=1.1,<2",
 ]
 
+[project.optional-dependencies]
+# 测试工具（门禁/开发期）：pytest-xdist 用于本机并行，pytest-timeout 让挂起
+# 由单条用例承担（scripts/gate.sh 的 --timeout，缺失时自动降级）。
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "pytest-timeout>=2.4",
+]
+
 [project.scripts]
 stock-dashboard = "src.main:run"
 

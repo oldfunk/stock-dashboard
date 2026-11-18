@@ -47,6 +47,19 @@ if timeout --version >/dev/null 2>&1; then TIMEOUT_BIN="timeout"; fi
 MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-600}"
 VENDOR_TIMEOUT="${GATE_TIMEOUT_VENDOR:-600}"
 
+# 单条用例超时（2026-11-18）：整批超时只能证明"卡在 96%"，不知道是哪条。
+# 2026-11-17 部署时母套件在 96% 挂住、吃满 600s → 整条 gate 只能报"超时"。
+# 装上 pytest-timeout 后，挂起由**单条用例**承担（默认 180s；本机最慢用例
+# 实测 44s，留 4 倍余量），失败信息直接给用例名 + 栈，整批还能继续跑完。
+# 插件缺失时自动降级为旧行为（只有整批 timeout），不阻断门禁。
+TEST_TIMEOUT="${GATE_TEST_TIMEOUT:-180}"
+TIMEOUT_ARGS=()
+PER_TEST=0
+if "$PYBIN" -c "import pytest_timeout" >/dev/null 2>&1; then
+    TIMEOUT_ARGS=(--timeout="$TEST_TIMEOUT")
+    PER_TEST=1
+fi
+
 # vendor 已知问题排除清单（带 Issue 链接；修复后移出并恢复基线）
 DESELECT=()
 if [ -f scripts/gate-exclusions.txt ]; then
@@ -110,13 +123,18 @@ _run() {  # $1=标签 $2=超时秒数；其余=pytest 参数
 
 echo "=== 母项目门禁（权威：排除 paper_trading/）==="
 echo "（超时保护：母 ${MOTHER_TIMEOUT}s / vendor ${VENDOR_TIMEOUT}s；timeout=${TIMEOUT_BIN:-无}）"
-_run mother "$MOTHER_TIMEOUT" --ignore=paper_trading
+if [ "$PER_TEST" = "1" ]; then
+    echo "（单条用例超时：${TEST_TIMEOUT}s，pytest-timeout 生效——挂起会报出用例名）"
+else
+    echo "（未装 pytest-timeout：单条用例超时不可用，只有整批兜底——建议 pip install -e '.[dev]'）"
+fi
+_run mother "$MOTHER_TIMEOUT" --ignore=paper_trading ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"}
 MOTHER_PASSED=$(cat "$BASETEMP/mother.count" 2>/dev/null)
 MOTHER_RC=$(cat "$BASETEMP/mother.rc" 2>/dev/null)
 MOTHER_FLOOR=$(_floor scripts/gate-baseline.txt)
 
 echo "=== vendor 套件（记录，不阻塞母项目）==="
-_run vendor "$VENDOR_TIMEOUT" paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"}
+_run vendor "$VENDOR_TIMEOUT" paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"} ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"}
 VENDOR_PASSED=$(cat "$BASETEMP/vendor.count" 2>/dev/null)
 VENDOR_RC=$(cat "$BASETEMP/vendor.rc" 2>/dev/null)
 VENDOR_FLOOR=$(_floor scripts/gate-baseline-vendor.txt)
