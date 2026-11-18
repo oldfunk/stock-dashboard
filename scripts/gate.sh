@@ -126,7 +126,7 @@ echo "（超时保护：母 ${MOTHER_TIMEOUT}s / vendor ${VENDOR_TIMEOUT}s；tim
 if [ "$PER_TEST" = "1" ]; then
     echo "（单条用例超时：${TEST_TIMEOUT}s，pytest-timeout 生效——挂起会报出用例名）"
 else
-    echo "（未装 pytest-timeout：单条用例超时不可用，只有整批兜底——建议 pip install -e '.[dev]'）"
+    echo "（未装 pytest-timeout：单条用例超时不可用，只有整批兜底——建议 .venv/bin/pip install pytest-timeout）"
 fi
 _run mother "$MOTHER_TIMEOUT" --ignore=paper_trading ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"}
 MOTHER_PASSED=$(cat "$BASETEMP/mother.count" 2>/dev/null)

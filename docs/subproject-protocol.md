@@ -44,7 +44,7 @@
 ## 6. Vendor 门禁
 
 1. 子方契约表（拥有/只读/永不碰）逐条核对，不满足不开合。
-2. 生产 worktree `gate.sh` **分层**：母项目用例（排除 `paper_trading/`）= 权威门禁，必须全绿；vendor 用例单独跑并记录，**域内失败不阻塞母项目**（母方无法修域内代码，见 §3/§4）。已知域内问题列 `scripts/gate-exclusions.txt`（带子项目 Issue 链接），修复后移出并恢复基线。
+2. 生产 worktree `gate.sh` **分层**：母项目用例（排除 `paper_trading/`）= 权威门禁，必须全绿；vendor 用例单独跑并记录，**域内失败不阻塞母项目**（母方无法修域内代码，见 §3/§4）。已知域内问题列 `scripts/gate-exclusions.txt`（带子项目 Issue 链接），修复后移出并恢复基线。两层都带**单条用例超时**（`pytest-timeout`，默认 180s；缺插件时退化为整批 600s 兜底），挂起报出用例名而不是只报"卡在 96%"。
 3. 机械适配（import 路径、配置命名空间）必须单列 commit，逐条列出，不得顺手改逻辑。
 4. 基线两套：`scripts/gate-baseline.txt`（母项目，权威）/ `scripts/gate-baseline-vendor.txt`（vendor，记录）。
 

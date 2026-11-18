@@ -12,6 +12,9 @@
 
 1. **门禁**：开发期用**本机并行门禁**（`python -m pytest -n auto -q`，约 2.5 分钟，
    含 vendor 全量 2151 例）。生产门禁只在**发布**时跑（每周一次，或一个功能完成时）。
+   - 两种门禁都建议装 `pytest-timeout`（`pip install pytest-timeout`）：`scripts/gate.sh`
+     检测到它会自动加 `--timeout=180`（`GATE_TEST_TIMEOUT` 可调），挂起由**单条用例**
+     承担并报出用例名；未装则退回旧的整批 600s 兜底，脚本头部会提示。
 2. **制造环境**：研究线/筛选器用**合成库**验证，不等真实采集。
    - `python scripts/make_synthetic_env.py` —— 真库，bake 了已知 MOS->超额关系
      （`excess_60 = 5.0 + 0.30*mos + N(0,6)`）

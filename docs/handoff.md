@@ -3,7 +3,11 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-17 深夜：v2.2.0 已发布；子项目 v0.9.0 合流并用可下单验证）
+## 最后状态（2026-11-18 深夜：门禁加单条用例超时；v2.2.0 线上运行中）
+
+- **门禁加固（`5ef42f8`，已在 main 与 nec 双树）**：`scripts/gate.sh` 装上 `pytest-timeout` 后，母/vendor 套件都带 `--timeout=180`（`GATE_TEST_TIMEOUT` 可调），**挂起会报出用例名**而不是只报"卡在 96%"；插件缺失自动降级为整批 600s 兜底并提示。`pyproject.toml` 新增 `[project.optional-dependencies].dev`（pytest / xdist / timeout）记录测试期依赖，**不进运行时**。生产 venv 已装 pytest-timeout 2.4.0（pytest 9.2.0 不变）。
+  - 验证：挂起样例 `--timeout=2` → 2.04s 失败并点名用例；`/home/nec/sd-verify` @ `5ef42f8` 全量 gate rc=0：母 **1495 passed / 369.34s**、vendor **886 passed / 13 skipped / 154.07s**，合计 523s。
+  - 教训（写进脚本注释）：11-17 那次"超时"无法归因，本次改动把归因成本从"重跑整批"降到"看一行失败信息"。
 
 - **v2.2.0 已发布**：在 v2.1.0 基础上按小版本号进位（tag `v2.2.0` + GitHub Release）。内容 = 子项目 vendor v0.9.0 合流 + 母侧子项目面板可用/可下单的端到端验证。
 - **母侧子项目（:8081 合并树）可用与下单验证（隔离库 + 线上写路径）**：
@@ -27,14 +31,17 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **明日 15:30 复验**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换日志（补几只/耗时）。
+1. **明日（11-19）15:30 复验**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换日志（补几只/耗时）。
 2. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
 3. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
 4. **子项目衔接观察**：:8081 用新 v0.9.0 面板跑一个交易日，确认状态机（queued_rq）、健康时效判据无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
-5. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
+5. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
+6. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
 
 ## 已知隐患
 
+- **`sse-starlette` 约束与 venv 漂移（2026-11-18 发现，未修）**：`pyproject.toml` 写 `sse-starlette>=2.0,<3`，但 nec venv 实装 **3.6.0**，且 `src/` 里**零引用**（疑似废弃依赖）。后果：在 nec 上跑 `pip install -e .`（或 `-e ".[dev]"`）会把它降到 2.4.1 并重装本包——**生产只单独装测试插件，别用 `-e`**。清理方向：确认无用后删依赖或放宽上限，需单独一批。
+- **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。
 - **nec CPU 老（无 sse4.2/popcnt，不支持 x86-64-v2）**：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 被钉住；`pip install -U` 任何含二进制的依赖前先验证 import（新 numpy/duckdb wheel 直接 illegal instruction core dump）。
 - **共用工作树干扰已定规（2026-10-28 实录）**：母方 deploy 中途主工作树被切分支致输出错乱。现行规程：主工作树归母方、Qoder 独立 worktree（Issue #9 指引在册）、母方验收部署在隔离克隆（`%TEMP%\opencode\sd-accept`）；**deploy 运行期间任何一方不得切分支/改工作区**。
@@ -59,6 +66,7 @@
 - **nec 独立版框架状态与账本曾脱节（2026-11-12 修复）**：`portfolio.state` 停在 11-06（2 仓 vs 账本 8 仓）。修复用 `ledger reset-state --only rq_session_state`；若再出现 `InitPositionError`，同样处置。
 
 ## 历史交接区（追加，不删）
+- 2026-11-18 门禁加固：pytest-timeout 单条用例超时（挂起报出用例名，`5ef42f8`）；`[project.optional-dependencies].dev` 入册；顺手修 iteration-log 两处历史编辑残留（`<tool_call>` 文本 + 重复段落）
 - 2026-10-30 数据来源收口日（批9–批12 四批验收：温度计回填/申万扩图/季报披露日/北交所接入/判败加固；F2 覆盖层上线首跑 regime=risk_off；北交所 321 只价格回填；三次 gate 拦截教训三条；gate 1063→1124）
 - 2026-10-29 员工批1-4 全量验收合入（N1-N4/N19-N22/N17-N18/T1 共 10 commit）+ 用户四决策落地（U9-A 双拉三列 / N5① 门修活 / N8① pe_ttm 落列 / P0-3b）+ 假门清理；gate 875→907；协作规程更新（独立 worktree）
 - 2026-10-28 生产迁移 Pi→nec（gzip 压缩流搬 2.5G 库；nec venv 老 CPU 适配 gate 1115 等价；Pi 服务 stop+disable、母库冻结副本留子项目；gate 867→873）
