@@ -3,7 +3,17 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-18 深夜：门禁加单条用例超时；v2.2.0 线上运行中）
+## 最后状态（2026-11-19 凌晨：no_data 归因器修活；门禁加单条用例超时；v2.2.0 线上运行中）
+
+- **`audit_no_data` 按任务语义归类（`ccbde24`，main）**：生产库 3209 条 no_data 里 **3193 条 unattributed** 全部是"有行情也有财务"，按形态永远分不出来。改为看 `backfill_progress.task`：
+  - `price_depth` + 有行情 → **`no_early_history`**（2911 条）：早段窗口取不到更早行情（上市晚于目标起点/源无早段），限流会记 partial 重试。
+  - 财务三任务（`em_deep_gap`/`em_full_gap`/`interest_coverage_backfill`）+ 有行情有财务 → **`financial_partial`**（282 条）：目标字段上游不提供。
+  - 未登记任务仍 `unattributed` → **exit 1 不变**（fail-closed）。
+  - 验证：真实库 **unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；全量 gate 母 **1502 passed**（基线 1495→1502）。
+- **muse 分支审查（`origin/muse/stock-dashboard-fixes`，2 commit，均未合）**：
+  - `fe4bfbd`（加"有行情缺财务"桶）**不改**：真实库 **0 命中**，退出码仍 1；它引用的"192 只"是 `coverage_gaps()` 里批10-c 的跨库缺口数（今天为 0），不是 no_data 计数。
+  - `58ac76d`（`TradingBridge` CWD 错位拒绝建空库）**逻辑有效**（实测旧代码静默建 61KB 空库、新代码报错不落盘、正确 CWD 与全新安装不受影响），但改的是 vendored `paper_trading/`，按协议只能走上游 issue + tag；当前 :8081 用绝对路径、:8080 CWD 正确、cron 均 `cd` 在先，无现网暴露。
+  - 附带实证：配置读失败时 `TradingBridge` **静默回退默认参数**（cash 100000 → 1000000），比空库更危险，待上游评估。
 
 - **门禁加固（`5ef42f8`，已在 main 与 nec 双树）**：`scripts/gate.sh` 装上 `pytest-timeout` 后，母/vendor 套件都带 `--timeout=180`（`GATE_TEST_TIMEOUT` 可调），**挂起会报出用例名**而不是只报"卡在 96%"；插件缺失自动降级为整批 600s 兜底并提示。`pyproject.toml` 新增 `[project.optional-dependencies].dev`（pytest / xdist / timeout）记录测试期依赖，**不进运行时**。生产 venv 已装 pytest-timeout 2.4.0（pytest 9.2.0 不变）。
   - 验证：挂起样例 `--timeout=2` → 2.04s 失败并点名用例；`/home/nec/sd-verify` @ `5ef42f8` 全量 gate rc=0：母 **1495 passed / 369.34s**、vendor **886 passed / 13 skipped / 154.07s**，合计 523s。
@@ -31,10 +41,11 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **明日（11-19）15:30 复验**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换日志（补几只/耗时）。
-2. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
-3. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
-4. **子项目衔接观察**：:8081 用新 v0.9.0 面板跑一个交易日，确认状态机（queued_rq）、健康时效判据无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
+1. **今日（11-19）15:30 复验**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换日志（补几只/耗时）。
+2. **给上游提 issue（两条，不写母仓代码）**：① `TradingBridge` CWD 错位守卫 + `load_config` 静默回退默认配置（附 muse 补丁与三场景实测）；② `test_minute_supply_t59` 两条用例依赖墙钟，应注入 `now`。
+3. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
+4. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
+5. **子项目衔接观察**：:8081 用新 v0.9.0 面板跑一个交易日，确认状态机（queued_rq）、健康时效判据无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
 5. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
 6. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
 
@@ -49,7 +60,8 @@
 - **deploy 窗口纪律（2026-10-28/29 实录）**：**15:30–19:00 禁止部署重启**——两次在流水线运行窗口内部署把当日选股打断重跑（无数据损失但拖到 ~19:15）。部署排 15:30 前或 19:00 后。
 - **上游 EM 接口对产线 IP 会整天 RemoteDisconnected**（2026-10-30/11-03 实录）：K 线增量整天 0 行、靠 F2 覆盖层兜住广度；增量次日自愈。腾讯行情批查对北交所 920 号段出数正常（批13-b 已接），但**腾讯当日 bar 发布晚于 15:30**（11-03 实录：15:36 拉不到当日、17:00 已有）→ EM 挂掉的日子增量可能零新增，次日 start_date=latest 自愈（已知行为，不修）。
 - **EM 依赖补数待解封**：301139（10-30 备源救回后 qfq 锚点轮再失败）与 920305（partial）等 push2his 解封后 `--source akshare` 手动补。
-- **BJ 财务复扫与归因器新桶**：321 只中 128 已有年报、其余待二次放行/上游真无；`audit_no_data` 的规则集还没有"有行情缺财务"桶（192 只暂列 unattributed 触发 exit 1——机器断言在正确工作，桶要加）。
+- ~~BJ 财务复扫与归因器新桶~~：**2026-11-19 已解除**——归因器改按任务语义归类后，生产库 `unattributed` 3209→**0**、退出码 0（2911 `no_early_history` + 282 `financial_partial`）。"有行情缺财务"是 `coverage_gaps()` 的**跨库缺口**（当前 0 只），不是 no_data 记录，塞进分类会让 100% 归因变成假话。BJ 财务 321/321 早在批12 已清零。
+- **vendor 两条用例依赖墙钟（2026-11-19 凌晨实录）**：`test_minute_supply_t59.py` 的 `test_intraday_collect_logs_each_symptom_once` 与 `test_intraday_collect_writes_minute_heartbeat` 依赖 `completed_slots(now)` 非空——**00:50 跑必红**（当日尚无已完成时段，`needed=false`，假源根本没被调用），**22:55 跑必绿**（当日 48 个时段都已过）。同代码同命令，差别只在时刻，vendor 计数会 884/886 波动；不是母侧回归，需上游给测试注入 `now`（issue 待提）。
 - **close_adj 修复仍手动**：增量已由 U9-A 供给、回填由 Sina 三列，但修残缺仍靠手动 `fix_close_adj_nulls`（无调度）。
 - ~~既有 vendor 用例失败待查~~：**2026-11-17 已消除**——v0.9.0 上游修复后 vendor 套件 886 passed / 0 failed（含此前失败的 `test_raw_feed` 与 `test_minute_supply_t59`），vendor 基线升到 886。
 - **生产纪律提请（用户协调，未决）**：母仓库目录（/home/nec/stock-dashboard）不得跑非母项目进程（Hermes agent 的旧 main.py 曾抢占 9527 致母服务重启循环）；端口 9527/8081/8080 各归其主。

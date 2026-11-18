@@ -100,3 +100,24 @@ python scripts/audit_no_data.py --verify-live --format md
 要点：年报行 93,309 里**五字段全 NULL 只有 205 行（0.22%）**，且全部落在 2016 年以前
 （2016–2025 每年均为 0）——即"整份资产负债表没落地"的行极少且集中在历史深度外，
 `goodwill` 的低覆盖不是这一类。
+
+## 六、2026-11-19 复核：归因器改按任务语义，unattributed 归零
+
+上面的快照是 10-30 的结论；此后回填继续跑，`backfill_progress` 涨到 **3209 条 no_data**，
+其中 **3193 条落进 `unattributed` → 体检常年 exit 1**。形态清一色是"有行情也有财务"
+（`price_depth` 2911 / `em_deep_gap` 129 / `interest_coverage_backfill` 105 / `em_full_gap` 48），
+按数据形态分不出来——原来的判据只看"库内有没有行情/财务"，而 no_data 的**语义由任务决定**。
+
+修复后（`ccbde24`，判据看 `backfill_progress.task`）：
+
+| 桶 | 只数 | 语义 |
+|---|---:|---|
+| `no_early_history` | 2911 | `price_depth`：早段窗口无更早行情（上市晚于目标起点或源无早段；限流记 `partial` 重试） |
+| `financial_partial` | 282 | 财务三任务：目标字段上游不提供（有财务、字段缺） |
+| `delisted` | 10 | 名称含"退" |
+| `ambiguous` | 6 | 行情 0 行但有财务，需 `--verify-live` |
+| `unattributed` | **0** | 退出码 0 |
+
+同时明确：**"有行情缺财务"不是 no_data 桶**，它是 `coverage_gaps()` 的跨库缺口
+（2026-11-19 实测 0 只），混进分类会让"100% 归因"变成假话。未登记的新任务仍落
+`unattributed` 并 exit 1——断言保留。

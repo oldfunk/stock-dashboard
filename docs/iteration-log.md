@@ -165,6 +165,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-19（no_data 归因器修活：按任务语义归类，unattributed 3193→0；muse 分支审查）
+
+- **`audit_no_data` 改按任务语义归类（`ccbde24`）**：生产库 3209 条 no_data 里 **3193 条 unattributed**，形态清一色"有行情也有财务"（`price_depth` 2911 / `em_deep_gap` 129 / `interest_coverage_backfill` 105 / `em_full_gap` 48），按数据形态永远分不出来，而 `backfill_progress.task` 直接说明语义。新增两桶：`no_early_history`（price_depth + 有行情 = 早段窗口无更早行情，限流会记 partial 重试）、`financial_partial`（财务三任务 + 有行情有财务 = 目标字段上游不提供）。**未登记任务仍 `unattributed` → exit 1**，断言未被稀释。真实库实测：**unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；全量 gate 母 **1502 passed**（基线 1495 → 1502）。
+- **muse 分支审查（`origin/muse/stock-dashboard-fixes`，2 commit，均未合）**：① `fe4bfbd` 加"有行情缺财务"桶——**真实库 0 命中**、退出码仍 1；它引用的"192 只"是 `coverage_gaps()` 里批10-c 的**跨库缺口**数（今天为 0 只），不是 no_data 计数；桶名还会与 `coverage_gaps()` 同名撞车、证据文案把价格任务的 no_data 当成财务结论。② `58ac76d` `TradingBridge` CWD 错位拒绝建空库——**逻辑有效**（实测：旧代码在错 CWD 静默建 61KB 空库、`cash` 走默认 1000000；新代码报 `FileNotFoundError` 且不落盘；正确 CWD 与全新安装不受影响），但改的是 vendored `paper_trading/`，按协议只能走上游 issue + tag；且**当前无现网暴露**（:8081 绝对路径、:8080 CWD 正确、9 条 cron 全部 `cd` 在先）。③ 附带实证（muse 只提了一句）：配置读不到时 `TradingBridge` **静默回退默认参数**（cash 100000 → 1000000），比空库更危险，待上游评估。
+- **vendor 两条用例依赖墙钟（发现并定性）**：夜间 gate 出现 `test_minute_supply_t59` 两例失败（vendor 884），复跑与源码核对后确认：用例依赖 `completed_slots(now)` 非空，**00:50 跑必红**（当日 0 个已完成时段，`needed=false`，假源没被调用）、**22:55 跑必绿**（48 个时段），同代码同命令只差时刻。非母侧回归；vendor 基线仍记 886，不降；需上游给测试注入 `now`。
+
 ### 2026-11-18（门禁加固：pytest-timeout 单条用例超时，挂起能报出用例名）
 
 - **背景**：11-17 部署时母套件卡在 96% 吃满 600s，整条 gate 只能报"超时"——整批超时只知道进度条，不知道是哪条用例。
