@@ -3,7 +3,12 @@
 > 账本 `iteration-log.md` 是真相源，本文件是下一班开工的 10 行速览。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-19 凌晨：no_data 归因器修活；门禁加单条用例超时；v2.2.0 线上运行中）
+## 最后状态（2026-11-19 凌晨：母侧纸盘恢复运行；no_data 归因器修活；v2.2.0 线上运行中）
+
+- **母侧子项目（:8081）AI 交易员断档三周，已恢复（`751bb7f`）**：用户观察"10 月底后没跑过计划和交易"，取证确认——`agent_plans` 最后一条 **10-26 一直 pending**、`op_log` 最后一条 **10-23 16:47**、`fills` 停在 10-08；nec crontab 里只剩独立版 :8080 的任务。**根因**：母侧运行时配置只存在于 crontab，10-23 后一次重写把三条任务全丢了，面板仍 200 所以完全静默。
+  - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"。
+  - 路径/口径：CWD=`paper_trading/`、母 `.venv`、`--scheme mother --pool-from screening --pool-limit 15`；`calendar sync` 已跑（母库日历覆盖到 2026-12-31）；LLM 连通性实测（`llm models` 与一次 `llm ask` 均 ok）。
+  - **待观察**：今日 16:30–18:30 应生成 11-20 的 pending 计划；明日 09:30–10:00 应执行。验收命令见 `docs/architecture.md` §9.7。
 
 - **`audit_no_data` 按任务语义归类（`ccbde24`，main）**：生产库 3209 条 no_data 里 **3193 条 unattributed** 全部是"有行情也有财务"，按形态永远分不出来。改为看 `backfill_progress.task`：
   - `price_depth` + 有行情 → **`no_early_history`**（2911 条）：早段窗口取不到更早行情（上市晚于目标起点/源无早段），限流会记 partial 重试。
@@ -42,18 +47,20 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **今日（11-19）15:30 复验**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换日志（补几只/耗时）。
+1. **今日（11-19）两个窗口观察母侧纸盘**：16:30–18:30 应出现 11-20 的 pending 计划（`sqlite3 paper_trading/paper_account.db "select id,plan_date,status from agent_plans order by id desc limit 3"`）；次日 09:30–10:00 应执行并转 `done`。`dash` 面板 `/api/status` 的 pending 计划、`logs/agent.log` 同步看。
 2. **上游跟踪（已提 issue `paper-trading#3`）**：① `TradingBridge` CWD 守卫 + `load_config` 静默回退；② `test_minute_supply_t59` 两例依赖墙钟。母仓不落地，等上游 tag。
-3. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
-4. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
-5. **子项目衔接观察**：:8081 用新 v0.9.0 面板跑一个交易日，确认状态机（queued_rq）、健康时效判据无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
-5. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
-6. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
+3. **今日 15:30 复验（母项目流水线）**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换（补几只/耗时）。
+4. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
+5. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
+6. **子项目衔接观察**：:8081 跑一个完整交易日（计划→开盘执行→NAV），确认 `queued_rq`/健康时效无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
+7. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
+8. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
 
 ## 已知隐患
 
 - **生产树有 11-05 的旧应用残留（未跟踪，2026-11-18 清点）**：`main.py`（旧 Hermes 入口，跑起来会抢 9527）、`src/app.py`、`src/database.py`、`templates/`、`.venvdeb/`、`nightly-report.md`、`paper_trading/data.db.pre-t35.bak`。它们不挡 `git pull`，但**绝不能被启动**；清理需用户确认（建议 `mv` 到 `/home/nec/attic/` 而非删除）。
 - **`sse-starlette` 约束与 venv 漂移（2026-11-18 发现，未修）**：`pyproject.toml` 写 `sse-starlette>=2.0,<3`，但 nec venv 实装 **3.6.0**，且 `src/` 里**零引用**（疑似废弃依赖）。后果：在 nec 上跑 `pip install -e .`（或 `-e ".[dev]"`）会把它降到 2.4.1 并重装本包——**生产只单独装测试插件，别用 `-e`**。清理方向：确认无用后删依赖或放宽上限，需单独一批。
+- **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把三条任务写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。
 - **nec CPU 老（无 sse4.2/popcnt，不支持 x86-64-v2）**：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 被钉住；`pip install -U` 任何含二进制的依赖前先验证 import（新 numpy/duckdb wheel 直接 illegal instruction core dump）。

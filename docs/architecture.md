@@ -258,3 +258,24 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 - `/api/data/research/hypotheses|experiments|decisions|market_states`
 - 原则：只读、稳定 JSON 契约、缺失不抛错（子项目可静默回退）。
 
+### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补）
+
+母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条 cron** 驱动，
+缺一条就会静默停摆（2026-10-23→11-19 实证：面板 200，`agent_plans` 停在 10-26
+pending、三周零流水）。任务、命令与路径的真相源是
+`scripts/install_mother_agent_cron.sh`（幂等安装 + `--check` 核对），三条任务：
+
+| 时间 | 任务 | 作用 |
+|---|---|---|
+| 工作日 09:30–10:00 每 5 分 | `agent tick` | 只执行当天 pending 计划；无计划静默，不临时问模型 |
+| 工作日 16:30–18:30 每 5 分 | `agent tick` | 数据定稿到今天后做**下一交易日**计划，成功后幂等停止 |
+| 周六 10:00 | `calendar sync` | 交易日历（母库 `trading_calendar` 优先），未覆盖的日期 fail-closed |
+
+- 命令固定 `--scheme mother --pool-from screening --pool-limit 15`，CWD 必须是
+  `paper_trading/`（相对路径 `data.db`/`paper_account.db`/`var/`/`logs/` 都相对 CWD）。
+- `engine.enabled=false` 是发布默认：母侧路线是"收盘计划 + 开盘执行"一日一决策，
+  不跑盘中规则引擎/条件单成交；独立版 :8080 的 cron 与此互不影响。
+- 两条实例共用母库只读接口，但**账户、DB、var、日志各自独立**；改动任一侧不得改另一侧。
+- 验收：`bash scripts/install_mother_agent_cron.sh --check` 退出 0；`logs/agent.log`
+  在计划窗口出现 tick 流水；`agent_plans` 出现目标日为下一交易日的 pending 行。
+
