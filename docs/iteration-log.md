@@ -171,6 +171,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **muse 分支审查（`origin/muse/stock-dashboard-fixes`，2 commit，均未合）**：① `fe4bfbd` 加"有行情缺财务"桶——**真实库 0 命中**、退出码仍 1；它引用的"192 只"是 `coverage_gaps()` 里批10-c 的**跨库缺口**数（今天为 0 只），不是 no_data 计数；桶名还会与 `coverage_gaps()` 同名撞车、证据文案把价格任务的 no_data 当成财务结论。② `58ac76d` `TradingBridge` CWD 错位拒绝建空库——**逻辑有效**（实测：旧代码在错 CWD 静默建 61KB 空库、`cash` 走默认 1000000；新代码报 `FileNotFoundError` 且不落盘；正确 CWD 与全新安装不受影响），但改的是 vendored `paper_trading/`，按协议只能走上游 issue + tag；且**当前无现网暴露**（:8081 绝对路径、:8080 CWD 正确、9 条 cron 全部 `cd` 在先）。③ 附带实证（muse 只提了一句）：配置读不到时 `TradingBridge` **静默回退默认参数**（cash 100000 → 1000000），比空库更危险，待上游评估。
 - **vendor 两条用例依赖墙钟（发现并定性）**：夜间 gate 出现 `test_minute_supply_t59` 两例失败（vendor 884），复跑与源码核对后确认：用例依赖 `completed_slots(now)` 非空，**00:50 跑必红**（当日 0 个已完成时段，`needed=false`，假源没被调用）、**22:55 跑必绿**（48 个时段），同代码同命令只差时刻。非母侧回归；vendor 基线仍记 886，不降；需上游给测试注入 `now`。
 
+- **事件收尾**：`origin/muse/stock-dashboard-fixes` 已删除（其代码 **0 行合入**，证据留在本账本与 handoff）；两条 vendor 发现问题 + 一条测试墙钟问题转上游 issue [paper-trading#3](https://github.com/oldfunk/paper-trading/issues/3)，附实测输出、提案补丁与"现网无暴露"的边界说明。
+
 ### 2026-11-18（门禁加固：pytest-timeout 单条用例超时，挂起能报出用例名）
 
 - **背景**：11-17 部署时母套件卡在 96% 吃满 600s，整条 gate 只能报"超时"——整批超时只知道进度条，不知道是哪条用例。
