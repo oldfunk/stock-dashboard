@@ -40,6 +40,7 @@
 
 ## 已知隐患
 
+- **生产树有 11-05 的旧应用残留（未跟踪，2026-11-18 清点）**：`main.py`（旧 Hermes 入口，跑起来会抢 9527）、`src/app.py`、`src/database.py`、`templates/`、`.venvdeb/`、`nightly-report.md`、`paper_trading/data.db.pre-t35.bak`。它们不挡 `git pull`，但**绝不能被启动**；清理需用户确认（建议 `mv` 到 `/home/nec/attic/` 而非删除）。
 - **`sse-starlette` 约束与 venv 漂移（2026-11-18 发现，未修）**：`pyproject.toml` 写 `sse-starlette>=2.0,<3`，但 nec venv 实装 **3.6.0**，且 `src/` 里**零引用**（疑似废弃依赖）。后果：在 nec 上跑 `pip install -e .`（或 `-e ".[dev]"`）会把它降到 2.4.1 并重装本包——**生产只单独装测试插件，别用 `-e`**。清理方向：确认无用后删依赖或放宽上限，需单独一批。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。
