@@ -4,12 +4,13 @@
 > 文档分类（真相源 / 规程 / 设计 / 快照报告）见 `docs/README.md`——引用报告里的数字前先确认它是哪一类。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-19 晚：纸盘恢复并产出第一份真实计划；母项目流水线正常；v2.2.0 线上运行中）
+## 最后状态（2026-11-19 深夜：纸盘已按母策略重生成计划；母项目流水线正常；v2.2.0 线上运行中）
 
 - **11-19 运行日复核（22:13）**：母项目 run **867** `completed`（15:30:17–15:42:00；5527 → 817 候选 → 20 只，ROE 覆盖 816/817 过闸）；AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06），数字抽检 13 只命中（约 0.65 处/只）、自洽检查 1 例（002648 moat≤2 给 BUY）；kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。
 - **母方案策略纠正（vendored 热修，已部署 :8081；上游 [paper-trading#6](https://github.com/oldfunk/paper-trading/pull/6)）**：发现 plan #15 买入 **601899**，而母项目自己的分析是 **HOLD、买入区间 8-12、现价 23.88**——根因是 `screening_detail()` 根本没查 `ai_trade_strategy`（上下文看不到母策略），参考信号仍是 MA5/20。修复：母方案参考信号换成母策略（signal/buy_zone/stop/评分）+ `MOTHER_RULES`；`_execute_actions` 加**买入硬闸门**（缺分析/过期/非 BUY/超区间即拒，拒因进 `ai:decide`，fail-closed）。
-  - 验证：22 条单测；隔离副本复演明天执行 → `601899 @23.88` 被"母策略信号=HOLD"拒绝、`002558 @18.27`（BUY + 18-22 区间内）放行，无新委托；vendor gate **908**（基线 886→908）。
-  - **plan #15 仍是旧策略产物**：明天 09:30 执行时买入会被新闸门拒绝（预期行为，留审计）；下一份计划（11-20 16:30 生成、11-21 执行）才完全由母策略驱动。
+  - 验证：32 条单测；隔离副本复演 → 旧 plan #15 的买入被"母策略信号=HOLD"拒绝、AVOID 持仓 002192 被强制卖出；**新 plan #18**（卖 002192 + 买 000426）两笔都成交（卖 200@43.15、买 100@19.82，T+1/费用正确）；vendor gate **918**（基线 886→918）。
+  - **计划已按母策略重生成**：11-19 23:45 用 `agent tick --force` 生成 **plan #18**（`pending`，11-20）；#15/#16/#17 均 `superseded`；计划 JSON 含 `actions_rejected` 与 AVOID 强制卖出，明天 09:30 执行（`check_paper_agent.py` 绿）。
+  - **新发现（未修，记录在案）**：母侧 `nav_history` 从 10-22 起没有收盘 NAV——`_snapshot_close_nav` 要求当日 **raw** 收盘，而母侧 `data.db.daily_bars_raw` 为空（raw 由独立版的 `data fetch-raw` cron 供），`daily_close` 虽有当日不复权收盘但没有 integration 接口。要么补 raw 同步，要么加 `daily_close` 契约；**不能拿 qfq 价冒充 raw**。
 - **母侧纸盘第一份真实计划（#15）**：16:31 首跳撞 zhipu **429（code 1302）**、16:36 重试成功；`plan_date=2026-11-20`、`asof=2026-11-19`、20 只标的，动作 = **买 601899 紫金矿业 100 股** + 持有盐湖/融捷。体检脚本绿；明天 09:30–10:00 执行。
   - **新发现（已提上游 [#5](https://github.com/oldfunk/paper-trading/issues/5)）**：`asof` 取所有标的的 **max**，20 只里只有 3 只有 11-19 K 线，买入标的 601899 的末根是 11-18——决策实际用的是昨天收盘，计划却标记为今天。执行侧只有 30% 偏离闸，防不住"差一天"。
 
@@ -75,6 +76,7 @@
 - ~~生产树 11-05 的旧应用残留~~：**2026-11-19 已清出**——`main.py`/`src/app.py`/`src/database.py`/`templates/`/`.venvdeb/`/`nightly-report.md`/`paper_trading/data.db.pre-t35.bak` 全部 `mv` 到 `/home/nec/attic/20261119-old-hermes/`，附 `MANIFEST.txt`（sha256 + 原路径，可逆）。移动前确认：无进程占用、全仓零引用、根 `templates/` 不是 `src/web/templates`。生产树现在 `git status` 干净。
 - ~~`sse-starlette` 约束与 venv 漂移~~：**2026-11-19 已解决**——全仓（src/tests/scripts/vendor）零引用，已从 `pyproject.toml` 删除；生产 venv 里已装的 3.6.0 不动（没有代码引用）。`pip install -e .` 不会再因 `<3` 约束降级它。
 - **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把三条任务写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
+- **母侧 `nav_history` 自 10-22 起缺收盘 NAV（2026-11-19 发现，未修）**：`_snapshot_close_nav` 只认当日 **raw** 收盘，而母侧 `daily_bars_raw` 为空（raw 由独立版 `data fetch-raw` cron 供），所以计划窗口每次都跳过；`daily_close` 有当日不复权收盘但缺 integration 接口。修法二选一（补 raw 同步 / 加 `daily_close` 契约），需单测 + 口径说明；**不得用 qfq 价冒充 raw**。影响：面板净值曲线从 10-22 起断档，`/api/status` 的实时市值仍正常。
 - **计划新鲜度被 `asof=max` 掩盖（2026-11-19 实录，上游 #5）**：计划 #15 的 20 只标的里只有 **3 只** 有当日 K 线，买入标的 601899 的末根是 11-18，但 `asof` 取所有标的的最大值 → 计划仍以"今天"落库。根因一半在数据（腾讯当日 bar 晚于 15:43 的拉取窗口），一半在判据（`max` 而非按标的分层）。当前缓解：次日 `start_date=latest` 自愈 + 执行侧 30% 偏离闸 + 仓位小（100 股）；**不要把它当成"数据已经是最新"的证据**。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。
