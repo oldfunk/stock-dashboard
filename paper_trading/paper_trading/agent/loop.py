@@ -250,6 +250,37 @@ class AgentTrader:
         return buy_violation(sym, price, refs, asof=asof,
                              today=datetime.now().date().isoformat())
 
+    def _mother_avoid_sells(self, *, positions: dict, actions: list) -> list[dict]:
+        """母方案：持仓 signal=AVOID 且动作里没有卖出的，补一条全量卖出。
+
+        2026-11-19 用户口径："用母项目的策略"——AVOID 的持仓不能靠模型自愿离场。
+        没有母分析时返回空（不凭猜测卖）；T+1 可用为 0 时也跳过（交给解冻后的下一轮）。
+        """
+        if not self._is_mother():
+            return []
+        refs, _ = self._mother_refs()
+        have_sell = {str(a.get("symbol")) for a in (actions or [])
+                     if isinstance(a, dict)
+                     and str(a.get("action", "")).lower() == "sell"}
+        out: list[dict] = []
+        for sym, p in (positions or {}).items():
+            if str(sym) in have_sell:
+                continue
+            r = refs.get(str(sym).zfill(6)) or {}
+            if str(r.get("signal") or "").upper() != "AVOID":
+                continue
+            vol = int(getattr(p, "available_volume", 0) or 0)
+            if vol <= 0:
+                continue
+            out.append({
+                "action": "sell", "symbol": str(sym), "volume": vol,
+                "reason": "母策略 AVOID：代码层强制离场",
+                "basis": ["screening.ai_trade_strategy.signal"],
+                "thesis": "母项目最新一轮分析为 AVOID，按母策略纪律离场",
+                "risk_stop": None, "confidence": 100, "expected_hold_days": 0,
+            })
+        return out
+
     def _ref_text(self, all_bars: dict, symbols: list[str]) -> str:
         """参考信号：母方案用母策略（signal/区间/止损），其他方案用 MA。"""
         if self._is_mother():
@@ -686,7 +717,13 @@ class AgentTrader:
                 a["price_source"] = "last_close"
             except (TypeError, ValueError):
                 continue
-        # 计划是给“下一个交易日开盘”用的；plan_date 已在问模型前算好。
+        # 母策略纪律（2026-11-19）：持仓 signal=AVOID 而计划没给卖出的，补一条全量卖出。
+        # 写进计划 JSON，执行与审计都看得到；模型说 hold 也不能绕过母策略。
+        positions = {p.symbol: p for p in b.broker.get_all_positions()}
+        avoid_sells = self._mother_avoid_sells(positions=positions, actions=actions)
+        if avoid_sells:
+            actions = actions + avoid_sells
+        # 计划是给"下一个交易日开盘"用的；plan_date 已在问模型前算好。
         pid = b.broker.save_plan(plan_date, symbols,
                                  {"actions": actions, "summary": summary, "asof": asof,
                                   "conditions": conditions,
@@ -1086,7 +1123,10 @@ class AgentTrader:
         allow_sell = set(positions)
         decided: list[dict] = []
         n_orders = 0
-        all_actions = actions if isinstance(actions, list) else []
+        all_actions = list(actions) if isinstance(actions, list) else []
+        # 执行层补救（2026-11-19）：旧计划或模型漏掉的 AVOID 持仓，在这里补卖。
+        all_actions = all_actions + self._mother_avoid_sells(
+            positions=positions, actions=all_actions)
         n_cap = self.cfg.max_orders_per_run + 5
         for idx, a in enumerate(all_actions):
             if idx >= n_cap:

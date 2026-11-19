@@ -27,6 +27,8 @@ REFS = {
                "target_price": "", "score": 84.5, "ai_failed": False},
     "000792": {"signal": "HOLD", "buy_zone": "18-20元", "stop_loss": "跌破15元",
                "target_price": "", "score": 96.2, "ai_failed": False},
+    "002192": {"signal": "AVOID", "buy_zone": "低于15元", "stop_loss": "10元",
+               "target_price": "", "score": 95.0, "ai_failed": False},
     "920000": {"signal": "", "buy_zone": "", "stop_loss": "",
                "target_price": "", "score": 0, "ai_failed": True},
 }
@@ -136,3 +138,55 @@ def test_mother_block_only_for_mother_scheme():
 
     t.bridge = SimpleNamespace(scheme=SimpleNamespace(source="general"))
     assert t._mother_block("601899", 23.88) is None
+
+
+# ── 持仓 AVOID 强制离场 ──────────────────────────────────────────────────
+
+def _pos(sym, avail):
+    return SimpleNamespace(symbol=sym, available_volume=avail)
+
+
+def _mother_trader():
+    t = AgentTrader.__new__(AgentTrader)
+    t.bridge = SimpleNamespace(scheme=SimpleNamespace(source="mother"))
+    t._mother_refs = lambda: (REFS, "2026-11-19")
+    return t
+
+
+def test_avoid_holding_gets_forced_sell():
+    """002192 母分析 AVOID：即使模型写 hold，代码层也补全量卖出。"""
+    out = _mother_trader()._mother_avoid_sells(
+        positions={"002192": _pos("002192", 200),
+                   "000792": _pos("000792", 400)},
+        actions=[{"action": "hold", "symbol": "000792"}])
+    assert len(out) == 1
+    assert out[0]["symbol"] == "002192"
+    assert out[0]["volume"] == 200
+    assert "AVOID" in out[0]["reason"]
+
+
+def test_existing_sell_is_not_duplicated():
+    out = _mother_trader()._mother_avoid_sells(
+        positions={"002192": _pos("002192", 200)},
+        actions=[{"action": "sell", "symbol": "002192", "volume": 200}])
+    assert out == []
+
+
+def test_t1_zero_available_is_skipped():
+    out = _mother_trader()._mother_avoid_sells(
+        positions={"002192": _pos("002192", 0)}, actions=[])
+    assert out == []
+
+
+def test_hold_signal_does_not_force_sell():
+    out = _mother_trader()._mother_avoid_sells(
+        positions={"000792": _pos("000792", 400)}, actions=[])
+    assert out == []
+
+
+def test_general_scheme_never_forces_sell():
+    t = AgentTrader.__new__(AgentTrader)
+    t.bridge = SimpleNamespace(scheme=SimpleNamespace(source="general"))
+    t._mother_refs = lambda: (REFS, "2026-11-19")
+    assert t._mother_avoid_sells(
+        positions={"002192": _pos("002192", 200)}, actions=[]) == []
