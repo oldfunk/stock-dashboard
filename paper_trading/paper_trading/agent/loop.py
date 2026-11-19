@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from paper_trading.cli import TradingBridge
 
-from paper_trading.agent.prompts import TRADER_SYSTEM, USER_TMPL
+from paper_trading.agent.prompts import MOTHER_RULES, TRADER_SYSTEM, USER_TMPL
 from paper_trading.agent.runtime import due_action
 from paper_trading.utils.market_time import in_open_exec_window
 from paper_trading.utils.trading_calendar import (
@@ -227,6 +227,41 @@ class AgentTrader:
             txt += ("\n用户自定义交易指令（最高优先级，风控与合规除外）：\n"
                     + s.instruction.strip()[:2000])
         return txt
+
+    def _is_mother(self) -> bool:
+        """当前方案是否母项目价值策略（决定参考信号与买入闸门）。"""
+        return str(getattr(self.bridge.scheme, "source", "")) == "mother"
+
+    def _mother_refs(self) -> tuple[dict[str, dict], Optional[str]]:
+        """母筛选最新一轮的策略引用 -> ({code: refs}, asof)。"""
+        from paper_trading.agent.mother_strategy import refs_from_screening
+        from paper_trading.integration.mother import screening_detail
+
+        block = screening_detail() or {}
+        return refs_from_screening(block), block.get("asof")
+
+    def _mother_block(self, sym: str, price: float) -> Optional[str]:
+        """买入闸门：母策略视角下不合规就返回原因（非母方案恒 None）。"""
+        if not self._is_mother():
+            return None
+        from paper_trading.agent.mother_strategy import buy_violation
+
+        refs, asof = self._mother_refs()
+        return buy_violation(sym, price, refs, asof=asof,
+                             today=datetime.now().date().isoformat())
+
+    def _ref_text(self, all_bars: dict, symbols: list[str]) -> str:
+        """参考信号：母方案用母策略（signal/区间/止损），其他方案用 MA。"""
+        if self._is_mother():
+            from paper_trading.agent.mother_strategy import ref_text
+
+            refs, _ = self._mother_refs()
+            return ref_text(refs, symbols)
+        ref = self.bridge.strategy.generate_signals(all_bars)
+        return "无" if not ref else "、".join(
+            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}"
+            f"{s.volume}股@{s.price:.2f}"
+            for s in ref.values())
 
     def _cand_txt(self, candidates: Optional[list]) -> str:
         if not candidates:
@@ -592,10 +627,7 @@ class AgentTrader:
         if require_today:
             self._snapshot_close_nav(symbols, base_now.date().isoformat())
 
-        ref = b.strategy.generate_signals(all_bars)
-        ref_txt = "无" if not ref else "、".join(
-            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}{s.volume}股@{s.price:.2f}"
-            for s in ref.values())
+        ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
@@ -614,6 +646,8 @@ class AgentTrader:
             min_ticket=int(self._engine_min_ticket()))
             + f"\n注意：当前为休盘，最新定稿数据截至 {asof}。"
               "你的决策将在下一个开盘执行。")
+        if self._is_mother():
+            system += MOTHER_RULES
         from paper_trading.llm import LLMError
 
         try:
@@ -867,10 +901,7 @@ class AgentTrader:
                 latest = b.price_map(symbols)
 
         # 5. 参考信号 + 上下文，问 LLM
-        ref = b.strategy.generate_signals(all_bars)
-        ref_txt = "无" if not ref else "、".join(
-            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}{s.volume}股@{s.price:.2f}"
-            for s in ref.values())
+        ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
@@ -892,6 +923,8 @@ class AgentTrader:
             system += ("\n本轮额外纳入以下 AI 自主提名标的（程序已校验为合法 A 股并补齐数据）："
                        + "、".join(f"{p.get('name') or p['symbol']}({p['symbol']})"
                                    for p in picks))
+        if self._is_mother():
+            system += MOTHER_RULES
         from paper_trading.llm import LLMError
 
         try:
@@ -1155,6 +1188,10 @@ class AgentTrader:
                 # "门禁静默关闭 = 同源自洽盲区"。无基准 = 拒单，不放行。
                 rec["status"] = ("拒绝：无独立基准价（bars/计划价均缺失），"
                                  "尺度门禁无法执行（fail-closed）")
+            elif act == "buy" and (why_mother := self._mother_block(sym, px)):
+                # 母策略闸门（2026-11-19）：signal 非 BUY / 现价不在买入区间 / 分析过期
+                # 一律拒绝。实测事故：计划买入 601899（母分析 HOLD、区间 8-12、现价 23.88）。
+                rec["status"] = f"拒绝：{why_mother}"
             elif vol * px > self.cfg.max_order_value:
                 rec["status"] = f"拒绝：超单笔上限{int(self.cfg.max_order_value)}元"
             elif n_orders >= self.cfg.max_orders_per_run:

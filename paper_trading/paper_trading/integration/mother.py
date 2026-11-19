@@ -802,7 +802,8 @@ def screening_detail(local_pool: Optional[list] = None,
                     return None
                 rows = [dict(r) for r in conn.execute(
                     """SELECT code, name, score, pe, pb, roe, reason, strategy_tags,
-                              dividend_yield, score_detail
+                              dividend_yield, score_detail, ai_trade_strategy,
+                              ai_failed
                        FROM screening_result WHERE run_id = ?
                        ORDER BY score DESC""", (run["run_id"],)).fetchall()]
                 return {"run_id": run["run_id"], "run_date": _as_date(run["run_date"]),
