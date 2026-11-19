@@ -717,15 +717,26 @@ class AgentTrader:
                 a["price_source"] = "last_close"
             except (TypeError, ValueError):
                 continue
-        # 母策略纪律（2026-11-19）：持仓 signal=AVOID 而计划没给卖出的，补一条全量卖出。
-        # 写进计划 JSON，执行与审计都看得到；模型说 hold 也不能绕过母策略。
-        positions = {p.symbol: p for p in b.broker.get_all_positions()}
-        avoid_sells = self._mother_avoid_sells(positions=positions, actions=actions)
-        if avoid_sells:
-            actions = actions + avoid_sells
+        # 母策略整备（2026-11-19）：违规买入进 actions_rejected；AVOID 持仓的 hold
+        # 换成全量卖出。执行层还有闸门兜底，这里保证"计划本身自洽"。
+        actions_rejected: list = []
+        if self._is_mother():
+            from paper_trading.agent.mother_strategy import clean_mother_actions
+
+            refs, ref_asof = self._mother_refs()
+            available = {p.symbol: int(getattr(p, "available_volume", 0) or 0)
+                         for p in b.broker.get_all_positions()}
+            actions, actions_rejected, forced = clean_mother_actions(
+                actions, refs, asof=ref_asof,
+                today=base_now.date().isoformat(), available=available)
+            if forced:
+                summary = (summary + "；母策略 AVOID 强制卖出：" + "、".join(forced))[:200]
+            if actions_rejected:
+                summary = (summary + f"；母策略拒绝买入 {len(actions_rejected)} 笔")[:200]
         # 计划是给"下一个交易日开盘"用的；plan_date 已在问模型前算好。
         pid = b.broker.save_plan(plan_date, symbols,
-                                 {"actions": actions, "summary": summary, "asof": asof,
+                                 {"actions": actions, "summary": summary,
+                                  "actions_rejected": actions_rejected, "asof": asof,
                                   "conditions": conditions,
                                   "conditions_rejected": conditions_rejected,
                                   "pool_source": pool_source,
@@ -1124,9 +1135,18 @@ class AgentTrader:
         decided: list[dict] = []
         n_orders = 0
         all_actions = list(actions) if isinstance(actions, list) else []
-        # 执行层补救（2026-11-19）：旧计划或模型漏掉的 AVOID 持仓，在这里补卖。
-        all_actions = all_actions + self._mother_avoid_sells(
-            positions=positions, actions=all_actions)
+        # 执行层补救（2026-11-19）：旧计划或模型漏掉的 AVOID 持仓，在这里补卖，
+        # 并去掉同标的的 hold（避免"持有 + 卖出"并列的审计噪音）。
+        forced_sells = self._mother_avoid_sells(positions=positions,
+                                                actions=all_actions)
+        if forced_sells:
+            _forced = {a["symbol"] for a in forced_sells}
+            all_actions = [
+                a for a in all_actions
+                if not (isinstance(a, dict)
+                        and str(a.get("action", "")).lower() == "hold"
+                        and str(a.get("symbol")) in _forced)
+            ] + forced_sells
         n_cap = self.cfg.max_orders_per_run + 5
         for idx, a in enumerate(all_actions):
             if idx >= n_cap:

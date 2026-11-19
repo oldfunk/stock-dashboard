@@ -190,3 +190,45 @@ def test_general_scheme_never_forces_sell():
     t._mother_refs = lambda: (REFS, "2026-11-19")
     assert t._mother_avoid_sells(
         positions={"002192": _pos("002192", 200)}, actions=[]) == []
+
+
+# ── 计划整备：过滤违规买入 + AVOID 持仓改卖 ──────────────────────────────
+
+from paper_trading.agent.mother_strategy import clean_mother_actions  # noqa: E402
+
+
+def test_clean_plan_rejects_hold_signal_buy():
+    clean, rejected, forced = clean_mother_actions(
+        [{"action": "buy", "symbol": "601899", "volume": 100, "price": 23.88}],
+        REFS, asof="2026-11-19", today="2026-11-19", available={})
+    assert clean == [] and forced == []
+    assert len(rejected) == 1 and "HOLD" in rejected[0]["reject_reason"]
+
+
+def test_clean_plan_keeps_valid_buy_and_turns_avoid_hold_into_sell():
+    clean, rejected, forced = clean_mother_actions(
+        [{"action": "buy", "symbol": "002558", "volume": 100, "price": 18.27},
+         {"action": "hold", "symbol": "002192", "volume": 0}],
+        REFS, asof="2026-11-19", today="2026-11-19",
+        available={"002192": 200})
+    assert rejected == []
+    assert forced == ["002192"]
+    assert any(a["action"] == "buy" and a["symbol"] == "002558" for a in clean)
+    sells = [a for a in clean if a["action"] == "sell"]
+    assert len(sells) == 1 and sells[0]["volume"] == 200
+
+
+def test_clean_plan_appends_sell_when_avoid_holding_absent():
+    clean, _, forced = clean_mother_actions(
+        [{"action": "hold", "symbol": "000792", "volume": 0}],
+        REFS, asof="2026-11-19", today="2026-11-19",
+        available={"002192": 200})
+    assert forced == ["002192"]
+    assert [a["symbol"] for a in clean if a["action"] == "sell"] == ["002192"]
+
+
+def test_clean_plan_rejects_buy_without_price():
+    clean, rejected, _ = clean_mother_actions(
+        [{"action": "buy", "symbol": "002558", "volume": 100, "price": None}],
+        REFS, asof="2026-11-19", today="2026-11-19", available={})
+    assert clean == [] and "无有效价格" in rejected[0]["reject_reason"]

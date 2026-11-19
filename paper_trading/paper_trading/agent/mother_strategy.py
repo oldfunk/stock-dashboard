@@ -108,6 +108,71 @@ def ref_text(refs: dict[str, dict], symbols: list[str]) -> str:
     return "\n".join(lines)
 
 
+def clean_mother_actions(actions: list, refs: dict[str, dict], *,
+                         asof: Optional[str] = None,
+                         today: Optional[str] = None,
+                         available: Optional[dict[str, int]] = None,
+                         ) -> tuple[list, list, list]:
+    """母方案的计划整备：过滤违规买入、把 AVOID 持仓的 hold 换成卖出。
+
+    返回 `(可以直接落计划的动作, 被拒动作(带 reject_reason), 被强制离场的代码)`。
+
+    为什么在计划阶段就做：执行层闸门只是兜底；计划里留着"必被拒的买单"或
+    "hold 与 sell 并列"会让面板与审计自相矛盾（2026-11-19 实测踩过）。
+    """
+    available = available or {}
+    clean: list = []
+    rejected: list = []
+    forced: list[str] = []
+    seen: set[str] = set()
+    for a in actions or []:
+        if not isinstance(a, dict):
+            continue
+        act = str(a.get("action", "")).lower()
+        sym = str(a.get("symbol") or "").zfill(6)
+        if act == "buy" and sym:
+            try:
+                price = float(a.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            if price <= 0:
+                rejected.append({**a, "reject_reason": "无有效价格（无法校验买入区间）"})
+                continue
+            why = buy_violation(sym, price, refs, asof=asof, today=today)
+            if why:
+                rejected.append({**a, "reject_reason": why})
+                continue
+        if (act == "hold" and sym
+                and str((refs.get(sym) or {}).get("signal") or "").upper() == "AVOID"
+                and int(available.get(sym, 0)) > 0):
+            clean.append(_sell_action(sym, int(available[sym])))
+            forced.append(sym)
+            seen.add(sym)
+            continue
+        if act == "sell":
+            seen.add(sym)
+        clean.append(a)
+    for sym, vol in available.items():
+        sym = str(sym).zfill(6)
+        if sym in seen or int(vol or 0) <= 0:
+            continue
+        if str((refs.get(sym) or {}).get("signal") or "").upper() != "AVOID":
+            continue
+        clean.append(_sell_action(sym, int(vol)))
+        forced.append(sym)
+    return clean, rejected, forced
+
+
+def _sell_action(sym: str, volume: int) -> dict:
+    return {
+        "action": "sell", "symbol": sym, "volume": volume,
+        "reason": "母策略 AVOID：代码层强制离场",
+        "basis": ["screening.ai_trade_strategy.signal"],
+        "thesis": "母项目最新一轮分析为 AVOID，按母策略纪律离场",
+        "risk_stop": None, "confidence": 100, "expected_hold_days": 0,
+    }
+
+
 def buy_violation(code: str, price: float, refs: dict[str, dict], *,
                   asof: Optional[str] = None,
                   today: Optional[str] = None,
