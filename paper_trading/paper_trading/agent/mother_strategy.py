@@ -67,9 +67,14 @@ def _as_trade_dict(raw: Any) -> dict:
 
 
 def refs_from_screening(block: Optional[dict]) -> dict[str, dict]:
-    """`screening_detail()` 的 block -> `{code: {signal, buy_zone, ...}}`。"""
+    """`screening_detail()` 的 block -> `{code: {signal, buy_zone, ...}}`。
+
+    兼容两种形状：block 包装（`{"source","asof","data":{"rows"}}`）与裸行（`{"rows"}`）。
+    """
+    block = block or {}
+    rows = block.get("rows") or (block.get("data") or {}).get("rows") or []
     out: dict[str, dict] = {}
-    for row in (block or {}).get("rows") or []:
+    for row in rows:
         code = str(row.get("code") or "").zfill(6)
         trade = _as_trade_dict(row.get("ai_trade_strategy"))
         out[code] = {

@@ -107,6 +107,17 @@ def test_refs_from_screening_parses_json_string():
     assert refs["601899"]["buy_zone"] == "8-12"
 
 
+def test_refs_from_screening_accepts_detail_wrapper():
+    """真实返回是 block 包装：rows 在 data.rows（2026-11-19 实测踩过一次）。"""
+    block = {"source": "mother:screening_result", "asof": "2026-11-19",
+             "data": {"rows": [{"code": "601899", "score": 89.7,
+                                "ai_trade_strategy": {"signal": "HOLD",
+                                                      "buy_zone": "8-12"},
+                                "ai_failed": 0}]}}
+    refs = refs_from_screening(block)
+    assert refs["601899"]["signal"] == "HOLD"
+
+
 def test_ref_text_marks_missing_and_failed():
     text = ref_text(REFS, ["601899", "920000", "999999"])
     assert "601899：HOLD" in text
