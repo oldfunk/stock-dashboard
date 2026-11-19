@@ -232,3 +232,16 @@ def test_clean_plan_rejects_buy_without_price():
         [{"action": "buy", "symbol": "002558", "volume": 100, "price": None}],
         REFS, asof="2026-11-19", today="2026-11-19", available={})
     assert clean == [] and "无有效价格" in rejected[0]["reject_reason"]
+
+
+def test_clean_plan_caps_buys_by_order_limit_sells_first():
+    """执行层 max_orders_per_run=2 时，计划阶段就要对齐：卖出优先，多余买单进 rejected。"""
+    clean, rejected, _ = clean_mother_actions(
+        [{"action": "sell", "symbol": "002192", "volume": 200},
+         {"action": "buy", "symbol": "002558", "volume": 100, "price": 18.27},
+         {"action": "buy", "symbol": "000426", "volume": 100, "price": 19.81}],
+        REFS, asof="2026-11-19", today="2026-11-19",
+        available={"002192": 200}, max_orders=2)
+    assert len([a for a in clean if a["action"] == "sell"]) == 1
+    assert len([a for a in clean if a["action"] == "buy"]) == 1
+    assert len(rejected) == 1 and "笔数上限" in rejected[0]["reject_reason"]

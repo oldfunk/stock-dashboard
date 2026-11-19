@@ -728,11 +728,15 @@ class AgentTrader:
                          for p in b.broker.get_all_positions()}
             actions, actions_rejected, forced = clean_mother_actions(
                 actions, refs, asof=ref_asof,
-                today=base_now.date().isoformat(), available=available)
+                today=base_now.date().isoformat(), available=available,
+                max_orders=int(self.cfg.max_orders_per_run))
             if forced:
                 summary = (summary + "；母策略 AVOID 强制卖出：" + "、".join(forced))[:200]
             if actions_rejected:
-                summary = (summary + f"；母策略拒绝买入 {len(actions_rejected)} 笔")[:200]
+                _rej = "、".join(
+                    f"{a.get('symbol')}（{str(a.get('reject_reason'))[:20]}）"
+                    for a in actions_rejected[:3])
+                summary = (summary + "；未执行：" + _rej)[:200]
         # 计划是给"下一个交易日开盘"用的；plan_date 已在问模型前算好。
         pid = b.broker.save_plan(plan_date, symbols,
                                  {"actions": actions, "summary": summary,

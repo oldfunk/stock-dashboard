@@ -112,6 +112,7 @@ def clean_mother_actions(actions: list, refs: dict[str, dict], *,
                          asof: Optional[str] = None,
                          today: Optional[str] = None,
                          available: Optional[dict[str, int]] = None,
+                         max_orders: Optional[int] = None,
                          ) -> tuple[list, list, list]:
     """母方案的计划整备：过滤违规买入、把 AVOID 持仓的 hold 换成卖出。
 
@@ -160,6 +161,21 @@ def clean_mother_actions(actions: list, refs: dict[str, dict], *,
             continue
         clean.append(_sell_action(sym, int(vol)))
         forced.append(sym)
+    if max_orders is not None:
+        # 笔数上限在**计划阶段**就对齐执行层（卖出优先，降风险不能被买单挤掉）。
+        n_sell = sum(1 for a in clean if str(a.get("action")).lower() == "sell")
+        room = max(0, int(max_orders) - n_sell)
+        out: list = []
+        kept = 0
+        for a in clean:
+            if str(a.get("action")).lower() == "buy":
+                if kept >= room:
+                    rejected.append({**a, "reject_reason": (
+                        f"超单轮笔数上限（母方案 max_orders_per_run={max_orders}，卖出优先）")})
+                    continue
+                kept += 1
+            out.append(a)
+        clean = out
     return clean, rejected, forced
 
 
