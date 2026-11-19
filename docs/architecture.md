@@ -121,7 +121,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 |---|---|---|---|
 | `market_index` | 采集 | 首页 | 大盘指数，保留 30 天 |
 | `stock_snapshot` | 采集/onboard | 全站 | 当日快照：行情 + 基础财务 + 股息字段（NULL=缺数据）；**只支持当日**——每日覆盖写、不保留历史截面（2026-10-29 P0-3 用户拍板 b），历史状态向量走 `market_state_daily`（F6 逐 code PIT），需要逐股历史截面时再议版本化 |
-| `daily_close` | 采集（覆盖层） | market_state 广度/估值分位 | 全市场当日收盘覆盖层；腾讯当日 bar 晚于 15:30 时由次日自愈 |
+| `daily_close` | 采集（覆盖层） | market_state 广度/估值分位 | 全市场当日收盘覆盖层；**不复权，只有 close/amount/volume**——填不了 `kline_daily` 的 OHLC/复权列（所以"当日 K 线"仍可能滞后一天，见上游 paper-trading#5）；腾讯当日 bar 晚于 15:30 的部分由次日自愈 |
 | `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；四列价格 `close_raw`（不复权，估值）/`close_adj`（后复权，回测）/`close_qfq`（前复权，子项目契约）/`close`（展示，= `close_qfq`）+ `shares`（每日流通股本） |
 | `trading_calendar` | 周六维护（S15） | 调度/子项目契约/T+1 | 历史尾部 + 未来交易日；**源覆盖到哪写到哪**，覆盖外不臆造（子项目 fail-closed 依赖） |
 | `benchmark_daily` | 收益维护 | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数 |

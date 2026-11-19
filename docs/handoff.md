@@ -4,7 +4,11 @@
 > 文档分类（真相源 / 规程 / 设计 / 快照报告）见 `docs/README.md`——引用报告里的数字前先确认它是哪一类。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-19 凌晨：母侧纸盘恢复运行；no_data 归因器修活；v2.2.0 线上运行中）
+## 最后状态（2026-11-19 晚：纸盘恢复并产出第一份真实计划；母项目流水线正常；v2.2.0 线上运行中）
+
+- **11-19 运行日复核（22:13）**：母项目 run **867** `completed`（15:30:17–15:42:00；5527 → 817 候选 → 20 只，ROE 覆盖 816/817 过闸）；AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06），数字抽检 13 只命中（约 0.65 处/只）、自洽检查 1 例（002648 moat≤2 给 BUY）；kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。
+- **母侧纸盘第一份真实计划（#15）**：16:31 首跳撞 zhipu **429（code 1302）**、16:36 重试成功；`plan_date=2026-11-20`、`asof=2026-11-19`、20 只标的，动作 = **买 601899 紫金矿业 100 股** + 持有盐湖/融捷。体检脚本绿；明天 09:30–10:00 执行。
+  - **新发现（已提上游 [#5](https://github.com/oldfunk/paper-trading/issues/5)）**：`asof` 取所有标的的 **max**，20 只里只有 3 只有 11-19 K 线，买入标的 601899 的末根是 11-18——决策实际用的是昨天收盘，计划却标记为今天。执行侧只有 30% 偏离闸，防不住"差一天"。
 
 - **母侧子项目（:8081）AI 交易员断档三周，已恢复（`751bb7f`）**：用户观察"10 月底后没跑过计划和交易"，取证确认——`agent_plans` 最后一条 **10-26 一直 pending**、`op_log` 最后一条 **10-23 16:47**、`fills` 停在 10-08；nec crontab 里只剩独立版 :8080 的任务。**根因**：母侧运行时配置只存在于 crontab，10-23 后一次重写把三条任务全丢了，面板仍 200 所以完全静默。
   - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"。
@@ -54,10 +58,10 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **今日（11-19）两个窗口观察母侧纸盘**：16:30–18:30 应出现 11-20 的 pending 计划（`sqlite3 paper_trading/paper_account.db "select id,plan_date,status from agent_plans order by id desc limit 3"`）；次日 09:30–10:00 应执行并转 `done`。`dash` 面板 `/api/status` 的 pending 计划、`logs/agent.log` 同步看。**一键结论**：`python scripts/check_paper_agent.py`（18:45 后、10:15 后各跑一次；0=绿，红会直接说缺什么）。
-2. **上游跟踪（已提 issue `paper-trading#3`）**：① `TradingBridge` CWD 守卫 + `load_config` 静默回退；② `test_minute_supply_t59` 两例依赖墙钟。母仓不落地，等上游 tag。
-3. **今日 15:30 复验（母项目流水线）**：AI 分析 `analyzed_count` 是否稳定 20、偏离率是否维持 ≤0.5 处/只；kline 轮换（补几只/耗时）。
-4. **全市场日线增量**：轮换已上线；跑几天后看停更跨度是否收敛到目标（约 ceil(5400/日批) 个交易日），必要时调 `kline.full_market_daily_limit`。
+1. **明日（11-20）09:30–10:00 观察计划 #15 执行**：应买 601899 100 股、状态转 `done`；**一键结论** `python scripts/check_paper_agent.py`（10:15 后跑，0=绿）。若红：先看 `paper_trading/logs/agent.log`、再看 `data_asof` 是否已到当天。
+2. **上游跟踪（`paper-trading#3` + `#5`）**：① CWD 守卫 + 配置静默回退；② 墙钟用例；③ **计划新鲜度 `asof=max` 掩盖个股陈旧**（本轮实录，今日 20 只标的只有 3 只有当日 K 线）。母仓不落地，等上游 tag。
+3. **kline 新鲜度杠杆（Qoder 遗留项，建议下一批）**：`daily_close` 当日 5527 只齐全但不复权、只有 close/amount/volume，填不了 `kline_daily` 行；要合并需补齐 OHLC + 复权列，或让计划侧显式接受 T-1 并记录覆盖率。两条路都要单测 + 门禁，别在盘后手改数据。
+4. **全市场日线增量**：轮换补 395/600（1502s 预算用尽）；跑几天后看停更跨度是否收敛，必要时调 `kline.full_market_daily_limit` / `full_market_max_seconds`。
 5. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
 6. **子项目衔接观察**：:8081 跑一个完整交易日（计划→开盘执行→NAV），确认 `queued_rq`/健康时效无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
 7. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
@@ -68,6 +72,7 @@
 - ~~生产树 11-05 的旧应用残留~~：**2026-11-19 已清出**——`main.py`/`src/app.py`/`src/database.py`/`templates/`/`.venvdeb/`/`nightly-report.md`/`paper_trading/data.db.pre-t35.bak` 全部 `mv` 到 `/home/nec/attic/20261119-old-hermes/`，附 `MANIFEST.txt`（sha256 + 原路径，可逆）。移动前确认：无进程占用、全仓零引用、根 `templates/` 不是 `src/web/templates`。生产树现在 `git status` 干净。
 - ~~`sse-starlette` 约束与 venv 漂移~~：**2026-11-19 已解决**——全仓（src/tests/scripts/vendor）零引用，已从 `pyproject.toml` 删除；生产 venv 里已装的 3.6.0 不动（没有代码引用）。`pip install -e .` 不会再因 `<3` 约束降级它。
 - **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把三条任务写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
+- **计划新鲜度被 `asof=max` 掩盖（2026-11-19 实录，上游 #5）**：计划 #15 的 20 只标的里只有 **3 只** 有当日 K 线，买入标的 601899 的末根是 11-18，但 `asof` 取所有标的的最大值 → 计划仍以"今天"落库。根因一半在数据（腾讯当日 bar 晚于 15:43 的拉取窗口），一半在判据（`max` 而非按标的分层）。当前缓解：次日 `start_date=latest` 自愈 + 执行侧 30% 偏离闸 + 仓位小（100 股）；**不要把它当成"数据已经是最新"的证据**。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
 - **nec 承载双项目（互不干扰为用户约定）**：子项目独立版（:8080 + 5 cron，`/home/nec/paper-trading`）与母项目同机，`mother_dir()` 默认解析到合并树活库；母方改动（重启/迁移/deploy）前须确认不碰 :8080 与其目录。Pi 全面退役（无监听/无 cron/服务禁启），冻结副本仅存档。
 - **nec CPU 老（无 sse4.2/popcnt，不支持 x86-64-v2）**：numpy 1.26.4 / pandas 2.2.3 / duckdb 1.4.2 被钉住；`pip install -U` 任何含二进制的依赖前先验证 import（新 numpy/duckdb wheel 直接 illegal instruction core dump）。

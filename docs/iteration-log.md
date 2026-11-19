@@ -167,6 +167,12 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-19（晚：母侧纸盘首个真实计划 + 运行日复核）
+
+- **母项目流水线（run 867）**：15:30:17–15:42:00 `completed`；5527 只 → 817 候选 → 20 只（ROE 覆盖 816/817 过闸）。AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06）；数字抽检 13 只命中（约 0.65 处/只，仍是标签/字段占用那类）、输出自洽 1 例（002648 moat≤2 给 BUY）。kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。
+- **母侧纸盘断档后第一份真实计划（#15）**：16:31 首跳 zhipu **429 code=1302**（与母项目 15:47–17:06 的 AI 分析共用 Key，撞限速），16:36 重试成功；`plan_date=2026-11-20`、`asof=2026-11-19`、20 只标的，动作 = **买 601899 紫金矿业 100 股** + 持有 000792/002192；体检脚本绿，明天 09:30–10:00 执行。
+- **新发现并提上游（[paper-trading#5](https://github.com/oldfunk/paper-trading/issues/5)）**：`_plan` 的新鲜度 `asof` 取所有标的的 **max**——计划 20 只里只有 3 只有 11-19 K 线，买入标的 601899 的末根是 11-18，决策实际用昨天的收盘却标记为今天；执行侧只有 30% 偏离闸，防不住"差一天"。建议：计划里记录 `freshness={fresh,total}`、持仓按风险分层要求当日、`asof` 不用 max。母仓不改 vendored，等上游。
+
 ### 2026-11-19（no_data 归因器修活：按任务语义归类，unattributed 3193→0；muse 分支审查）
 
 - **`audit_no_data` 改按任务语义归类（`ccbde24`）**：生产库 3209 条 no_data 里 **3193 条 unattributed**，形态清一色"有行情也有财务"（`price_depth` 2911 / `em_deep_gap` 129 / `interest_coverage_backfill` 105 / `em_full_gap` 48），按数据形态永远分不出来，而 `backfill_progress.task` 直接说明语义。新增两桶：`no_early_history`（price_depth + 有行情 = 早段窗口无更早行情，限流会记 partial 重试）、`financial_partial`（财务三任务 + 有行情有财务 = 目标字段上游不提供）。**未登记任务仍 `unattributed` → exit 1**，断言未被稀释。真实库实测：**unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；全量 gate 母 **1502 passed**（基线 1495 → 1502）。
