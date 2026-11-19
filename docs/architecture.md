@@ -339,6 +339,10 @@ pending、三周零流水）。任务、命令与路径的真相源是
   `paper_trading/`（相对路径 `data.db`/`paper_account.db`/`var/`/`logs/` 都相对 CWD）。
 - `engine.enabled=false` 是发布默认：母侧路线是"收盘计划 + 开盘执行"一日一决策，
   不跑盘中规则引擎/条件单成交；独立版 :8080 的 cron 与此互不影响。
+- **策略口径（2026-11-19 起，热修已部署）**：母方案的参考信号与买入闸门取自母项目
+  `screening_result.ai_trade_strategy`（signal / buy_zone / stop_loss）；没有分析、分析
+  过期（>3 天）、signal 非 BUY、现价不在买入区间 → **拒绝买入**（代码层 fail-closed，
+  拒因进 `ai:decide`）。不再使用 MA 信号；卖出不受闸门限制。上游 PR paper-trading#6。
 - 两条实例共用母库只读接口，但**账户、DB、var、日志各自独立**；改动任一侧不得改另一侧。
 - 验收：`bash scripts/install_mother_agent_cron.sh --check` 退出 0；`python scripts/check_paper_agent.py`
   退出 0（收盘窗口后要求下一交易日有计划、开盘窗口后要求当天计划已 `done`，休市日只查 cron）；

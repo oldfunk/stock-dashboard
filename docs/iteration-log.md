@@ -167,6 +167,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-19（晚二：母方案改用母项目策略，买入加代码闸门）
+
+- **问题（用户指正 + 生产实测）**：母侧实例的 plan #15 买入 **601899 紫金矿业 100 股**，而母项目自己的分析是 **HOLD、买入区间 8-12、现价 23.88**。根因两层：① `integration/mother.py::screening_detail()` 的 SELECT 没有 `ai_trade_strategy`，子项目 AI 上下文根本看不到母策略；② `AgentTrader` 的参考信号固定是 MA5/20，母方案只是"股票池来自母筛选"。
+- **修复（vendored 热修，用户授权；上游 PR [#6](https://github.com/oldfunk/paper-trading/pull/6)）**：`screening_detail` 按列存在性增查 `ai_trade_strategy/ai_failed`（旧库缺列降级）；新增 `agent/mother_strategy.py`（区间解析、母策略参考文本、`buy_violation` 买入闸门）；母方案参考信号换成母策略并追加 `MOTHER_RULES`；`_execute_actions` 买入前过硬闸门（缺分析/过期/非 BUY/超区间即拒，拒因进 `ai:decide`）。`general/custom` 行为不变，卖出不拦。
+- **验证**：22 条单测（含真实事故形状）；生产库 `sqlite .backup` 隔离副本复演 2026-11-20 09:35 执行 → `601899 @23.88` 被"母策略信号=HOLD（仅 BUY 允许买入）"拒绝、`002558 @18.27`（BUY + 18-22 区间）放行，**无新委托**；vendor gate **908**（基线 886→908）；:8081 已重启加载新代码，health/check 全绿。
+- **遗留**：plan #15 仍是旧策略产物，明天执行时买入会被新闸门拒绝（预期、留审计）；下一份计划（11-20 16:30 → 11-21 执行）起完全由母策略驱动。`asof=max` 的新鲜度问题仍在上游 [#5](https://github.com/oldfunk/paper-trading/issues/5)。
+
 ### 2026-11-19（晚：母侧纸盘首个真实计划 + 运行日复核）
 
 - **母项目流水线（run 867）**：15:30:17–15:42:00 `completed`；5527 只 → 817 候选 → 20 只（ROE 覆盖 816/817 过闸）。AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06）；数字抽检 13 只命中（约 0.65 处/只，仍是标签/字段占用那类）、输出自洽 1 例（002648 moat≤2 给 BUY）。kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。

@@ -7,6 +7,9 @@
 ## 最后状态（2026-11-19 晚：纸盘恢复并产出第一份真实计划；母项目流水线正常；v2.2.0 线上运行中）
 
 - **11-19 运行日复核（22:13）**：母项目 run **867** `completed`（15:30:17–15:42:00；5527 → 817 候选 → 20 只，ROE 覆盖 816/817 过闸）；AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06），数字抽检 13 只命中（约 0.65 处/只）、自洽检查 1 例（002648 moat≤2 给 BUY）；kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。
+- **母方案策略纠正（vendored 热修，已部署 :8081；上游 [paper-trading#6](https://github.com/oldfunk/paper-trading/pull/6)）**：发现 plan #15 买入 **601899**，而母项目自己的分析是 **HOLD、买入区间 8-12、现价 23.88**——根因是 `screening_detail()` 根本没查 `ai_trade_strategy`（上下文看不到母策略），参考信号仍是 MA5/20。修复：母方案参考信号换成母策略（signal/buy_zone/stop/评分）+ `MOTHER_RULES`；`_execute_actions` 加**买入硬闸门**（缺分析/过期/非 BUY/超区间即拒，拒因进 `ai:decide`，fail-closed）。
+  - 验证：22 条单测；隔离副本复演明天执行 → `601899 @23.88` 被"母策略信号=HOLD"拒绝、`002558 @18.27`（BUY + 18-22 区间内）放行，无新委托；vendor gate **908**（基线 886→908）。
+  - **plan #15 仍是旧策略产物**：明天 09:30 执行时买入会被新闸门拒绝（预期行为，留审计）；下一份计划（11-20 16:30 生成、11-21 执行）才完全由母策略驱动。
 - **母侧纸盘第一份真实计划（#15）**：16:31 首跳撞 zhipu **429（code 1302）**、16:36 重试成功；`plan_date=2026-11-20`、`asof=2026-11-19`、20 只标的，动作 = **买 601899 紫金矿业 100 股** + 持有盐湖/融捷。体检脚本绿；明天 09:30–10:00 执行。
   - **新发现（已提上游 [#5](https://github.com/oldfunk/paper-trading/issues/5)）**：`asof` 取所有标的的 **max**，20 只里只有 3 只有 11-19 K 线，买入标的 601899 的末根是 11-18——决策实际用的是昨天收盘，计划却标记为今天。执行侧只有 30% 偏离闸，防不住"差一天"。
 
@@ -14,7 +17,7 @@
   - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"。
   - 路径/口径：CWD=`paper_trading/`、母 `.venv`、`--scheme mother --pool-from screening --pool-limit 15`；`calendar sync` 已跑（母库日历覆盖到 2026-12-31）；LLM 连通性实测（`llm models` 与一次 `llm ask` 均 ok）。
   - **回流上游**：同一套经验整理成通用版 `deploy/install-instance-cron.sh` + `docs/second-instance.md`，已提 [paper-trading#4](https://github.com/oldfunk/paper-trading/pull/4)（只加部署/文档、不改运行时；用假 crontab 验证了 check→install→check→幂等）。
-  - **待观察**：今日 16:30–18:30 应生成 11-20 的 pending 计划；明日 09:30–10:00 应执行。验收命令见 `docs/architecture.md` §9.7。
+  - **已观察到**：11-19 16:36 生成 plan #15（见上）；明日 09:30–10:00 执行（买入会被新闸门拒绝）。验收命令见 `docs/architecture.md` §9.7。
 
 - **母侧纸盘两个窗口已用隔离库端到端预演（2026-11-19 凌晨）**：生产账本 `sqlite .backup` 到 `/tmp/pt-sim`，直接调用 `AgentTrader.tick` 注入时刻，不碰生产：
   - 计划窗口（模拟 11-19 16:45，`force` 越过"定稿到今天"检查）：**LLM 真实调用**，plan **#15** 落库、`plan_date=2026-11-20`、`asof=2026-11-18`，约 2 分钟。
