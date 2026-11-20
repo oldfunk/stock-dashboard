@@ -4,7 +4,7 @@
 面板一直 200、心跳过期也只显示 stale，直到用户发现"没有计划和交易"。
 本脚本回答三个机器可判的问题：
 
-1. cron 三条任务是否齐全（委托 `scripts/install_mother_agent_cron.sh --check`）；
+1. cron 任务是否齐全（委托 `scripts/install_mother_agent_cron.sh --check`）；
 2. 收盘计划窗口（16:30–18:30）过去后，是否已有**下一交易日**的 pending 计划；
 3. 开盘执行窗口（09:30–10:00）过去后，今天的计划是否已 `done`（或有计划可查）。
 
@@ -73,7 +73,7 @@ def judge(now: datetime, plans: list[dict], *, trading_day: bool,
     ok = True
     if not cron_ok:
         ok = False
-        msgs.append("cron 三条任务不全（跑 scripts/install_mother_agent_cron.sh --check）")
+        msgs.append("cron 任务不全（跑 scripts/install_mother_agent_cron.sh --check）")
 
     if not trading_day:
         msgs.append(f"{now.date().isoformat()} 休市，不要求计划/执行")

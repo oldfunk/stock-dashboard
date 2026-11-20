@@ -2,14 +2,16 @@
 # 安装/核对母项目合并树（:8081）的 AI 交易员 cron（2026-11-19 立）。
 #
 # 为什么有这个脚本：这段运行时配置过去只存在于 nec 的 crontab 里。
-# 2026-10-23 之后三条任务在一次 crontab 重写中丢失，面板照常 200、
+# 2026-10-23 之后三条交易任务在一次 crontab 重写中丢失，面板照常 200、
 # 计划与交易却静默停摆三周（agent_plans 最后一条 10-26 一直 pending，
 # 最后一笔成交停在 10-08）。规则写进仓库，下次被误删可以一条命令核对回来。
 #
-# 三条任务各管一段（窗口由子项目代码写死，见 paper_trading/AGENTS.md）：
+# 三条交易任务各管一段（窗口由子项目代码写死，见 paper_trading/AGENTS.md）：
 #   09:30-10:00  开盘执行窗口：只消费当天 pending 计划，无计划静默
 #   16:30-18:30  收盘计划窗口：数据定稿到今天才做下一交易日计划
 #   周六 10:00   交易日历同步（母库 trading_calendar 优先）
+# 另两条 raw 收盘拉取（A1，2026-11-21）只为 NAV：15:50 给 16:30 计划窗口用，
+# 20:40 源晚发布时兜底（脚本 scripts/fetch_mother_raw.sh）。
 #
 # 用法：
 #   bash scripts/install_mother_agent_cron.sh          # 缺哪条补哪条（幂等）
@@ -36,13 +38,18 @@ mkdir -p "$PT/logs"
 
 TICK_CMD="cd $PT && $PY -m paper_trading.cli --scheme mother agent tick --pool-from screening --pool-limit 15 --json >> logs/agent.log 2>&1"
 CAL_CMD="cd $PT && $PY -m paper_trading.cli calendar sync --json >> logs/calendar.log 2>&1"
+RAW_CMD="bash $ROOT/scripts/fetch_mother_raw.sh"
 LINES=(
     "30,35,40,45,50,55 9 * * 1-5 $TICK_CMD"
     "*/5 16-18 * * 1-5 $TICK_CMD"
     "0 10 * * 6 $CAL_CMD"
+    "50 15 * * 1-5 $RAW_CMD"
+    "40 20 * * 1-5 $RAW_CMD"
 )
 # 识别键：只认能唯一定位该任务的片段，避免脚本路径变化后重复安装
-KEYS=("scheme mother agent tick" "scheme mother agent tick" "calendar sync --json >> logs/calendar.log")
+KEYS=("scheme mother agent tick" "scheme mother agent tick"
+      "calendar sync --json >> logs/calendar.log"
+      "50 15 * * 1-5 bash" "40 20 * * 1-5 bash")
 
 cur="$(crontab -l 2>/dev/null || true)"
 missing=()
@@ -53,11 +60,11 @@ for i in "${!LINES[@]}"; do
 done
 
 if [ "${#missing[@]}" -eq 0 ]; then
-    echo "✓ 母侧 AI 交易员 cron 三条齐全"
+    echo "✓ 母侧 AI 交易员 cron 五条齐全"
     exit 0
 fi
 if [ "$CHECK" = "1" ]; then
-    echo "!! 缺少 ${#missing[@]} 条（共 3 条）"
+    echo "!! 缺少 ${#missing[@]} 条（共 5 条）"
     printf '   %s\n' ${missing[@]+"${missing[@]}"}
     exit 1
 fi
