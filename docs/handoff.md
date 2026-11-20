@@ -62,11 +62,12 @@
 
 ## 下一步方向（按此顺序，一次一步，每步带生产证据）
 
-1. **明日（11-20）09:30–10:00 观察计划 #15 执行**：应买 601899 100 股、状态转 `done`；**一键结论** `python scripts/check_paper_agent.py`（10:15 后跑，0=绿）。若红：先看 `paper_trading/logs/agent.log`、再看 `data_asof` 是否已到当天。
-2. **上游跟踪（`paper-trading#3` + `#5`）**：① CWD 守卫 + 配置静默回退；② 墙钟用例；③ **计划新鲜度 `asof=max` 掩盖个股陈旧**（本轮实录，今日 20 只标的只有 3 只有当日 K 线）。母仓不落地，等上游 tag。
-3. **kline 新鲜度杠杆（Qoder 遗留项，建议下一批）**：`daily_close` 当日 5527 只齐全但不复权、只有 close/amount/volume，填不了 `kline_daily` 行；要合并需补齐 OHLC + 复权列，或让计划侧显式接受 T-1 并记录覆盖率。两条路都要单测 + 门禁，别在盘后手改数据。
-4. **全市场日线增量**：轮换补 395/600（1502s 预算用尽）；跑几天后看停更跨度是否收敛，必要时调 `kline.full_market_daily_limit` / `full_market_max_seconds`。
-5. **下周六（11-21）复验**：EM 段 no_data 比例、qfq 多锚、benchmark_daily 跟上。
+> **当前按 `docs/remediation-20261121.md` 的 A→B→C→D 工序执行**（A 正确性 → B 可度量 → C 盘中 → D 闭环）。
+
+1. **A1 NAV 断档**：母侧 raw 拉取（持仓+池）+ 补 11-20 NAV 复算；验收=连续 3 日 NAV 无缺。
+2. **A2 计划新鲜度**：17:00 二次拉取完整 OHLC，让 `asof` 为真；不合并子项目代码。
+3. **B1–B4 纸盘可度量**：连续 10 个交易日、周报（超额/听话率/费用）。
+4. **上游跟踪（`paper-trading#3/#4/#5/#6/#7`）**：等子项目大版本更新后统一处理，暂不合并。
 6. **子项目衔接观察**：:8081 跑一个完整交易日（计划→开盘执行→NAV），确认 `queued_rq`/健康时效无异常；独立版 :8080 与 cron 未受影响（不碰其目录）。
 7. **文档系统性更新（用户已排期）**：architecture / handoff / iteration-log / roadmap / subproject-protocol / development-workflow 逐份对照代码校准，**每改一份先自问"这条还成立吗"**；已顺手修掉 iteration-log 里一处历史插入残留（`<tool_call>` 文本）与一段重复段落。
 8. **批21 验收 / 批18-a 派工 / Qoder 两个连带项**。
