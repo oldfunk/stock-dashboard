@@ -4,7 +4,12 @@
 > 文档分类（真相源 / 规程 / 设计 / 快照报告）见 `docs/README.md`——引用报告里的数字前先确认它是哪一类。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-19 深夜：纸盘已按母策略重生成计划；母项目流水线正常；v2.2.0 线上运行中）
+## 最后状态（2026-11-21 凌晨：修复工序开工——A1 账本 + E0 桥底座；纸盘按母策略运行）
+
+- **修复工序开工（A1 + E0）**：
+  - **A1**：11-20 收盘 NAV 已复算并校正时间戳——`nav_history` id=13，total **95,867.37**（现金 85,589.37 + 持仓 10,278），`op_log[nav:close]` 留痕；根因（`daily_bars_raw` 为空）用 `scripts/fetch_mother_raw.sh` + **15:50/20:40** 两条 cron 补上（母侧 cron 由 3 条变 **5 条**）。周一 16:30 观察自动写入，连续 3 日达标才算 A1 关闭。
+  - **E0**：新增 `src/paper_bridge/`（只读桥底座）——`mode=ro`+`query_only`、显式合并树路径（不自动发现 :8080）、缺库/缺列/被锁一律 `unavailable` 降级；8 条夹具测试；gate 母 **1513→1521**。
+  - **vendor 计数说明**：周六凌晨 gate 的 vendor **914/918** 是已知墙钟 flake（`test_minute_supply_t59` 2 例 + `test_bar_source` 2 例；后者 fixture 的 `_weekday(-1)` 在周六会回退成与 `_weekday(0)` 同一天）。非回归，工作日复跑应回 918。
 
 - **11-19 运行日复核（22:13）**：母项目 run **867** `completed`（15:30:17–15:42:00；5527 → 817 候选 → 20 只，ROE 覆盖 816/817 过闸）；AI 分析 **20/20** 成功（glm-4.5-flash，15:47–17:06），数字抽检 13 只命中（约 0.65 处/只）、自洽检查 1 例（002648 moat≤2 给 BUY）；kline 轮换补 **395/600**（1502s 预算用尽）、**当日 K 线仅 5 行**（腾讯 bar 晚发布，次日自愈），`daily_close` 当日 5527 全；`market_state` 11-19 快照已落。三服务 200、近 3h 零 ERROR。
 - **母方案策略纠正（vendored 热修，已部署 :8081；上游 [paper-trading#6](https://github.com/oldfunk/paper-trading/pull/6)）**：发现 plan #15 买入 **601899**，而母项目自己的分析是 **HOLD、买入区间 8-12、现价 23.88**——根因是 `screening_detail()` 根本没查 `ai_trade_strategy`（上下文看不到母策略），参考信号仍是 MA5/20。修复：母方案参考信号换成母策略（signal/buy_zone/stop/评分）+ `MOTHER_RULES`；`_execute_actions` 加**买入硬闸门**（缺分析/过期/非 BUY/超区间即拒，拒因进 `ai:decide`，fail-closed）。

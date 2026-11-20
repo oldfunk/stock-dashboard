@@ -172,6 +172,9 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **11-20 首个母策略计划执行（plan #18）**：09:30:36 自动执行——卖 **002192 200@43.15**（-2,816 元，含印花税 4.315）、买 **000426 100@19.82**；持有 000792 400。现金 85,589.37，持仓市值 10,278，**总资产 95,867（-4.13%）**。当晚生成 **plan #19（11-23 pending）**，纸盘闭环自转。
 - **11-20 流水线**：run 868 `completed`，5527 → 20，AI 20/20；周六 00:00 复盘 run 869 `completed`（5 只观察池）。
 - **工序落地**：新增 `docs/remediation-20261121.md`（A 正确性 → B 可度量 → C 盘中 → D 闭环，含验收/回滚/节奏/明确不做），handoff 下一步改为按工序执行。
+- **A1 NAV 断档（已修，待连续验证）**：根因是母侧 `daily_bars_raw` 为空（raw 只由独立版 :8080 的 cron 供）。新增 `scripts/fetch_mother_raw.sh`（只拉持仓）并纳入 installer（15:50/20:40，cron 3→5 条）；11-20 NAV 用持仓×raw 收盘复算 **95,867.37**，timestamp 校正到 11-20，`op_log[nav:close]` 留痕。周一 16:30 观察自动写入。
+- **E0 桥底座（已完成）**：`src/paper_bridge/`（settings/conn/contract/state）——`mode=ro`+`query_only`、显式合并树路径、缺库/缺列/被锁降级；8 条夹具测试；gate 母 **1513→1521**。
+- **周六凌晨 vendor 914/918 的定性**：已知墙钟 flake 增加两例——`test_bar_source` 的 fixture `_weekday(-1)` 在周六回退成与 `_weekday(0)` 同日，断言顺序翻车；与 minute_supply 两例同类，工作日会恢复 918。
 - **已知**：`nav_history` 仍停在 10-22（raw 缺失，issue #7）；计划 `asof=max` 的新鲜度问题（issue #5）靠 A2 的 17:00 二次拉取缓解，不合并子项目代码。
 - **上游**：PR #4 / #6 已 rebase 到最新 main（含 T95 面板）；issue #7 已提；用户指令暂不合并，等大版本更新后统一处理。
 
