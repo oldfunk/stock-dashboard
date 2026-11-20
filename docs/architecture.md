@@ -217,7 +217,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-19）：母 **1502**、vendor **886**——本条不复制数字为准，改基线时以文件为准。
+- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。本条不复制数字——2026-11-20 复检：原副本（母 **1502** / vendor **886**）已落后于文件当日值（1513 / 918），副本删除，升基线只改文件。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。

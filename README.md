@@ -286,7 +286,7 @@ A 股模拟盘，策略与撮合解耦，T+1/费率/涨跌幅全建模；AI 交�
 - **AI 分析** — 用户自带 Key（`/llm` 页配置模型，面板队列执行；外部程序经 API 读写保留兼容）。免 Key 通道已不可用。
 - **Web 看板** — FastAPI + Jinja2（候选/观察池/钉选共用 `_stock_card.html` + `stock_metrics.py` 单一指标源；只展示数据，不内联 AI 分析）
 - **调度** — 内置 `src/scheduler.py`（daemon 线程，采集→筛选→K 线；不触发 AI）+ systemd 常驻
-- **验证** — `bash scripts/gate.sh`（母项目权威 + vendor 记录；基线 702 / 242，只升不降）
+- **验证** — `bash scripts/gate.sh`（母项目权威 + vendor 记录；下限以 `scripts/gate-baseline.txt` / `scripts/gate-baseline-vendor.txt` 为准，只升不降）
 
 ---
 
