@@ -175,6 +175,7 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **A1 NAV 断档（已修，待连续验证）**：根因是母侧 `daily_bars_raw` 为空（raw 只由独立版 :8080 的 cron 供）。新增 `scripts/fetch_mother_raw.sh`（只拉持仓）并纳入 installer（15:50/20:40，cron 3→5 条）；11-20 NAV 用持仓×raw 收盘复算 **95,867.37**，timestamp 校正到 11-20，`op_log[nav:close]` 留痕。周一 16:30 观察自动写入。
 - **E0 桥底座（已完成）**：`src/paper_bridge/`（settings/conn/contract/state）——`mode=ro`+`query_only`、显式合并树路径、缺库/缺列/被锁降级；8 条夹具测试；gate 母 **1513→1521**。
 - **周六凌晨 vendor 914/918 的定性**：已知墙钟 flake 增加两例——`test_bar_source` 的 fixture `_weekday(-1)` 在周六回退成与 `_weekday(0)` 同日，断言顺序翻车；与 minute_supply 两例同类，工作日会恢复 918。
+- **Issue #10（子项目数据契约）：指数每日刷新 + sector 契约（`4b6654b`）**：`benchmark_daily` 原仅周六刷新（实测 11-13 落后 6 个交易日），调度器改为每日流水线后 `refresh_benchmarks`；手动刷新后 5 个指数全部到 **11-20**（东财优先、`sh000922` 走新浪回退）。契约裸码提为 `CONTRACT_INDEX_SOURCES` 并补测试；文档锁定"两套键并存 / 价格指数不复权 / 15:30 后可用"；`stock_snapshot.sector` 缺省 NULL 不回退。门禁 **1521→1522**。
 - **已知**：`nav_history` 仍停在 10-22（raw 缺失，issue #7）；计划 `asof=max` 的新鲜度问题（issue #5）靠 A2 的 17:00 二次拉取缓解，不合并子项目代码。
 - **上游**：PR #4 / #6 已 rebase 到最新 main（含 T95 面板）；issue #7 已提；用户指令暂不合并，等大版本更新后统一处理。
 
