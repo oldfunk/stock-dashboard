@@ -103,6 +103,16 @@ class TestRefreshBenchmarks:
             f"落库键必须与读数侧一致，实际 {stubs['save']}"
         assert stats["sh000300"] == 1
 
+    def test_contract_codes_are_included_as_raw_keys(self, stubs):
+        """子项目契约裸码（000001/399001/399006）必须并入，且用带前缀的拉取符号。"""
+        from src.outcome_service import refresh_benchmarks
+        refresh_benchmarks({})
+        saved = {code for code, _ in stubs["save"]}
+        assert {"000001", "399001", "399006"} <= saved, stubs["save"]
+        assert {"sh000300", "sh000922"} <= saved, stubs["save"]
+        fetch = stubs["fetch"]
+        assert {"sh000001", "sz399001", "sz399006"} <= set(fetch), fetch
+
     def test_zero_rows_warns_loudly(self, stubs, caplog):
         """非空校验：0 行不再是"看起来一切正常"的一条 info。"""
         import logging

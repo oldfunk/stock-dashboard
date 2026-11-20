@@ -13,6 +13,14 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+#: 子项目契约标准码（母库**存裸码**，拉取符号另给；Issue #5 / #10）
+#: 与 config 的 `sh000300`/`sh000922` 并存，两套键都不能改。
+CONTRACT_INDEX_SOURCES = {
+    "000001": "sh000001",
+    "399001": "sz399001",
+    "399006": "sz399006",
+}
+
 
 def _benchmarks(config: dict | None) -> list[dict]:
     """基准清单（唯一入口）。
@@ -24,7 +32,7 @@ def _benchmarks(config: dict | None) -> list[dict]:
     （0 行只留一条 info）。规范化放这一个入口，读写两侧不可能再分叉。
 
     注：子项目契约标准码（000001/399001/399006，Issue #5）是**有意存裸码**的，
-    由 `refresh_benchmarks` 里的 `contract_sources` 单独并入，不经此函数，
+    由 `refresh_benchmarks` 里的 `CONTRACT_INDEX_SOURCES` 单独并入，不经此函数，
     故本函数只规范化 config/DEFAULT 里的收益验证基准。
     """
     from src.analyzer.outcomes import DEFAULT_BENCHMARKS
@@ -72,14 +80,12 @@ def refresh_benchmarks(config: dict | None = None,
     from src.models.database import BenchmarkDailyDAO
 
     # 契约标准码 → 东财/新浪指数符号（与 scripts/fix_price_contract.py 一致）
-    contract_sources = {"000001": "sh000001", "399001": "sz399001",
-                        "399006": "sz399006"}
     stats = {}
     dao = BenchmarkDailyDAO()
     targets: dict[str, str] = {}   # 存储码 → 拉取符号
     for b in _benchmarks(config):
         targets[b["code"]] = b["code"]      # 已由 _benchmarks 规范化，键=符号
-    for code, src in contract_sources.items():
+    for code, src in CONTRACT_INDEX_SOURCES.items():
         targets.setdefault(code, src)
     for code, src in targets.items():
         try:

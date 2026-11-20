@@ -343,6 +343,15 @@ class MarketScheduler:
             except Exception as e:
                 logger.warning(f"[调度器] K线增量阶段异常（不阻断快照）: {e}")
 
+            # 基准指数日线（2026-11-21，Issue #10）：子项目 CSI300 曲线与超额对照
+            # 需要每交易日更新；原实现只在周六维护里刷，实测会 stale 约一周。
+            try:
+                from src.outcome_service import refresh_benchmarks
+                bstats = refresh_benchmarks(config)
+                logger.info("[调度器] 基准指数日线: %s", bstats)
+            except Exception as e:
+                logger.warning(f"[调度器] 基准指数日线刷新失败: {e}")
+
             # F2（2026-10-30 重提，U9-A 昨晚实证解链）：市场状态日频快照。
             # 依赖当日 daily_close 覆盖层（采集阶段已落全市场收盘）+ kline 历史；
             # 当日向量的广度/波动率/流动性由覆盖层补全市场样本（见 market_state
