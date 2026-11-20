@@ -28,6 +28,10 @@ CREATE TABLE fills (fill_id INTEGER PRIMARY KEY, order_id INTEGER,
                     symbol TEXT, direction INTEGER, volume INTEGER,
                     price REAL, commission REAL, stamp_duty REAL,
                     transfer_fee REAL, timestamp TEXT);
+CREATE TABLE orders (order_id INTEGER PRIMARY KEY, symbol TEXT,
+                     direction INTEGER, volume INTEGER, status TEXT,
+                     filled_price REAL, commission REAL, stamp_duty REAL,
+                     created_at TEXT);
 CREATE TABLE nav_history (id INTEGER PRIMARY KEY, timestamp TEXT, cash REAL,
                           market_value REAL, total_value REAL,
                           available_cash REAL, pnl REAL, pnl_pct REAL);
