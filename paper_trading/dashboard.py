@@ -1287,6 +1287,24 @@ def _export_csv(account_db: str, kind: str, limit: int = 5000) -> tuple[str, str
     return f"paper_trading_{kind}_{stamp}.csv", buf.getvalue()
 
 
+def _scheme_low_risk(name, instruction) -> bool:
+    """内置方案切换（mother/general）且不改自定义指令 = 低风险写，免口令。
+
+    2026-11-24：母项目第二实例（:8081）与主实例（:8080）是不同 origin，
+    localStorage 里的 admin_token 不共享；切换方案被要求重填 API Key，而
+    第二实例未必存有 provider Key（secrets 里只有 admin_token）⇒ 接管也失败，
+    形成反复索要 Key 的死循环。
+
+    方案切换只写 gitignored 的 `strategy.local.yaml`，不碰 Key/接口地址/资金，
+    与"改模型名/厂商免口令"同一风险档。但以下仍必须口令：
+    - `custom`：自定义指令会进 AI prompt，属于注入面；
+    - 任何 `instruction` 变更（含清空）：同上。
+    """
+    from paper_trading.strategy.schemes import GENERAL_ID, MOTHER_ID
+
+    return str(name) in (MOTHER_ID, GENERAL_ID) and instruction is None
+
+
 def _takeover_token(body: dict, secrets_path) -> str:
     """凭 Key 接管：body.api_key 与已存一致时返回可存的口令，否则空串。
     供换浏览器/首次使用场景（与 llm/config 的接管规则一致）。"""
@@ -2304,6 +2322,15 @@ class Handler(BaseHTTPRequestHandler):
                 status = (q.get("status") or [None])[0]
                 conn = _ro(self.account_db)
                 try:
+                    # 旧线/legacy 实例没有 rq_intents 表（2026-11-24 母合并树
+                    # :8081 实测 /api/intents 500）：这里是只读展示，缺表应
+                    # 优雅降级为空列表，而不是把控制台刷成 500。
+                    if not conn.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table'"
+                            " AND name='rq_intents'").fetchone():
+                        self._json({"ok": True, "data": [],
+                                    "unavailable": "rq_intents 表不存在（旧线实例）"})
+                        return
                     sql = ("SELECT biz_id, symbol, side, volume, rule_ref, status,"
                            " created_at, result FROM rq_intents")
                     args: list = []
@@ -2366,19 +2393,24 @@ class Handler(BaseHTTPRequestHandler):
                 return
             body = self._read_json()
             if u.path == "/api/schemes/active":
+                _name = str(body.get("name", ""))
+                _instr = body.get("instruction")
                 _tok_out = ""
-                if not self._admin_ok(body):
-                    # 凭 Key 接管（换浏览器/首次使用；与 llm/config 接管规则一致）
-                    _tok_out = _takeover_token(body, self.secrets_path)
-                    if not _tok_out:
-                        self._json({"ok": False, "error": "口令错误（换了浏览器？切换时填写 API Key 即可接管）"}, code=403)
-                        return
+                # 内置方案切换且不改自定义指令：低风险写，免口令（见
+                # `_scheme_low_risk` 的 2026-11-24 事故说明）。custom / 改指令
+                # 仍走口令或凭 provider Key 接管。
+                if not _scheme_low_risk(_name, _instr):
+                    if not self._admin_ok(body):
+                        # 凭 Key 接管（换浏览器/首次使用；与 llm/config 接管规则一致）
+                        _tok_out = _takeover_token(body, self.secrets_path)
+                        if not _tok_out:
+                            self._json({"ok": False, "error": "口令错误（自定义方案/修改指令需要口令；换浏览器可填写 API Key 接管）"}, code=403)
+                            return
                 from paper_trading.strategy import set_active
 
                 from pathlib import Path as _P
                 ok, msg = set_active(
-                    _P(__file__).resolve().parents[1], str(body.get("name", "")),
-                    body.get("instruction"))
+                    _P(__file__).resolve().parents[1], _name, _instr)
                 _data = {"message": msg} if ok else None
                 if ok and _tok_out:
                     _data["admin_token"] = _tok_out

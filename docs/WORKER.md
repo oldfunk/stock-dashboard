@@ -1715,6 +1715,18 @@ T9/T10 结果裁决与 M1 门禁签核（§5.1 不绿不合）、P0 事故响应
   @18.81，现金 90,995 → 92,870.04069，生产账本 md5 未变
   （见 `docs/incident-2026-11-23.md` §8）。
 
+- [x] **T103 第二实例面板修复**（2026-11-24，母合并树 :8081）：
+  ① **内置方案切换免口令**：`mother`/`general` 且不改自定义指令属于低风险写；
+  此前第二实例与主实例是不同 origin，localStorage 里的 admin_token 不共享，
+  切方案时反复索要 API Key，而第二实例 `secrets.local.json` 只存 admin_token
+  （无 provider Key 时接管也失败）。`custom` 或任何 instruction 变更仍要口令
+  （自定义指令会进 prompt，属注入面）。
+  ② **`/api/intents` 兼容旧线实例**：母合并树没有 `rq_intents` 表，旧代码
+  直接 500；现在返回 `{"ok":true,"data":[],"unavailable":"..."}`。
+  验收：`tests/test_dashboard.py` 新增 3 条（免口令边界 / 内置切换 200 与
+  custom 403 / 缺表降级）；AGENTS 面板口令规则同步补例外说明。
+
+
 
 
 

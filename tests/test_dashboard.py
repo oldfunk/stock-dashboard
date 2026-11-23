@@ -291,3 +291,108 @@ def test_takeover_token(tmp_path):
     assert _takeover_token({"api_key": "wrong"}, str(tmp_path / "s.json")) == ""
     assert _takeover_token({}, str(tmp_path / "s.json")) == ""
     assert _takeover_token({"api_key": "k"}, str(tmp_path / "nope.json")) == ""
+
+
+def test_scheme_low_risk_boundary():
+    """方案切换的免口令边界：内置 mother/general 免；custom/改指令仍要口令。"""
+    from paper_trading.dashboard import _scheme_low_risk
+
+    assert _scheme_low_risk("general", None)
+    assert _scheme_low_risk("mother", None)
+    assert not _scheme_low_risk("custom", None)       # 自定义指令是注入面
+    assert not _scheme_low_risk("general", "")         # 清空指令也是变更
+    assert not _scheme_low_risk("general", "改指令")    # 任何指令变更
+    assert not _scheme_low_risk("nope", None)
+
+
+@pytest.fixture
+def plain_panel(tmp_path, monkeypatch):
+    """没有 admin_token 的面板（模拟 8081 第二实例的浏览器无口令状态）。"""
+    import threading
+    from http.server import HTTPServer
+
+    import paper_trading.dashboard as d
+    import paper_trading.strategy as st
+
+    calls: list[tuple] = []
+
+    def fake_set_active(root, name, instruction=None):
+        calls.append((name, instruction))
+        return True, f"ok:{name}"
+
+    monkeypatch.setattr(st, "set_active", fake_set_active)
+
+    class _H(d.Handler):
+        pass
+
+    _H.data_db = str(tmp_path / "data.db")
+    _H.account_db = str(tmp_path / "acct.db")
+    _H.secrets_path = str(tmp_path / "s.json")
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}", calls
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_scheme_switch_builtin_needs_no_token(plain_panel):
+    """2026-11-24 母实例 :8081 抱怨点：切内置方案不得再索要 API Key。"""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base, calls = plain_panel
+
+    def call(body):
+        req = urllib.request.Request(base + "/api/schemes/active",
+                                     data=_json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, _json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, _json.loads(e.read().decode())
+
+    st, r = call({"name": "general"})
+    assert st == 200 and r["ok"] and calls[-1] == ("general", None)
+    st, r = call({"name": "mother"})
+    assert st == 200 and calls[-1] == ("mother", None)
+    # custom / 改指令仍 fail-closed
+    st, r = call({"name": "custom"})
+    assert st == 403 and "口令" in r["error"]
+    st, r = call({"name": "general", "instruction": "注入"})
+    assert st == 403 and "口令" in r["error"]
+
+
+def test_intents_endpoint_degrades_without_rq_table(tmp_path):
+    """旧线实例没有 rq_intents 表：/api/intents 返回空列表而不是 500。"""
+    import json as _json
+    import sqlite3
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+
+    import paper_trading.dashboard as d
+
+    acct = tmp_path / "acct.db"
+    sqlite3.connect(acct).close()               # 合法空库（无 rq_intents）
+
+    class _H(d.Handler):
+        pass
+
+    _H.data_db = str(tmp_path / "data.db")
+    _H.account_db = str(acct)
+    _H.secrets_path = str(tmp_path / "s.json")
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{srv.server_port}/api/intents", timeout=10) as r:
+            assert r.status == 200
+            body = _json.loads(r.read().decode())
+        assert body["ok"] is True and body["data"] == []
+        assert "rq_intents" in body.get("unavailable", "")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
