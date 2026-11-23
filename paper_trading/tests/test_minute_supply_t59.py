@@ -64,7 +64,10 @@ def test_intraday_collect_logs_each_symptom_once(sandbox, monkeypatch, capsys):
                 for s in mn.completed_slots("5", now)]   # 健康的给满 ⇒ 不进 errors
 
     monkeypatch.setattr(mn, "fetch_minute", fake_fetch)
-    argv = ["minute", "sync", "--intraday", "--symbols", "920156", "000426", "--json"]
+    # 时钟必须钉住：盘中窗口外（如凌晨/收盘后）needed=false，根本不会去拉，
+    # 症状流水也就不会出现——那是正确行为，不是本用例要测的东西。
+    argv = ["minute", "sync", "--intraday", "--symbols", "920156", "000426",
+            "--now", "2026-11-03T14:37:00", "--json"]
     # 第一跳：只有 920156 坏 ⇒ 落一条；第二、三跳同症状 ⇒ 不再刷流水
     for _ in range(3):
         _run(args, argv)
@@ -73,7 +76,7 @@ def test_intraday_collect_logs_each_symptom_once(sandbox, monkeypatch, capsys):
     # 症状集合扩大 ⇒ 必须再落一条。注意要挑一只**库里还没有料**的标的：
     # 已齐的标的会被"跳过打接口"那条优化挡掉，根本不产生 error（那是正确行为）。
     argv2 = ["minute", "sync", "--intraday", "--symbols", "920156", "000426",
-             "600519", "--json"]
+             "600519", "--now", "2026-11-03T14:37:00", "--json"]
     fail.add("600519")
     _run(args, argv2)
     assert _gap_rows(tmp / "a.db") == 2, "症状集合变了就必须重新留痕"
@@ -84,7 +87,8 @@ def test_intraday_collect_writes_minute_heartbeat(sandbox, monkeypatch, capsys):
     tmp, args = sandbox
     monkeypatch.setattr(mn, "fetch_minute",
                         lambda symbol, period="5", days=3, now=None: [])
-    _run(args, ["minute", "sync", "--intraday", "--symbols", "002192", "--json"])
+    _run(args, ["minute", "sync", "--intraday", "--symbols", "002192",
+                "--now", "2026-11-03T14:37:00", "--json"])
     hb_file = tmp / "var" / "heartbeat.json"
     assert hb_file.exists(), "盘中采集必须留心跳"
     data = json.loads(hb_file.read_text(encoding="utf-8"))

@@ -145,7 +145,7 @@ sudo logrotate -d /etc/logrotate.d/paper-trading   # dry-run 校验
 ## LLM 接入安全（P1：只咨询，不交易）
 
 1. **Key 三不**：不进 git（`secrets.local.json` 已 gitignore）、不进日志（`op_log` params/result 禁止出现 Key，单测锁定）、面板只回显掩码（`****末4位`）。
-2. **面板写操作必须口令，但用户无感**：`admin_token` 首次保存自动生成，浏览器 localStorage 自动保管，用户永远不用看见；换浏览器凭**当前已存** API Key 保存一次即接管（证明知道密钥；无令牌的本地接口没有 Key 可接管，需在原浏览器改，或删掉 `secrets.local.json` 重配）。局域网使用，禁止把面板暴露到公网。**唯一例外（LLM 配置）**：只改模型名/厂商不需要口令；**改 API Key 或接口地址 `base_url` 需要口令**——改 Key 后可凭新 Key 接管、改地址决定已存 Key 会被发去哪里，都是高危写操作。改地址接管必须填与已存一致的 Key（不再接受任意非空 Key：否则局域网内填个假 Key 就能改地址并领走写入口令）。**免口令保存不回传口令**（v0.6.8 起）：只有首次配置、调用方已持有效口令、或 `base_url` 接管成功三种情况才回传 `admin_token`，避免局域网内任何人“改一次模型”就拿到写权限。
+2. **面板写操作必须口令，但用户无感**：`admin_token` 首次保存自动生成，浏览器 localStorage 自动保管，用户永远不用看见；换浏览器凭**当前已存** API Key 保存一次即接管（证明知道密钥；无令牌的本地接口没有 Key 可接管，需在原浏览器改，或删掉 `secrets.local.json` 重配）。局域网使用，禁止把面板暴露到公网。**唯一例外（LLM 配置）**：只改模型名/厂商不需要口令；**改 API Key 或接口地址 `base_url` 需要口令**——改 Key 后可凭新 Key 接管、改地址决定已存 Key 会被发去哪里，都是高危写操作。改地址接管必须填与已存一致的 Key（不再接受任意非空 Key：否则局域网内填个假 Key 就能改地址并领走写入口令）。**免口令保存不回传口令**（v0.6.8 起）：只有首次配置、调用方已持有效口令、或 `base_url` 接管成功三种情况才回传 `admin_token`，避免局域网内任何人“改一次模型”就拿到写权限。**方案切换同档例外（2026-11-24）**：切换内置 `mother`/`general` 且不改自定义指令属于低风险写，免口令（第二实例 :8081 与主实例 :8080 不同 origin，localStorage 口令不共享会反复索要 API Key）；切到 `custom` 或修改自定义指令仍必须口令——自定义指令会进 AI prompt，属于注入面。
 3. **LLM 不碰下单链**：`llm:ask` 只问答记流水；任何决策环（P2）必须走 fail-closed 钳制（schema/白名单/100 股倍数/金额上限），再经 `RiskManager`，缺一不可。
 4. **命令行传 Key 会留 shell 历史，敏感环境一律用面板设置页。**
 5. **本地接口免令牌**：Ollama / LM Studio / vLLM / 局域网网关只填接口地址即可（`TOKENLESS_PRESETS`）；空 Key 时**不发** `Authorization` 头（空 Bearer 反而会被拒）。切到这类预设会清掉已存的云端 Key，避免把 Key 发到别的机器。无令牌接口没有 Key 可用来"换浏览器接管"，只能原浏览器改或删 `secrets.local.json` 重配。
