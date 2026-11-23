@@ -170,10 +170,10 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 ### 2026-11-24（vendor v0.10.1：第二实例方案切换免口令 + intents 降级）
 
 - **合流**：`git subtree pull --prefix=paper_trading paper-upstream v0.10.1 --squash`（单向 tag 流，无冲突）；vendor 树与上游 v0.10.1 逐字节一致（305 文件）。
-- **修复一（用户报障）**：:8081 控制台切换投资方案时反复索要 API Key。根因：第二实例与独立版 :8080 是不同 origin，localStorage 的 admin_token 不共享；且第二实例 secrets 只存 admin_token、未存 provider Key（凭 Key 接管也失败）。改为内置方案 mother/general 且不改自定义指令时免口令（与"改模型名/厂商免口令"同档）；custom/改指令仍 fail-closed 要口令（自定义指令会进 prompt，属注入面）。
+- **修复一（用户报障）**：:8081 控制台切换投资方案时反复索要 API Key。根因：第二实例与独立版 :8080 是不同 origin，localStorage 的 admin_token 不共享；内置方案切换只写 gitignored 的 `strategy.local.yaml`，本不该要求口令（实测我们的 secrets **有** provider Key，但 UI 仍走接管流程，体验上等于死循环）。改为内置方案 mother/general 且不改自定义指令时免口令（与"改模型名/厂商免口令"同档）；custom/改指令仍 fail-closed 要口令（自定义指令会进 prompt，属注入面）。
 - **修复二**：母合并树没有 `rq_intents` 表，`/api/intents` 直接 500（控制台可见）；改为返回空列表 + `unavailable` 标注。
 - **测试**：`test_dashboard.py` +3（免口令边界 / 内置切换 200 与 custom 403 / 缺表降级）；上游顺手修 `test_minute_supply_t59` 两条墙钟用例（handoff 隐患 #110 的根因）。
-- **验证**：上游全量 **996 passed / 13 skipped**；生产 gate 与 :8081 冒烟在本次 deploy.sh 中执行（结果补记）。
+- **验证**：上游全量 **996 passed / 13 skipped**；生产 gate 母 **1522** / vendor **996**；:8081 重启加载 v0.10.1 后 `/api/intents` **200**（空列表 + `unavailable` 标注）、内置方案切换**免口令 200**、三端口 200。
 
 ### 2026-11-23（深夜：子项目 v0.10.0 合流并发布）
 

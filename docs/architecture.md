@@ -108,7 +108,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.10.0**（2026-11-23 合流，含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的七条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.10.1**（2026-11-24 合流；含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check / :8081 方案免口令与 intents 降级）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的七条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
 
@@ -274,7 +274,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ## 9. 价格模型 / 主键 / 子项目数据契约（2026-10-27）
 
-> 背景：子项目 `paper-trading`（本仓 vendored **v0.10.0**；下列契约自 v0.7.2 起沿用）执行侧已切"母库优先"（`config.data.daily_source=auto`），
+> 背景：子项目 `paper-trading`（本仓 vendored **v0.10.1**；下列契约自 v0.7.2 起沿用）执行侧已切"母库优先"（`config.data.daily_source=auto`），
 > 只读母库 SQLite（`mode=ro`），缺标的回退本地 akshare 前复权日线。以下契约来自子项目 Issue #4–#8。
 
 ### 9.1 复权口径（`kline_daily`）

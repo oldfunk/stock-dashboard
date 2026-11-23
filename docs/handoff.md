@@ -7,9 +7,10 @@
 ## 最后状态（2026-11-24 凌晨：vendor v0.10.1；第二实例面板修复）
 
 - **vendor v0.10.1（2026-11-24）**：`git subtree pull --prefix=paper_trading paper-upstream v0.10.1 --squash`（单向 tag 流，无冲突），vendor 树与上游逐字节一致；vendor 用例 993 → **996**（基线已更新）。
-  - **用户报障修复**：:8081 控制台切换投资方案反复索要 API Key。根因是第二实例与 :8080 不同 origin，localStorage 的 admin_token 不共享；且第二实例 secrets 只有 admin_token、没有 provider Key，凭 Key 接管也失败。现在内置方案（mother/general）且不改自定义指令时免口令；`custom` 或改指令仍需口令（指令会进 prompt）。
+  - **用户报障修复**：:8081 控制台切换投资方案反复索要 API Key。根因是第二实例与 :8080 不同 origin，localStorage 的 admin_token 不共享；内置方案切换只写 gitignored 的 `strategy.local.yaml`，本不该要求口令（实测我们的 secrets **有** provider Key，但 UI 仍走接管流程，体验上等于死循环）。现在内置方案（mother/general）且不改自定义指令时免口令；`custom` 或改指令仍需口令（指令会进 prompt）。
   - **顺带修复**：旧线实例没有 `rq_intents` 表，`/api/intents` 曾 500；现返回空列表 + `unavailable`。
   - 上游全量 **996 passed / 13 skipped**；生产 gate 与 :8081 冒烟在 deploy.sh 中执行。
+  - **生产验证（2026-11-24 凌晨）**：gate 母 **1522** / vendor **996**；:8081 重启后 `/api/intents` **200**（空列表 + `unavailable`）、`POST /api/schemes/active {"name":"mother"}` 免口令 **200**、三端口 200。上游 v0.10.1 **只有 tag、没有 GitHub Release**（由子项目自行决定是否发布）。
 
 - **子项目 v0.10.0 合流 + 发布（2026-11-23）**：
   - `git subtree pull ... paper-upstream main`（16+ 提交）→ 冲突 3 个文件（`agent/loop.py`、`agent/mother_strategy.py`、`tests/test_mother_strategy.py`；上游已合入 PR #6，以 theirs 解决）；vendor **993 passed / 13 skipped**。
