@@ -46,6 +46,10 @@ MINUTE_DUE = (9 * 60 + 35, 15 * 60 + 5)
 ENGINE_DUE = (9 * 60, 15 * 60 + 59)
 AGENT_DUE_AFTER_MIN = 16 * 60 + 30 + 240      # 20:30
 
+#: 名字 → 当日应跳窗口（分钟）。看门狗判"第一跳迟到了多久"时要用窗口起点，
+#: 不能直接拿"距上次心跳"——跨夜后的第一次检查必然看到十几小时的年龄。
+DUE_WINDOWS = {"engine": ENGINE_DUE, "rq_tick": RQ_TICK_DUE, "minute": MINUTE_DUE}
+
 #: 面板服务的两种可能形态（systemd --user 或系统级 unit），逐个探测，任一 active 即算活着
 DASHBOARD_UNITS = (
     # nec 生产实际是系统级 unit（/etc/systemd/system/），不是 Pi 时代的 user unit
@@ -132,30 +136,62 @@ def due(name: str, now: Optional[datetime] = None) -> bool:
     return True
 
 
+def _seconds_since_due_start(name: str, now: datetime) -> Optional[float]:
+    """距今天该心跳项"应跳窗口起点"的秒数；无窗口概念返回 None。
+
+    窗口第一跳的宽限（2026-11-18 事故派生）：engine cron 在 09:00:00 起跳，
+    但心跳写在轮次末尾；看门狗 09:00:02 就检查时，最后一条心跳还是昨天
+    15:59 —— 直接拿"距上次心跳"判，就是每天固定一次"engine 应跳未跳"
+    （现网 11-19 09:00 实测 61,259s）。按窗口起点算，第一跳只迟到 2 秒。
+    """
+    if name == "agent":
+        start_min = AGENT_DUE_AFTER_MIN
+    else:
+        win = DUE_WINDOWS.get(name)
+        if not win:
+            return None
+        start_min = win[0]
+    start = now.replace(hour=start_min // 60, minute=start_min % 60,
+                        second=0, microsecond=0)
+    return (now - start).total_seconds()
+
+
 def probe(thresholds: Optional[dict] = None, path: Optional[Path] = None,
           now: Optional[datetime] = None) -> dict:
     """心跳体检：返回 {checks, unhealthy, healthy}。
 
     应跳而未跳 / 缺记录 = 不健康（fail-closed：没有证据就是没跑）；
     非应跳时段记为 `not-due`，不计入告警。
+
+    `ok` 用**有效年龄**判：`min(距上次心跳, 距窗口起点)`。跨夜/周末后的
+    第一次检查因此不会误报（窗口内真停滞仍会被"距窗口起点"抓住）。
+    `age_sec` 保留真实年龄供人看，`since_due_sec` 是判定口径。
     """
     th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    now_dt = _now(now)
     checks: dict = {}
     bad: list = []
     for name, limit in th.items():
         a = age(name, path=path, now=now)
         if not due(name, now):
             checks[name] = {"age_sec": None if a is None else round(a, 1),
+                            "since_due_sec": None,
                             "limit_sec": float(limit), "ok": True, "state": "not-due"}
             continue
-        ok = a is not None and 0 <= a <= float(limit)
+        since_due = _seconds_since_due_start(name, now_dt)
+        eff = a
+        if a is not None and since_due is not None:
+            eff = min(a, since_due)
+        ok = eff is not None and 0 <= eff <= float(limit)
         checks[name] = {"age_sec": None if a is None else round(a, 1),
+                        "since_due_sec": (None if since_due is None
+                                          else round(since_due, 1)),
                         "limit_sec": float(limit), "ok": bool(ok),
                         "state": "ok" if ok else "stale"}
         if not ok:
             bad.append(name)
     return {"checks": checks, "unhealthy": bad, "healthy": not bad,
-            "checked_at": _now(now).isoformat(timespec="seconds")}
+            "checked_at": now_dt.isoformat(timespec="seconds")}
 
 
 def dashboard_active(runner=subprocess.run) -> str:

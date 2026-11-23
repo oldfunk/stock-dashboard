@@ -9,6 +9,12 @@
 ② `carry_over`  Q6 顺延的意图今天有没有落地（不能只顺延不兑现）；
 ③ `intent_chain` 当日新意图全链闭环（入队→会话→落账→标记）。
 
+2026-11-17/18 两次事故后追加三项（都是"日志里有真相、门禁看不见"的形状）：
+④ `cond_loop`    已成交的条件单必须 filled（11-17 的 queued_rq 事故）；
+⑤ `engine_crash` engine.log 当日 `crashed` 扫描（11-17 刷 250 次仍全绿）；
+⑥ `tick_stall`   rq_tick.log 当日 `InitPositionError` / `IdleSpin` 扫描
+                （11-18 每跳 0 退出但全天 0 成交）。
+
 全部只读：开库一律 `mode=ro`，不写 `op_log`，不碰状态目录。
 """
 from __future__ import annotations
@@ -16,7 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -30,17 +36,28 @@ def _ro(db_path) -> sqlite3.Connection:
 
 
 def latest_evidence(state_dir, today: str) -> tuple[Optional[dict], str]:
-    """读 `<state_dir>/evidence_<today>.json`（会话后置留痕）。"""
+    """读当天的会话留痕：优先 `<state_dir>/evidence_<today>.json`（最新一份
+    别名），没有就读当天带时刻的 `evidence_<today>_<HHMMSS>.json` 里最新的一份。
+
+    2026-11-19 起每跳一份证据文件（T94）：一天可能有多场会话，旧实现后一场
+    覆盖前一场。读取端保持"拿最近一份"的语义，同时不再在别名缺失时假装
+    "今天没有留痕"——那会把一次真实会话的证据降级成不存在。
+    """
     d = Path(str(state_dir))
     f = d / f"evidence_{today}.json"
-    if not f.exists():
-        cand = sorted(d.glob("evidence_*.json")) if d.is_dir() else []
-        return None, (f"今日无会话留痕（{f.name} 不存在）"
-                      + (f"；最近一份：{cand[-1].name}" if cand else "；目录里一份都没有"))
-    try:
-        return json.loads(f.read_text(encoding="utf-8")), f.name
-    except Exception as exc:                    # noqa: BLE001 - 坏了要说坏在哪
-        return None, f"{f.name} 解析失败：{type(exc).__name__}: {exc}"
+    if f.exists():
+        try:
+            return json.loads(f.read_text(encoding="utf-8")), f.name
+        except Exception as exc:                    # noqa: BLE001 - 坏了要说坏在哪
+            return None, f"{f.name} 解析失败：{type(exc).__name__}: {exc}"
+    cand = sorted(d.glob(f"evidence_{today}_*.json")) if d.is_dir() else []
+    if cand:
+        latest = cand[-1]
+        try:
+            return json.loads(latest.read_text(encoding="utf-8")), latest.name
+        except Exception as exc:                    # noqa: BLE001
+            return None, f"{latest.name} 解析失败：{type(exc).__name__}: {exc}"
+    return None, f"今日无会话留痕（{f.name} 不存在）"
 
 
 def today_buys(account_db, today: str) -> set:
@@ -306,7 +323,21 @@ def check_cond_loop(account_db, today: str, *, executor: str = "rqalpha") -> dic
         rows = [dict(r) for r in c.execute(
             "SELECT biz_id, rule_ref, status FROM rq_intents"
             " WHERE substr(created_at,1,10)=? AND rule_ref LIKE 'cond:%'", (today,))]
+        # T92（2026-11-20）：僵尸条件单——触发后入了队列、意图已过期，条件单
+        # 却一直停在 queued_rq。今天没有新触发时也必须报，不能报"无条件触发"绿。
+        cutoff = (datetime.fromisoformat(today) - timedelta(days=3)).date().isoformat()
+        zombies = [dict(r) for r in c.execute(
+            "SELECT id, symbol, created_at FROM conditional_orders"
+            " WHERE status='queued_rq' AND substr(created_at,1,10) < ?"
+            " ORDER BY id", (cutoff,))]
         if not rows:
+            if zombies:
+                return item(
+                    "cond_loop", "条件单闭环", "warn",
+                    f"{today} 无条件触发，但有 {len(zombies)} 条 queued_rq 超过 3 天"
+                    f"未落定：{[z['id'] for z in zombies][:6]}——"
+                    "意图多半已跨日过期而条件单没跟着收口",
+                    on_red="查 expire_stale 是否落定条件单（T92）/expire_due 是否被跳过")
             return item("cond_loop", "条件单闭环", "green", f"{today} 无条件触发")
         ids = set()
         for r in rows:
@@ -329,6 +360,11 @@ def check_cond_loop(account_db, today: str, *, executor: str = "rqalpha") -> dic
                     f"{detail}——已成交的条件单仍非 filled：{stuck}"
                     f"（会在下一交易日重复触发买入；面板也会一直显示待触发）",
                     on_red="查 rq 队列闭环（queue.apply_outcomes）与条件状态白名单")
+    if zombies:
+        return item("cond_loop", "条件单闭环", "warn",
+                    f"{detail}；另有 {len(zombies)} 条 queued_rq 超过 3 天未落定："
+                    f"{[z['id'] for z in zombies][:6]}",
+                    on_red="查 expire_stale 是否落定条件单（T92）/expire_due 是否被跳过")
     return item("cond_loop", "条件单闭环", "green", detail)
 
 
@@ -361,6 +397,118 @@ def check_engine_crashes(account_db, today: str, *, limit: int = 5) -> dict:
     return item("engine_crash", "引擎崩溃扫描", "green", f"{today} 无崩溃记录")
 
 
+def check_tick_stall(account_db, today: str, *, sample: int = 3) -> dict:
+    """rq tick 会话拒开/空转扫描（2026-11-18 事故派生，T93）。
+
+    11-18 每跳都以 0 退出、心跳正常，而 `InitPositionError` 在 rq_tick.log
+    刷了 142 次、全天 0 成交——`engine_crash` 只扫 engine.log 且只认
+    `crashed` 关键词，这类"活着但没干活"完全看不见。判据：当天日志里出现
+    `InitPositionError`（框架账户与账本脱钩）或 `IdleSpin:`（会话空转）
+    ⇒ warn（不是红：钱没动，但执行能力已经没了，必须在收盘报告里出现）。
+
+    日志是追加写的：按行首日期切换"当前业务日"，只认 today 段——
+    traceback 的后续行没有时间戳，跟着它所属的日期段走。
+    """
+    log = Path(str(account_db)).resolve().parent / "rq_tick.log"
+    if not log.exists():
+        return item("tick_stall", "tick 会话拒开扫描", "skip", f"{log.name} 不存在")
+    needles = ("InitPositionError", "IdleSpin:")
+    hits: list[str] = []
+    cur = ""
+    try:
+        with log.open(encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                s = ln.lstrip()
+                if s.startswith("[20") and len(s) > 11 and s[5] == "-" and s[8] == "-":
+                    cur = s[1:11]
+                if cur != today:
+                    continue
+                if any(n in ln for n in needles):
+                    hits.append(ln.strip()[:220])
+                    if len(hits) >= 200:
+                        break
+    except OSError as exc:                      # noqa: BLE001 - 读不了要说出来
+        return item("tick_stall", "tick 会话拒开扫描", "warn",
+                    f"读 {log.name} 失败：{type(exc).__name__}: {exc}")
+    if hits:
+        return item("tick_stall", "tick 会话拒开扫描", "warn",
+                    f"{today} 会话拒开/空转 ≥{len(hits)} 行：{hits[0]}",
+                    on_red="查当日首个 InitPositionError/IdleSpin：通常是状态目录与账本"
+                           "脱钩或分钟线没接上；确认后 ledger reset-state 并从账本重建")
+    return item("tick_stall", "tick 会话拒开扫描", "green", f"{today} 无拒开/空转")
+
+
+def check_action_funnel(account_db, today: str) -> dict:
+    """交易动作终态（2026-11-23 事故派生，T102）。
+
+    事故：计划 #28 的 `sell 000426 400` 与 `buy 600519 100` 被单轮处理上限
+    截断，状态停在"拒绝：超出单轮处理上限（仅审计，未执行）"——账本没错，
+    意图队列也没错，**单子从未进入执行链**，而 daily-check 全绿。
+
+    判据：当日 `agent_decisions.result.decisions` 里每条 buy/sell 必须以
+    **业务原因**结束（已入队/已成交/风控拒绝/池外/数量/价格/门禁等）；
+    "超出单轮处理上限""未知动作"属于执行管道自身丢单 ⇒ **红**（不是钱类红：
+    账本没动，但交易完整性已被破坏）。
+    """
+    with contextlib.closing(_ro(account_db)) as c:
+        if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                         " AND name='agent_decisions'").fetchone():
+            return item("action_funnel", "交易动作终态", "skip",
+                        "agent_decisions 表不存在")
+        rows = [dict(r) for r in c.execute(
+            "SELECT id, result_json, created_at FROM agent_decisions"
+            " WHERE decision_date=? ORDER BY id", (today,))]
+
+    if not rows:
+        return item("action_funnel", "交易动作终态", "skip",
+                    f"{today} 没有 AI 决策记录")
+
+    total = 0
+    bad: list[str] = []
+    queued = 0
+    rejected = 0
+    for r in rows:
+        try:
+            result = json.loads(r.get("result_json") or "{}")
+        except (TypeError, ValueError):
+            bad.append(f"decision#{r['id']} 结果不是合法 JSON")
+            continue
+        for d in (result.get("decisions") or []):
+            if not isinstance(d, dict):
+                continue
+            act = str(d.get("action") or "").lower()
+            if act not in ("buy", "sell"):
+                continue
+            total += 1
+            status = str(d.get("status") or "").strip()
+            label = f"{d.get('symbol')} {act}"
+            if not status:
+                bad.append(f"{label} 无终态")
+            elif "超出单轮处理上限" in status or "未知动作" in status:
+                bad.append(f"{label}：{status[:60]}")
+            elif status.startswith("已入意图队列") or status.startswith("已成交") \
+                    or status.startswith("试运行通过"):
+                queued += 1
+            elif status.startswith("拒绝：") or status.startswith("风控拒绝：") \
+                    or status.startswith("撮合拒绝："):
+                rejected += 1
+            else:
+                bad.append(f"{label}：无法识别的终态 {status[:60]}")
+
+    if bad:
+        return item("action_funnel", "交易动作终态", "red",
+                    f"{today} 有 {len(bad)} 笔买卖动作被执行管道丢单："
+                    + "；".join(bad[:3]),
+                    on_red="查 agent.log 当日 `AI decide done` 的逐条 status；"
+                           "排序/额度只允许拒绝 hold，不允许丢买卖单")
+    if total == 0:
+        return item("action_funnel", "交易动作终态", "green",
+                    f"{today} 无买卖动作")
+    return item("action_funnel", "交易动作终态", "green",
+                f"{today} 买卖动作 {total} 笔全部有业务终态"
+                f"（入队/成交 {queued}、业务拒绝 {rejected}）")
+
+
 def daily_check(*, data_db, account_db, symbols: list, today: str, cfg,
                 state_dir: str = "var/rq_state/live",
                 days: int = 60, heartbeat_path=None,
@@ -379,7 +527,9 @@ def daily_check(*, data_db, account_db, symbols: list, today: str, cfg,
         check_carry_over(account_db, today, now=now, executor=executor),
         check_intent_chain(account_db, today, executor=executor),
         check_cond_loop(account_db, today, executor=executor),
+        check_action_funnel(account_db, today),
         check_engine_crashes(account_db, today),
+        check_tick_stall(account_db, today),
     ]
     reds = [i for i in items if i["status"] == "red"]
     items.sort(key=lambda i: m3_verify.STATUS_ORDER.get(i["status"], 9))

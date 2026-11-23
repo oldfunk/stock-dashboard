@@ -181,3 +181,91 @@ def test_quality_cli_dispatch(tmp_path, capsys):
     assert data["ok"] and "findings" in data["data"]
     # 601398 无数据 → 有发现；600519 干净
     assert "601398" in data["data"]["findings"]
+
+
+# ---------- 2026-11-19 事故派生（T94）：日历不知道的日期不许当交易日 ----------
+@pytest.fixture()
+def calendar_env(tmp_path, monkeypatch):
+    """把交易日历缓存指到临时文件，避免读到部署机/仓库里的真缓存。"""
+    from paper_trading.utils import trading_calendar as tc
+
+    p = tmp_path / "trading_calendar.json"
+    monkeypatch.setenv(tc.CALENDAR_ENV, str(p))
+    tc.clear_calendar_cache()
+    yield p
+    tc.clear_calendar_cache()
+
+
+def _bars_missing_1105(tmp_path):
+    """老股 + 11-02..11-06 的 K 线，故意缺 11-05（2026 年中秋休市）。"""
+    b = _bridge(tmp_path)
+    rows = [_bar("600519", date(2026, 9, 1), 10.0)]
+    rows += [_bar("600519", date(2026, 11, d), 10.0) for d in (2, 3, 4, 6)]
+    b.data_db.upsert_bars(rows)
+    return b
+
+
+def test_calendar_knows_respects_both_bounds(calendar_env):
+    from paper_trading.utils import trading_calendar as tc
+
+    tc.save_calendar(["2026-11-02", "2026-11-03"], path=calendar_env)
+    assert tc.calendar_knows("2026-11-02", path=calendar_env) is True
+    assert tc.calendar_knows("2026-11-03", path=calendar_env) is True
+    assert tc.calendar_knows("2026-11-01", path=calendar_env) is False   # 早于 min
+    assert tc.calendar_knows("2026-11-04", path=calendar_env) is False   # 晚于 max
+
+
+def test_quality_no_gap_when_calendar_says_holiday(tmp_path, calendar_env):
+    """缓存覆盖 11-05 且明确不是交易日 ⇒ 缺 K 线不是缺口（中秋节）。"""
+    from paper_trading.data.quality import check_symbol
+    from paper_trading.utils import trading_calendar as tc
+
+    tc.save_calendar(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-06"],
+                     path=calendar_env)
+    b = _bars_missing_1105(tmp_path)
+    f = check_symbol(b.data_db, "600519", today=date(2026, 11, 6))
+    assert not [x for x in f if x["type"] == "gap"], f
+
+
+def test_quality_no_gap_before_calendar_coverage(tmp_path, calendar_env):
+    """缓存只从 11-06 开始：11-05 属于"日历不知道"，跳过而不是回退成工作日。
+
+    11-19 现网实际形状：缓存 min_date=2026-09-30，质量检查回看 90 天，
+    2026-09-25（中秋）被 44 个标的各报一次缺口。
+    """
+    from paper_trading.data.quality import check_symbol
+    from paper_trading.utils import trading_calendar as tc
+
+    tc.save_calendar(["2026-11-06"], path=calendar_env)
+    b = _bars_missing_1105(tmp_path)
+    f = check_symbol(b.data_db, "600519", today=date(2026, 11, 6))
+    assert not [x for x in f if x["type"] == "gap"], f
+
+
+def test_quality_still_flags_gap_inside_coverage(tmp_path, calendar_env):
+    """覆盖范围内、且明确是交易日的缺口必须照报——不许把检查改瞎。"""
+    from paper_trading.data.quality import check_symbol
+    from paper_trading.utils import trading_calendar as tc
+
+    tc.save_calendar(["2026-11-02", "2026-11-03", "2026-11-04",
+                      "2026-11-05", "2026-11-06"], path=calendar_env)
+    b = _bars_missing_1105(tmp_path)
+    f = check_symbol(b.data_db, "600519", today=date(2026, 11, 6))
+    gaps = [x for x in f if x["type"] == "gap"]
+    assert gaps and "2026-11-05" in gaps[0]["missing"], f
+
+
+def test_quality_stale_survives_outside_calendar_coverage(tmp_path, calendar_env):
+    """停滞扫描不能用"日历不知道就跳过"：2024 年的旧数据在覆盖窗外，
+    跳过会把 lag 算成 0，陈旧数据假装新鲜（NEC 上实测两条 stale 用例变红）。"""
+    from paper_trading.data.quality import check_symbol
+    from paper_trading.utils import trading_calendar as tc
+
+    tc.save_calendar(["2026-11-06"], path=calendar_env)
+    b = _bridge(tmp_path)
+    b.data_db.upsert_bars([
+        _bar("600519", date(2024, 1, 1) + timedelta(days=i), 10.0)
+        for i in range(5)])
+    f = check_symbol(b.data_db, "600519", today=date(2026, 11, 6))
+    assert any(x["type"] == "stale" for x in f), f
+    assert not any(x["type"] == "gap" for x in f), f

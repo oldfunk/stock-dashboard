@@ -96,8 +96,8 @@ def test_sync_keeps_future_drops_history(tmp_path, monkeypatch):
     from paper_trading.utils import trading_calendar as tc
 
     today = date.today()
-    recent = (today - timedelta(days=40)).isoformat()   # 落在 45 天尾部内
-    old = (today - timedelta(days=120)).isoformat()      # 超出尾部的历史
+    recent = (today - timedelta(days=40)).isoformat()   # 落在尾部窗口内
+    old = (today - timedelta(days=tc.HISTORY_TAIL_DAYS + 30)).isoformat()  # 超尾部
     future = (today + timedelta(days=300)).isoformat()   # 远期未来
 
     class _Col:

@@ -62,6 +62,52 @@ def _fill(db, symbol="002192", direction=-1, volume=100, price=47.3, ts=None):
         return int(cur.lastrowid)
 
 
+def test_action_funnel_red_when_cap_drops_a_trade(acct):
+    """T102：计划里的买卖单被执行管道截断（仅审计）必须报红。
+
+    2026-11-23 计划 #28 的 `sell 000426` 就停在这个状态，旧 daily-check 全绿。
+    """
+    br = PaperBroker(db_path=acct, config=TradingConfig(initial_cash=50000.0))
+    br.save_agent_decision(
+        decision_date=TODAY, plan_id=28, from_plan=True,
+        actions=[{"action": "buy", "symbol": "601899", "volume": 400},
+                 {"action": "sell", "symbol": "000426", "volume": 400}],
+        result={"decisions": [
+            {"action": "buy", "symbol": "601899",
+             "status": "已入意图队列（新线执行）：601899_BUY_400@x"},
+            {"action": "sell", "symbol": "000426",
+             "status": "拒绝：超出单轮处理上限 8 条（仅审计，未执行）"}]})
+    out = dc.check_action_funnel(acct, TODAY)
+    assert out["status"] == "red"
+    assert "000426" in out["detail"] and "丢单" in out["detail"]
+
+
+def test_action_funnel_green_with_business_rejections(acct):
+    """风控/池外/数量这类业务拒绝是合法终态，不能报红。"""
+    br = PaperBroker(db_path=acct, config=TradingConfig(initial_cash=50000.0))
+    br.save_agent_decision(
+        decision_date=TODAY, plan_id=1, from_plan=False,
+        actions=[{"action": "buy", "symbol": "600519", "volume": 100}],
+        result={"decisions": [
+            {"action": "buy", "symbol": "600519",
+             "status": "风控拒绝：超单笔上限20000元"},
+            {"action": "sell", "symbol": "000426",
+             "status": "拒绝：数量须为100倍数"}]})
+    out = dc.check_action_funnel(acct, TODAY)
+    assert out["status"] == "green" and "业务拒绝 2" in out["detail"]
+
+
+def test_action_funnel_unknown_status_is_red(acct):
+    """无法识别的终态同样视为丢单：宁可报红，不许静默放过。"""
+    br = PaperBroker(db_path=acct, config=TradingConfig(initial_cash=50000.0))
+    br.save_agent_decision(
+        decision_date=TODAY, plan_id=2, from_plan=False, actions=[],
+        result={"decisions": [{"action": "buy", "symbol": "600519",
+                               "status": ""}]})
+    out = dc.check_action_funnel(acct, TODAY)
+    assert out["status"] == "red" and "无终态" in out["detail"]
+
+
 def _ev(kept=(("002192.XSHE", 100), ("300390.XSHE", 200)), dropped=(), uns=()):
     return {"init_align": {"kept": [list(k) for k in kept],
                            "dropped_silently": list(dropped),

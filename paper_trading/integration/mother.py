@@ -800,9 +800,17 @@ def screening_detail(local_pool: Optional[list] = None,
                 ).fetchone()
                 if not run:
                     return None
+                # 母策略列（signal/buy_zone/stop）在旧库里可能不存在：按列存在性
+                # 降级，缺列时照旧返回筛选明细（子项目对缺失一律 fail-closed）。
+                _extra = []
+                if _has(conn, "screening_result", ("ai_trade_strategy",)):
+                    _extra.append("ai_trade_strategy")
+                if _has(conn, "screening_result", ("ai_failed",)):
+                    _extra.append("ai_failed")
+                _extra_sql = (", " + ", ".join(_extra)) if _extra else ""
                 rows = [dict(r) for r in conn.execute(
-                    """SELECT code, name, score, pe, pb, roe, reason, strategy_tags,
-                              dividend_yield, score_detail
+                    f"""SELECT code, name, score, pe, pb, roe, reason, strategy_tags,
+                              dividend_yield, score_detail{_extra_sql}
                        FROM screening_result WHERE run_id = ?
                        ORDER BY score DESC""", (run["run_id"],)).fetchall()]
                 return {"run_id": run["run_id"], "run_date": _as_date(run["run_date"]),

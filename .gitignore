@@ -38,6 +38,8 @@ Thumbs.db
 
 # Project specific (ledger + market DBs, never commit — any name)
 data.db
+# 测试/回归输出（临时日志，不进仓库）
+run_*.txt
 paper_account.db
 *.db
 *.sqlite3

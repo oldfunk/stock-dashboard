@@ -14,6 +14,7 @@ G-T13-9 一天一进程（模块级 `_SESSION_USED` 拒绝进程内重入）。
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -25,6 +26,23 @@ from .provider import SessionGate, SessionGateError, config_fingerprint
 from .store import to_order_book_id, to_symbol
 
 PKG_DIR = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
+
+
+def evidence_paths(work, today: str,
+                   now: Optional[datetime] = None) -> tuple[str, str]:
+    """本会话证据文件 + 当日"最新一份"别名。
+
+    2026-11-18 事故派生（T94）：一天可以跑多次会话（11-19 就是 09:32 两笔 +
+    09:47 一笔），旧实现共用一个 `evidence_<日>.json`，后一次把前一次**直接
+    覆盖**——出事时只剩最后一跳的现场，第一跳的事实只能去 rq_tick.log 里捞。
+    现在每跳一份带时刻的文件，另写一份不带时刻的别名给
+    `daily_check.latest_evidence`（保持旧读法不变）。
+    """
+    stamp = (now or datetime.now()).strftime("%H%M%S")
+    base = Path(work)
+    return (str(base / f"evidence_{today}_{stamp}.json"),
+            str(base / f"evidence_{today}.json"))
 
 
 def _parse_dt(value):
@@ -455,7 +473,7 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
 
     work = Path(workdir or state_dir or ".")
     work.mkdir(parents=True, exist_ok=True)
-    evidence_path = str(work / f"evidence_{today}.json")
+    evidence_path, evidence_latest = evidence_paths(work, today)
     cfg = build_config(today=today, data_db=data_db, bundle=bundle, symbols=symbols,
                        init_cash=init_cash, state_dir=state_dir,
                        evidence=evidence_path, require_bands=require_bands,
@@ -486,6 +504,13 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
         err = describe_error(exc)
     evidence = (json.loads(Path(evidence_path).read_text(encoding="utf-8"))
                 if Path(evidence_path).exists() else {})
+    # 当日"最新一份"别名：后一次会话覆盖它没问题（历史逐份留在带时刻的文件里），
+    # 这样 daily-check / 面板仍能一条路径读到最近一次现场。
+    if Path(evidence_path).exists():
+        try:
+            Path(evidence_latest).write_bytes(Path(evidence_path).read_bytes())
+        except OSError as exc:                  # noqa: BLE001 - 别名写不了不阻断会话
+            logger.warning("evidence 别名写入失败（%s）：%s", evidence_latest, exc)
     settled_biz = {str(o.get("biz_id") or "") for o in st.orders
                    if str(o.get("status", "")).startswith(("INSTRUMENT_UNAVAILABLE",
                                                             "SKIPPED"))} - {""}
@@ -513,6 +538,7 @@ def run_session(*, today: str, data_db: str, bundle: str, symbols: list, plan: l
         "unavailable": st.unavailable,
         "snapshots": st.snapshots, "evidence": evidence, "gates": verdict,
         "session_marked_done": done, "evidence_path": evidence_path,
+        "evidence_latest": evidence_latest,
     }
 
 

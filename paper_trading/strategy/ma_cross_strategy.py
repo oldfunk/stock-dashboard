@@ -22,6 +22,13 @@ class MACrossStrategy(BaseStrategy):
     - 死叉（MA5 下穿 MA20）：卖出
     """
 
+    params_schema = {
+        "short_window": {"type": int, "default": 5, "min": 2, "max": 120},
+        "long_window": {"type": int, "default": 20, "min": 3, "max": 250},
+        "buy_volume": {"type": int, "default": 100, "min": 100, "max": 100000},
+        "sell_volume": {"type": int, "default": 100, "min": 100, "max": 100000},
+    }
+
     def __init__(
         self,
         short_window: int = 5,

@@ -19,12 +19,46 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from paper_trading.cli import TradingBridge
 
-from paper_trading.agent.prompts import TRADER_SYSTEM, USER_TMPL
+from paper_trading.agent.prompts import MOTHER_RULES, TRADER_SYSTEM, USER_TMPL
 from paper_trading.agent.runtime import due_action
 from paper_trading.utils.market_time import in_open_exec_window
 from paper_trading.utils.trading_calendar import (
     calendar_covers, is_trading_day, next_trading_day,
 )
+
+#: T96：候选池"当日定稿"覆盖率下限。低于它不出计划/不现决——旧实现取
+#: `max(asof)`，只要 1 只有当日 K 线就放行，其余标的停在几天前也照样进 LLM
+#: 上下文（与母库 issue #5 同类）。持仓另有一条更硬的线：必须全部当日。
+FRESH_COVERAGE_MIN = 0.80
+
+
+def freshness_of(all_bars: dict, symbols: list[str], holdings: list[str],
+                 required: str) -> dict:
+    """逐只 K 线末根日期 → 新鲜度画像（不复用 max，避免掩盖个股陈旧）。
+
+    返回 `{required,total,fresh,coverage,oldest,stale,holdings_stale,per_symbol}`。
+    `stale` 是 `{symbol: 末根日期}`；`holdings_stale` 只含持仓里的陈旧项。
+    """
+    per: dict[str, Optional[str]] = {}
+    for s in symbols:
+        bars = all_bars.get(s) or []
+        try:
+            per[s] = bars[-1].timestamp.date().isoformat() if bars else None
+        except Exception:                       # noqa: BLE001 - 坏 bar 当缺失
+            per[s] = None
+    fresh = [s for s in symbols if per.get(s) and per[s] >= required]
+    stale = {s: per.get(s) for s in symbols if s not in fresh}
+    hold_set = set(holdings or ())
+    return {
+        "required": required,
+        "total": len(symbols),
+        "fresh": len(fresh),
+        "coverage": round(len(fresh) / len(symbols), 4) if symbols else 1.0,
+        "oldest": min((v for v in per.values() if v), default=None),
+        "stale": stale,
+        "holdings_stale": {s: per.get(s) for s in hold_set if s not in fresh},
+        "per_symbol": per,
+    }
 
 
 @dataclass
@@ -228,6 +262,72 @@ class AgentTrader:
                     + s.instruction.strip()[:2000])
         return txt
 
+    def _is_mother(self) -> bool:
+        """当前方案是否母项目价值策略（决定参考信号与买入闸门）。"""
+        return str(getattr(self.bridge.scheme, "source", "")) == "mother"
+
+    def _mother_refs(self) -> tuple[dict[str, dict], Optional[str]]:
+        """母筛选最新一轮的策略引用 -> ({code: refs}, asof)。"""
+        from paper_trading.agent.mother_strategy import refs_from_screening
+        from paper_trading.integration.mother import screening_detail
+
+        block = screening_detail() or {}
+        return refs_from_screening(block), block.get("asof")
+
+    def _mother_block(self, sym: str, price: float) -> Optional[str]:
+        """买入闸门：母策略视角下不合规就返回原因（非母方案恒 None）。"""
+        if not self._is_mother():
+            return None
+        from paper_trading.agent.mother_strategy import buy_violation
+
+        refs, asof = self._mother_refs()
+        return buy_violation(sym, price, refs, asof=asof,
+                             today=datetime.now().date().isoformat())
+
+    def _mother_avoid_sells(self, *, positions: dict, actions: list) -> list[dict]:
+        """母方案：持仓 signal=AVOID 且动作里没有卖出的，补一条全量卖出。
+
+        2026-11-19 用户口径："用母项目的策略"——AVOID 的持仓不能靠模型自愿离场。
+        没有母分析时返回空（不凭猜测卖）；T+1 可用为 0 时也跳过（交给解冻后的下一轮）。
+        """
+        if not self._is_mother():
+            return []
+        refs, _ = self._mother_refs()
+        have_sell = {str(a.get("symbol")) for a in (actions or [])
+                     if isinstance(a, dict)
+                     and str(a.get("action", "")).lower() == "sell"}
+        out: list[dict] = []
+        for sym, p in (positions or {}).items():
+            if str(sym) in have_sell:
+                continue
+            r = refs.get(str(sym).zfill(6)) or {}
+            if str(r.get("signal") or "").upper() != "AVOID":
+                continue
+            vol = int(getattr(p, "available_volume", 0) or 0)
+            if vol <= 0:
+                continue
+            out.append({
+                "action": "sell", "symbol": str(sym), "volume": vol,
+                "reason": "母策略 AVOID：代码层强制离场",
+                "basis": ["screening.ai_trade_strategy.signal"],
+                "thesis": "母项目最新一轮分析为 AVOID，按母策略纪律离场",
+                "risk_stop": None, "confidence": 100, "expected_hold_days": 0,
+            })
+        return out
+
+    def _ref_text(self, all_bars: dict, symbols: list[str]) -> str:
+        """参考信号：母方案用母策略（signal/区间/止损），其他方案用 MA。"""
+        if self._is_mother():
+            from paper_trading.agent.mother_strategy import ref_text
+
+            refs, _ = self._mother_refs()
+            return ref_text(refs, symbols)
+        ref = self.bridge.strategy.generate_signals(all_bars)
+        return "无" if not ref else "、".join(
+            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}"
+            f"{s.volume}股@{s.price:.2f}"
+            for s in ref.values())
+
     def _cand_txt(self, candidates: Optional[list]) -> str:
         if not candidates:
             return ""
@@ -410,6 +510,14 @@ class AgentTrader:
                     skipped.append({"symbol": sym, "side": side,
                                     "why": "与直接动作重复，避免双重下单"})
                     continue
+                if side == "buy" and (sym, "sell") in direct:
+                    # 计划自相矛盾（2026-11-23 计划 #28）：同一批里计划卖 000426，
+                    # 却又挂"跌到 18.5 买 000426"的条件单。当日卖单被上限丢掉后
+                    # 买单照常触发，方向和计划完全相反。离场优先必须前置到挂单时。
+                    arm_rejected.append(
+                        {"id": 0, "symbol": sym,
+                         "why": "与同批卖出动作冲突（离场优先，不挂买入条件）"})
+                    continue
                 if (sym, side) in seen:
                     skipped.append({"symbol": sym, "side": side,
                                     "why": "同方向条件单已存在，避免双重下单"})
@@ -583,19 +691,42 @@ class AgentTrader:
                 all_bars[sym] = bars
         if not all_bars:
             return {"ok": False, "error": "无历史数据，无法做计划", "timestamp": now}
-        asof = max(bars[-1].timestamp.date().isoformat() for bars in all_bars.values())
-        if require_today and not force and asof != base_now.date().isoformat():
-            return {"ok": True, "skipped": "no-fresh-data", "asof": asof,
-                    "plan_date": plan_date, "timestamp": now, "symbols": symbols}
+        holdings = [p.symbol for p in b.broker.get_all_positions()]
+        fresh = freshness_of(all_bars, symbols, holdings,
+                             base_now.date().isoformat())
+        asof = max((bars[-1].timestamp.date().isoformat()
+                    for bars in all_bars.values() if bars), default=None)
+        if require_today and not force:
+            if fresh["holdings_stale"] or fresh["coverage"] < FRESH_COVERAGE_MIN:
+                logger.warning(
+                    "AI plan skipped: freshness %s/%s (holdings stale %s)",
+                    fresh["fresh"], fresh["total"], fresh["holdings_stale"])
+                try:
+                    b.broker.log_operation(
+                        "ai:plan",
+                        {"symbols": symbols, "asof": asof,
+                         "freshness": fresh, "plan_date": plan_date,
+                         "pool_source": pool_source},
+                        True,
+                        {"skipped": "no-fresh-data", "freshness": fresh},
+                        None, None)
+                except Exception:               # noqa: BLE001 - 审计不挡返回
+                    pass
+                return {"ok": True, "skipped": "no-fresh-data", "asof": asof,
+                        "freshness": fresh, "plan_date": plan_date,
+                        "timestamp": now, "symbols": symbols}
+            stale_cand = set(fresh["stale"]) - set(holdings)
+            if stale_cand:
+                # 覆盖率过线但部分候选陈旧：把它们剔出 prompt，不让 LLM 看旧价
+                symbols = [s for s in symbols if s not in stale_cand]
+                all_bars = {k: v for k, v in all_bars.items() if k in symbols}
+                fresh["dropped"] = sorted(stale_cand)
         # 只有运行时收盘计划窗口（require_today 且数据已定稿到今天）才记收盘
         # NAV：无交易的交易日也要有一行，否则逐日收益/回撤基线出现空洞。
         if require_today:
             self._snapshot_close_nav(symbols, base_now.date().isoformat())
 
-        ref = b.strategy.generate_signals(all_bars)
-        ref_txt = "无" if not ref else "、".join(
-            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}{s.volume}股@{s.price:.2f}"
-            for s in ref.values())
+        ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
@@ -612,8 +743,11 @@ class AgentTrader:
             max_conditions=int(self.cfg.max_conditions),
             condition_max_days=int(self.cfg.condition_max_days),
             min_ticket=int(self._engine_min_ticket()))
-            + f"\n注意：当前为休盘，最新定稿数据截至 {asof}。"
+            + f"\n注意：当前为休盘，最新定稿数据截至 {asof}；"
+              f"候选池当日覆盖 {fresh['fresh']}/{fresh['total']}。"
               "你的决策将在下一个开盘执行。")
+        if self._is_mother():
+            system += MOTHER_RULES
         from paper_trading.llm import LLMError
 
         try:
@@ -652,15 +786,38 @@ class AgentTrader:
                 a["price_source"] = "last_close"
             except (TypeError, ValueError):
                 continue
-        # 计划是给“下一个交易日开盘”用的；plan_date 已在问模型前算好。
+        # 母策略整备（2026-11-19）：违规买入进 actions_rejected；AVOID 持仓的 hold
+        # 换成全量卖出。执行层还有闸门兜底，这里保证"计划本身自洽"。
+        actions_rejected: list = []
+        if self._is_mother():
+            from paper_trading.agent.mother_strategy import clean_mother_actions
+
+            refs, ref_asof = self._mother_refs()
+            available = {p.symbol: int(getattr(p, "available_volume", 0) or 0)
+                         for p in b.broker.get_all_positions()}
+            actions, actions_rejected, forced = clean_mother_actions(
+                actions, refs, asof=ref_asof,
+                today=base_now.date().isoformat(), available=available,
+                max_orders=int(self.cfg.max_orders_per_run))
+            if forced:
+                summary = (summary + "；母策略 AVOID 强制卖出：" + "、".join(forced))[:200]
+            if actions_rejected:
+                _rej = "、".join(
+                    f"{a.get('symbol')}（{str(a.get('reject_reason'))[:20]}）"
+                    for a in actions_rejected[:3])
+                summary = (summary + "；未执行：" + _rej)[:200]
+        # 计划是给"下一个交易日开盘"用的；plan_date 已在问模型前算好。
         pid = b.broker.save_plan(plan_date, symbols,
-                                 {"actions": actions, "summary": summary, "asof": asof,
+                                 {"actions": actions, "summary": summary,
+                                  "actions_rejected": actions_rejected, "asof": asof,
+                                  "freshness": fresh,
                                   "conditions": conditions,
                                   "conditions_rejected": conditions_rejected,
                                   "pool_source": pool_source,
                                   "picks": [{k: p.get(k) for k in ("symbol", "name", "reason")}
                                             for p in picks]})
         b.broker.log_operation("ai:plan", {"symbols": symbols, "asof": asof,
+                                           "freshness": fresh,
                                            "plan_date": plan_date,
                                            "pool_source": pool_source,
                                            "n_picks": len(picks),
@@ -668,6 +825,7 @@ class AgentTrader:
                                            "n_conditions_rejected": len(conditions_rejected),
                                            **({"slot": slot} if slot else {})}, True,
                                {"plan_id": pid, "summary": summary,
+                                "freshness": fresh,
                                 "n_actions": len(actions),
                                 "n_conditions": len(conditions),
                                 "n_conditions_rejected": len(conditions_rejected),
@@ -677,7 +835,7 @@ class AgentTrader:
                                 "raw": str(raw or "")[:1500]}, None, None)
         logger.info(f"AI plan saved id={pid} for={plan_date} asof={asof}")
         return {"ok": True, "mode": "plan", "plan_id": pid, "plan_date": plan_date,
-                "asof": asof, "timestamp": now, "symbols": symbols,
+                "asof": asof, "freshness": fresh, "timestamp": now, "symbols": symbols,
                 "pool_source": pool_source, "actions": actions,
                 "conditions": conditions,
                 "conditions_rejected": conditions_rejected,
@@ -838,20 +996,26 @@ class AgentTrader:
                     "timestamp": now_iso, "symbols": symbols}
 
         # 4.6 无新鲜数据守卫（只拦现决现执：节假日/源未更新时不问 LLM）
+        #     T96：不再用 any/max 只看一只；按覆盖率 + 持仓逐只判。
         today = base_now.date()
-        if not any(bars and bars[-1].timestamp.date() >= today for bars in all_bars.values()):
-            _asof = ""
-            try:
-                _asof = max(bars[-1].timestamp for bars in all_bars.values()
-                            if bars).date().isoformat()
-            except Exception:
-                _asof = ""
-            logger.warning(f"No fresh bars (latest {_asof or 'none'}), AI skips")
-            b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode},
+        fresh = freshness_of(all_bars, symbols, list(positions), today.isoformat())
+        if fresh["holdings_stale"] or fresh["coverage"] < FRESH_COVERAGE_MIN:
+            logger.warning(
+                "No fresh bars (fresh %s/%s, holdings stale %s), AI skips",
+                fresh["fresh"], fresh["total"], fresh["holdings_stale"])
+            b.broker.log_operation("ai:decide", {"symbols": symbols, "mode": mode,
+                                                 "freshness": fresh},
                                    True, {"skipped": "no-fresh-bars",
-                                          "latest": _asof}, None, None)
-            return {"ok": True, "skipped": "no-fresh-bars", "latest": _asof,
+                                          "latest": fresh["oldest"],
+                                          "freshness": fresh}, None, None)
+            return {"ok": True, "skipped": "no-fresh-bars",
+                    "latest": fresh["oldest"], "freshness": fresh,
                     "timestamp": now_iso, "symbols": symbols}
+        stale_cand = set(fresh["stale"]) - set(positions)
+        if stale_cand:
+            symbols = [s for s in symbols if s not in stale_cand]
+            all_bars = {k: v for k, v in all_bars.items() if k in symbols}
+            fresh["dropped"] = sorted(stale_cand)
 
         # 4.7 AI 自主提名（pass1）：候选之外允许它点名全市场任意 A 股。
         #     放在新鲜守卫之后——没新行情就不必白花一次 LLM 与补数。
@@ -867,10 +1031,7 @@ class AgentTrader:
                 latest = b.price_map(symbols)
 
         # 5. 参考信号 + 上下文，问 LLM
-        ref = b.strategy.generate_signals(all_bars)
-        ref_txt = "无" if not ref else "、".join(
-            f"{s.symbol}{'买入' if s.direction.value == 1 else '卖出'}{s.volume}股@{s.price:.2f}"
-            for s in ref.values())
+        ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
@@ -892,6 +1053,8 @@ class AgentTrader:
             system += ("\n本轮额外纳入以下 AI 自主提名标的（程序已校验为合法 A 股并补齐数据）："
                        + "、".join(f"{p.get('name') or p['symbol']}({p['symbol']})"
                                    for p in picks))
+        if self._is_mother():
+            system += MOTHER_RULES
         from paper_trading.llm import LLMError
 
         try:
@@ -924,7 +1087,7 @@ class AgentTrader:
             pool_source=pool_source, slot=_slot_s,
             picks=[{"symbol": p["symbol"], "name": p.get("name", "")}
                    for p in picks], conditions=conditions,
-            conditions_rejected=conditions_rejected)
+            conditions_rejected=conditions_rejected, freshness=fresh)
 
     def _execute_plan(self, pending: dict, all_bars: dict,
                       latest: dict, slot: Optional[str] = None,
@@ -993,7 +1156,8 @@ class AgentTrader:
                 from_plan=True, plan_id=int(pending["id"]),
                 pool_source=str(plan.get("pool_source", "config")),
                 slot=slot, conditions=conditions,
-                conditions_rejected=conditions_rejected)
+                conditions_rejected=conditions_rejected,
+                freshness=plan.get("freshness"))
         except Exception as e:                # noqa: BLE001
             # H-5 定案（T8 复核后主 AI 裁决）：**执行中断也消费计划**。
             # 反向风险更严重：崩溃不消费 → 下个 tick 自动重跑 → 已成交的
@@ -1041,7 +1205,8 @@ class AgentTrader:
                          picks: Optional[list] = None,
                          conditions: Optional[list] = None,
                          conditions_rejected: Optional[list] = None,
-                         plan_id: Optional[int] = None) -> dict:
+                         plan_id: Optional[int] = None,
+                         freshness: Optional[dict] = None) -> dict:
         """逐条钳制执行（dry_run 不碰账本；from_plan 仅标记来源）。"""
         from paper_trading.models import Order, OrderType, Signal, SignalType
         from paper_trading.utils import get_logger
@@ -1053,7 +1218,32 @@ class AgentTrader:
         allow_sell = set(positions)
         decided: list[dict] = []
         n_orders = 0
-        all_actions = actions if isinstance(actions, list) else []
+        all_actions = list(actions) if isinstance(actions, list) else []
+        # 执行层补救（2026-11-19）：旧计划或模型漏掉的 AVOID 持仓，在这里补卖，
+        # 并去掉同标的的 hold（避免"持有 + 卖出"并列的审计噪音）。
+        forced_sells = self._mother_avoid_sells(positions=positions,
+                                                actions=all_actions)
+        if forced_sells:
+            _forced = {a["symbol"] for a in forced_sells}
+            all_actions = forced_sells + [
+                a for a in all_actions
+                if not (isinstance(a, dict)
+                        and str(a.get("action", "")).lower() == "hold"
+                        and str(a.get("symbol")) in _forced)
+            ]
+        if all_actions:
+            # 交易优先 + 卖出优先（2026-11-23 事故）：执行层的单轮处理上限
+            # （`n_cap`，含审计噪音）和日内笔数上限都是**按顺序扣**的。
+            # 计划里 hold 条目多（AI 普遍给"7 hold + 3 交易"）时，若原序执行，
+            # 后面的买卖单会被前面的 hold 挤掉——11-23 计划 #28 的
+            # `sell 000426 400` 就是这样被静默丢弃（只剩"仅审计"），而同计划挂的
+            # `buy 000426` 条件单反而成交了。
+            # 排序固定为：卖 → 买 → 其他（hold）；同类保持模型原序。
+            _rank = {"sell": 0, "buy": 1}
+            all_actions = sorted(
+                all_actions,
+                key=lambda a: _rank.get(str(a.get("action", "")).lower(), 2)
+                if isinstance(a, dict) else 3)
         n_cap = self.cfg.max_orders_per_run + 5
         for idx, a in enumerate(all_actions):
             if idx >= n_cap:
@@ -1155,6 +1345,10 @@ class AgentTrader:
                 # "门禁静默关闭 = 同源自洽盲区"。无基准 = 拒单，不放行。
                 rec["status"] = ("拒绝：无独立基准价（bars/计划价均缺失），"
                                  "尺度门禁无法执行（fail-closed）")
+            elif act == "buy" and (why_mother := self._mother_block(sym, px)):
+                # 母策略闸门（2026-11-19）：signal 非 BUY / 现价不在买入区间 / 分析过期
+                # 一律拒绝。实测事故：计划买入 601899（母分析 HOLD、区间 8-12、现价 23.88）。
+                rec["status"] = f"拒绝：{why_mother}"
             elif vol * px > self.cfg.max_order_value:
                 rec["status"] = f"拒绝：超单笔上限{int(self.cfg.max_order_value)}元"
             elif n_orders >= self.cfg.max_orders_per_run:
@@ -1224,8 +1418,10 @@ class AgentTrader:
                           "n_picks": len(picks or []),
                           "n_conditions": len(conditions or []),
                           "n_conditions_rejected": len(conditions_rejected or []),
+                          **({"freshness": freshness} if freshness else {}),
                           **({"slot": slot} if slot else {})}, True,
-            {"decisions": decided, "picks": picks or [], "conditions": cond_res},
+            {"decisions": decided, "picks": picks or [], "conditions": cond_res,
+             **({"freshness": freshness} if freshness else {})},
             nav2.cash, nav2.total_value)
         # 决策落库（供回放/审计）；失败不阻断决策链
         try:
@@ -1249,4 +1445,4 @@ class AgentTrader:
                 "from_plan": from_plan, "pool_source": pool_source,
                 "summary": summary, "decisions": decided,
                 "picks": picks or [], "conditions": cond_res,
-                "nav": nav2.__dict__}
+                "freshness": freshness, "nav": nav2.__dict__}

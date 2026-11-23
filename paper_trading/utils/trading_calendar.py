@@ -28,7 +28,9 @@ CALENDAR_ENV = "PAPER_TRADING_CALENDAR"
 DEFAULT_CALENDAR_REL = Path("var") / "trading_calendar.json"
 #: 同步时保留的最近历史天数：只为“最近一个假期/节后审计”这类近况查询兜底，
 #: 不是存历史档案；缓存主体是未来交易日（更早历史要查就查数据源，别信缓存）。
-HISTORY_TAIL_DAYS = 45
+#: 2026-11-19 由 45 → 120：`data:quality` 的缺口扫描要回看 ~60 个交易日的 K 线
+#: （约 3 个月），45 天覆盖不到就会把中秋节（2026-09-25）当成“缺数据”报出来。
+HISTORY_TAIL_DAYS = 120
 _CACHE: dict = {"path": "", "mtime_ns": -1, "data": {}}
 _LOGGER = logging.getLogger(__name__)
 _HORIZON_WARNED: Set[str] = set()
@@ -220,11 +222,34 @@ def calendar_covers(d: date | datetime | str,
     - 有缓存但日期晚于 `max_date`（如 2027 源尚未发布）：返回 False，
       交易入口（tick/引擎/事件/实时报价）应 **fail-closed** 跳过，
       并提示跑 `calendar sync`；禁止把“未知日”当交易日静默成交。
+
+    只判“未来一侧”（晚于 max 才不覆盖），因为交易入口只关心今天/明天。
+    历史审计（如 `data:quality` 的缺口扫描）要用 `calendar_knows`：
+    它连 `min_date` 之前的日子也算“不知道”，不许按工作日回退当交易日。
     """
     data = _read_calendar(path)
     if not data:
         return True
     return _as_date(d).isoformat() <= str(data["max_date"])
+
+
+def calendar_knows(d: date | datetime | str,
+                   path: Optional[str | Path] = None) -> bool:
+    """缓存是否**知道**该日期（`min_date <= d <= max_date`）。
+
+    与 `calendar_covers` 的区别：历史方向也要判。缓存只留最近
+    `HISTORY_TAIL_DAYS` 天 + 未来，更早的日期它答不了“是不是交易日”；
+    历史审计看到这种日期应跳过，而不是回退成“周一到周五”把节假日报成缺口
+    （2026-09-25 中秋休市被 `data:quality` 误报 44 次，就是这个形状）。
+
+    缓存不存在时返回 True：与 `is_trading_day` 的回退口径保持一致，
+    不能因为没缓存就让所有历史检查失效。
+    """
+    data = _read_calendar(path)
+    if not data:
+        return True
+    iso = _as_date(d).isoformat()
+    return str(data["min_date"]) <= iso <= str(data["max_date"])
 
 
 def is_trading_day(d: date | datetime | str, holidays: Optional[Set[str]] = None) -> bool:

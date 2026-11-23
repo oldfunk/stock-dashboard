@@ -155,10 +155,13 @@ def expire_stale(db_path: str | Path, day: str) -> list[str]:
     """
     with _conn(db_path) as c:
         rows = c.execute(
-            "SELECT biz_id, created_at FROM rq_intents"
+            "SELECT biz_id, created_at, rule_ref FROM rq_intents"
             " WHERE status IN ('pending','queued')").fetchall()
+        has_cond = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table'"
+            " AND name='conditional_orders'").fetchone()
         ids = []
-        for b, ca in rows:
+        for b, ca, rule_ref in rows:
             if str(ca)[:10] >= str(day)[:10] or is_carried(ca, day):
                 continue
             ids.append(b)
@@ -166,6 +169,26 @@ def expire_stale(db_path: str | Path, day: str) -> list[str]:
                       (json.dumps({"reason": "跨日未执行，过期（盘中决策只在当日内有效；"
                                              "盘后决定按 Q6 顺延一个交易日）",
                                    "expired_on": day}, ensure_ascii=False), b))
+            # T92（2026-11-20）：条件单触发后入队，意图跨日过期 ⇒ 条件单不能
+            # 永远停在 queued_rq（面板"已交框架"常亮、cond_loop 看不见）。
+            ref = str(rule_ref or "")
+            if has_cond and ref.startswith("cond:"):
+                cid = ref[5:].strip()
+                if cid.isdigit():
+                    cur = c.execute(
+                        "SELECT status, detail FROM conditional_orders WHERE id=?",
+                        (int(cid),)).fetchone()
+                    if cur and cur[0] == "queued_rq":
+                        try:
+                            detail = json.loads(cur[1] or "{}")
+                        except (TypeError, ValueError):
+                            detail = {}
+                        detail["expired_why"] = "意图跨日未执行，条件单作废"
+                        detail["expired_on"] = day
+                        c.execute(
+                            "UPDATE conditional_orders SET status='expired', detail=?"
+                            " WHERE id=? AND status='queued_rq'",
+                            (json.dumps(detail, ensure_ascii=False), int(cid)))
     return ids
 
 

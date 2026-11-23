@@ -68,13 +68,22 @@ USER_TMPL = """股票池：{pool}
 日内上限：{max_orders} 笔，单笔 ≤{max_order_value} 元。
 {scheme}
 {candidates}
-参考信号（仅供参考，可不采纳）：{signals}
+参考信号（一般仅供参考；若系统规则声明为权威，以系统规则为准）：{signals}
 项目实时状态：
 {context}
 请输出今日决策 JSON。"""
 
 SCHEME_TMPL = """当前投资方案：{title}（{name}）——{desc}
 离场纪律：{exits}"""
+
+MOTHER_RULES = """
+本轮为母项目（Stock Dashboard）价值策略，上面的"母策略参考"是**权威依据**：
+- 只有 signal=BUY 且现价在买入区间内才允许 buy；HOLD/AVOID 一律不得新开仓（代码层还会再校验一次）。
+- 买入区间按市值表述（含"亿市值"）时无法换算成价格，可结合评分与理由判断，但仍不得违反 signal。
+- 卖出按母策略的 stop_loss / take_profit 与论点卖出条件；**持仓 signal=AVOID 必须给出卖出**（全部可用股），代码层还会补一条，不要用 hold 绕过。
+- 不得引用 MA 金叉/死叉作为买卖依据（本轮参考信号已换成母策略，没有技术信号）。
+- 没有母库分析（或分析过期）的标的不得买入；缺分析时宁可 hold 并写明原因。
+"""
 
 CAND_TMPL = """Stock Dashboard 量化筛选依据（score 越高越优，可重点考虑高分者，但仍须自己判断）：
 {cand_lines}"""

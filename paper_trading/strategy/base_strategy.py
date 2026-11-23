@@ -13,7 +13,12 @@ class BaseStrategy(ABC):
 
     子类需实现 `generate_signals` 方法，接收当前行情数据，
     返回标准交易信号字典 {symbol: Signal}。
+
+    `params_schema`（T87）：`{参数名: {type, default, min, max, choices}}`。
+    注册表按它做类型/范围校验；策略**只产 Signal**，不得直接下单。
     """
+
+    params_schema: dict = {}
 
     def __init__(self, name: str = "base") -> None:
         self.name = name

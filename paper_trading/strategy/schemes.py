@@ -82,12 +82,12 @@ def mother_scheme() -> Scheme | None:
         return None
     return Scheme(
         name=MOTHER_ID, title="Stock Dashboard 价值",
-        desc="Stock Dashboard 价值投资理念：选股范围取自 Stock Dashboard 最新筛选，执行沿用通用规则，论点优先",
+        desc="Stock Dashboard 价值投资理念：选股范围、买卖区间与止损取自 Stock Dashboard 最新筛选与 AI 分析（signal/buy_zone/stop_loss），风控与撮合沿用通用规则",
         available=True, source=MOTHER_ID, universe_source="screening", universe_limit=15,
         signal={"short_window": 5, "long_window": 20,
                 "buy_volume": 100, "sell_volume": 100},
         sizing={"max_orders_per_run": 2, "max_order_value": 15000.0},
-        exits_note="论点卖出条件一票否决；无明确机会就持有不动",
+        exits_note="母策略 stop_loss/take_profit 与论点卖出条件一票否决；无明确机会就持有不动；不参考 MA 信号",
     )
 
 
