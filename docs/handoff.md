@@ -4,7 +4,12 @@
 > 文档分类（真相源 / 规程 / 设计 / 快照报告）见 `docs/README.md`——引用报告里的数字前先确认它是哪一类。
 > 每班收尾必须重写本文件（"最后状态"+"下一步方向"+"已知隐患"三段重写，"历史交接区"只追加不删），写完再 push + 简报。后一班只读它 + 账本当日条目就能接上。
 
-## 最后状态（2026-11-23 深夜：子项目 v0.10.0 合流并发布；纸盘按母策略运行）
+## 最后状态（2026-11-24 凌晨：vendor v0.10.1；第二实例面板修复）
+
+- **vendor v0.10.1（2026-11-24）**：`git subtree pull --prefix=paper_trading paper-upstream v0.10.1 --squash`（单向 tag 流，无冲突），vendor 树与上游逐字节一致；vendor 用例 993 → **996**（基线已更新）。
+  - **用户报障修复**：:8081 控制台切换投资方案反复索要 API Key。根因是第二实例与 :8080 不同 origin，localStorage 的 admin_token 不共享；且第二实例 secrets 只有 admin_token、没有 provider Key，凭 Key 接管也失败。现在内置方案（mother/general）且不改自定义指令时免口令；`custom` 或改指令仍需口令（指令会进 prompt）。
+  - **顺带修复**：旧线实例没有 `rq_intents` 表，`/api/intents` 曾 500；现返回空列表 + `unavailable`。
+  - 上游全量 **996 passed / 13 skipped**；生产 gate 与 :8081 冒烟在 deploy.sh 中执行。
 
 - **子项目 v0.10.0 合流 + 发布（2026-11-23）**：
   - `git subtree pull ... paper-upstream main`（16+ 提交）→ 冲突 3 个文件（`agent/loop.py`、`agent/mother_strategy.py`、`tests/test_mother_strategy.py`；上游已合入 PR #6，以 theirs 解决）；vendor **993 passed / 13 skipped**。
@@ -107,7 +112,7 @@
 - **上游 EM 接口对产线 IP 会整天 RemoteDisconnected**（2026-10-30/11-03 实录）：K 线增量整天 0 行、靠 F2 覆盖层兜住广度；增量次日自愈。腾讯行情批查对北交所 920 号段出数正常（批13-b 已接），但**腾讯当日 bar 发布晚于 15:30**（11-03 实录：15:36 拉不到当日、17:00 已有）→ EM 挂掉的日子增量可能零新增，次日 start_date=latest 自愈（已知行为，不修）。
 - **EM 依赖补数待解封**：301139（10-30 备源救回后 qfq 锚点轮再失败）与 920305（partial）等 push2his 解封后 `--source akshare` 手动补。
 - ~~BJ 财务复扫与归因器新桶~~：**2026-11-19 已解除**——归因器改按任务语义归类后，生产库 `unattributed` 3209→**0**、退出码 0（2911 `no_early_history` + 282 `financial_partial`）。"有行情缺财务"是 `coverage_gaps()` 的**跨库缺口**（当前 0 只），不是 no_data 记录，塞进分类会让 100% 归因变成假话。BJ 财务 321/321 早在批12 已清零。
-- **vendor 两条用例依赖墙钟（2026-11-19 凌晨实录）**：`test_minute_supply_t59.py` 的 `test_intraday_collect_logs_each_symptom_once` 与 `test_intraday_collect_writes_minute_heartbeat` 依赖 `completed_slots(now)` 非空——**00:50 跑必红**（当日尚无已完成时段，`needed=false`，假源根本没被调用），**22:55 跑必绿**（当日 48 个时段都已过）。同代码同命令，差别只在时刻，vendor 计数会 884/886 波动；不是母侧回归，需上游给测试注入 `now`（已并入 [paper-trading#3](https://github.com/oldfunk/paper-trading/issues/3) 第 3 条）。
+- ~~**vendor 两条用例依赖墙钟（2026-11-19 凌晨实录）**~~：**2026-11-24 v0.10.1 已修**——`test_intraday_collect_logs_each_symptom_once` 与 `test_intraday_collect_writes_minute_heartbeat` 统一传 `--now 2026-11-03T14:37:00`，不再依赖运行时刻（此前 00:50 跑必红、22:55 跑必绿，vendor 计数会 884/886 波动）。
 - **close_adj 修复仍手动**：增量已由 U9-A 供给、回填由 Sina 三列，但修残缺仍靠手动 `fix_close_adj_nulls`（无调度）。
 - ~~既有 vendor 用例失败待查~~：**2026-11-17 已消除**——v0.9.0 上游修复后 vendor 套件 886 passed / 0 failed（含此前失败的 `test_raw_feed` 与 `test_minute_supply_t59`），vendor 基线升到 886。
 - **生产纪律提请（用户协调，未决）**：母仓库目录（/home/nec/stock-dashboard）不得跑非母项目进程（Hermes agent 的旧 main.py 曾抢占 9527 致母服务重启循环）；端口 9527/8081/8080 各归其主。
