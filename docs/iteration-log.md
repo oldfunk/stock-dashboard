@@ -167,6 +167,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-23（深夜：子项目 v0.10.0 合流并发布）
+
+- **合流**：`git subtree pull --prefix=paper_trading paper-upstream main --squash`，16+ 提交；冲突仅在 `agent/loop.py`、`agent/mother_strategy.py`、`tests/test_mother_strategy.py`（上游已合入 PR #6 并追加修改），以 theirs 解决。vendor 全量 **993 passed / 13 skipped**；母门禁 **1522**。
+- **发布**：上游 `__version__` 0.7.0 → **0.10.0**，annotated tag **v0.10.0** + GitHub Release；母仓 `subtree pull v0.10.0` 对齐，vendored 版本记录更新。
+- **内容**：母策略接入（signal/buy_zone/stop、AVOID 强制离场、计划整备）、T96 计划新鲜度（逐只覆盖/持仓当日，修 issue #5）、卖→买→hold 与条件冲突拒单、面板 P1/P2（曲线/分时/FIFO/CSV）、daily-check 终态门禁与引擎沙箱。
+- **交互**：T96 要求持仓当日 K 线；母侧 `sync_data` 在 16:30 窗口取本地当日 bar，源晚发布时会 `no-fresh-data` 重试；A2（17:00 二次刷新）仍是待办。
+- **验证**：隔离副本 16:45 模拟 plan 窗口，freshness 8/8、coverage=1.0、asof=11-23（在当日数据可得的前提下）；生产重启待验证。
+
 ### 2026-11-23（周一收盘复核；A1b/A5b 发布时点兜底）
 
 - **纸盘**：plan #19 执行——买 **603979 金诚信 100@43.98**；NAV **96,363.32（-3.64%）**（现金 81,186.32 + 持仓市值 15,177）；当晚 plan #20（11-24）生成：卖 000426（母策略 AVOID 强制）、持有 000792/603979。当日 +0.52% vs 沪深300 +0.09%（日超额 +0.42pp）。
