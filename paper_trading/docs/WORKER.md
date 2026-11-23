@@ -1568,7 +1568,8 @@ T9/T10 结果裁决与 M1 门禁签核（§5.1 不绿不合）、P0 事故响应
 ## 2026-11-17 · 突击修复（主 AI 亲做，签字后第 2 个交易日）
 
 - [x] **T86 条件单队列闭环（P0·钱类相邻）**：`queued_rq` 不在 `STATUSES`
-  ⇒ 每次触发抛 `ValueError`（生产 250 次），条件单停在 armed（次日重复买入）、
+  ⇒ 每次触发抛 `ValueError`（自 11-06 日志窗口起 **125 次崩溃**，11-17 当日 24 次），
+  条件单停在 armed（次日重复买入）、
   同跳后续条件被跳过、成交后不落定。修复：白名单 + `apply_outcomes` 闭环
   （executed⇒filled / rejected⇒rejected）+ 面板标签 + daily-check 两项
   （`cond_loop` 红 / `engine_crash` 黄）——`7d35292`；生产 #98 按 `fills#32`
@@ -1585,23 +1586,138 @@ T9/T10 结果裁决与 M1 门禁签核（§5.1 不绿不合）、P0 事故响应
 > 已在，但**装配是硬编码**（`cli.py:196`、`main.py:50`），无注册表/无参数注入/
 > 无自定义加载契约；规则引擎+队列模式已让系统无计划独立成交（11-16 实证）。
 
-- [ ] **T87 策略契约与注册表**：`BaseStrategy` 明确 `params_schema`（类型/默认/
-  范围）+ `name` 唯一性；新增 `paper_trading/strategy/registry.py`：
-  `build(spec)` 按 `{class, params}` 构造，未知类/参数越界 **fail-closed**
-  （返回错误并留痕，不许静默用默认值）。验收：单测覆盖正常/未知类/坏参数。
-- [ ] **T88 配置注入与默认装配**：`strategy.local.yaml` 支持
-  `strategies: [{name, class, params, enabled}]`；`cli.TradingBridge` 与
-  `main.py` 不再硬编码 `MACrossStrategy`，改为注册表装配；空配置 ⇒ 内置默认
-  （MA5/20）；坏配置 ⇒ 启动即失败并写 `op_log[strategy:config]`。
-  验收：配置优先级（local > 默认）、禁用策略不产生信号。
-- [ ] **T89 自定义策略加载契约**：允许 `class: mypkg.MyStrategy`（仅限已安装
-  包/`PAPER_TRADING_STRATEGY_PATH` 白名单目录）；导入失败/非 BaseStrategy 子类
-  ⇒ 拒绝并留痕；文档写明"自定义策略不得直接下单"（只产 `Signal`，执行仍走风控+
-  队列）。验收：临时模块加载成功 + 三类坏输入被拒。
-- [ ] **T90 内置基础策略集与"无 AI 也能决策"**：除 MA 交叉外补一个不依赖母库的
-  基础组合（例：`Breakout` 20 日高突破 + `StopLoss` 已有规则、`RSI` 区间），
-  全部只吃本地 `daily_bars_raw`；给出"断网 + 无 LLM key"的独立运行日配置样例。
-  验收：离线 dry-run 一日产生可解释信号。
-- [ ] **T91 文档与回归**：`docs/strategy-contract.md`（契约/参数表/示例/禁用与
-  回滚）；`tests/test_strategy_registry_t87.py`；CI 门禁含新增测试；
-  文档写明"策略只做判定，L1 执行与钱类口径不变"。
+- [x] **T87 策略契约与注册表**（2026-11-20）：`BaseStrategy.params_schema` + 
+  `strategy/registry.py`（`build`/`build_all`/`build_from_config`/`load_specs`），
+  未知类/未知参数/类型/越界/构造失败/重名全部 `StrategyConfigError`。
+- [x] **T88 配置注入与默认装配**（2026-11-20）：`config.yaml strategy.strategies`
+  + `strategy.local.yaml` 优先；`TradingBridge` / `main.py` 改注册表装配；
+  空配置回 MA5/20；坏配置启动失败并写 `op_log[strategy:config]`。
+- [x] **T89 自定义策略加载契约**（2026-11-20）：`pkg.Module.Class` 仅限已安装包
+  或 `PAPER_TRADING_STRATEGY_PATH` 白名单；非子类/导入失败/越界目录拒绝；
+  文档写明"不得直接下单"（`docs/strategy-contract.md`）。
+- [x] **T90 内置基础策略集**（2026-11-20）：新增 `breakout`（20 日高突破 /
+  10 日低跌破）与 `rsi_zone`（RSI 穿越 30/70），只吃本地日线；文档给离线
+  dry-run 样例（`--scheme general run --dry-run`，无母库/无 LLM）。
+- [x] **T91 文档与回归**（2026-11-20）：`docs/strategy-contract.md` + 
+  `tests/test_strategy_registry_t87.py`（18 条）；全量套件含新增用例。
+
+## Batch 22 追加 · 11-18 事故派生（2026-11-19）
+
+> 事故本体（`rq:fill` 幂等键缺业务日）已由 `01f512f` 当日修复并复盘在
+> `docs/incident-2026-11-18.md`。以下两项是复盘时暴露、但**不属于**当日
+> 止血范围的结构缺口。
+
+- [x] **T92 条件单僵尸收口**（2026-11-20）：`queue.expire_stale` 命中
+  `rule_ref=cond:<id>` 时同步把 `queued_rq` 条件单标 `expired`，detail 写
+  `expired_why/expired_on`；`daily_check.check_cond_loop` 增加"`queued_rq`
+  创建超过 3 天"的 warn（无今日触发也报）。验收：`test_cond_expire_t92.py`
+  5 条（过期落定/armed 不动/非 cond 不动/僵尸 warn/无僵尸 green）。
+- [x] **T93 "活着但没干活"探针**（`bb7ff9d`）：11-18 每跳都以 0 退出、心跳正常，
+  而 `InitPositionError` 在 `rq_tick.log` 刷了 142 次、全日 0 成交——现有
+  `engine_crash` 只扫 `engine.log` 且只认 `crashed` 关键词。已加 daily-check
+  `tick_stall`：按行首日期只取当天段，扫 `InitPositionError` / `IdleSpin`，
+  命中记 **warn**（钱没动、不触发 rollback，但收盘报告里必须出现）。
+  验收：4 条单测覆盖"今日命中/IdleSpin/历史不误报/无日志"；11-19 回放
+  11-18 日志应报黄。（"交易时段 ≥N 跳 0 成交"那半条不在本次范围——它本质上
+  是资金/意图口径，`intent_queue` + `tick_stall` 已能定位。）
+
+- [x] **T94 观测三修**（2026-11-19 晚，11-19 运行日复盘中暴露）：
+  ① **会话证据逐份留存**：一天多场会话（11-19 = 09:32 两笔 + 09:47 一笔）
+  旧实现共用一个 `evidence_<日>.json`，后一场覆盖前一场。改为
+  `evidence_<日>_<HHMMSS>.json` 每场一份 + `evidence_<日>.json` 别名；
+  `daily_check.latest_evidence` 别名缺失时回退读当天最新一份（不再假装没留痕）。
+  ② **看门狗窗口首跳宽限**：11-19 09:00 固定假报「engine 应跳未跳 61,259s」。
+  判定改为 `min(距上次心跳, 距窗口起点)`：09:00:02 只算迟到 2s，09:06 仍未跳
+  才报 stale（真停滞不被洗白）。
+  ③ **日历不知道的历史日不许当交易日**：质量检查回看约 90 天，而日历缓存只留
+  最近 45 天（`min_date=2026-09-30`），2026-09-25 中秋被 44 个标的各报一次缺口。
+  新增 `calendar_knows()`（双向覆盖判断），质量缺口扫描只统计"知道"的日期；
+  `HISTORY_TAIL_DAYS` 45 → 120，让之后的同步覆盖完整回看窗口。
+  **注意**：停滞（stale）扫描**不能**跟着裁剪——2024 年的旧数据在覆盖窗外被
+  算成 0 天就永远不报（NEC 实测两条例用回退即红）。两种语义已拆开：
+  `_trading_days_between(require_known=...)`。
+  验收：`test_evidence_t94.py` + 心跳/质量新增 7 条；全量 904 passed / 13 skipped。
+
+- [x] **T95 面板 P0（结果视图）**（2026-11-19 晚）：把净值从表格升级为收益曲线，
+  并把"今天怎么样"放到第一屏。**设计契约见 `docs/ui-iteration-20261119.md`**，
+  代码改动只在 `dashboard.py`（只读、零新依赖、纯 SVG）：
+  ① 5 张 KPI（总资产/今日盈亏/累计收益/最大回撤/仓位）；
+  ② 收益曲线三种模式（总资产/收益率/回撤），同日去重、缺日虚线 + 覆盖度徽标、
+     初始资金基准线、悬浮明细；
+  ③ "今日/系统"卡（成交/条件单/意图/体检/健康）；
+  ④ 持仓表加名称/占比/持仓天数/距峰值/10 日迷你走势；
+  ⑤ 净值明细表折叠保留；移除 emoji（设计规范）。
+  指标口径全部在服务端（`/api/performance`、`/api/overview`），前端只画；
+  生产实测：26/34 个交易日有 NAV、缺 8 日、MDD 6.36%、仓位 51.8%。
+  验收：`test_dashboard_perf_t95.py` + 页面门禁；三档宽度/深浅色截图。
+
+- [x] **T96 计划新鲜度**（2026-11-20 与面板 P1 同批）：不再用 `max(asof)` 放行，
+  改为逐只 K 线末根日期 + **今日**覆盖率（运行时计划/决策的既有契约是"定稿到
+  今天才做"，本次只修 max 掩盖，不放松成 T-1）：
+  - `freshness_of()`：`{required,fresh,total,coverage,oldest,stale,holdings_stale,per_symbol}`；
+    阈值 `FRESH_COVERAGE_MIN=0.80`，持仓**全部**必须新鲜；过线但个别候选陈旧
+    的直接剔出 prompt（`dropped`）。
+  - 覆盖率不达标：不动模型，`ai:plan` 记 `skipped=no-fresh-data`（面板流水可见
+    "计划跳过：数据覆盖不足 x/y，最旧 …"），下个 tick 重试。
+  - `ai:plan`/`ai:decide` 都把 `freshness` 写进 plan JSON / op_log；面板运维页
+    展示"最新计划 + 数据截至 + 当日覆盖 + 持仓陈旧"。
+  验收：`tests/test_freshness_t96.py`（覆盖率/持仓陈旧/缺失 bar/空池）；
+  既有 `test_tick_plan_waits_for_today_data` 继续通过（T-1 整池仍按不新鲜拒）。
+  未做：17:00 全池 qfq sync——先看覆盖率暴露后是否仍需要。
+
+- [x] **T97 面板 P1（任务视图）**（2026-11-20，与 T96 同批）：
+  - 顶部 `总览 / 交易 / 运维 / 控制台` 四 tab，hash 路由（`#/trading` 等），
+    `[data-tab]` 控制显隐；KPI/健康条常驻，不漏告警。
+  - 总览：P0 的曲线/KPI/今日卡/持仓/净值明细；交易：订单、**新意图队列**、
+    条件单；运维：**心跳卡 + 今日体检 + 最新计划/新鲜度** + 数据来源 + AI 流水；
+    控制台：方案、运行时刻、规则引擎、AI 问答、模型设置。
+  - 后端新增 `/api/intents`（limit 安全夹取）；`/api/overview` 增加
+    `health.checks`（四心跳状态）与 `plan`（最新计划 + freshness）。
+  - 验收：页面门禁加 tab/意图/运维断言；`/api/intents` 接口用例；
+    715 窄屏四 tab 无横向溢出。
+
+- [x] **T98 面板 P2：已实现盈亏 + 交易统计**（2026-11-21，`aae502f`）：
+  `/api/performance` 增加 FIFO 口径 `realized_pnl/fees_total/closed_trades/
+  win_trades/lose_trades/win_rate/unmatched_sell_volume`；历史重建卖出没有
+  匹配买入时只报量、不算收益（不拿 0 成本虚增）。生产 11-20：已实现
+  −3,100.10、费用 242.81、3 胜/10 负、无未匹配。验收：
+  `tests/test_dashboard_perf_t95.py`。
+
+- [x] **T99 面板 P2：今日分时**（2026-11-21，`0bffba9`+`cee7130`）：
+  `GET /api/intraday` 从当前账本反推目标日开盘（先反推目标日之后成交，再反推
+  当日成交），09:30 用上一交易日 raw 收盘估值，之后按 5 分钟线逐点，成交时间
+  ≤ 当前 bar 时生效；`reconstruction_ok=false` 显式"需核账"；无分钟线
+  `available=false`，默认请求周末自动回退最近交易日并返回 `fallback`。
+  面板总览新增分时卡（纯 SVG + 悬浮），2026-11-21 布局调整：上移到主收益曲线
+  之后、净值明细/持仓之前。验收：`tests/test_intraday_t98.py`；生产 11-20
+  49 点、起点 95,800.39、终点 95,470.19，与收盘 NAV 一致。
+
+- [x] **T100 面板 P2：CSV 导出**（2026-11-21，`2d7d6e8`）：
+  `GET /api/export.csv?type=performance|nav|positions|orders|fills|intents|cond`
+  （只读，UTF-8 BOM + attachment，limit 默认 5000/最大 20000，未知 type 400）；
+  收益曲线/净值/持仓/订单/意图/条件单标题行统一 `CSV` 小按钮。验收：
+  `test_dashboard_perf_t95.py::test_export_csv_endpoints` + 页面门禁。
+
+- [x] **T101 执行顺序修复（11-23 计划 #28 事故）**（2026-11-23）：
+  `hold` 条目占满单轮处理上限，导致计划里的 `sell 000426 400` 和
+  `buy 600519 100` 被静默丢弃；同计划挂的 `buy 000426` 条件单反而成交，
+  方向与计划相反。修复：① 执行前固定排序 卖 → 买 → hold（全方案，上限语义
+  不变）；② `_arm_conditions` 拒绝"同批卖出动作 + 同标的买入条件"的冲突。
+  复盘见 `docs/incident-2026-11-23.md`；验收：`tests/test_agent.py` 两条新增
+  （交易不被 hold 挤掉 / 冲突条件落 rejected）。
+
+- [x] **T102 交易动作终态门禁**（2026-11-23，`action_funnel`）：
+  daily-check 新增一项：当日 `agent_decisions` 里每条 buy/sell 必须以业务原因
+  结束（入队/成交/风控拒绝…）；"超出单轮处理上限""未知动作"或无终态 ⇒ 红。
+  事故当天的卖单正是停在这个状态而核对全绿。验收：
+  `tests/test_daily_check_t80.py`（丢单红 / 业务拒绝绿 / 空终态红）。
+  同日沙箱复验：隔离副本投 `SELL 000426 100`，`rq tick` 正常消费并成交
+  @18.81，现金 90,995 → 92,870.04069，生产账本 md5 未变
+  （见 `docs/incident-2026-11-23.md` §8）。
+
+
+
+
+
+
+

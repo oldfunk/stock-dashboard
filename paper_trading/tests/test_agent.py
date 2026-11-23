@@ -608,6 +608,27 @@ def test_arm_rejects_sell_condition_without_holding(tmp_path):
     assert ConditionalOrders(b.account_db_path).list_all(5) == []
 
 
+def test_arm_rejects_buy_condition_conflicting_with_sell_action(tmp_path):
+    """计划自相矛盾必须拒绝（2026-11-23 计划 #28 事故）。
+
+    同一批动作里有 `sell 000426`，条件里却挂 `price_below 18.5 buy 000426`；
+    当日卖单被单轮上限丢掉后买单照常成交，方向和计划相反。
+    """
+    from paper_trading.engine.conditional import ConditionalOrders
+
+    exp = (datetime.now() + timedelta(days=2)).date().isoformat()
+    b = _bridge(str(tmp_path), _fresh_bars())
+    t = AgentTrader(b, AgentConfig(picks_enabled=False))
+    conds = [{"symbol": "600519", "side": "buy", "cond_type": "price_below",
+              "cond_value": 10.0, "volume": 100, "value": 0,
+              "expiry": f"{exp}T23:59", "note": "逢低买", "source": "ai"}]
+    res = t._arm_conditions(
+        conds, actions=[{"action": "sell", "symbol": "600519", "volume": 100}])
+    assert res["n_created"] == 0 and res["n_rejected"] == 1
+    assert "离场优先" in res["rejected"][0]["why"]
+    assert ConditionalOrders(b.account_db_path).list_all(5) == []
+
+
 def test_trader_prompt_has_exit_playbook():
     """离场三件套（止损/放飞/清仓）必须写进系统提示，且不破坏 JSON 占位符。"""
     from paper_trading.agent.prompts import TRADER_SYSTEM
@@ -732,6 +753,48 @@ def test_actions_beyond_cap_are_audited(monkeypatch, tmp_path):
     assert "超出单轮处理上限" in ds[7]["status"]
     assert "超出单轮处理上限" in ds[8]["status"]
     assert ds[0]["status"] == "持有不动"
+
+
+def test_trades_are_processed_before_holds_at_cap(monkeypatch, tmp_path):
+    """2026-11-23 事故回归：hold 不能挤掉交易，卖单必须排在最前。
+
+    生产计划 #28 是"7 hold + 买 601899 + 买 600519 + 卖 000426"，原序执行
+    撞上单轮处理上限 8 条，后两条（含**卖出**）被静默丢弃，而同计划的
+    `buy 000426` 条件单反而成交。修复：执行前固定排序 卖 → 买 → hold。
+    """
+    from datetime import datetime
+
+    b = _bridge(str(tmp_path), _fresh_bars())
+    b.broker.apply_external_fill(
+        symbol="600519", direction=1, volume=100, price=10.0,
+        commission=5.0, filled_at=datetime.now())
+    t = AgentTrader(b, AgentConfig(max_orders_per_run=3, max_order_value=20000.0))
+    bars = _fresh_bars()
+    actions = [{"action": "hold", "symbol": f"60000{i}", "volume": 0,
+                "reason": f"h{i}"} for i in range(7)]
+    actions += [
+        {"action": "buy", "symbol": "601899", "volume": 100,
+         "reason": "买", "basis": ["recent_closes"], "risk_stop": 8.0},
+        {"action": "sell", "symbol": "600519", "volume": 100,
+         "reason": "卖", "basis": ["recent_closes"]},
+    ]
+    res = t._execute_actions(
+        actions=actions, summary="", symbols=["600519", "601899"],
+        all_bars={"600519": bars, "601899": bars},
+        latest_prices={"600519": 12.9, "601899": 12.9},
+        cash=b.broker.get_cash(),
+        positions={p.symbol: p for p in b.broker.get_all_positions()},
+        nav_total=1000000.0, dry_run=True, mode="live",
+        now=datetime.now().isoformat(), from_plan=True, plan_id=1)
+
+    ds = res["decisions"]
+    assert len(ds) == 9, "被上限挡下的条目仍要留审计"
+    assert ds[0]["action"] == "sell" and ds[0]["symbol"] == "600519"
+    assert "超出单轮处理上限" not in ds[0]["status"]
+    buy = [d for d in ds if d["action"] == "buy"][0]
+    assert "超出单轮处理上限" not in buy["status"]
+    dropped = [d for d in ds if "超出单轮处理上限" in d["status"]]
+    assert len(dropped) == 1 and dropped[0]["action"] == "hold"
 
 
 def test_condition_gate_rejects_when_no_price():

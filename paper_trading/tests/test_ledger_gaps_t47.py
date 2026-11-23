@@ -179,6 +179,34 @@ def test_post_session_is_idempotent_per_biz_id(broker):
     assert broker.get_cash() == pytest.approx(CASH - 1000 * 37.58 - 9.395 - 0.3758)
 
 
+def test_post_session_same_shape_fill_on_later_day_is_posted_again(broker):
+    """幂等键必须含业务日（2026-11-18 事故）：`fp` 跨日恒定、`i` 只是会话内序号，
+    旧键 `rq-fill:{fp}:{i}:{symbol}:{volume}` 不含日期 ⇒ 与历史同形状成交撞键，
+    被当 already_posted 静默跳过（框架买了、账本没记 → 脱钩 → 当日后续会话全拒开）。"""
+    ev = {"trades": [mktrade()]}
+    d1 = ld.post_session(broker, ev, today="2026-11-12", fp="34288a78d4b8736f")
+    d2 = ld.post_session(broker, ev, today="2026-11-18", fp="34288a78d4b8736f")
+    assert len(d1["posted"]) == 1, d1
+    assert len(d2["posted"]) == 1, d2                       # 跨日不许被吞
+    assert d2["skipped"] == []
+    assert len(rows(broker, "fills")) == 2
+    assert d1["posted"][0]["biz_id"] != d2["posted"][0]["biz_id"]
+    # 同一业务日再跑一次仍然只算一次
+    d2b = ld.post_session(broker, ev, today="2026-11-18", fp="34288a78d4b8736f")
+    assert d2b["posted"] == [] and len(d2b["skipped"]) == 1
+    assert len(rows(broker, "fills")) == 2
+
+
+def test_post_session_without_fp_still_dedupes_the_legacy_key(broker):
+    """不带 fp 的路径（手工补跑）旧键第一段本来就地是业务日：同日重放必须仍去重。"""
+    ev = {"trades": [mktrade()]}
+    first = ld.post_session(broker, ev, today=TODAY)
+    second = ld.post_session(broker, ev, today=TODAY)
+    assert len(first["posted"]) == 1
+    assert second["posted"] == [] and len(second["skipped"]) == 1
+    assert len(rows(broker, "fills")) == 1
+
+
 def test_post_session_biz_id_survives_op_log_window(broker, monkeypatch):
     """幂等判定不能用"最近 N 条"窗口：面板问答把目标行挤出窗口就会重复落账。"""
     ld.post_session(broker, {"trades": [mktrade()]}, today=TODAY, fp="fp-a")

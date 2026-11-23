@@ -6,6 +6,7 @@
    真实事故形状（601899 HOLD、区间 8-12、现价 23.88）必须被杀掉。
 """
 
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -132,7 +133,9 @@ def test_ref_text_marks_missing_and_failed():
 def test_mother_block_only_for_mother_scheme():
     t = AgentTrader.__new__(AgentTrader)
     t.bridge = SimpleNamespace(scheme=SimpleNamespace(source="mother"))
-    t._mother_refs = lambda: (REFS, "2026-11-19")
+    # asof 必须用今天：闸门按 real today 判过期，写死 11-19 会变成定时炸弹
+    # （同 test_bar_source 周末假红那类问题）。
+    t._mother_refs = lambda: (REFS, date.today().isoformat())
     assert t._mother_block("601899", 23.88)
     assert t._mother_block("002558", 18.27) is None
 
@@ -245,3 +248,32 @@ def test_clean_plan_caps_buys_by_order_limit_sells_first():
     assert len([a for a in clean if a["action"] == "sell"]) == 1
     assert len([a for a in clean if a["action"] == "buy"]) == 1
     assert len(rejected) == 1 and "笔数上限" in rejected[0]["reject_reason"]
+
+
+def test_clean_plan_orders_sells_before_buys_even_if_llm_lists_buy_first():
+    """计划自洽 ≠ 执行自洽：执行层按顺序扣 max_orders，卖单必须排前面。
+
+    2026-11-20 复核发现：旧 clean_mother_actions 只按 n_sell 给买单留额度，
+    但输出顺序仍是 LLM 原序；若 LLM 先买后卖，买单会先吃掉 max_orders，
+    AVOID 强制卖出在执行层被上限挡掉。
+    """
+    clean, _, _ = clean_mother_actions(
+        [{"action": "buy", "symbol": "002558", "volume": 100, "price": 18.27},
+         {"action": "sell", "symbol": "002192", "volume": 200}],
+        REFS, asof="2026-11-19", today="2026-11-19",
+        available={"002192": 200}, max_orders=2)
+    assert [a["action"] for a in clean] == ["sell", "buy"]
+
+
+def test_execute_actions_wires_mother_gate_and_avoid_sell():
+    """源码级钉接线：买入闸门与 AVOID 补卖必须在 _execute_actions 里。
+
+    纯函数用例无法发现"接线被删"——这正是 11-19 复审抓到的自证缺口。
+    """
+    import inspect
+
+    from paper_trading.agent.loop import AgentTrader
+
+    src = inspect.getsource(AgentTrader._execute_actions)
+    assert "_mother_block(sym, px)" in src
+    assert "_mother_avoid_sells(" in src

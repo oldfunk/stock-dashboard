@@ -28,9 +28,25 @@ def _weekday(offset_days: int) -> date:
     return d
 
 
+def _prev_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _next_weekday(d: date) -> date:
+    d += timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+
 D_LATEST = _weekday(0).isoformat()     # 母库"最新一日"（今天或上一个工作日）
-D_PREV = _weekday(-1).isoformat()      # 母库"前一日"
-D_NEXT = _weekday(1).isoformat()       # 交易日历里的"下一排期"
+# 2026-11-21（周六）实测：`_weekday(-1)` 会与 D_LATEST 撞成同一个周五，
+# 合成母库两行同日 ⇒ bar_source 断言随机失败。必须显式取 D_LATEST 的上一工作日。
+D_PREV = _prev_weekday(date.fromisoformat(D_LATEST)).isoformat()
+D_NEXT = _next_weekday(date.fromisoformat(D_LATEST)).isoformat()
 D_SEQ = [_weekday(-3 - i).isoformat() for i in range(3)][::-1]   # 本地三日升序
 
 

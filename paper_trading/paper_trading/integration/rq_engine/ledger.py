@@ -75,8 +75,20 @@ def post_session(broker, evidence: dict, *, today: str, fp: str = "",
         return {"posted": [], "skipped": [], "errors": errors,
                 "ok": False, "today": today}
     for i, t in enumerate(trades):
-        biz_id = f"{BIZ_PREFIX}:{fp or today}:{i}:{t.get('symbol')}:{t.get('volume')}"
-        if _already_posted(broker, "rq:fill", biz_id):
+        # 2026-11-18：幂等键必须带**业务日**。`fp` 是配置指纹（跨日恒定）、`i`
+        # 只是会话内成交序号——两者都不含日期，"某天的第 0 笔 000792 买 100"
+        # 与 11-12 重置重放的同一形状成交就撞了键（op_log id 513），
+        # post_session 判 already_posted 静默跳过：框架买了、账本没记 ⇒
+        # 框架/账本脱钩 ⇒ 当日后续每一跳都拒开会话（11-18 全天零成交）。
+        # 同日重跑仍靠本键去重（today 相同）；跨日不再误吞。
+        biz_id = (f"{BIZ_PREFIX}:{today}:{fp or today}:{i}:"
+                  f"{t.get('symbol')}:{t.get('volume')}")
+        # 旧口径（无业务日）只在没有 fp 的调用路径上补判：那时键里的第一段
+        # 本来就是 today，同日重放靠它去重。带 fp 的路径不查旧键——正是旧键
+        # 跨日不可分辨，才需要这次修复。
+        legacy = f"{BIZ_PREFIX}:{fp or today}:{i}:{t.get('symbol')}:{t.get('volume')}"
+        if _already_posted(broker, "rq:fill", biz_id) or (
+                not fp and _already_posted(broker, "rq:fill", legacy)):
             skipped.append({"biz_id": biz_id, "why": "already_posted"})
             continue
         if dry_run:

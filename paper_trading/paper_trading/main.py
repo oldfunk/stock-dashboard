@@ -12,7 +12,6 @@ from paper_trading.data.db_manager import DataDBManager
 from paper_trading.models import Order, OrderType, Signal, TradingConfig
 from paper_trading.portfolio.portfolio import Portfolio
 from paper_trading.risk.risk_manager import RiskManager
-from paper_trading.strategy.ma_cross_strategy import MACrossStrategy
 from paper_trading.utils import get_logger
 
 
@@ -42,12 +41,29 @@ class PaperTradingEngine:
         data_db: str = "data.db",
         account_db: str = "paper_account.db",
         config: Optional[TradingConfig] = None,
+        config_path: str = "config.yaml",
     ) -> None:
         self.data_db = DataDBManager(data_db)
         self.broker = PaperBroker(account_db, config)
         self.portfolio = Portfolio(self.broker)
         self.risk = RiskManager()
-        self.strategy = MACrossStrategy(short_window=5, long_window=20)
+        from paper_trading.strategy.registry import (
+            StrategyConfigError, build_from_config,
+        )
+        try:
+            self.strategy = build_from_config(
+                config_path,
+                root=Path(__file__).resolve().parents[1],
+                defaults={"short_window": 5, "long_window": 20,
+                          "buy_volume": 100, "sell_volume": 100})
+        except StrategyConfigError as exc:
+            try:
+                self.broker.log_operation(
+                    "strategy:config", {"config": str(config_path)},
+                    False, {"error": str(exc)}, None, None)
+            except Exception:               # noqa: BLE001
+                pass
+            raise
         self.config = config or TradingConfig()
 
     def update_data(self, symbols: list[str], full: bool = False) -> None:

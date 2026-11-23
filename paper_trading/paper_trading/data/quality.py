@@ -40,16 +40,26 @@ def _as_date(v) -> date:
     return datetime.fromisoformat(str(v)[:10]).date()
 
 
-def _trading_days_between(a: date, b: date) -> list[date]:
-    """(a, b] 区间内的交易日（周末+本地日历缓存判断；仅用于质量检查）。"""
-    from paper_trading.utils.trading_calendar import is_trading_day
+def _trading_days_between(a: date, b: date, *,
+                         require_known: bool = True) -> list[date]:
+    """(a, b] 区间内的交易日（周末+本地日历缓存判断；仅用于质量检查）。
+
+    `require_known=True`（缺口扫描）：只统计**日历缓存知道**的日期。缓存只留
+    最近 `HISTORY_TAIL_DAYS` 天，更早的日子它答不了"是不是交易日"，回退成
+    工作日会把节假日（中秋 2026-09-25）报成 44 个标的的缺口。不知道就跳过。
+
+    `require_known=False`（停滞扫描）：历史再早也要算。停滞判的是"最后一根
+    K 线离今天多少交易日"，缓存覆盖不到就按周末回退——这里少算会让陈旧数据
+    假装新鲜（2024 年的数据在覆盖窗口外被算成 0 天，`stale` 永远不报）。
+    """
+    from paper_trading.utils.trading_calendar import calendar_knows, is_trading_day
 
     out: list[date] = []
     d, n = a, 0
     while d < b and n < _MAX_GAP_SCAN:
         d += timedelta(days=1)
         n += 1
-        if is_trading_day(d):
+        if (not require_known or calendar_knows(d)) and is_trading_day(d):
             out.append(d)
     return out
 
@@ -120,7 +130,7 @@ def check_symbol(db, symbol: str, *, days: int = 30,
 
     # 5) 末尾停滞（长期停牌/同步停滞标记）
     if max_d < today:
-        lag = len(_trading_days_between(max_d, today))
+        lag = len(_trading_days_between(max_d, today, require_known=False))
         if lag >= suspension_days:
             findings.append({"type": "stale", "symbol": symbol,
                              "date": max_d.isoformat(),

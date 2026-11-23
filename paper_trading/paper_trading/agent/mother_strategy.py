@@ -176,6 +176,10 @@ def clean_mother_actions(actions: list, refs: dict[str, dict], *,
                 kept += 1
             out.append(a)
         clean = out
+    # 执行层是按顺序扣单轮笔数上限的：卖单必须排在买单前面，否则
+    # "AVOID 强制离场" 会在买单用满额度后被上限挡掉（计划里写了、执行没做）。
+    clean = ([a for a in clean if str(a.get("action")).lower() == "sell"]
+             + [a for a in clean if str(a.get("action")).lower() != "sell"])
     return clean, rejected, forced
 
 

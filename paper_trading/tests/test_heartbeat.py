@@ -158,3 +158,26 @@ def test_engine_round_beats_even_when_both_crash(tmp_path, monkeypatch):
     assert len(beats) == 1 and beats[0][0] == "engine", beats
     assert beats[0][1] is False, beats
     assert "boom-rules" in (beats[0][2] or ""), beats
+
+
+def test_first_tick_of_window_gets_grace(tmp_path):
+    """窗口第一跳不许误报：09:00:02 检查时最后心跳还是昨天 15:59。
+
+    11-19 现网实测：09:00:01 报「engine 应跳未跳（最后心跳 61259s 前）」，
+    09:10 就恢复——每天固定一次假阳性，会训练人忽略告警。
+    判据改为 min(距上次心跳, 距窗口起点)：09:00:02 只迟到 2 秒。
+    """
+    p = _seed(tmp_path, "engine", datetime(2026, 10, 27, 15, 59, 0))
+    out = hb.probe({"engine": 300}, path=p, now=datetime(2026, 10, 28, 9, 0, 2))
+    chk = out["checks"]["engine"]
+    assert chk["ok"] is True and chk["state"] == "ok", out
+    assert chk["age_sec"] > 60000          # 真实年龄仍如实报出
+    assert chk["since_due_sec"] == 2.0     # 判定口径是窗口起点
+
+
+def test_window_start_grace_still_catches_real_stall(tmp_path):
+    """宽限不能把真停滞洗白：09:06 还没有窗口内第一跳 ⇒ 距起点 360s > 300s。"""
+    p = _seed(tmp_path, "engine", datetime(2026, 10, 27, 15, 59, 0))
+    out = hb.probe({"engine": 300}, path=p, now=datetime(2026, 10, 28, 9, 6, 0))
+    assert out["checks"]["engine"]["state"] == "stale", out
+    assert out["unhealthy"] == ["engine"]

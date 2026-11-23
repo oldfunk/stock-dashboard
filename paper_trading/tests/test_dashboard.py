@@ -12,10 +12,27 @@ def test_dashboard_imports():
     import paper_trading.dashboard as d
 
     assert hasattr(d, "Handler") and hasattr(d, "main")
-    assert "market-row" in d.PAGE and "/api/quotes" in d.PAGE
+    assert "market-row" in d.PAGE
+    # /api/quotes 仍在后端（P1 分时/未来用），但 P0 页面改用服务端展示价，
+    # 不再让"价格实时、市值昨日"的半截数据同屏出现。
+    import inspect as _inspect
+
+    assert "/api/quotes" in _inspect.getsource(d.Handler.do_GET)
+    assert "price_source" in d.PAGE
     assert "运行时刻" in d.PAGE and "/api/agent/runtime" in d.PAGE
     assert "/api/agent/schedule" not in d.PAGE  # 旧可编辑队列已从界面移除
     assert "写死" in d.PAGE and "16:30" in d.PAGE
+    # T95 P0：曲线/今日卡接口与容器；设计规范要求无 emoji
+    assert "perfchart" in d.PAGE and "/api/performance" in d.PAGE
+    assert "/api/overview" in d.PAGE and "今日 / 系统" in d.PAGE
+    assert 'id="tabs"' in d.PAGE and 'data-tab="trading"' in d.PAGE
+    assert "/api/intents" in d.PAGE and "意图队列" in d.PAGE
+    assert "运行健康" in d.PAGE and "最新计划与数据新鲜度" in d.PAGE
+    assert "intradaychart" in d.PAGE and "/api/intraday" in d.PAGE
+    assert "/api/export.csv?type=nav" in d.PAGE
+    assert "/api/export.csv?type=positions" in d.PAGE
+    assert "已实现" in d.PAGE
+    assert "🔴" not in d.PAGE and "✅" not in d.PAGE
 
 
 def test_entry_modules_import():
