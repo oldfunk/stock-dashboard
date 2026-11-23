@@ -12,6 +12,7 @@
 #   周六 10:00   交易日历同步（母库 trading_calendar 优先）
 # 另两条 raw 收盘拉取（A1，2026-11-21）只为 NAV：15:50 给 16:30 计划窗口用，
 # 20:40 源晚发布时兜底（脚本 scripts/fetch_mother_raw.sh）。
+# 17:05/17:35 两条 K 线二次拉取（A2，2026-11-24）：保 T96 计划窗口持仓当日覆盖。
 #
 # 用法：
 #   bash scripts/install_mother_agent_cron.sh          # 缺哪条补哪条（幂等）
@@ -41,6 +42,7 @@ CAL_CMD="cd $PT && $PY -m paper_trading.cli calendar sync --json >> logs/calenda
 RAW_CMD="bash $ROOT/scripts/fetch_mother_raw.sh"
 NAV_CMD="cd $ROOT && $PY scripts/nav_close_mother.py >> logs/nav_close.log 2>&1"
 BENCH_CMD="cd $ROOT && $PY scripts/refresh_benchmarks.py >> logs/benchmarks.log 2>&1"
+KLINE_CMD="cd $ROOT && $PY scripts/refresh_kline_pool.py >> logs/kline_pool.log 2>&1"
 LINES=(
     "30,35,40,45,50,55 9 * * 1-5 $TICK_CMD"
     "*/5 16-18 * * 1-5 $TICK_CMD"
@@ -49,12 +51,15 @@ LINES=(
     "40 20 * * 1-5 $RAW_CMD"
     "50 20 * * 1-5 $NAV_CMD"
     "45 20 * * 1-5 $BENCH_CMD"
+    "5 17 * * 1-5 $KLINE_CMD"
+    "35 17 * * 1-5 $KLINE_CMD"
 )
 # 识别键：只认能唯一定位该任务的片段，避免脚本路径变化后重复安装
 KEYS=("scheme mother agent tick" "scheme mother agent tick"
       "calendar sync --json >> logs/calendar.log"
       "50 15 * * 1-5 bash" "40 20 * * 1-5 bash"
-      "nav_close_mother.py" "refresh_benchmarks.py")
+      "nav_close_mother.py" "refresh_benchmarks.py"
+      "5 17 * * 1-5 cd" "35 17 * * 1-5 cd")
 
 cur="$(crontab -l 2>/dev/null || true)"
 missing=()
@@ -65,11 +70,11 @@ for i in "${!LINES[@]}"; do
 done
 
 if [ "${#missing[@]}" -eq 0 ]; then
-    echo "✓ 母侧 AI 交易员 cron 七条齐全"
+    echo "✓ 母侧 AI 交易员 cron 九条齐全"
     exit 0
 fi
 if [ "$CHECK" = "1" ]; then
-    echo "!! 缺少 ${#missing[@]} 条（共 7 条）"
+    echo "!! 缺少 ${#missing[@]} 条（共 9 条）"
     printf '   %s\n' ${missing[@]+"${missing[@]}"}
     exit 1
 fi

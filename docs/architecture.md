@@ -109,7 +109,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.10.1**（2026-11-24 合流；含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check / :8081 方案免口令与 intents 降级）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的七条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.10.1**（2026-11-24 合流；含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check / :8081 方案免口令与 intents 降级）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的九条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
 
@@ -331,7 +331,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补；2026-11-24 扩为 7 条）
 
-母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条交易 cron + 两条 raw 拉取 + 两条收盘兜底** 驱动，
+母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条交易 cron + 两条 raw 拉取 + 两条收盘兜底 + 两条 K 线二次拉取** 驱动，
 缺一条就会静默停摆（2026-10-23→11-19 实证：面板 200，`agent_plans` 停在 10-26
 pending、三周零流水）。任务、命令与路径的真相源是
 `scripts/install_mother_agent_cron.sh`（幂等安装 + `--check` 核对）：
@@ -345,6 +345,8 @@ pending、三周零流水）。任务、命令与路径的真相源是
 | 工作日 20:40 | 同上 | 源晚发布时兜底（NAV 只认 raw，见 issue paper-trading#7） |
 | 工作日 20:45 | `scripts/refresh_benchmarks.py` | 指数日线兜底：16:00 首刷常遇东财断连/新浪未发布（2026-11-23 实测） |
 | 工作日 20:50 | `scripts/nav_close_mother.py` | 16:30 因 raw 未入库跳过时，用 20:40 的 raw 补写当日 NAV（幂等） |
+| 工作日 17:05 | `scripts/refresh_kline_pool.py` | 二次拉取持仓+候选 Top20 的完整 OHLC，保 T96 计划窗口当日覆盖 |
+| 工作日 17:35 | 同上 | 源晚发布时兜底（16:30–18:30 窗口内后续 tick 可用） |
 
 - 命令固定 `--scheme mother --pool-from screening --pool-limit 15`，CWD 必须是
   `paper_trading/`（相对路径 `data.db`/`paper_account.db`/`var/`/`logs/` 都相对 CWD）。
