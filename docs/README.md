@@ -34,6 +34,7 @@
 | 文件 | 回答什么问题 |
 |---|---|
 | `paper-bridge.md` | **子项目↔母项目只读桥**：为什么同机 SQLite 直连、契约 v1（账户/持仓/计划/成交/NAV/分钟线）、实例路径与失败降级、E0–E4 落地 |
+| `close-review-design.md` | **收盘检阅与投资笔记融合**：现状盘点、价值视角四问、F1–F5 功能拆解、数据/评估/排期、风险与待拍板事项 |
 | `research-os.md` | 研究 OS 的分层与判据链设计（预注册 → CI → Bonferroni → 敏感性） |
 | `research-os-tasklist.md` | 研究 OS 任务清单；**未勾选 ≠ 未实现**，勾选前按验收命令复核 |
 | `ai-model-glm47-flash.md` | 当前模型通道的参数与实测（thinking / json_mode / max_tokens） |
