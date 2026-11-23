@@ -5,10 +5,10 @@ Sina raw 在 15:50 还没发布（`day_no_today_bar=3`），所以 16:30 会跳�
 20:40 的 raw 拉取之后用本脚本补写；幂等（`has_nav_for_day` 已有行就返回）。
 
 只写 `nav_history` + `op_log[nav:close]`，不下单、不改持仓。
+**不切工作目录**（母仓纪律：脚本路径一律基于 __file__，库/配置用绝对路径）。
 """
 from __future__ import annotations
 
-import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -16,7 +16,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PT = ROOT / "paper_trading"
 sys.path.insert(0, str(PT))
-os.chdir(PT)
 
 from paper_trading.agent.loop import AgentTrader  # noqa: E402
 from paper_trading.cli import TradingBridge  # noqa: E402
@@ -24,7 +23,12 @@ from paper_trading.cli import TradingBridge  # noqa: E402
 
 def main() -> int:
     day = date.today().isoformat()
-    b = TradingBridge()
+    b = TradingBridge(
+        data_db=str(PT / "data.db"),
+        account_db=str(PT / "paper_account.db"),
+        config_path=str(PT / "config.yaml"),
+        secrets_path=str(PT / "secrets.local.json"),
+    )
     held = [p.symbol for p in b.broker.get_all_positions() if p.total_volume]
     if not held:
         print(f"{day} 无持仓，跳过 NAV")
