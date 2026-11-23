@@ -330,7 +330,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补）
 
-母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条交易 cron + 两条 raw 拉取** 驱动，
+母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条交易 cron + 两条 raw 拉取 + 两条收盘兜底** 驱动，
 缺一条就会静默停摆（2026-10-23→11-19 实证：面板 200，`agent_plans` 停在 10-26
 pending、三周零流水）。任务、命令与路径的真相源是
 `scripts/install_mother_agent_cron.sh`（幂等安装 + `--check` 核对）：
@@ -342,6 +342,8 @@ pending、三周零流水）。任务、命令与路径的真相源是
 | 周六 10:00 | `calendar sync` | 交易日历（母库 `trading_calendar` 优先），未覆盖的日期 fail-closed |
 | 工作日 15:50 | `scripts/fetch_mother_raw.sh` | 拉当日 **raw 收盘**（持仓），供 16:30 计划窗口写 NAV |
 | 工作日 20:40 | 同上 | 源晚发布时兜底（NAV 只认 raw，见 issue paper-trading#7） |
+| 工作日 20:45 | `scripts/refresh_benchmarks.py` | 指数日线兜底：16:00 首刷常遇东财断连/新浪未发布（2026-11-23 实测） |
+| 工作日 20:50 | `scripts/nav_close_mother.py` | 16:30 因 raw 未入库跳过时，用 20:40 的 raw 补写当日 NAV（幂等） |
 
 - 命令固定 `--scheme mother --pool-from screening --pool-limit 15`，CWD 必须是
   `paper_trading/`（相对路径 `data.db`/`paper_account.db`/`var/`/`logs/` 都相对 CWD）。

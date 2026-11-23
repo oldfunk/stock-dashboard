@@ -34,22 +34,27 @@ if [ ! -x "$PY" ]; then
     echo "!! 找不到 python：$PY（用 PAPER_PY=/path/to/python 指定）"
     exit 2
 fi
-mkdir -p "$PT/logs"
+mkdir -p "$PT/logs" "$ROOT/logs"
 
 TICK_CMD="cd $PT && $PY -m paper_trading.cli --scheme mother agent tick --pool-from screening --pool-limit 15 --json >> logs/agent.log 2>&1"
 CAL_CMD="cd $PT && $PY -m paper_trading.cli calendar sync --json >> logs/calendar.log 2>&1"
 RAW_CMD="bash $ROOT/scripts/fetch_mother_raw.sh"
+NAV_CMD="cd $ROOT && $PY scripts/nav_close_mother.py >> logs/nav_close.log 2>&1"
+BENCH_CMD="cd $ROOT && $PY scripts/refresh_benchmarks.py >> logs/benchmarks.log 2>&1"
 LINES=(
     "30,35,40,45,50,55 9 * * 1-5 $TICK_CMD"
     "*/5 16-18 * * 1-5 $TICK_CMD"
     "0 10 * * 6 $CAL_CMD"
     "50 15 * * 1-5 $RAW_CMD"
     "40 20 * * 1-5 $RAW_CMD"
+    "50 20 * * 1-5 $NAV_CMD"
+    "45 20 * * 1-5 $BENCH_CMD"
 )
 # 识别键：只认能唯一定位该任务的片段，避免脚本路径变化后重复安装
 KEYS=("scheme mother agent tick" "scheme mother agent tick"
       "calendar sync --json >> logs/calendar.log"
-      "50 15 * * 1-5 bash" "40 20 * * 1-5 bash")
+      "50 15 * * 1-5 bash" "40 20 * * 1-5 bash"
+      "nav_close_mother.py" "refresh_benchmarks.py")
 
 cur="$(crontab -l 2>/dev/null || true)"
 missing=()
@@ -60,11 +65,11 @@ for i in "${!LINES[@]}"; do
 done
 
 if [ "${#missing[@]}" -eq 0 ]; then
-    echo "✓ 母侧 AI 交易员 cron 五条齐全"
+    echo "✓ 母侧 AI 交易员 cron 七条齐全"
     exit 0
 fi
 if [ "$CHECK" = "1" ]; then
-    echo "!! 缺少 ${#missing[@]} 条（共 5 条）"
+    echo "!! 缺少 ${#missing[@]} 条（共 7 条）"
     printf '   %s\n' ${missing[@]+"${missing[@]}"}
     exit 1
 fi
