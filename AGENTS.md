@@ -9,7 +9,7 @@ python -m src.main serve    # Web + 内置调度器（默认）
 python -m src.main run      # 执行一次采集 + 筛选（不含 AI 分析）
 ```
 
-测试门禁：开发期用**本机并行门禁** `python -m pytest -n auto -q`（见 `docs/development-workflow.md`，约 2.5 分钟，含 vendor 全量）；**发布期**才在生产服务器跑 `bash scripts/gate.sh`。**分层**：母项目用例权威强制，vendor 用例记录不阻塞；基线只升不降，下限记录 `scripts/gate-baseline.txt` / `scripts/gate-baseline-vendor.txt` 由 gate.sh 自动强制。
+测试门禁：**本机不跑 pytest**（只做编辑/commit/文本扫描）；全仓验证在生产 worktree 跑 `bash scripts/gate.sh`（见 `docs/development-workflow.md`）。**分层**：母项目用例权威强制，vendor 用例记录不阻塞；基线只升不降，下限记录 `scripts/gate-baseline.txt` / `scripts/gate-baseline-vendor.txt` 由 gate.sh 自动强制。
 
 ## 技术栈
 
@@ -30,7 +30,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 - 提交信息中文，写清「改了什么 + 为什么」
 - 验证声明必须精确：手动分步验证 ≠ live 验证通过。任何"验证通过"必须附带实际执行的命令和输出作为证据，不能夸大验证范围。主动验证所有风险点，而非选择性验证。
 - 任务颗粒度必须细化到"单一可验证步骤"：复合任务必须拆分为独立子任务，每个子任务有明确的完成标准和验证命令。
-- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支；2) 本机并行门禁 `python -m pytest -n auto -q` 全绿；3) 更新 handoff.md；4) 更新迭代日志。**发布期**（每周一次，或一个功能完成时）才执行 `bash scripts/deploy.sh`（推 nightly → 生产 worktree 门禁，绿了才合 main → 生产同步 + 按需重启 + 健康检查；部署目标读本地 `deploy.local.md` 的 KEY=VALUE 块）。见 `docs/development-workflow.md`。
+- 所有任务完成后必须自动执行收尾流程（无需用户提醒）：1) 推送 nightly 分支；2) 生产 worktree 跑 `bash scripts/gate.sh` 全绿（母项目权威 + vendor 记录）；3) 更新 handoff.md；4) 更新迭代日志。**发布期**（每周一次，或一个功能完成时）才执行 `bash scripts/deploy.sh`（推 nightly → 生产 worktree 门禁，绿了才合 main → 生产同步 + 按需重启 + 健康检查；部署目标读本地 `deploy.local.md` 的 KEY=VALUE 块）。见 `docs/development-workflow.md`。
 - 环境差异必须验证：PC 上测试通过 ≠ 生产服务器上能跑。涉及生产服务器的改动必须在生产服务器上实际执行验证，不能只在 PC 上跑测试就声称完成。
 - 文档更新是交付物的一部分：交接文档和迭代日志必须与代码同步更新，不能作为可选步骤。
 
@@ -47,6 +47,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 3. `git push origin HEAD`（先推 nightly 分支留痕）
 4. 合并：ff 合并入 main 并 `git push origin main`（2026-09-27 起用户长期授权直接合并/推送，无需逐次批准）；多日累积在同一 nightly 分支，审计时 `git log origin/main..HEAD --stat`
 5. 子项目更新（单向 tag 流，详见 `docs/subproject-protocol.md`）：`git subtree pull --prefix=paper_trading paper-upstream <tag> --squash`（只跟 tag，不跟 main；`paper_trading/` 内文件绝不手改，hotfix 例外见协议 §5）。接缝 bug 母修、域内 bug 提 Issue 等 tag。
+   **发布权归子方**：不推 `paper-trading` 的 main、不打 tag、不发 GitHub Release、不改它的版本号；母方只提 feature 分支 + PR（2026-11-23 越权教训）。
 
 **绝不**：在本地 main 上直接 commit（合并的 ff 前进除外）；手改 `paper_trading/` 内任何文件（上游漂移则以后 pull 冲突）。合并后同步生产服务器并验证运行（`git pull` + gate + 改 routes/模板/采集则重启 `stock-dashboard.service` + 确认运行正常）。
 
@@ -62,6 +63,7 @@ Python 3.10+ · FastAPI + Jinja2 · SQLite (WAL) · AKShare + 腾讯行情 · AI
 
 ### 文档约定
 
+0. **先看 `docs/README.md` 的文档地图**：真相源 / 规程 / 设计 / 快照报告四类；引用报告里的数字前先确认它属于哪一类。
 1. 文档放 `docs/`，文件名英文小写连字符（如 agent-api.md）
 2. 格式跟随现有文档（参考 architecture.md），勿自创版式：`> 创建：日期 · 上游：来源 · 状态：…` 头部元信息行 + `## N.` 编号章节；表格、代码块按需
 3. 新文档先在 `nightly/*` 分支起草，长期授权下可直接合并（历史要求用户批准的写法已废止）

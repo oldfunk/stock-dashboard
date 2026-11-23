@@ -10,11 +10,13 @@
 
 ## 三条新规
 
-1. **门禁**：开发期用**本机并行门禁**（`python -m pytest -n auto -q`，约 2.5 分钟，
-   含 vendor 全量 2151 例）。生产门禁只在**发布**时跑（每周一次，或一个功能完成时）。
-   - 两种门禁都建议装 `pytest-timeout`（`pip install pytest-timeout`）：`scripts/gate.sh`
-     检测到它会自动加 `--timeout=180`（`GATE_TEST_TIMEOUT` 可调），挂起由**单条用例**
-     承担并报出用例名；未装则退回旧的整批 600s 兜底，脚本头部会提示。
+1. **门禁**：**本机不做全仓验证**（AGENTS 纪律：本机只编辑/commit/文本扫描）；
+   需要快速反馈时，可在生产机 `bash scripts/gate.sh` 或在 nec 的隔离 worktree 跑**单个测试文件**，
+   仅作参考；**交付验证一律以生产 gate 为准**（母项目权威 + vendor 记录）。
+   - `scripts/gate.sh` 分层：母项目用例必须全绿、vendor 记录不阻塞；基线只升不降。
+   - 门禁环境建议装 `pytest-timeout`（`pip install pytest-timeout`）：脚本检测到它会自动加
+     `--timeout=180`（`GATE_TEST_TIMEOUT` 可调），挂起由**单条用例**承担并报出用例名；
+     未装则退回整批 600s 兜底，脚本头部会提示。
 2. **制造环境**：研究线/筛选器用**合成库**验证，不等真实采集。
    - `python scripts/make_synthetic_env.py` —— 真库，bake 了已知 MOS->超额关系
      （`excess_60 = 5.0 + 0.30*mos + N(0,6)`）
@@ -27,7 +29,7 @@
 
 ## 发布清单（每周或功能完成时）
 
-- [ ] 本机并行门禁全绿
+- [ ] 生产 gate 全绿（母项目权威 + vendor 记录，基线只升不降）
 - [ ] `bash scripts/deploy.sh`（生产门禁 → 合 main → 同步 → 健康检查）
 - [ ] 更新 handoff / iteration-log
 

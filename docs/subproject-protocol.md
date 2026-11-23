@@ -17,6 +17,8 @@
 2. 子方按功能打 tag（`v0.x.y` + changelog + 单测证据）；母方**默认跟最新 tag**（包工头可指定版本/分支为例外，例外入账），不跟 main。
 3. Vendor 命令：`git subtree pull --prefix=<dir> <remote> <tag> --squash`（nightly 分支操作）。
 4. 母方按需拉取，不承诺跟进时效；账本记录 vendored 版本号（当 lockfile 用）。
+5. **发布权归子方**：tag、版本号、GitHub Release、直接推 `main` 一律由子方完成；
+   母方只提 feature 分支 + PR（2026-11-23 代发越权教训）。
 
 ## 3. Bug 分诊（按位置，不按层级）
 

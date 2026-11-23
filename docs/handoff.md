@@ -12,9 +12,9 @@
   - 上游全量 **996 passed / 13 skipped**；生产 gate 与 :8081 冒烟在 deploy.sh 中执行。
   - **生产验证（2026-11-24 凌晨）**：gate 母 **1522** / vendor **996**；:8081 重启后 `/api/intents` **200**（空列表 + `unavailable`）、`POST /api/schemes/active {"name":"mother"}` 免口令 **200**、三端口 200。上游 v0.10.1 **只有 tag、没有 GitHub Release**（由子项目自行决定是否发布）。
 
-- **子项目 v0.10.0 合流 + 发布（2026-11-23）**：
+- **子项目 v0.10.0 合流（2026-11-23；发布为母方越权，已纠正）**：
   - `git subtree pull ... paper-upstream main`（16+ 提交）→ 冲突 3 个文件（`agent/loop.py`、`agent/mother_strategy.py`、`tests/test_mother_strategy.py`；上游已合入 PR #6，以 theirs 解决）；vendor **993 passed / 13 skipped**。
-  - 上游打 **annotated tag `v0.10.0`** + GitHub Release；`__version__` 0.7.0 → 0.10.0；母仓再 `subtree pull v0.10.0` 对齐版本。
+  - 母方**越权**代改 `__version__`、打 tag `v0.10.0` + GitHub Release；2026-11-24 用户纠正，发布权归子方。子项目随后自行发 **v0.10.1**（仅 tag、无 Release）。
   - 内容：母策略闸门/AVOID 强制离场（PR #6）、**T96 计划新鲜度**（逐只覆盖率、持仓必须当日，修 #5）、卖→买→hold 执行顺序、面板 P1/P2（收益曲线/今日分时/FIFO 已实现盈亏/CSV）、daily-check 交易动作终态门禁。
   - **交互注意**：T96 要求持仓当日 K 线；母侧 16:30 计划依赖 `sync_data` 的本地当日 bar，若源未发布会 `no-fresh-data` 重试（17:00 二次刷新是 A2，待做）。
 
@@ -41,7 +41,7 @@
   - **新发现（已提上游 [#5](https://github.com/oldfunk/paper-trading/issues/5)）**：`asof` 取所有标的的 **max**，20 只里只有 3 只有 11-19 K 线，买入标的 601899 的末根是 11-18——决策实际用的是昨天收盘，计划却标记为今天。执行侧只有 30% 偏离闸，防不住"差一天"。
 
 - **母侧子项目（:8081）AI 交易员断档三周，已恢复（`751bb7f`）**：用户观察"10 月底后没跑过计划和交易"，取证确认——`agent_plans` 最后一条 **10-26 一直 pending**、`op_log` 最后一条 **10-23 16:47**、`fills` 停在 10-08；nec crontab 里只剩独立版 :8080 的任务。**根因**：母侧运行时配置只存在于 crontab，10-23 后一次重写把三条任务全丢了，面板仍 200 所以完全静默。
-  - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"。
+  - 修复：`scripts/install_mother_agent_cron.sh` 把三条任务（当时）写进仓库（幂等安装 + `--check`），已在 nec 安装并实测"删一条→check 报缺→install 补回→check 通过"；后扩为 7 条（raw/NAV/指数兜底）。
   - 路径/口径：CWD=`paper_trading/`、母 `.venv`、`--scheme mother --pool-from screening --pool-limit 15`；`calendar sync` 已跑（母库日历覆盖到 2026-12-31）；LLM 连通性实测（`llm models` 与一次 `llm ask` 均 ok）。
   - **回流上游**：同一套经验整理成通用版 `deploy/install-instance-cron.sh` + `docs/second-instance.md`，已提 [paper-trading#4](https://github.com/oldfunk/paper-trading/pull/4)（只加部署/文档、不改运行时；用假 crontab 验证了 check→install→check→幂等）。
   - **已观察到**：11-19 16:36 生成 plan #15（见上）；明日 09:30–10:00 执行（买入会被新闸门拒绝）。验收命令见 `docs/architecture.md` §9.7。
@@ -55,7 +55,7 @@
   - `price_depth` + 有行情 → **`no_early_history`**（2911 条）：早段窗口取不到更早行情（上市晚于目标起点/源无早段），限流会记 partial 重试。
   - 财务三任务（`em_deep_gap`/`em_full_gap`/`interest_coverage_backfill`）+ 有行情有财务 → **`financial_partial`**（282 条）：目标字段上游不提供。
   - 未登记任务仍 `unattributed` → **exit 1 不变**（fail-closed）。
-  - 验证：真实库 **unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；当批 gate 母 **1502 passed**（基线 1495→1502；现基线 **1513**，含今晚体检脚本 +11）。
+  - 验证：真实库 **unattributed 0 / rc=0**（3209 = 2911 + 282 + 10 delisted + 6 ambiguous）；单测 29 passed；当批 gate 母 **1502 passed**（基线 1495→1502；当前基线见 `scripts/gate-baseline*.txt`：母 1522 / vendor 996）。
 - **muse 分支审查（`origin/muse/stock-dashboard-fixes`，2 commit，均未合）**：
   - `fe4bfbd`（加"有行情缺财务"桶）**不改**：真实库 **0 命中**，退出码仍 1；它引用的"192 只"是 `coverage_gaps()` 里批10-c 的跨库缺口数（今天为 0），不是 no_data 计数。
   - `58ac76d`（`TradingBridge` CWD 错位拒绝建空库）**逻辑有效**（实测旧代码静默建 61KB 空库、新代码报错不落盘、正确 CWD 与全新安装不受影响），但改的是 vendored `paper_trading/`，按协议只能走上游 issue + tag；当前 :8081 用绝对路径、:8080 CWD 正确、cron 均 `cd` 在先，无现网暴露。
@@ -102,7 +102,7 @@
 
 - ~~生产树 11-05 的旧应用残留~~：**2026-11-19 已清出**——`main.py`/`src/app.py`/`src/database.py`/`templates/`/`.venvdeb/`/`nightly-report.md`/`paper_trading/data.db.pre-t35.bak` 全部 `mv` 到 `/home/nec/attic/20261119-old-hermes/`，附 `MANIFEST.txt`（sha256 + 原路径，可逆）。移动前确认：无进程占用、全仓零引用、根 `templates/` 不是 `src/web/templates`。生产树现在 `git status` 干净。
 - ~~`sse-starlette` 约束与 venv 漂移~~：**2026-11-19 已解决**——全仓（src/tests/scripts/vendor）零引用，已从 `pyproject.toml` 删除；生产 venv 里已装的 3.6.0 不动（没有代码引用）。`pip install -e .` 不会再因 `<3` 约束降级它。
-- **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把三条任务写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
+- **母侧纸盘的运行时配置曾只存在于 crontab（2026-11-19 实证）**：10-23 之后三条任务被一次 crontab 重写丢失，面板照常 200、计划与交易静默停摆三周，无任何告警。现已把任务（当前 **7 条**：交易 3 + raw 2 + NAV/指数兜底 2）写进 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`）；**任何改 crontab 的操作之后都要跑一次 `--check`**，并注意母侧与独立版 :8080 的 cron 行不能互相覆盖。母侧目前**没有**看门狗能发现"tick 停了"，只能靠 `logs/agent.log` 与 `agent_plans` 日期人工看。
 - **母侧 `nav_history` 自 10-22 起缺收盘 NAV（2026-11-19 发现，未修）**：`_snapshot_close_nav` 只认当日 **raw** 收盘，而母侧 `daily_bars_raw` 为空（raw 由独立版 `data fetch-raw` cron 供），所以计划窗口每次都跳过；`daily_close` 有当日不复权收盘但缺 integration 接口。修法二选一（补 raw 同步 / 加 `daily_close` 契约），需单测 + 口径说明；**不得用 qfq 价冒充 raw**。影响：面板净值曲线从 10-22 起断档，`/api/status` 的实时市值仍正常。
 - **计划新鲜度被 `asof=max` 掩盖（2026-11-19 实录，上游 #5）**：计划 #15 的 20 只标的里只有 **3 只** 有当日 K 线，买入标的 601899 的末根是 11-18，但 `asof` 取所有标的的最大值 → 计划仍以"今天"落库。根因一半在数据（腾讯当日 bar 晚于 15:43 的拉取窗口），一半在判据（`max` 而非按标的分层）。当前缓解：次日 `start_date=latest` 自愈 + 执行侧 30% 偏离闸 + 仓位小（100 股）；**不要把它当成"数据已经是最新"的证据**。
 - **门禁依赖 `pytest-timeout`（2026-11-18）**：`gate.sh` 靠 `import pytest_timeout` 探测，装了才有单条用例超时；换新 venv / 新机器时记得装，否则只剩整批 600s 兜底（脚本会在头部提示）。
@@ -127,7 +127,7 @@
 - **`analysis_outcome` 写入方停滞（2026-11-12）**：10 月 0 条、11 月仅 1 条（9 月 73 条）。非重复行（双基准是设计）。外部 AI 分析写入方，待查。
 - **`daily_close` 间歇缺口（2026-11-12）**：11-10 缺 80 只（603/605 开头）、11-12 缺 7 只（3016xx/3021xx）；缺失代码均 active 且其它日有数据。疑腾讯批查漏拉/停牌，待查。
 - **`market_state` 覆盖虚高（2026-11-12）**：每日 pass、coverage=1.0，但 `pe_percentile_5y` 缺失；11-09/10/11 三天指标完全一致（疑似同一份快照）。
-- **母仓库 `paper-trading` remote 指向本地 `/home/nec/paper-trading`**：`subtree pull` 是只读拉取（不写 nec）。**2026-11-17 已把 vendored 树从 v0.8.0 拉到 v0.9.0**（M3 观察期签字 + M4 钱类加固），此前"vendor 副本陈旧"的隐患已解除；下次跟新 tag 时同样只读拉取。
+- **母仓库 `paper-upstream` remote 指向 GitHub `oldfunk/paper-trading`**：`subtree pull` 是**只读拉取**（不写子项目仓库、不推 main/tag/Release）。当前 vendored **v0.10.1**；下次跟新 tag 同样只读拉取，发布权归子方。
 - **nec 独立版框架状态与账本曾脱节（2026-11-12 修复）**：`portfolio.state` 停在 11-06（2 仓 vs 账本 8 仓）。修复用 `ledger reset-state --only rq_session_state`；若再出现 `InitPositionError`，同样处置。
 
 ## 历史交接区（追加，不删）

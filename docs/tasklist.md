@@ -68,7 +68,7 @@
 - [x] **B1 价格复权模型 + 限速抓取**（已完成）：三列 `close_raw`（估值）/`close_adj`（回测）/`close`（正数前复权展示）；Sina raw+hfq 各一次。生产实测 `price_history` **5514 done / 12 no_data / 1 partial**；深度段 `price_depth` **2602 done / 2911 no_data**（上市晚于 2016，归因器记为 `no_early_history`）/ 1 partial。契约列存量已归零。
 - [x] **B2 全市场年报抓取**（已完成）：mainfin 一次取全基础指标；`backfill_financial_full.py`（进度/锁/限速）。生产实测 `financial_full` **4566 done**（目标 4568），`financial_history` 15.2 万行；余量为上游真无。
 - [ ] **B3 数据意义校验**（部分完成）：财务侧——负价/零价/重复行=0；异常值（gm -5678%、roe -266264%）定性为真实财务事件非数据错误；历史股本 4,759 只多年同值（已知上游盖值，A6 净利/EPS 反推绕过）。价格侧随 B1 完成，尚未做全市场复核。
-- [x] **B4 子项目合并**（已超期完成）：v0.6.9 → … → **v0.9.0**（2026-11-17 合流，单向 tag 流）；母侧运行契约见 `architecture.md` §9.7。
+- [x] **B4 子项目合并**（已超期完成）：v0.6.9 → … → **v0.10.1**（2026-11-24 合流，单向 tag 流；含母策略/T96/P2/daily-check）；母侧运行契约见 `architecture.md` §9.7。
 - [x] **B5 个股 UI 全面统一**（`58e4f74`…`15f3d7e`，gate 691）：候选/AI 观察池/钉选共用 `_stock_card.html`；钉选服务端渲染；计数并入标签；浏览器实测三视图一致。
 - [ ] **B6 全代码审计 + 文档更新**（进行中，2026-11-19）：architecture（流水线/48 张表/基线）、handoff、iteration-log、roadmap、subproject-protocol、development-workflow 已校准；剩余：`agent-api.md`、`research-os-tasklist.md` 进度回填、历史 audit 报告的"归档"标注。
 

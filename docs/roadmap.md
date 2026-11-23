@@ -113,7 +113,7 @@ flowchart LR
 
 ### 新开（2026-09-28 纸盘模拟）
 
-- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并 + subtree 机制化（三处一字未动）——原面板嵌回 `/paper`（直达 :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA/agent dry-run 与 `llm ask` 已验证；自动调度已开（2026-09-30 用户批准，母价值路线：workday 16:45 tick，`--scheme mother` + screening 15 只，一日一决策，三道闸不变）。**2026-11-19 补齐**：该调度只存在于 crontab，10-23 被一次重写丢失、停摆三周；三条任务已入库 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`），运行契约见 `architecture.md` §9.7。
+- **M6 纸盘模拟**（进行中）：子项目 paper-trading 全量合并 + subtree 机制化（三处一字未动）——原面板嵌回 `/paper`（直达 :8081）；Universe 走母筛选（pool-from screening）+ AI 用我们的 Key；MA/agent dry-run 与 `llm ask` 已验证；自动调度已开（2026-09-30 用户批准，母价值路线：workday 16:45 tick，`--scheme mother` + screening 15 只，一日一决策，三道闸不变）。**2026-11-19 补齐**：该调度只存在于 crontab，10-23 被一次重写丢失、停摆三周；任务已入库 `scripts/install_mother_agent_cron.sh`（幂等 + `--check`），当前 **7 条**（交易 3 + raw 2 + NAV/指数兜底 2），运行契约见 `architecture.md` §9.7。**2026-11-24**：vendored 升到 **v0.10.1**（母策略/T96/P2/daily-check）。
 
 ### 防回归门禁（AKShare 事故不再犯）
 

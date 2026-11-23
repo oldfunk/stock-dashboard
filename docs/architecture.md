@@ -1,6 +1,6 @@
 # Stock Dashboard — 系统架构
 
-> 创建：2026-09-12 · 更新：2026-11-19（流水线实际步骤 / 表清单补全 / 门禁基线改引文件 / 母侧纸盘运行契约 §9.7） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
+> 创建：2026-09-12 · 更新：2026-11-24（vendor v0.10.1 / 纸盘只读桥 E0 / 指数日更 / 消息面设计） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
 > 改本系统前先读本文件。模块边界变更必须同步更新本文件 + 对应单测。
 
 ## 0. 术语表（开工前先读）
@@ -87,6 +87,7 @@ flowchart LR
 8. K 线增量：活跃池 + 全市场轮换（失败不阻断后面的快照）。
 9. `market_state` 日频快照（失败可 `backfill_market_state --force` 补算）。
 10. AI 分析后台触发（`ai.enabled`，未配 Key 时落失败记录、不空转）。
+11. 基准指数日线：东财优先/新浪回退，每交易日刷新（20:45 再兜底一次）——供 `/outcomes` 与子项目 CSI300 曲线/超额对照。
 
 AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板只负责展示数据与 AI 笔记、列表卡片不再内联 AI 分析。周六复盘由 `WatchlistReviewer.review()` 触发（定时节奏见 `ai_review.days/time`，默认周六 00:00；硬规则 + 监控条件本地执行；LLM 决议走用户 Key → `ai_watchlist` / `ai_journal`）。
 
@@ -124,7 +125,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `daily_close` | 采集（覆盖层） | market_state 广度/估值分位 | 全市场当日收盘覆盖层；**不复权，只有 close/amount/volume**——填不了 `kline_daily` 的 OHLC/复权列（所以"当日 K 线"仍可能滞后一天，见上游 paper-trading#5）；腾讯当日 bar 晚于 15:30 的部分由次日自愈 |
 | `kline_daily` | 调度/回填 | K 线图/估值分位/回测 | 日 K；四列价格 `close_raw`（不复权，估值）/`close_adj`（后复权，回测）/`close_qfq`（前复权，子项目契约）/`close`（展示，= `close_qfq`）+ `shares`（每日流通股本） |
 | `trading_calendar` | 周六维护（S15） | 调度/子项目契约/T+1 | 历史尾部 + 未来交易日；**源覆盖到哪写到哪**，覆盖外不臆造（子项目 fail-closed 依赖） |
-| `benchmark_daily` | 收益维护 | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数 |
+| `benchmark_daily` | 收益维护（每交易日 + 20:45 兜底） | `/outcomes`、子项目 | 基准指数日线；**代码约定**：`sh000300`/`sh000922`（收益验证用）+ `000001`/`399001`/`399006`（子项目约定，上证综指/深证成指/创业板指）；价格指数、不复权 |
 | `instrument` | 初始化/迁移 | 研究 OS/回测 | 证券主数据（`instrument_id`，2026-10-26 迁移后 0 空值） |
 | `market` | 迁移 | 研究 OS | 市场主数据（A 股 = 1 行） |
 | `data_quality_daily` | 数据体检 | 运维 | 每日数据质量结论 |
@@ -217,7 +218,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-19）：母 **1502**、vendor **886**——本条不复制数字为准，改基线时以文件为准。
+- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-24）：母 **1522**、vendor **996**——本条不复制数字为准，改基线时以文件为准。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。
@@ -328,7 +329,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 - `/api/data/research/hypotheses|experiments|decisions|market_states`
 - 原则：只读、稳定 JSON 契约、缺失不抛错（子项目可静默回退）。
 
-### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补）
+### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补；2026-11-24 扩为 7 条）
 
 母树里的 `paper_trading/` 不是"只有面板"：AI 交易员靠 **三条交易 cron + 两条 raw 拉取 + 两条收盘兜底** 驱动，
 缺一条就会静默停摆（2026-10-23→11-19 实证：面板 200，`agent_plans` 停在 10-26

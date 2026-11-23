@@ -1,6 +1,6 @@
 # 文档地图（先读这一页）
 
-> 创建：2026-11-19 · 目的：这个仓有 29 份文档，真相源、规程、历史报告混在一起。
+> 创建：2026-11-19 · 目的：这个仓有 30+ 份文档，真相源、规程、历史报告混在一起。
 > **判断一条信息是否可信，先看它属于哪一类**：真相源随代码维护；快照/报告只在当天成立。
 
 ## 1. 真相源（与代码同步维护，冲突时以这里为准）
@@ -17,7 +17,7 @@
 | 文件 | 回答什么问题 |
 |---|---|
 | `subproject-protocol.md` | 与 paper-trading 的单向 tag 流、bug 分诊、vendor 门禁、hotfix 例外 |
-| `development-workflow.md` | 开发期怎么验证：本机并行门禁 / 合成环境 / 发布才走 deploy |
+| `development-workflow.md` | 开发期怎么验证：生产 worktree gate / 合成环境 / 发布才走 deploy |
 | `agent-api.md` | 外部程序怎么调这个系统（只读数据 API + 触发） |
 | `value-investing-methodology.md` | 价值投资方法论的完整方案（P0-1…P0-10 的目标/数据源/验收） |
 | `tasklist.md` | 上述方案的进度勾选（含 Research OS 的 R0–R6 状态） |
