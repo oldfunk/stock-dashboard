@@ -50,7 +50,7 @@ def test_summarize_fees_turnover_nav():
     assert s["fills"] == 1 and s["buy_fills"] == 1
     assert s["fees"] == pytest.approx(5.01)
     assert s["turnover"] == pytest.approx(740.0)
-    assert s["turnover_pct"] == pytest.approx(740.0 / 100500.0)
+    assert s["turnover_pct"] == pytest.approx(0.0074)
     assert s["nav_pct"] == pytest.approx(0.01)
     text = render(s, "2026-11-20", "2026-11-27")
     assert "买卖兑现率" in text and "NAV" in text
