@@ -377,8 +377,9 @@ pending、三周零流水）。任务、命令与路径的真相源是
   费用、回撤、暴露、今日盈亏），失败回退 E0 只读桥；`/api/paper/performance` 暴露快照。
 - **事件**：`news_event`（P0 政策/监管、P1 公司重大、30 分钟冷却、P0≤5/P1≤10），
   规则先行，只落库/提醒，**不触发交易**，P0/P1 只进下一计划窗口复核清单。
-- **调度**：进程内 scheduler，15:45 首跑、18:30 重试（`news.review_*`）；
-  盘中 09:30–15:05 每 10 分钟扫一次事件（`news.event_*`）。不是 crontab 任务。
+- **调度**：进程内 scheduler，15:45 首跑、18:30 重试、**20:55 在面板 asof 到当天时刷新**
+  （`news.review_*`，不覆盖人工批注）；盘中 09:30–15:05 每 10 分钟扫一次事件
+  （`news.event_*`）。不是 crontab 任务。
 - **面板**：首页"收盘检阅"卡（最新一篇 + 今日 P0/P1）、`/news` 页（检阅/事件/最新新闻）、
   `/journal/{date}` 全文、`/performance`（纸盘 vs 基准 + 信号前向收益）；
   API `/api/news/review/*`、`/api/news/events`、`/api/performance`。
