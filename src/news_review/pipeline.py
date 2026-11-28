@@ -256,6 +256,8 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
                                         degraded or "llm_empty")
         if not degraded:
             degraded = "llm_empty"
+    else:
+        content_md = rules.sanitize_db_fact_citations(content_md)
 
     valid_ids = [n["id"] for n in news]
     cited = rules.referenced_ids(content_md)

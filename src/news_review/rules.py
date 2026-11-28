@@ -40,7 +40,6 @@ COMPANY_EVENT_KEYWORDS = {
 ADVICE_PATTERN = re.compile(
     r"(建议|应当|可以|考虑|值得|不妨)[^。；\n]{0,12}"
     r"(买入|卖出|加仓|减仓|清仓|建仓|止盈|止损|抄底|追高)"
-    r"|(目标价|止损价|买入价|卖出价)\s*[:：]?\s*[0-9]"
 )
 CITATION_RE = re.compile(r"\[news#(\d+)\]")
 _WS_PUNCT = re.compile(r"[\s，。！？、；：\"'“”‘’（）()【】\[\]<>《》\-—_/\\|.,!?;:]+")
@@ -212,3 +211,27 @@ def missing_citations(md: str, valid_ids: Iterable[int]) -> list[int]:
 
 def advice_hits(md: str) -> list[str]:
     return [m.group(0).strip() for m in ADVICE_PATTERN.finditer(str(md or ""))]
+
+
+_DB_FACT_SECTIONS = (1, 4)
+_SECTION_RE = re.compile(r"(?m)^##\s*(\d+)\.")
+
+
+def sanitize_db_fact_citations(md: str) -> str:
+    """去掉市场事实/组合变量两节的新闻引用。
+
+    这两节的数据来自行情库与纸盘只读桥，不是 `news_item`；模型若给它们挂
+    `[news#id]` 会造成"来源看起来成立、实际无关"的假引用（2026-11-27 实测）。
+    只动这两节，新闻相关章节的引用原样保留。
+    """
+    lines = str(md or "").splitlines()
+    section = None
+    out = []
+    for line in lines:
+        m = _SECTION_RE.match(line)
+        if m:
+            section = int(m.group(1))
+        if section in _DB_FACT_SECTIONS:
+            line = CITATION_RE.sub("", line)
+        out.append(line)
+    return "\n".join(out)

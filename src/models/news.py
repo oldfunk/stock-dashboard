@@ -105,14 +105,20 @@ class NewsDAO:
         return out
 
     def between(self, start: str, end: str, limit: int = 100) -> list[dict]:
-        """[start, end) 窗口内的新闻（收盘检阅用；缺发布时间按 fetched_at）。"""
+        """[start, end) 窗口内的新闻（收盘检阅用；缺发布时间按 fetched_at）。
+
+        用 SQLite ``datetime()`` 归一化：源站只给日期时补 00:00，避免
+        "2026-11-28" 被字典序误算进 11-27 的窗口（2026-11-28 实测）。
+        """
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM news_item "
-                "WHERE COALESCE(NULLIF(published_at, ''), fetched_at) >= ? "
-                "AND COALESCE(NULLIF(published_at, ''), fetched_at) < ? "
-                "ORDER BY COALESCE(NULLIF(published_at, ''), fetched_at) DESC, "
-                "id DESC LIMIT ?", (start, end, int(limit))).fetchall()
+                "WHERE datetime(COALESCE(NULLIF(published_at, ''), fetched_at)) "
+                ">= datetime(?) "
+                "AND datetime(COALESCE(NULLIF(published_at, ''), fetched_at)) "
+                "< datetime(?) "
+                "ORDER BY datetime(COALESCE(NULLIF(published_at, ''), fetched_at)) "
+                "DESC, id DESC LIMIT ?", (start, end, int(limit))).fetchall()
         return [dict(r) for r in rows]
 
     def apply_linkage(self, rows: list[dict]) -> int:

@@ -213,6 +213,7 @@ def portfolio_facts() -> dict:
         "available": bool(nav or acc),
         "nav": {k: nav.get(k) for k in
                 ("timestamp", "cash", "market_value", "total_value", "pnl_pct")},
+        "nav_note": "pnl_pct 为成立以来累计收益，不是本周收益",
         "cash": acc.get("cash"),
         "positions": [{k: p.get(k) for k in
                        ("symbol", "total_volume", "available_volume", "avg_cost")}

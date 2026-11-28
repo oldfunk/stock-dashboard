@@ -54,6 +54,16 @@ def test_citation_and_advice_checks():
     assert rules.advice_hits(md)
 
 
+def test_sanitize_strips_citations_only_from_db_fact_sections():
+    md = ("## 1. 市场事实\n沪深300 上涨 [news#1]\n"
+          "## 2. 持仓与观察池\n000792 有公告 [news#2]\n"
+          "## 4. 组合变量\nNAV 97125 [news#3]\n"
+          "## 5. 纪律与风险\n无 [news#4]")
+    out = rules.sanitize_db_fact_citations(md)
+    assert "[news#1]" not in out and "[news#3]" not in out
+    assert "[news#2]" in out and "[news#4]" in out
+
+
 def test_build_events_caps_and_keys():
     targets = {"000792": "盐湖股份"}
     items = [{"id": 1, "title": "盐湖股份被立案调查", "code": "000792",
