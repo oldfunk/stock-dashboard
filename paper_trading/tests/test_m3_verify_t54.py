@@ -96,14 +96,17 @@ def test_verify_all_no_rollback_from_intraday_nav(broker, conn):
 
 
 # ---------------------------------------------------------------- ② 影子留痕未到点
-def test_parity_before_shadow_time_does_not_accuse_the_cron(conn):
+def test_parity_before_shadow_time_does_not_accuse_the_cron(conn, monkeypatch):
+    """启用影子对账时（恢复场景）保留“未到点不指控 cron”的原语义。"""
+    monkeypatch.setattr(mv, "SHADOW_PARITY_ENABLED", True)
     r = mv.check_parity_trace(conn, TODAY, now=at("14:35"))
     assert r["status"] == "warn"
     assert "时点未到" in r["detail"], r["detail"]
     assert "没跑" not in r["detail"], "未到点时不许指控 cron"
 
 
-def test_parity_after_shadow_time_uses_the_old_wording(conn):
+def test_parity_after_shadow_time_uses_the_old_wording(conn, monkeypatch):
+    monkeypatch.setattr(mv, "SHADOW_PARITY_ENABLED", True)
     r = mv.check_parity_trace(conn, TODAY, now=at("16:10"))
     assert r["status"] == "warn" and "cron 没跑" in r["detail"]
     r2 = mv.check_parity_trace(conn, PAST)           # 历史日：直接旧文案

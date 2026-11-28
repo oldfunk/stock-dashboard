@@ -1,0 +1,10 @@
+# 默认所有文件由仓库所有者复核。
+# 外部贡献通过 PR；合并前需通过 gate 与 CODEOWNERS review。
+* @oldfunk
+
+# 安全/账本/发布相关路径显式列出，避免未来团队扩大后误合。
+/paper_trading/risk/ @oldfunk
+/paper_trading/broker/ @oldfunk
+/paper_trading/utils/ledger_backup.py @oldfunk
+/.github/ @oldfunk
+/deploy/ @oldfunk

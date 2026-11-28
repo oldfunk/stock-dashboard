@@ -1,0 +1,5 @@
+# 统一 Qoder 工具身份的提交归因到 oldfunk（仅影响本地 git 工具链：
+# git shortlog / blame / log --use-mailmap；GitHub Contributors 图仍按 commit
+# author email 归因，不会因 .mailmap 自动移除——见
+# docs/worker/report-qoder-provenance-20261124.md）。
+oldfunk <oldfunk@users.noreply.github.com> Qoder <qoder@users.noreply.github.com>

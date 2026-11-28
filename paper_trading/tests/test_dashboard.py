@@ -31,6 +31,15 @@ def test_dashboard_imports():
     assert "intradaychart" in d.PAGE and "/api/intraday" in d.PAGE
     assert "/api/export.csv?type=nav" in d.PAGE
     assert "/api/export.csv?type=positions" in d.PAGE
+    assert "/api/benchmark" in d.PAGE and "沪深300" in d.PAGE
+    assert "/api/sectors" in d.PAGE and "行业分布" in d.PAGE
+    assert "成交记录" in d.PAGE and "/api/export.csv?type=fills" in d.PAGE
+    assert "母项目契约" in d.PAGE and "/api/contract" in d.PAGE
+    assert "AI 成绩" in d.PAGE and "/api/ai-scorecard" in d.PAGE
+    assert "策略资金额度" in d.PAGE and "/api/strategy-allocations" in d.PAGE
+    assert "运维巡检" in d.PAGE and "/api/ops-status" in d.PAGE
+    assert "报告" in d.PAGE and "/api/report" in d.PAGE
+    assert "逐日审计" in d.PAGE and "/api/audit" in d.PAGE
     assert "已实现" in d.PAGE
     assert "🔴" not in d.PAGE and "✅" not in d.PAGE
 
@@ -392,7 +401,64 @@ def test_intents_endpoint_degrades_without_rq_table(tmp_path):
             body = _json.loads(r.read().decode())
         assert body["ok"] is True and body["data"] == []
         assert "rq_intents" in body.get("unavailable", "")
+        for path in ("/api/ai-scorecard", "/api/strategy-allocations",
+                     "/api/ops-status",
+                     "/api/report?kind=daily&date=2026-11-27",
+                     "/api/audit?date=2026-11-27"):
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{srv.server_port}{path}", timeout=20) as r:
+                assert r.status == 200
+                b = _json.loads(r.read().decode())
+            assert b["ok"] is True and isinstance(b["data"], dict)
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_scorecard_payload_uses_calibration(monkeypatch):
+    import paper_trading.dashboard as d
+    import paper_trading.strategy.calibration as cal
+
+    sample = {"available": True, "sufficient": True, "n": 10,
+              "by_signal": {"BUY": {"n": 5, "avg_excess_20": 0.1,
+                                    "hit_rate": 0.8}}}
+    monkeypatch.setattr(cal, "build_calibration", lambda **k: sample)
+    d._SCORE_CACHE.update(ts=0.0, data=None)
+    out = d._scorecard_payload(ttl=0)
+    assert out["available"] is True and out["n"] == 10
+    assert d._scorecard_payload(ttl=0) is out       # 60s 缓存命中
+
+
+def test_allocations_payload_from_bridge(monkeypatch, tmp_path):
+    import paper_trading.dashboard as d
+    from paper_trading.strategy.allocation import AllocationBook
+
+    book = AllocationBook(tmp_path / "acct.db")
+    book.record_buy("ma_cross", "600519", 12000)
+
+    class _B:
+        allocations = {"ma_cross": 0.5}
+        alloc_book = book
+
+        def get_status(self):
+            return {"total_value": 100000.0}
+
+    d._ALLOC_CACHE.update(ts=0.0, data=None)
+    out = d._allocations_payload(_B(), ttl=0)
+    assert out["enabled"] is True
+    assert out["items"][0]["used"] == 12000
+    assert out["items"][0]["remaining"] == 38000
+
+
+def test_ops_status_payload_uses_build_status(monkeypatch):
+    import paper_trading.dashboard as d
+    import paper_trading.utils.ops_status as ops
+
+    sample = {"ok": True, "red": [], "warn": [], "checks": [
+        {"id": "backup", "status": "green", "detail": "ok"}]}
+    monkeypatch.setattr(ops, "build_status", lambda b, **k: sample)
+    d._OPS_CACHE.update(ts=0.0, data=None)
+    out = d._ops_status_payload(object(), ttl=0)
+    assert out["ok"] is True and out["checks"][0]["id"] == "backup"
+
 

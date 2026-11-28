@@ -1,6 +1,6 @@
 # Stock Dashboard — 系统架构
 
-> 创建：2026-09-12 · 更新：2026-11-24（vendor v0.10.1 / 纸盘只读桥 E0 / 指数日更 / 消息面设计） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
+> 创建：2026-09-12 · 更新：2026-11-28（vendor v0.12.0 / 纸盘只读桥 E0 / 指数日更 / 消息面设计） · 地位：架构真相源（与 `iteration-log.md` 同级，`roadmap.md` 的上游依据）
 > 改本系统前先读本文件。模块边界变更必须同步更新本文件 + 对应单测。
 
 ## 0. 术语表（开工前先读）
@@ -109,7 +109,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 | `orchestrator.py` | 流水线编排 + 锁 | 各层入口函数 | 不得含采集/打分细节 |
 | `outcome_service.py` | 基准/K线刷新 + 前向收益落库 | `collector/` + `analyzer/outcomes` + `models/` | 不做交易、不改筛选、不发通知 |
 | `web/routes.py` | 读库 + enrich + 渲染 | DAO + `_enrich_stocks()` | 不得调 AKShare/LLM（`onboard` 后台线程除外）；列表卡片不得内联 AI 分析 |
-| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.10.1**（2026-11-24 合流；含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check / :8081 方案免口令与 intents 降级）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的九条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
+| `paper_trading/` | 子项目全量合并树（subtree 机制，vendored **v0.12.0**（2026-11-28 合流；含母策略 PR #6 / T96 计划新鲜度 / 面板 P2 / daily-check / :8081 方案免口令与 intents 降级）；单向 tag 流；规则引擎/条件单/AI 交易员/回测纪律等见子项目 README），原生页面独立运行；母侧实例的九条 cron 与运行窗口见 §9.7 | 母库只读（screening/watchlist/快照/AI 历史/笔记/论文）、我们的 LLM Key | vendored 运行 CWD 须为该目录；上游漂移则以后 pull 冲突 |
 
 ## 4. 数据表清单（现状）
 
@@ -218,7 +218,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ### 5.3 回归门禁（合并前必查）
 
-- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-24）：母 **1522**、vendor **996**——本条不复制数字为准，改基线时以文件为准。
+- 全仓 `pytest` 零失败；下限以 `scripts/gate-baseline.txt`（母项目）/ `scripts/gate-baseline-vendor.txt`（vendor）为准，**只升不降**，由 `gate.sh` 自动强制（本机不跑 pytest，全仓验证在生产机）。当前值（2026-11-28）：母 **1585**、vendor **1107**——本条不复制数字为准，改基线时以文件为准。
 - `collector/` / `screener/` 任一改动必须附带单测。
 - 破坏性变更三问（写进 commit message）：删了哪个 S#？兜底是否覆盖？契约单测是否同步？
 - 生产服务器只接受 `main` 分支部署；开发侧只提交 GitHub，不直连生产改动（生产从 origin 拉取，见 iteration-log 约束）。

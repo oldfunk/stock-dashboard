@@ -35,10 +35,16 @@ trading:
 
 strategy:
   active: general
-  short_window: 5
-  long_window: 20
+  short_window: 20
+  long_window: 60
   buy_volume: 100
   sell_volume: 100
+  # 多策略资金分配（默认空 = 未启用，沿用单方案行为）
+  # 权重由用户/AI 显式配置，代码里没有默认偏好；权重和 >100% 会启动失败。
+  # 额度 = weight × NAV（累计净买入成本口径）；卖出/持有不受限。
+  # allocations:
+  #   ma_cross: 0.6
+  #   rsi_zone: 0.4
 
 risk:
   max_single_order_value: 30000.0
@@ -79,6 +85,9 @@ agent:
   news_enabled: true
   news_limit: 12              # 进 prompt 最多几条（政策类排前；失败回空不阻断）
   news_timeout_sec: 15        # 抓取硬超时（秒）：连不上的源按超时回空，绝不挂死
+  # 策略健康策略：off=不注入；advisory=只注入建议（默认）；enforce=demote 时拒绝
+  # 新买入（卖出/持有不受影响）。enforce 是用户显式策略，不是框架默认。
+  health_policy: advisory
 
 # 规则引擎（盘中量化执行层；与 LLM 分工：引擎负责择时执行，LLM 负责选股与策略）
 engine:

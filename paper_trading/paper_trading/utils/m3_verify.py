@@ -32,6 +32,10 @@ CLOSE_NAV_DUE = (21, 10)
 #: 影子对账留痕的"到点"时刻：runbook §3 的 15:40 影子 cron + 5 分钟尾巴。
 #: 未到点时"今天没有 parity:diff"是**正常**，文案不许指控"cron 没跑"。
 PARITY_DUE = (15, 45)
+#: 影子对账是否在本部署启用。2026-11-24 决定**退役**：切换后从未装过影子 cron，
+#: 每天一条 warn 只会造成告警疲劳；双轨交叉验证由 `intent_chain`（意图↔账本）
+#: 与 `action_funnel`（动作终态）承担。要恢复双轨时改 True 并装 15:45 cron。
+SHADOW_PARITY_ENABLED = False
 #: 心跳文件的候选路径：先按 cwd（cron 与仓库根等价的情形），再按仓库根
 #: （操作者从 `~` 或 scratch 目录跑 `m3 verify` 的情形——T54 实测就是这种，
 #: 读不到文件被当成"应跳未跳"报了假红）。
@@ -457,6 +461,10 @@ def check_parity_trace(conn, today: str, now: Optional[datetime] = None) -> dict
     rows = _rows(conn, "SELECT * FROM op_log WHERE action='parity:diff' "
                        "AND substr(timestamp,1,10)=? ORDER BY id", (today,))
     if not rows:
+        if not SHADOW_PARITY_ENABLED:
+            return item("parity_trace", "双轨影子留痕连续", "skip",
+                        "影子对账已退役（2026-11-24）；双轨交叉验证由 "
+                        "intent_chain（意图↔账本）与 action_funnel（动作终态）承担")
         tn = now or datetime.now()
         if today == tn.date().isoformat() and (tn.hour, tn.minute) < PARITY_DUE:
             return item("parity_trace", "双轨影子留痕连续", "warn",
