@@ -2189,7 +2189,8 @@ async def api_performance(benchmark: str = "sh000300", limit: int = 250):
     from src.performance import paper_vs_benchmark, signal_summary
     return {"ok": True,
             "paper": paper_vs_benchmark(benchmark=benchmark, limit=limit),
-            "signals": signal_summary(AnalysisOutcomeDAO().get_all())}
+            "signals": signal_summary(
+                AnalysisOutcomeDAO().get_all(benchmark_code=benchmark))}
 
 
 @app.get("/news", response_class=HTMLResponse)
