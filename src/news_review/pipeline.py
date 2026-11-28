@@ -230,7 +230,8 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
     if news:
         try:
             text, model, usage = analyzer.ask_raw(
-                build_facts_prompt(date, facts, news), system=JSON_SYS)
+                build_facts_prompt(date, facts, news), system=JSON_SYS,
+                timeout=300.0)
             data = _extract_json(text) or {}
             judgments = data if isinstance(data, dict) else {}
         except Exception as e:                    # noqa: BLE001
@@ -239,7 +240,7 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
         try:
             text2, model2, usage2 = analyzer.ask_raw(
                 build_markdown_prompt(date, facts, judgments, news),
-                system=TEXT_SYS)
+                system=TEXT_SYS, timeout=300.0)
             content_md = (text2 or "").strip()
             if model2:
                 model = model2

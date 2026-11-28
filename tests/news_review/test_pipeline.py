@@ -50,7 +50,7 @@ class FakeAnalyzer:
     def __init__(self):
         self.calls = []
 
-    def ask_raw(self, prompt, system=None):
+    def ask_raw(self, prompt, system=None, timeout=None):
         self.calls.append(system)
         if system and "JSON" in system:
             return (json.dumps({
