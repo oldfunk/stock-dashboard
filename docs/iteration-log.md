@@ -167,6 +167,15 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-28（晚：E4 分析上下文 + F2 周报 + R3 归因 + 数据质量/巡检）
+
+- **E4**：新增 `src/paper_bridge/context.py`，单股 AI 分析 prompt 注入只读组合上下文（面板实际收益/持仓/计划；桥回退；300s 缓存）；异常不阻断分析；提示明确不得据此给交易建议。5 条测试。
+- **F2**：`src/news_review/weekly.py` 确定性聚合周一至周五日笔记（每日要点/重复主题/事件/组合实际收益/下周关注/来源），新增 `news_weekly` 表、周六 09:30 调度、`/api/news/weekly` 与 `/news` 周报区；本周 11-23→11-27 已生成。
+- **R3-1/2/3/4/5**：`src/research/strategy.py` 登记 `S-BASE-v0`（7 门+五维权重），版本 CLI 支持 new/promote/retire（只能引用 supported 假设）；`ensure_deployment` 把纸盘登记为 `D-20261128-001`（100,000，2026-09-28 起）；`attribution.py` 算周期收益/超额/费用/FIFO 已实现/行业/个股/regime；`drift.py` 滚动超额/回撤/暴露触发 `decision_log`。11-20→11-27 实测：总收益 +1.31%、超额 -1.43%、费用 30.47、已实现 -2,834、risk_off；漂移写 `DL-20261128-001`。
+- **数据质量**：`scripts/data_quality_report.py` 只读诊断；实测 2026-10 分析记录两边都缺、`market_state.pe_percentile_5y` 近 10 日全缺、daily_close 近 10 日 ≥98%、financial roic 98.1%/fcf 99.7%/roe10 100%。
+- **巡检**：`scripts/check_news_review.py` 检查缺笔记/章节/引用/建议/面板来源，`--require-panel` 可要求实际收益来源；11-27 通过（7/7、18 引用、0 无效、0 建议）。
+- **门禁**：母 **1606** / vendor **996**（1585 → 1606，+21 用例）；生产 worktree 全绿。
+
 ### 2026-11-28（下午：F 线收盘检阅 + 新闻源扩充；E2/B3；F0 三份真实笔记）
 
 - **新闻源扩充**：`news_fetcher.py` 新增财联社电报、东财全球快讯、新浪/同花顺/富途全球快讯适配器；默认 `akshare_em + caixin_hot + cls_telegraph + em_global`，市场级单源 20 条、合并去重后单轮 ≤40。时间归一化兼容 `date/time` 对象；新浪「【标题】正文」优先取括号标题。

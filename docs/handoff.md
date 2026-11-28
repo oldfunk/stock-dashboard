@@ -13,8 +13,12 @@
 - **E3 绩效页完成**：`/performance` + `/api/performance`：纸盘 vs 沪深300（共有交易日、累计超额），AI 信号前向收益按 BUY/HOLD/AVOID 汇总；已按子项目 issue #12 修正为**只统计所选基准、按 analysis_id 去重**（生产 570 条/60 日 264 条，不再是 1140/528）。
 - **子项目 finding 已处理**：`oldfunk/stock-dashboard#12`（`/api/performance` analysis×benchmark 双计）修复并加回归；子项目只读、未改母码。
 - **F1.5/F5 补齐**：市场级 P2/P0 事件（指数单日 ±3%，≥5% 升 P0；成交额 ±50%）已并入收盘检阅事件；`scripts/news_review_eval.py` 可查章节/引用/建议/面板 asof，带人工标注时算 precision/recall，`--check` 硬失败 exit 1；标注模板见 `docs/news-review-annotations-template.json`。
+- **F2 周报**：`src/news_review/weekly.py` + `news_weekly` + 周六 09:30 调度 + `/api/news/weekly` + `/news` 周报区；本周（11-23→11-27）已生成，日间重复主题/事件/组合实际收益/下周关注/来源。
+- **E4 分析上下文**：20 只单股分析 prompt 现在带只读组合上下文（实际收益/持仓/待执行计划，面板优先、桥回退、300s 缓存），并明确"不得据此给交易建议"。
+- **R3 策略/归因**：`S-BASE-v0` 已登记（7 门+五维权重）；CLI `scripts/research_strategy.py` 支持 new/promote/retire/deploy/attribute/drift；部署 `D-20261128-001`（100,000，2026-09-28 起）；11-20→11-27 归因已落库（总收益 +1.31%、超额 -1.43%、费用 30.47、regime risk_off）；漂移写 `DL-20261128-001`。
+- **数据质量与巡检**：`scripts/data_quality_report.py` 查出 2026-10 分析记录两边都缺、market_state `pe_percentile_5y` 近 10 日全缺、daily_close 近 10 日 ≥98%；`scripts/check_news_review.py` 可做收盘后硬检查。
 - **纸盘/数据**：NAV 97,125.32（-2.87%）；A2 目标池 20/20 当日；基准 5/5 到 11-27；三端口 200。
-- 门禁母 **1585** / vendor **996**；基线已更新；母套件超时下限调到 900s（1585 用例实测约 515s）。
+- 门禁母 **1606** / vendor **996**；基线已更新；母套件超时下限 900s。
 
 > 以下为 11-24 及更早的历史状态，保留原文（只追加不删）；最新状态以上面为准。
 

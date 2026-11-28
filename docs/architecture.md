@@ -388,3 +388,19 @@ pending、三周零流水）。任务、命令与路径的真相源是
   API `/api/news/review/*`、`/api/news/events`、`/api/performance`。
 - **口径**：新闻不进入纸盘策略；NAV/成交按笔记日期截断（历史回填不偷看未来）；
   无新闻是合法输出，失败降级为确定性摘要并标 `degraded`。
+
+## 11. 组合上下文 / 周报 / 策略归因（2026-11-28）
+
+- **E4 组合上下文**：`src/paper_bridge/context.py` 读 :8081 面板（失败回退 E0 桥），
+  300s 缓存；`AiAnalyzer.analyze_stock` 在 prompt 末尾注入实际收益/持仓/待执行计划，
+  并明确"组合数据只读，不得据此给交易建议"。
+- **F2 周报**：`src/news_review/weekly.py` 确定性聚合周一至周五日笔记，写
+  `news_weekly`（week_end 主键）；周六 09:30 scheduler 触发；`/api/news/weekly`
+  与 `/news` 周报区。不与周六观察池复盘共用 `ai_journal`。
+- **R3 策略/归因**：`S-BASE-v0` 登记在 `strategy_version`；`scripts/research_strategy.py`
+  提供 new/promote/retire/deploy/attribute/drift；`strategy_deployment`
+  记录纸盘资金/起止；`strategy_attribution` 每周/期一行；漂移触发 `decision_log`。
+  只读纸盘、不改交易。
+- **数据质量/巡检**：`scripts/data_quality_report.py`（分析月度缺口、market_state
+  指标缺失、daily_close 覆盖、财务字段）；`scripts/check_news_review.py`（缺笔记/
+  章节/引用/建议/面板来源）。
