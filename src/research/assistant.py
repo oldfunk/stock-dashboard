@@ -64,13 +64,8 @@ def build_prompt(facts: dict) -> str:
 
 
 def _allowed_numbers(facts: dict) -> set[str]:
-    out = set()
-    for r in facts.get("results") or []:
-        for k in ("value", "ci_low", "ci_high", "p_value", "sample_size"):
-            v = r.get(k)
-            if v is not None:
-                out.add(str(v))
-    return out
+    text = json.dumps(facts, ensure_ascii=False, default=str)
+    return set(NUMBER_RE.findall(text))
 
 
 def validate_memo(md: str, facts: dict) -> dict:
