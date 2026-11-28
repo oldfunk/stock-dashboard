@@ -25,3 +25,11 @@ def test_drift_no_signal_when_healthy():
     rows = [{"excess_return": 0.01}]
     panel = {"performance": {"current_drawdown": 0.02, "exposure": 0.2}}
     assert drift_signals(rows, panel, window=2) == []
+
+
+def test_drift_win_rate_and_data_quality():
+    panel = {"performance": {"current_drawdown": 0.02, "exposure": 0.2,
+                             "closed_trades": 3, "win_rate": 0.0}}
+    sig = drift_signals([], panel, data_quality={"market_state_coverage": 0.8})
+    kinds = {s["type"] for s in sig}
+    assert kinds == {"low_win_rate", "data_quality"}

@@ -22,7 +22,9 @@ def rolling_excess(rows: list[dict], window: int = 4) -> Optional[float]:
 def drift_signals(attributions: list[dict], panel: Optional[dict] = None,
                   window: int = 4, min_excess: float = 0.0,
                   max_drawdown: float = 0.10,
-                  max_exposure: float = 0.80) -> list[dict]:
+                  max_exposure: float = 0.80,
+                  min_win_rate: float = 0.30,
+                  data_quality: Optional[dict] = None) -> list[dict]:
     out = []
     ex = rolling_excess(attributions, window)
     if ex is not None and ex < min_excess:
@@ -41,6 +43,18 @@ def drift_signals(attributions: list[dict], panel: Optional[dict] = None,
         out.append({"type": "over_exposure",
                     "value": float(exp), "threshold": max_exposure,
                     "why": f"仓位 {float(exp) * 100:.1f}% > {max_exposure * 100:.0f}%"})
+    closed = int(summary.get("closed_trades") or 0)
+    win = summary.get("win_rate")
+    if closed >= 2 and win is not None and float(win) < min_win_rate:
+        out.append({"type": "low_win_rate",
+                    "value": float(win), "threshold": min_win_rate,
+                    "why": f"已平仓 {closed} 笔胜率 {float(win) * 100:.0f}%"
+                           f" < {min_win_rate * 100:.0f}%"})
+    cov = (data_quality or {}).get("market_state_coverage")
+    if cov is not None and float(cov) < 0.90:
+        out.append({"type": "data_quality",
+                    "value": float(cov), "threshold": 0.90,
+                    "why": f"market_state 覆盖 {float(cov) * 100:.1f}% < 90%"})
     return out
 
 
@@ -54,7 +68,18 @@ def run_drift(deployment_id: str, window: int = 4,
         panel = load_panel_snapshot()
     except Exception:
         panel = {}
-    signals = drift_signals(rows, panel, window)
+    coverage = None
+    try:
+        from src.models.database import db_conn
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT coverage FROM market_state_daily "
+                "ORDER BY trade_date DESC LIMIT 1").fetchone()
+        coverage = row["coverage"] if row else None
+    except Exception:
+        coverage = None
+    signals = drift_signals(rows, panel, window,
+                            data_quality={"market_state_coverage": coverage})
     result = {"deployment_id": deployment_id, "window": window,
               "attributions": len(rows),
               "signals": signals, "decision_id": None}
