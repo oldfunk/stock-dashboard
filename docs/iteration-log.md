@@ -172,7 +172,9 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **纸盘自主运行（11-24 → 11-27）**：plan #20–#23 均 09:30 自动执行——11-24 卖 **000426 100@19.64**、11-27 买 **000848 100@7.40**；持仓 000792 400 / 603979 100 / 000848 100；NAV **97,125.32（-2.87%）**；plan #24（11-30）pending。母策略出信号、子项目执行，全程无人工干预。
 - **E1 只读桥（完成）**：`src/paper_bridge/api.py` 提供 `GET /api/paper/status|nav|fills`，`load_status()` 聚合 account/positions/plan/nav/fills，每块带 `source/asof/stale`；缺库/缺表逐块 `unavailable` 并返回 200，不拖母站。首页新增 `_paper_card.html`（总资产/涨跌、持仓数、待执行计划、链接 `/paper`），桥不可用时整块隐藏。新增 `tests/test_paper_bridge_api.py` 3 例（聚合/降级/limit 校验）。生产实测 `/api/paper/status` 200，现金与持仓数字与 :8081 一致，首页出现"纸盘"。gate 母 **1522 → 1525**。
 - **B2 绩效表（完成）**：`scripts/paper_performance.py` 只读 NAV + `benchmark_daily`，按**双方共有的交易日**对齐，输出逐日收益/超额与累计收益/超额，不插值、不猜缺失日。实测 09-28 → 11-27：纸盘 **-2.87%** vs 沪深300 **-6.40%**，累计超额 **+3.52pp**；10-23→11-19 的 NAV 断档如实少行。新增 3 条纯函数测试；期间修正一处测试期望（基准 201/200 应为 +0.5%，原写 1%）。gate 母 **1525 → 1528**。
-- **基线**：母 **1528** / vendor **996**（生产 worktree `bash scripts/gate.sh` 全绿）。
+- **A3 K 线覆盖报告（完成）**：`scripts/kline_coverage_report.py` 只读母库，输出全市场 `kline_daily` / `daily_close` 覆盖率、持仓 + 最新候选池逐只末根与当日判断、近 N 日趋势、缺失按板块聚合；`--json` 供后续自动化。11-27 实测：全市场 kline **715/5527（12.9%，轮换池正常）**、`daily_close` **5527/5527**、**目标池 20/20 当日**；近 5 日 kline 覆盖 1859→715，符合轮换预算。新增 5 条测试（含夹具库 `collect`）。gate 母 **1528 → 1533**。
+- **测试隔离修复**：gate 曾偶发 `test_api_watchlist_falls_back_to_snapshot` 失败（断言 pe=12，实得 21.18）。根因是 `/stock/{code}` 与 `POST /api/watchlist/{code}` 在缺数据时 spawn 后台 `onboard` 线程，线程按**当时**的 db 路径写快照，用例切换 tmp 库后旧线程写进下一个用例。根 conftest 默认把 `onboard_stock_async` 置空，线程行为用例加 `@pytest.mark.allow_onboard`；回归 13 passed，全量 gate 1533 全绿。
+- **基线**：母 **1533** / vendor **996**（生产 worktree `bash scripts/gate.sh` 全绿）。
 - 想法/为什么：先把"看得见、算得清"补上——母站能只读看到纸盘状态，周报能算出相对基准的超额；桥保持只读和块级降级，避免母站被外部账本拖垮。
 
 ### 2026-11-24（vendor v0.10.1：第二实例方案切换免口令 + intents 降级）
