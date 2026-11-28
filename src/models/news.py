@@ -104,6 +104,38 @@ class NewsDAO:
                 out.extend(dict(r) for r in rows)
         return out
 
+    def between(self, start: str, end: str, limit: int = 100) -> list[dict]:
+        """[start, end) 窗口内的新闻（收盘检阅用；缺发布时间按 fetched_at）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM news_item "
+                "WHERE COALESCE(NULLIF(published_at, ''), fetched_at) >= ? "
+                "AND COALESCE(NULLIF(published_at, ''), fetched_at) < ? "
+                "ORDER BY COALESCE(NULLIF(published_at, ''), fetched_at) DESC, "
+                "id DESC LIMIT ?", (start, end, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+    def apply_linkage(self, rows: list[dict]) -> int:
+        """回写实体/聚类/级别（rows 需含 id，其余键可选）。"""
+        if not rows:
+            return 0
+        n = 0
+        with self._conn() as conn:
+            for r in rows:
+                if not r.get("id"):
+                    continue
+                entities = r.get("entities_json")
+                if entities is None and r.get("entities") is not None:
+                    entities = json.dumps(r["entities"], ensure_ascii=False)
+                cur = conn.execute(
+                    "UPDATE news_item SET entities_json=?, cluster_id=?, "
+                    "severity=?, event_type=?, official=? WHERE id=?",
+                    (entities, r.get("cluster_id"),
+                     r.get("severity"), r.get("event_type"),
+                     r.get("official"), r["id"]))
+                n += cur.rowcount
+        return n
+
     def mark_fetched(self, codes: list, ok: bool = True) -> None:
         """记录本轮抓取尝试（冷却按它算，与是否有内容无关）。"""
         if not codes:

@@ -17,7 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_time(raw) -> str:
-    """源站时间 → YYYY-MM-DD HH:MM（认不准就返回空，交由 fetched_at 兜底排序）。"""
+    """源站时间 → YYYY-MM-DD HH:MM（认不准就返回空，交由 fetched_at 兜底排序）。
+
+    兼容字符串、``datetime.date``/``time``/``datetime``（2026-11-28 新增的
+    财联社/新浪源直接给对象）。
+    """
+    if hasattr(raw, 'isoformat'):
+        raw = raw.isoformat()
     s = str(raw or '').strip()
     if not s:
         return ''
@@ -135,6 +141,105 @@ class CaixinHotSource:
         return out
 
 
+class _GlobalFeedSource:
+    """市场级全球/财经快讯的通用适配器（2026-11-28）。
+
+    AKShare 这几个接口列名不统一，子类只声明 ``fn`` 与取字段的方法。
+    任何字段缺失都降级为空，不让单条脏数据打断整批。
+    """
+    name = ''
+    fn = ''
+    market_level = True
+
+    def fetch(self, code: str, name: str = '', limit: int = 10) -> list:
+        return []
+
+    def _row(self, row) -> Optional[dict]:
+        raise NotImplementedError
+
+    def fetch_market(self, limit: int = 20) -> list:
+        try:
+            import akshare as ak
+
+            df = getattr(ak, self.fn)()
+        except Exception as e:
+            logger.warning("[新闻] %s 抓取失败: %s", self.name, e)
+            return []
+        if df is None or len(df) == 0:
+            return []
+        out = []
+        for _, row in df.head(limit).iterrows():
+            try:
+                item = self._row(row)
+            except Exception as e:
+                logger.warning("[新闻] %s 单条解析失败: %s", self.name, e)
+                continue
+            if item and item.get('title'):
+                out.append(item)
+        return out
+
+    def _base(self, title, summary, url='', published=''):
+        return {
+            'code': '', 'name': '市场',
+            'title': str(title or '').strip()[:200],
+            'summary': str(summary or '').strip()[:800],
+            'url': str(url or '').strip().split('?')[0],
+            'source': self.name,
+            'published_at': _normalize_time(published),
+        }
+
+
+class ClsTelegraphSource(_GlobalFeedSource):
+    """财联社电报（标题 + 内容 + 日期/时间对象，无链接）。"""
+    name = 'cls_telegraph'
+    fn = 'stock_info_global_cls'
+
+    def _row(self, row) -> Optional[dict]:
+        d, t = row.get('发布日期'), row.get('发布时间')
+        published = f"{d.isoformat()} {t.isoformat()}" if d and t else (d or t)
+        return self._base(row.get('标题'), row.get('内容'), '', published)
+
+
+class EmGlobalSource(_GlobalFeedSource):
+    """东方财富全球财经快讯（标题/摘要/时间/链接）。"""
+    name = 'em_global'
+    fn = 'stock_info_global_em'
+
+    def _row(self, row) -> Optional[dict]:
+        return self._base(row.get('标题'), row.get('摘要'),
+                          row.get('链接'), row.get('发布时间'))
+
+
+class SinaGlobalSource(_GlobalFeedSource):
+    """新浪财经全球快讯（只有时间 + 内容，标题取首句）。"""
+    name = 'sina_global'
+    fn = 'stock_info_global_sina'
+
+    def _row(self, row) -> Optional[dict]:
+        content = row.get('内容')
+        return self._base(_headline(content), content, '', row.get('时间'))
+
+
+class ThsGlobalSource(_GlobalFeedSource):
+    """同花顺全球财经快讯（标题/内容/时间/链接）。"""
+    name = 'ths_global'
+    fn = 'stock_info_global_ths'
+
+    def _row(self, row) -> Optional[dict]:
+        return self._base(row.get('标题'), row.get('内容'),
+                          row.get('链接'), row.get('发布时间'))
+
+
+class FutuGlobalSource(_GlobalFeedSource):
+    """富途全球快讯（标题/内容/时间/链接）。"""
+    name = 'futu_global'
+    fn = 'stock_info_global_futu'
+
+    def _row(self, row) -> Optional[dict]:
+        return self._base(row.get('标题'), row.get('内容'),
+                          row.get('链接'), row.get('发布时间'))
+
+
 _REGISTRY = {}
 
 
@@ -145,6 +250,11 @@ def register_source(cls):
 
 register_source(AkshareEmSource)
 register_source(CaixinHotSource)
+register_source(ClsTelegraphSource)
+register_source(EmGlobalSource)
+register_source(SinaGlobalSource)
+register_source(ThsGlobalSource)
+register_source(FutuGlobalSource)
 
 
 def get_source(name: str = 'akshare_em') -> Optional[object]:
@@ -229,7 +339,8 @@ def fetch_news(codes=None, source: str = 'akshare_em', per_code: int = 10) -> li
 
 
 def ingest(sources=None, per_code: int = 10, cooldown_min: int = 0,
-           market_cooldown_min=None, market_per_run: int = 0, **scope) -> dict:
+           market_cooldown_min=None, market_per_run: int = 0,
+           market_total: int = 0, **scope) -> dict:
     """抓取 → 落库，返回统计摘要（供 API/定时任务用）。
 
     sources 可传单个源名或列表：个股源按 target_codes 抓，市场级源
@@ -273,8 +384,17 @@ def ingest(sources=None, per_code: int = 10, cooldown_min: int = 0,
             mkt = []
             for src in market_srcs:
                 mkt.extend(src.fetch_market(limit=market_per_run))
-            market_added = dao.upsert_many(mkt)
-            dao.mark_fetched([MARKET_CODE], ok=bool(mkt))
+            seen, merged = set(), []
+            for it in mkt:
+                key = (it.get('url') or '', it.get('title') or '')
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(it)
+            if market_total > 0:
+                merged = merged[:int(market_total)]
+            market_added = dao.upsert_many(merged)
+            dao.mark_fetched([MARKET_CODE], ok=bool(merged))
 
     logger.info("[新闻] 个股源 %d 个：%d 只（冷却跳过 %d）/ %d 条，新增 %d；"
                 "市场级新增 %d%s", len(stock_srcs), len(codes), skipped,

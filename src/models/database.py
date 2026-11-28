@@ -383,6 +383,44 @@ CREATE TABLE IF NOT EXISTS news_digest (
     created_at      TEXT NOT NULL
 );
 
+-- 重大事件（F1.5，2026-11-28）：规则先行，只提醒不交易。
+-- event_key 含 30 分钟时间桶，同一实体+类型半小时内只留一条。
+CREATE TABLE IF NOT EXISTS news_event (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key   TEXT NOT NULL UNIQUE,
+    event_time  TEXT NOT NULL,
+    trade_date  TEXT NOT NULL,
+    level       TEXT NOT NULL,                  -- P0/P1/P2
+    event_type  TEXT,
+    code        TEXT DEFAULT '',
+    name        TEXT,
+    title       TEXT NOT NULL,
+    fact        TEXT,
+    inference   TEXT,
+    source      TEXT,
+    url         TEXT,
+    news_id     INTEGER,
+    official    INTEGER DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_news_event_date ON news_event(trade_date, level, id DESC);
+
+-- 收盘检阅运行记录（F3，2026-11-28）：只记录，不是发布闸。
+CREATE TABLE IF NOT EXISTS news_review_run (
+    review_date     TEXT PRIMARY KEY,
+    status          TEXT NOT NULL,              -- ok/degraded/skipped/error
+    item_count      INTEGER DEFAULT 0,
+    holdings_hit    INTEGER DEFAULT 0,
+    redline_hits    INTEGER DEFAULT 0,
+    event_count     INTEGER DEFAULT 0,
+    source_failures INTEGER DEFAULT 0,
+    duration_ms     INTEGER DEFAULT 0,
+    model           TEXT,
+    error           TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 -- 基准指数日线（2026-10-21）：信号前向收益对比用；只存收盘价，价格指数不含分红。
 CREATE TABLE IF NOT EXISTS benchmark_daily (
     code            TEXT NOT NULL,
@@ -545,6 +583,18 @@ def init_database():
         _add_column_if_not_exists(conn, 'kline_daily', 'close_adj', 'REAL')
         _add_column_if_not_exists(conn, 'kline_daily', 'close_qfq', 'REAL')
         _add_column_if_not_exists(conn, 'kline_daily', 'shares', 'REAL')
+        # 2026-11-28 F 线：新闻实体/聚类/级别；笔记扩展为"自主发布 + 来源 + 批注"。
+        # 旧行保持 NULL/默认值，读侧按缺省处理，不重算历史。
+        _add_column_if_not_exists(conn, 'news_item', 'entities_json', 'TEXT')
+        _add_column_if_not_exists(conn, 'news_item', 'cluster_id', 'TEXT')
+        _add_column_if_not_exists(conn, 'news_item', 'severity', 'TEXT')
+        _add_column_if_not_exists(conn, 'news_item', 'event_type', 'TEXT')
+        _add_column_if_not_exists(conn, 'news_item', 'official', 'INTEGER')
+        _add_column_if_not_exists(conn, 'ai_journal', 'note_type', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_journal', 'status', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_journal', 'sources_json', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_journal', 'annotations', 'TEXT')
+        _add_column_if_not_exists(conn, 'ai_journal', 'updated_at', 'TEXT')
         conn.execute(
             'CREATE INDEX IF NOT EXISTS idx_kline_code_date '
             'ON kline_daily(code, trade_date)'

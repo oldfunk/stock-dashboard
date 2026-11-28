@@ -168,6 +168,10 @@ class MarketScheduler:
         # 新闻舆情幂等标记（2026-10-19）：{时刻: 日期} / 摘要日期
         self._last_news_ingest_at = None
         self._last_news_summary = None
+        # 收盘检阅（2026-11-28）：首跑/重试各自只一次；事件检查独立低频
+        self._last_close_review = None
+        self._close_review_attempts = {}
+        self._last_event_check = None
         # 每周数据维护（2026-10-21）：股息 + 信号前向收益
         self._last_weekly_refresh = None
         self._weekly_in_progress = False
@@ -607,12 +611,120 @@ class MarketScheduler:
 
         # ② 每日 AI 摘要
         sat = _parse_hhmm(cfg.get("summary_time", "18:30"))
-        if sat is None or self._last_news_summary == today:
+        if sat is not None and self._last_news_summary != today and now.time() >= sat:
+            self._last_news_summary = today
+            threading.Thread(target=self._run_news_summary, daemon=True).start()
+
+        # ③ 收盘检阅（F1，15:45 首跑 / 18:30 重试；失败不阻塞主循环）
+        self._check_close_review(cfg, now)
+        # ④ 盘中重大事件（F1.5）：只落提醒，不交易
+        self._check_news_events(cfg, now)
+
+    def _is_trading_day(self, day) -> bool:
+        try:
+            from src.models.database import db_conn
+            with db_conn() as conn:
+                row = conn.execute(
+                    "SELECT is_open FROM trading_calendar "
+                    "WHERE market_id = 'CN' AND trade_date = ?",
+                    (day.isoformat(),)).fetchone()
+            if row is not None:
+                return bool(row["is_open"])
+        except Exception:
+            pass
+        return day.weekday() < 5
+
+    def _check_close_review(self, cfg: dict, now):
+        if not cfg.get("review_enabled", False):
             return
-        if now.time() < sat:
+        today = now.date()
+        if not self._is_trading_day(today):
             return
-        self._last_news_summary = today
-        threading.Thread(target=self._run_news_summary, daemon=True).start()
+        from src.models.news_review import NewsReviewDAO
+        dao = NewsReviewDAO()
+        date_s = today.isoformat()
+        if self._last_close_review == today or dao.get_review(date_s):
+            self._last_close_review = today
+            return
+        first = _parse_hhmm(cfg.get("review_time", "15:45"))
+        retry = _parse_hhmm(cfg.get("review_retry_time", "18:30"))
+        attempts = self._close_review_attempts.get(date_s, 0)
+        if first is None or now.time() < first:
+            return
+        if attempts >= 1 and (retry is None or now.time() < retry):
+            return
+        if attempts >= 2:
+            return
+        self._close_review_attempts[date_s] = attempts + 1
+        threading.Thread(target=self._run_close_review,
+                         args=(attempts == 0,), daemon=True).start()
+
+    @staticmethod
+    def _run_close_review(first_attempt: bool = True):
+        try:
+            from src.config import load_config
+            from src.news_review import run_close_review
+            cfg = load_config()
+            res = run_close_review(cfg=cfg)
+            logger.info("[收盘检阅] %s：%s（新闻 %s 条 / 事件 %s 条）",
+                        "ok" if res.get("ok") else "failed",
+                        res.get("status") or res.get("reason"),
+                        res.get("item_count"), res.get("event_count"))
+        except Exception as e:                    # noqa: BLE001
+            logger.warning("[收盘检阅] 异常（%s 次）: %s",
+                           "首跑" if first_attempt else "重试", e)
+
+    def _check_news_events(self, cfg: dict, now):
+        if not cfg.get("event_check_enabled", False):
+            return
+        if not self._is_trading_day(now.date()):
+            return
+        start = _parse_hhmm(cfg.get("event_active_start", "09:30"))
+        end = _parse_hhmm(cfg.get("event_active_end", "15:05"))
+        if start is None or end is None or not (start <= now.time() <= end):
+            return
+        every = int(cfg.get("event_check_min", 10))
+        last = self._last_event_check
+        if every <= 0 or (last is not None
+                          and (now - last).total_seconds() < every * 60):
+            return
+        self._last_event_check = now
+        threading.Thread(target=self._run_news_events, daemon=True).start()
+
+    @staticmethod
+    def _run_news_events():
+        try:
+            from datetime import timedelta as _td
+            from src.models.news import NewsDAO
+            from src.models.news_review import NewsEventDAO
+            from src.news_review import rules
+            from src.news_review.pipeline import link_news
+            from src.news_review.facts import target_facts
+            from src.models.database import db_conn
+            from src.config import load_config
+            from src.utils import now_cn as _now
+
+            cfg = load_config().get("news", {})
+            now = _now()
+            lookback = int(cfg.get("event_lookback_min", 90))
+            start = (now - _td(minutes=lookback)).strftime("%Y-%m-%d %H:%M:%S")
+            end = (now + _td(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
+            with db_conn() as conn:
+                targets = target_facts(conn, now.strftime("%Y-%m-%d"))
+            raw = NewsDAO().between(start, end, limit=200)
+            if not raw:
+                return
+            news = link_news(raw, targets)
+            NewsDAO().apply_linkage(news)
+            events = rules.build_events(
+                news, {t["code"]: t.get("name") or "" for t in targets},
+                now=now.strftime("%Y-%m-%d %H:%M:%S"),
+                limits=cfg.get("event_limits") or {"P0": 5, "P1": 10})
+            added = NewsEventDAO().upsert_many(events)
+            if added:
+                logger.info("[新闻事件] 新增 %d 条（P0/P1，只提醒）", added)
+        except Exception as e:                    # noqa: BLE001
+            logger.warning("[新闻事件] 检查异常: %s", e)
 
     @staticmethod
     def _run_news_ingest():
@@ -630,6 +742,7 @@ class MarketScheduler:
                 cooldown_min=int(cfg.get("code_cooldown_min", 15)),
                 market_cooldown_min=int(cfg.get("market_cooldown_min", 60)),
                 market_per_run=int(cfg.get("market_per_run", 20)),
+                market_total=int(cfg.get("market_total", 0)),
                 **scope)
         except Exception as e:
             logger.warning("[调度器] 新闻抓取异常: %s", e)

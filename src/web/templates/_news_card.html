@@ -1,0 +1,24 @@
+{% if news_review or news_events %}
+<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:10px 0 0;padding:10px 14px;border:1px solid var(--divider);border-radius:var(--radius);background:var(--bg-secondary);font-size:13px;color:var(--text-secondary);">
+    {% if news_review %}
+    {% set ra = news_review.actions_summary | from_json %}
+    <span style="font-weight:600;color:var(--text-primary);">收盘检阅</span>
+    <span>{{ news_review.journal_date }} · AI 自主</span>
+    {% if ra %}
+    <span>新闻 {{ ra.item_count or 0 }} 条</span>
+    <span>持仓命中 {{ ra.holdings_hit or 0 }}</span>
+    {% if ra.redline_hits %}<span style="color:var(--yellow,#b8860b);">红线 {{ ra.redline_hits }}</span>{% endif %}
+    {% endif %}
+    <a href="/journal/{{ news_review.journal_date }}" style="color:var(--accent);text-decoration:none;">阅读全文 →</a>
+    {% endif %}
+    {% if news_events %}
+    <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+        <span style="color:var(--text-tertiary);">今日事件</span>
+        {% for e in news_events %}
+        <span title="{{ e.title }}" style="padding:1px 6px;border-radius:4px;background:{{ 'var(--red,#c0392b)' if e.level == 'P0' else 'var(--yellow,#b8860b)' }};color:#fff;font-size:12px;">{{ e.level }}</span>
+        <span style="max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.title }}</span>
+        {% endfor %}
+    </span>
+    {% endif %}
+</div>
+{% endif %}

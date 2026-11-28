@@ -4,6 +4,7 @@ Web 看板 - FastAPI 路由
 
 import json
 import logging
+import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -538,6 +539,12 @@ async def index(request: Request):
     from src.paper_bridge import load_status as _paper_status
     paper = _paper_status(nav_limit=1, fills_limit=0)
 
+    # 收盘检阅 + 重大事件（F1；无数据时模板整块不渲染）
+    from src.models.news_review import NewsEventDAO, NewsReviewDAO
+    news_review = NewsReviewDAO().latest_review()
+    news_events = NewsEventDAO().recent(
+        limit=3, trade_date=now_cn().strftime("%Y-%m-%d"), levels=["P0", "P1"])
+
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
@@ -552,6 +559,8 @@ async def index(request: Request):
         "ai_watchlist": ai_watchlist,
         "ai_journal_latest": ai_journal_latest,
         "paper": paper,
+        "news_review": news_review,
+        "news_events": news_events,
         "sector_avg": sector_avg,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
@@ -1115,6 +1124,7 @@ async def api_news_ingest(req: NewsIngestRequest):
     }
     return news_fetcher.ingest(sources=sources, per_code=req.per_code,
                                market_per_run=int(cfg.get("market_per_run", 20)),
+                               market_total=int(cfg.get("market_total", 0)),
                                **scope)
 
 
@@ -1162,6 +1172,7 @@ async def api_news_summary(req: NewsSummaryRequest):
         news_fetcher.ingest(sources=news_fetcher.sources_from_config(cfg),
                             per_code=int(cfg.get("per_code", 8)),
                             market_per_run=int(cfg.get("market_per_run", 20)),
+                            market_total=int(cfg.get("market_total", 0)),
                             **scope)
     items = news_dao.for_codes([c for c, _ in codes],
                                limit_per_code=int(cfg.get("per_code", 8)),
@@ -1185,6 +1196,80 @@ async def api_news_summary(req: NewsSummaryRequest):
     return {"ok": True, "digest_date": digest_date,
             "judgments": len(res["judgments"]), "items": len(items),
             "model": res["model"], "usage": res["usage"]}
+
+
+def _review_json(row: dict) -> dict:
+    for key in ("market_snapshot", "actions_summary", "sources_json",
+                "annotations"):
+        if row.get(key):
+            try:
+                row[key] = json.loads(row[key])
+            except (json.JSONDecodeError, TypeError):
+                row[key] = None
+    return row
+
+
+@app.get("/api/news/review/latest")
+async def api_news_review_latest():
+    from src.models.news_review import NewsReviewDAO
+    row = NewsReviewDAO().latest_review()
+    if not row:
+        return {"ok": True, "data": None, "message": "暂无收盘检阅"}
+    return {"ok": True, "data": _review_json(row)}
+
+
+@app.get("/api/news/review/list")
+async def api_news_review_list(limit: int = 30):
+    from src.models.news_review import NewsReviewDAO
+    return {"ok": True, "data": NewsReviewDAO().list_reviews(limit=limit)}
+
+
+@app.get("/api/news/review/{review_date}")
+async def api_news_review_by_date(review_date: str):
+    from src.models.news_review import NewsReviewDAO
+    row = NewsReviewDAO().get_review(review_date)
+    if not row:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"ok": True, "data": _review_json(row)}
+
+
+@app.post("/api/news/review/run")
+async def api_news_review_run(date: str = "", dry_run: bool = False):
+    """手动触发收盘检阅（默认后台跑；dry_run 同步返回不落库）。"""
+    from src.news_review import run_close_review
+    review_date = (date or now_cn().strftime("%Y-%m-%d"))[:10]
+    if dry_run:
+        res = run_close_review(date=review_date, dry_run=True,
+                              cfg=load_config())
+        return {"ok": bool(res.get("ok")), "data": res}
+    threading.Thread(target=run_close_review,
+                     kwargs={"date": review_date, "cfg": load_config()},
+                     daemon=True).start()
+    return {"ok": True, "accepted": True, "date": review_date}
+
+
+@app.post("/api/news/review/{review_date}/annotate")
+async def api_news_review_annotate(review_date: str, body: dict):
+    from src.models.news_review import NewsReviewDAO
+    note = str(body.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="note 不能为空")
+    ok = NewsReviewDAO().annotate(review_date, note,
+                                  author=str(body.get("author") or "manual"))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"ok": True}
+
+
+@app.get("/api/news/events")
+async def api_news_events(date: str = "", limit: int = 20,
+                          level: str = ""):
+    from src.models.news_review import NewsEventDAO
+    levels = [level] if level in ("P0", "P1", "P2") else None
+    rows = NewsEventDAO().recent(
+        limit=max(1, min(limit, 100)),
+        trade_date=(date or None), levels=levels)
+    return {"ok": True, "data": rows}
 
 
 def _enrich_with_financial_summary(stocks: list) -> None:
@@ -2078,6 +2163,24 @@ async def api_outcomes(benchmark: str = "sh000300"):
         "rows": len(rows),
         "summary": {str(h): aggregate_outcomes(rows, h) for h in HORIZONS},
     }
+
+
+@app.get("/news", response_class=HTMLResponse)
+async def news_page(request: Request):
+    """新闻与收盘检阅（F4，2026-11-28）：只读展示，来源可点。"""
+    from src.models.news import NewsDAO
+    from src.models.news_review import NewsEventDAO, NewsReviewDAO
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    return templates.TemplateResponse(request, "news.html", {
+        "request": request,
+        "page_title": page_title,
+        "news_items": NewsDAO().latest(limit=40),
+        "review": NewsReviewDAO().latest_review(),
+        "reviews": NewsReviewDAO().list_reviews(limit=20),
+        "events": NewsEventDAO().recent(limit=30),
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
 
 @app.get("/journal", response_class=HTMLResponse)

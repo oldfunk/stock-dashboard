@@ -133,11 +133,14 @@
     <div class="journal-header">
         <a href="/">&larr; 返回看板</a>
         <a href="/outcomes" style="margin-left:14px">信号验证</a>
+        <a href="/news" style="margin-left:14px">新闻检阅</a>
         {% if journal %}
         <h1 class="journal-title">{{ journal.title }}</h1>
         <div class="journal-date">{{ journal.journal_date }}
             {% set jsum = journal.actions_summary | from_json %}
             {% if jsum and jsum.model %}&nbsp;&middot;&nbsp;<span class="journal-model">模型: {{ jsum.model }}</span>{% endif %}
+            {% if journal.note_type == 'close_review' %}&nbsp;&middot;&nbsp;<span class="journal-model">AI 自主 · 收盘检阅</span>{% endif %}
+            {% if journal.status == 'annotated' %}&nbsp;&middot;&nbsp;<span class="journal-model">已人工批注</span>{% endif %}
         </div>
         {% endif %}
     </div>
@@ -163,6 +166,20 @@
         <div class="journal-body">
             {{ journal.content_md | markdown_to_html | safe }}
         </div>
+
+        {% set anns = journal.annotations | from_json %}
+        {% if anns %}
+        <div class="journal-body" style="margin-top:20px;padding:12px 16px;background:var(--bg-tertiary);border-radius:var(--radius);">
+            <h3 style="font-size:14px;margin-bottom:8px;">人工批注</h3>
+            <ul style="margin:0 0 0 18px;">
+            {% for a in anns %}
+                <li style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">
+                    {{ a.note }} <span style="color:var(--text-tertiary);">— {{ a.author }} {{ a.at }}</span>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
         
         <!-- 矛盾检测面板 -->
         <div class="conflict-panel" style="margin-top: 24px; padding: 20px; background: var(--bg-tertiary); border-radius: var(--radius);">

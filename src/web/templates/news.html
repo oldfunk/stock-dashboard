@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>新闻检阅 - {{ page_title }}</title>
+<style>
+:root {
+    --bg-primary:#fff; --bg-secondary:#f7f8fa; --bg-tertiary:#eef0f3;
+    --text-primary:#1a1a1a; --text-secondary:#5f6368; --text-tertiary:#9aa0a6;
+    --divider:#e0e3e7; --divider-thin:#e8eaed; --accent:#1a73e8;
+    --red:#d93025; --green:#188038; --yellow:#b8860b; --radius:8px;
+}
+[data-theme="dark"] {
+    --bg-primary:#1e1e1e; --bg-secondary:#252526; --bg-tertiary:#2d2d30;
+    --text-primary:#e8eaed; --text-secondary:#b0b4b9; --text-tertiary:#7a7f85;
+    --divider:#3c4043; --divider-thin:#33363a; --accent:#8ab4f8;
+    --red:#f28b82; --green:#81c995; --yellow:#fdd663;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg-primary); color:var(--text-primary);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+.page { max-width:1180px; margin:0 auto; padding:20px; display:grid;
+        grid-template-columns:minmax(0,1fr) 240px; gap:20px; }
+.header { grid-column:1/-1; display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+          border-bottom:1px solid var(--divider); padding-bottom:12px; }
+.header h1 { font-size:20px; font-weight:600; margin:0; }
+.header a { color:var(--accent); text-decoration:none; font-size:13px; }
+.meta { font-size:12px; color:var(--text-tertiary); }
+.card { background:var(--bg-secondary); border:1px solid var(--divider);
+        border-radius:var(--radius); padding:16px 18px; margin-bottom:16px; }
+.card h2 { font-size:16px; font-weight:600; margin:0 0 10px; }
+.md h1 { font-size:18px; margin:16px 0 10px; }
+.md h2 { font-size:15px; margin:14px 0 8px; }
+.md p, .md li { font-size:13px; line-height:1.75; color:var(--text-secondary); }
+.md ul, .md ol { margin:8px 0 12px 22px; }
+.md strong { color:var(--text-primary); }
+.news-item { padding:10px 0; border-bottom:1px solid var(--divider-thin); }
+.news-item:last-child { border-bottom:none; }
+.news-item a { color:var(--text-primary); text-decoration:none; font-size:13px; }
+.news-item a:hover { color:var(--accent); }
+.news-line { font-size:12px; color:var(--text-tertiary); margin-top:3px; }
+.event { display:flex; gap:8px; align-items:flex-start; padding:8px 0;
+         border-bottom:1px solid var(--divider-thin); font-size:13px; }
+.event:last-child { border-bottom:none; }
+.badge { display:inline-block; padding:1px 6px; border-radius:4px; color:#fff;
+         font-size:11px; line-height:18px; flex:none; }
+.badge.P0 { background:var(--red); } .badge.P1 { background:var(--yellow); }
+.badge.P2 { background:var(--text-tertiary); }
+.side h3 { font-size:13px; color:var(--text-tertiary); margin:0 0 10px; font-weight:500; }
+.side-item { display:block; padding:8px 10px; border-radius:6px; text-decoration:none;
+             color:var(--text-secondary); font-size:12px; margin-bottom:4px; }
+.side-item:hover, .side-item.active { background:var(--bg-tertiary); color:var(--text-primary); }
+.empty { color:var(--text-tertiary); font-size:13px; }
+@media (max-width:900px) { .page { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <a href="/">&larr; 返回看板</a>
+        <a href="/journal">投资笔记</a>
+        <a href="/outcomes">信号验证</a>
+        <h1>新闻检阅</h1>
+        <span class="meta">更新 {{ now }} · 新闻不构成交易指令</span>
+    </div>
+
+    <main>
+        {% if review %}
+        {% set ra = review.actions_summary | from_json %}
+        <div class="card">
+            <h2>{{ review.title }}</h2>
+            <div class="meta" style="margin-bottom:10px;">
+                {{ review.journal_date }} · AI 自主生成
+                {% if ra %} · 新闻 {{ ra.item_count or 0 }} 条 · 持仓命中 {{ ra.holdings_hit or 0 }} · 事件 {{ ra.event_count or 0 }}{% endif %}
+                {% if review.status == 'annotated' %} · 已人工批注{% endif %}
+            </div>
+            <div class="md">{{ review.content_md | markdown_to_html | safe }}</div>
+        </div>
+        {% else %}
+        <div class="card"><h2>收盘检阅</h2><div class="empty">暂无检阅。每个交易日 15:45 自动生成；也可在 /news 页手动触发 API。</div></div>
+        {% endif %}
+
+        <div class="card">
+            <h2>重大事件（P0/P1，只提醒）</h2>
+            {% if events %}
+            {% for e in events %}
+            <div class="event">
+                <span class="badge {{ e.level }}">{{ e.level }}</span>
+                <div>
+                    <div>{{ e.title }}{% if e.code %} · {{ e.code }} {{ e.name or '' }}{% endif %}</div>
+                    <div class="news-line">{{ e.event_time }} · {{ e.event_type or '' }} · {{ e.source or '来源未知' }}
+                        {% if e.url %} · <a href="{{ e.url }}" target="_blank" rel="noopener">原文</a>{% endif %}
+                        {% if e.inference %} · 影响：{{ e.inference }}{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty">暂无 P0/P1 事件。</div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h2>最新新闻</h2>
+            {% if news_items %}
+            {% for n in news_items %}
+            <div class="news-item">
+                {% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>
+                {% else %}<span style="font-size:13px;">{{ n.title }}</span>{% endif %}
+                <div class="news-line">{{ n.published_at or n.fetched_at }} · {{ n.source or '来源未知' }}
+                    {% if n.code %} · {{ n.code }} {{ n.name or '' }}{% endif %}
+                    {% if n.severity %} · <span style="color:var(--red);">{{ n.severity }}</span>{% endif %}</div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty">暂无新闻。</div>
+            {% endif %}
+        </div>
+    </main>
+
+    <aside class="side">
+        <h3>历史检阅</h3>
+        {% if reviews %}
+        {% for r in reviews %}
+        <a class="side-item {{ 'active' if review and review.journal_date == r.journal_date else '' }}"
+           href="/journal/{{ r.journal_date }}">{{ r.journal_date }}<br>{{ r.title }}</a>
+        {% endfor %}
+        {% else %}
+        <div class="empty">暂无归档</div>
+        {% endif %}
+    </aside>
+</div>
+</body>
+</html>
