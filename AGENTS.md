@@ -4,6 +4,9 @@
 
 Local event-driven paper trading framework for A-share markets. Pure local operation, no third-party broker API required.
 
+**当前执行队列**：`docs/iteration-plan-20261124.md`；里程碑与进度真相源：`docs/ROADMAP.md`；
+交付证据：`docs/WORKER.md`；母库长线：`docs/TODO-p5-p7.md`；文档地图：`docs/README.md`。
+
 ## Hard Rules
 
 0. **立项约束优先（2026-10-27 对质后立，见 `docs/founding-mandate.md`）**：
@@ -42,12 +45,42 @@ python -m paper_trading.cli history --type fills --limit 20 --json
 
 # 除权除息人工调整（M1：只检测+审计，不自动改账本）
 python -m paper_trading.cli corporate apply --symbol 600519 --ex-date 2026-06-20 --cash-per-share 0.5 --share-ratio 0.3 --json
+# B4/B5：分红税估算 / 除权除息建议（只建议，不落账）
+python -m paper_trading.cli corporate tax --symbol 600519 --ex-date 2026-06-20 --cash-per-share 0.5 --json
+python -m paper_trading.cli corporate suggest --json
+
+# A3：多策略资金额度（只读）/ 默认策略对照（历史回测，不承诺收益）
+python -m paper_trading.cli strategy allocations --json
+python -m paper_trading.cli strategy compare --days 120 --json
+python -m paper_trading.cli strategy calibration --json
+python -m paper_trading.cli strategy research --grid ma_cross --days 250 --json
+
+# A5/B2：日/周报 + 逐日审计（只读）
+python -m paper_trading.cli report daily --date 2026-11-27 --json
+python -m paper_trading.cli audit day --date 2026-11-27 --json
+
+# v0.12 发布门禁（生产：全量+ops+daily-check+qfq；--skip-tests 可跳过 pytest）
+bash deploy/release-gate.sh
+
+# B1：账本备份/体检/演练（restore 默认 dry-run；--apply 才覆盖）
+python -m paper_trading.cli ledger backup --json
+python -m paper_trading.cli ledger inspect --json
+python -m paper_trading.cli ledger drill --work-dir /tmp/ledger-drill --json
+
+# M4：每日备份轮转 + 运维巡检（只读；red 退出 1）
+python -m paper_trading.cli ledger backup --out-dir backups --keep 20 --json
+python -m paper_trading.cli ledger backup-status --out-dir backups --json
+python -m paper_trading.cli ops check --json
+
+# B3：安全复核（只读）
+python -m paper_trading.cli security audit --json
 
 # 行情质量守卫（M2）：缺日/重复/异常涨跌幅/停牌停滞/无数据；有发现会落 op_log[data:quality]
 python -m paper_trading.cli data quality --json
 # 母库覆盖度/口径对照（P6）
 python -m paper_trading.cli data coverage --json
 python -m paper_trading.cli data compare --symbols 600036 --json
+python -m paper_trading.cli data qfq-check --json
 ```
 
 ### Cron Integration（生产机 NEC；路径已同步）

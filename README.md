@@ -1,7 +1,7 @@
 # Paper Trading Framework
 
 [![tests](https://github.com/oldfunk/paper-trading/actions/workflows/test.yml/badge.svg)](https://github.com/oldfunk/paper-trading/actions/workflows/test.yml)
-[![release](https://img.shields.io/github/v/release/oldfunk/paper-trading)](https://github.com/oldfunk/paper-trading/releases/tag/v0.1.0)
+[![release](https://img.shields.io/github/v/release/oldfunk/paper-trading)](https://github.com/oldfunk/paper-trading/releases)
 [![license](https://img.shields.io/github/license/oldfunk/paper-trading)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.13-blue)](requirements.txt)
 
@@ -28,6 +28,18 @@
 - **LLM 万能接入**：OpenAI 兼容接口 + 主流厂商预设 + 手填模型名，只咨询不交易
 - **盘中实时**：腾讯行情同源，面板现价盘中实时展示（NAV/结算永远收盘口径）
 - **只读集成**：[Stock Dashboard](https://github.com/oldfunk/stock-dashboard) 在同一台机器时，全市场候选池/代码表/基本面/论点自动可用，缺席静默回退
+- **面板 P2**：收益曲线（总资产/收益率/回撤）、今日分时、FIFO 已实现盈亏/胜率/费用、成交记录 + CSV 导出；**CSI300 基准已上线**（`/api/benchmark`，超额/相对回撤）；**行业分布已上线**（`/api/sectors`，未知桶/覆盖度）
+- **面板运维卡**：AI 成绩（BUY/HOLD/AVOID 样本/超额/命中率）、策略资金额度（权重/已用/剩余）、运维巡检（备份/心跳/raw_gate/熔断）；只读、纯 SVG、零前端依赖
+- **策略健康**：滚动 20 日超额、窗口回撤、换手、费用拖累，输出 healthy/watch/demote 建议（只读，不直接改交易）；已进入 AI 上下文（advisory），可选 `health_policy=enforce` 由用户显式拦新买
+- **AI 成绩校准**：`strategy calibration` 读母库 `analysis_outcome`（旧样本无 verdict 时按 signal+20日超额），输出 BUY/HOLD/AVOID 命中率与超额；样本足够才进 AI 上下文（advisory）
+- **默认通用策略**：`general` 方案为 **MA20/60 + 趋势/质量/风险** 中线手册（10–30 个交易日）；可用 `custom` 覆盖
+- **多策略资金分配**：`strategy.allocations`（权重由用户/AI 配置，无默认偏好；额度=weight×NAV）；计划/执行两处闸，卖出/持有不受限，超限 fail-closed
+- **审计与报告**：`agent replay` 可回放“健康度输入→选择→理由”；`report daily|weekly --out`（可选基准/行业归因）；`audit day` 串计划/决策/意图/成交/条件单；面板“报告”页可查日/周报与逐日审计
+- **参数研究**：`strategy research` 样本内→样本外→前向占位，输出候选/过拟合/拒绝，不自动写生产
+- **运维与安全**：`ledger backup/inspect/restore/migrate/drill`（恢复默认 dry-run）；`security audit` + `docs/security-review.md`
+- **公司行为建议**：`corporate tax`（分红税口径，缺持有时长不按 0 税）；`corporate suggest`（母库优先，akshare 可选；不自动改账）
+- **默认策略对照**：`strategy compare`（MA20/60 vs 旧 MA5/20，同窗口/费用/风控，样本内外分段；历史回测，不是收益承诺）
+- **接口探针**：`data contract` 只读检测母项目价值策略/行业/基准字段的**形状与新鲜度**，格式漂移显式报错（exit 3），不静默降级；运维页“母项目契约”卡同步展示
 
 ## 目录结构
 
@@ -296,6 +308,8 @@ python -m paper_trading.cli agent tick --json
 # 交易日历（同步“未来交易日”优先：只留最近 45 天 + 未来全部；失败回退周末+手填 holidays）
 python -m paper_trading.cli calendar sync --json
 python -m paper_trading.cli calendar status --json
+# 母项目接口探针（只读：价值策略/行业/基准的形状与新鲜度；形状漂移 exit 3）
+python -m paper_trading.cli data contract --json
 # 旧版 AI 定时队列（已停用，仅兼容查看/导出）
 python -m paper_trading.cli agent schedule list --json
 # 事件驱动复盘：只有异动/回撤才调 LLM，产出条件单（不直接下单）

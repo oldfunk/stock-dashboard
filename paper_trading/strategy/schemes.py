@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from paper_trading.strategy.general_playbook import GENERAL_RULES
+
 LOCAL_FILE = "strategy.local.yaml"
 
 MOTHER_ID = "mother"
@@ -37,6 +39,7 @@ class Scheme:
     sizing: dict = field(default_factory=dict)  # max_orders_per_run/max_order_value
     risk: dict = field(default_factory=dict)  # daily_loss_halt_pct
     exits_note: str = ""
+    rules: str = ""  # 方案级交易手册（general 用默认通用策略；custom 用 instruction）
     instruction: str = ""  # 仅 custom：用户自然语言交易指令
 
 
@@ -66,12 +69,14 @@ def builtin_schemes() -> dict[str, Scheme]:
     """通用默认方案（永远可用，开箱即用）。"""
     return {
         GENERAL_ID: Scheme(
-            name=GENERAL_ID, title="通用交易",
-            desc="Paper Trading 默认策略：MA5/20 趋势跟踪，配置池内决策",
+            name=GENERAL_ID, title="通用中线趋势",
+            desc="趋势 + 质量 + 风险的通用中线策略（10–30 个交易日），配置池内决策",
             available=True, source=GENERAL_ID, universe_source="config",
-            signal={"short_window": 5, "long_window": 20,
+            signal={"short_window": 20, "long_window": 60,
                     "buy_volume": 100, "sell_volume": 100},
-            exits_note="MA 死叉离场；论点卖出条件优先于技术信号",
+            exits_note="−7% 硬止损或跌破 MA20/结构低点；+15% 止损上移、+25% 回撤止盈；"
+                       "20 日无进展时间止损；论点卖出条件优先于技术信号",
+            rules=GENERAL_RULES,
         ),
     }
 
@@ -84,7 +89,7 @@ def mother_scheme() -> Scheme | None:
         name=MOTHER_ID, title="Stock Dashboard 价值",
         desc="Stock Dashboard 价值投资理念：选股范围、买卖区间与止损取自 Stock Dashboard 最新筛选与 AI 分析（signal/buy_zone/stop_loss），风控与撮合沿用通用规则",
         available=True, source=MOTHER_ID, universe_source="screening", universe_limit=15,
-        signal={"short_window": 5, "long_window": 20,
+        signal={"short_window": 20, "long_window": 60,
                 "buy_volume": 100, "sell_volume": 100},
         sizing={"max_orders_per_run": 2, "max_order_value": 15000.0},
         exits_note="母策略 stop_loss/take_profit 与论点卖出条件一票否决；无明确机会就持有不动；不参考 MA 信号",
@@ -107,7 +112,7 @@ def all_schemes(root: str | Path = ".") -> dict[str, Scheme]:
         name=CUSTOM_ID, title="自定义指令",
         desc="你用自然语言写交易策略，AI 照此执行（风控钳制不变）",
         available=True, source=CUSTOM_ID, universe_source="config",
-        signal={"short_window": 5, "long_window": 20,
+        signal={"short_window": 20, "long_window": 60,
                 "buy_volume": 100, "sell_volume": 100},
         exits_note="以你的指令为准；指令冲突处置：风控与合规优先",
         instruction=custom_instruction(root),

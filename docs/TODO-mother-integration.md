@@ -26,14 +26,14 @@
 
 - [x] `llm_context` 增加 `value_view` 富化字段（财务摘要/股息/筛选明细/追踪）
 - [x] `llm_context` 增加 `data_provenance`（每个接口的 source/asof/stale）
-- [ ] 结构压缩：长文本截断、只保留关键字段（不塞全文）
-- [ ] 更新 `TRADER_SYSTEM`：要求每条 action 给出 `basis`（引用的数据字段名）
+- [x] 结构压缩：长文本截断、只保留关键字段（不塞全文）——`agent/context.py` 预算感知（v0.7.0）
+- [x] 更新 `TRADER_SYSTEM`：要求每条 action 给出 `basis`（引用的数据字段名）——v0.7.0
 
 ## P2 — AI 决策 schema 细化（向后兼容）
 
 - [x] action 支持 `thesis / catalyst / risk_stop / confidence / expected_hold_days / position_size_reason`
 - [x] `basis` 字段名校验（fail-closed：前缀必须是上下文真实存在的数据域）
-- [ ] 显式止损条件优先（买入必给 `risk_stop` 或卖出条件）—— 待 opt-in 开关，避免打断现有输出
+- [x] 显式止损条件优先（买入必给 `risk_stop` 或卖出条件）——`agent.require_stop`（v0.7.1；v0.7.5 补齐 config 接线）
 - [x] 事件复盘复用同一富化上下文（`review_conditions` 走 `llm_context`，自动带富化+provenance）
 
 ## P3 — 上下文压缩技术
@@ -47,6 +47,14 @@
 
 - [x] `docs/mother-interface.md`：接口契约表、来源标注、降级规则、性能约束
 - [x] `docs/ROADMAP.md` / `AGENTS.md` 同步
+
+## P5 — 接口形状探针（2026-11-24）
+
+- [x] `paper_trading/integration/probes.py` + `data contract`：只读检测
+  `screening_result.ai_trade_strategy` / `stock_snapshot.sector` / `benchmark_daily`
+  的列、JSON 键、signal/confidence 取值与新鲜度；形状漂移 exit 3。
+- [x] `docs/mother-interface.md` §6：价值策略位置/格式 + 探针边界。
+- [x] 母项目 issue #10（基准/行业契约）/#11（v0.10.1 通知）已关闭。
 
 ## 性能约束（Pi 实机）
 

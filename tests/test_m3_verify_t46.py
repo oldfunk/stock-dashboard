@@ -201,8 +201,16 @@ def test_duplicate_fills_green_when_distinct(conn):
 
 
 # ---------- 影子留痕 / 审计 / 计划 / 条件单 ----------
-def test_parity_trace_warn_when_absent(conn):
+def test_parity_trace_warn_when_absent(conn, monkeypatch):
+    """启用影子对账时，缺 parity:diff 仍是 warn（保留原语义）。"""
+    monkeypatch.setattr(mv, "SHADOW_PARITY_ENABLED", True)
     assert mv.check_parity_trace(conn, TODAY)["status"] == "warn"
+
+
+def test_parity_trace_retired_by_default(conn):
+    """2026-11-24 退役：默认部署没有影子 cron，缺留痕应是 skip 而不是每日 warn。"""
+    out = mv.check_parity_trace(conn, TODAY)
+    assert out["status"] == "skip" and "退役" in out["detail"]
 
 
 def test_parity_trace_red_on_nonzero_delta(conn):

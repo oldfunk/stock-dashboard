@@ -29,7 +29,10 @@
 | `news` | `news_item` | `code, title` | `local:akshare`（财联社/同花顺快讯） | 母库个股 + 全局（`code=''`）；缺则本地 |
 | `screening_detail` | `screening_result` | `run_id, run_date` | `local:config`（手填池，无评分） | 含 `score_detail/reason/strategy_tags` |
 | `thesis` | `watchlist_thesis` | `code` | 无 → `unavailable` | 论点/卖出条件 |
-| `outcomes` | `analysis_outcome` | `stock_code` | 无 → `unavailable` | AI 结论追踪；覆盖度低时给 `note` |
+| `outcomes` | `analysis_outcome` | `stock_code` | 无 → `unavailable` | AI 结论追踪；verdict 为空时从 `stock_analysis_history.ai_analysis` JSON 原文回填；覆盖度低时给 `note` |
+| `outcome_samples` | `analysis_outcome` + `stock_analysis_history` | `analysis_id, benchmark_code, ret_20` | 无 → `unavailable` | 成绩校准全量样本：固定 `sh000300`、按 `analysis_id` 去重；旧样本无 verdict 时保留 signal+前向收益 |
+| `raw_close_map` | `kline_daily.close_raw` + `daily_close.close` | `code, trade_date` | 无 → `{}` | raw 管道的独立收盘参照；`kline_daily` 按标的滞后时用 `daily_close` 补洞（2026-11-28 实测 69,560 重叠行零差异） |
+| `sectors` | `stock_snapshot` | `code, sector, snapshot_date` | 无 → `unavailable` | 行业分布；NULL/缺行保持 None（按“未知”），不回退 |
 | `regime` | `market_index` | `index_code, date` | 无 → `unavailable` | 大盘指数状态 |
 
 此外，`paper_trading/integration/analysis.py` 仍读这些表（保留兼容）：
@@ -78,7 +81,7 @@ AI 上下文里的 `data_provenance` 汇总每个接口的 `source/asof/stale`�
   `close_qfq` 为 NULL 的老数据逐行降级 `close_adj`（后复权）→ 不复权，并通过
   `adj` 标注。`data compare` 输出的 `mother.adj` 反映当前口径（`qfq`/`hfq`/`raw`）。
 
-## 5.2 母库 Issue 台账与验收（#4–#8）
+## 5.2 母库 Issue 台账与验收（#4–#11）
 
 | 现象（v0.7.1 观测） | 母库 Issue | 验收（2026-10-27 母方交付） |
 |---|---|---|
@@ -87,11 +90,56 @@ AI 上下文里的 `data_provenance` 汇总每个接口的 `source/asof/stale`�
 | `trading_calendar` 空；`market_index` 停在 2026-07-03；`market_state_daily` 未落库 | #6 | ⚠️ 部分：`trading_calendar` 3949 行但**只有历史**（max=2026-10-26，无未来交易日），子项目仅在覆盖今天/未来时采用，否则回退 akshare（v0.7.4 防 fail-closed 停摆）；`market_index` 已更新至 2026-10-27 ✅。**请母方补未来交易日（≥3 个月）** |
 | `kline_daily` 仅 959/5527 只（如 000858 缺失） | #7 | ⏳ 覆盖仍 959 只（母方回填进行中）；子项目逐标的回退本地，不阻断 |
 | 最小数据契约汇总（qfq/基准/日历/主键/覆盖度） | #8 | ✅ P0/P1 项已交付；P2（覆盖度视图）随回填推进 |
+| `benchmark_daily` 只在周六刷新，`sh000300` 停在 11-13；`sector` 缺契约 | #10 | ✅ 2026-11-24 关闭：每交易日 15:30 后刷新；`sh000300`/`000001`/`399001`/`399006` 到 11-23，`sh000922` 11-20（stale）；sector 全表 5247/5527，NULL 不回退；探针 `data contract` 验收 |
+| 子项目 v0.10.1 vendor 通知（:8081 方案切换免口令 + intents 降级） | #11 | ✅ 2026-11-24 关闭：gate 母 1522 / vendor 996；:8081 三条验收通过 |
 
 验收方式：Pi 上 `PAPER_TRADING_MOTHER_DIR=/home/pi/stock-dashboard venv/bin/python -m pytest tests/test_mother_contract.py -q`
 （含 `close_qfq` 近 30 天非空、基准代码、日历有 `is_open=1` 行三项数据级校验）。
 
-## 6. 性能约束（Pi 实机）
+## 6. 价值策略接口（2026-11-24 实测）
+
+母项目的“价值投资策略”不是一张策略注册表（`strategy_version/deployment/attribution`
+当前都是 **0 行**），而是流水线写入 `screening_result` 的 **AI 交易建议 JSON**。
+子项目只读这一处，不反向写。
+
+| 位置 | 关键列 | 说明 |
+|---|---|---|
+| `screening_result` | `code, run_date, run_id, score, status, ai_failed` | 最新一轮筛选结果；`run_date` 是新鲜度锚点 |
+| 同上 | `ai_trade_strategy` | **JSON 字符串**（兼容 dict）：`signal`, `buy_zone`, `stop_loss` 必填；`confidence`, `target_price`, `take_profit` 可选 |
+| 同上 | `ai_analysis`, `ai_investment_strategy`, `reason`, `score_detail` | 分析正文 / 投资策略 / 七门原因 / 五维拆解 |
+| `stock_analysis_history` | `stock_code, analysis_date, ai_trade_strategy, model` | 同一策略的历史序列 |
+| `ai_watchlist` | `code, status, added_reason, monitor_condition` | 观察池（core/dropped） |
+| `watchlist_thesis` | `code, core_thesis, assumptions, red_lines, sell_conditions` | 论点与卖出条件 |
+| `analysis_outcome` | `signal, verdict, ret_20/60/120, excess_*` | AI 结论追踪（P5.5 用） |
+
+**取值约定**：`signal ∈ {BUY, HOLD, AVOID}`（大小写不敏感，子项目统一转大写）；
+`confidence ∈ {高, 中, 低}`（可空）；`buy_zone` 是文本区间（如 `10-12元`），由
+`mother_strategy.parse_price_zone` 解析，解析失败按“区间不可用”处理。
+
+### 6.1 探针（不是接口）
+
+母项目负责供数；子项目只做**只读探针**，检测“接口对歪”而不是等它伪装成缺数据：
+
+```bash
+python -m paper_trading.cli data contract --json
+```
+
+输出三组 `ok/available/asof/stale/errors/warnings/shape`：
+
+- `strategy`：`screening_result` 列、`run_date` 新鲜度、`ai_trade_strategy` JSON 形状、
+  signal/confidence 取值、`buy_zone/stop_loss` 缺失计数；
+- `sector`：`stock_snapshot(code, sector, snapshot_date)` 覆盖度与 NULL 数；
+- `benchmark`：`benchmark_daily` 五个契约键的最新日期与缺失键。
+
+形状错误（缺列 / 坏 JSON / 未知 signal / 缺指数键）→ 退出码 **3**，必须人工归因；
+新鲜度单独用 `stale` 表达，不混进形状 `ok`。
+
+**边界**：探针不建表、不写母库、不缓存长期结果；母库不可读时三组都返回
+`available=false`，不抛异常、不阻断交易链。
+面板运维页“母项目契约”卡调用同一探针（`/api/contract`，30 秒缓存）。
+
+
+## 7. 性能约束（Pi 实机）
 
 - 母库 363MB 且正在回填：子项目**不新增常驻进程、不触发回填、不 `SELECT *`**。
 - 查询按 `code` 精确命中索引；小表（<10 万行）允许 `IN (...)`。

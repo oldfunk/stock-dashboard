@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -537,24 +538,59 @@ def raw_close_map(codes: Iterable[str], days: int = 30,
     if conn is None:
         return out
     try:
-        if not _has(conn, "kline_daily", ("code", "trade_date", "close_raw")):
+        has_kline = _has(conn, "kline_daily", ("code", "trade_date", "close_raw"))
+        # daily_close：母库当日全市场收盘覆盖层（不复权 close/amount/volume）。
+        # 2026-11-28 实测：与 kline_daily.close_raw 在 69,560 个重叠行上零差异，
+        # 可作 close 的补充参照；kline_daily 按标的回填滞后时用它补洞。
+        has_daily = _has(conn, "daily_close", ("code", "trade_date", "close"))
+        if not has_kline and not has_daily:
             return out
         for code in dict.fromkeys(str(c).strip().zfill(6) for c in (codes or [])):
             def _fetch():
-                if since:
-                    rows = conn.execute(
-                        """SELECT trade_date, close_raw, volume, amount
-                           FROM kline_daily WHERE code = ? AND trade_date >= ?
-                           ORDER BY trade_date""", (code, str(since)[:10])).fetchall()
-                else:
-                    rows = conn.execute(
-                        """SELECT trade_date, close_raw, volume, amount
-                           FROM kline_daily WHERE code = ?
-                           ORDER BY trade_date DESC LIMIT ?""",
-                        (code, int(days))).fetchall()
-                return {str(dict(r)["trade_date"])[:10]: dict(r) for r in rows}
+                merged: dict = {}
+                if has_kline:
+                    if since:
+                        rows = conn.execute(
+                            """SELECT trade_date, close_raw, volume, amount
+                               FROM kline_daily WHERE code = ? AND trade_date >= ?
+                               ORDER BY trade_date""",
+                            (code, str(since)[:10])).fetchall()
+                    else:
+                        rows = conn.execute(
+                            """SELECT trade_date, close_raw, volume, amount
+                               FROM kline_daily WHERE code = ?
+                               ORDER BY trade_date DESC LIMIT ?""",
+                            (code, int(days))).fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        merged[str(d["trade_date"])[:10]] = {
+                            **d, "ref_source": "kline_daily"}
+                if has_daily:
+                    if since:
+                        rows = conn.execute(
+                            """SELECT trade_date, close, volume, amount
+                               FROM daily_close WHERE code = ? AND trade_date >= ?
+                               ORDER BY trade_date""",
+                            (code, str(since)[:10])).fetchall()
+                    else:
+                        rows = conn.execute(
+                            """SELECT trade_date, close, volume, amount
+                               FROM daily_close WHERE code = ?
+                               ORDER BY trade_date DESC LIMIT ?""",
+                            (code, int(days))).fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        day = str(d["trade_date"])[:10]
+                        if day in merged or d.get("close") is None:
+                            continue
+                        merged[day] = {"trade_date": day,
+                                       "close_raw": d["close"],
+                                       "volume": d.get("volume"),
+                                       "amount": d.get("amount"),
+                                       "ref_source": "daily_close"}
+                return dict(sorted(merged.items()))
             try:
-                key = f"rawclose:{_dbkey(conn)}:{code}:{days}:{since or '-'}"
+                key = f"rawclose2:{_dbkey(conn)}:{code}:{days}:{since or '-'}"
                 out[code] = _cached(key, ttl, _fetch)
             except Exception:               # noqa: BLE001 - 单只失败不影响其他
                 out[code] = {}
@@ -581,16 +617,28 @@ def raw_close_asof(codes: Iterable[str], mother: Optional[Path] = None,
     if conn is None:
         return out
     try:
-        if not _has(conn, "kline_daily", ("code", "trade_date", "close_raw")):
+        has_kline = _has(conn, "kline_daily", ("code", "trade_date", "close_raw"))
+        has_daily = _has(conn, "daily_close", ("code", "trade_date", "close"))
+        if not has_kline and not has_daily:
             return out
         for code in dict.fromkeys(str(c).strip().zfill(6) for c in (codes or [])):
             def _fetch():
-                r = conn.execute(
-                    """SELECT MAX(trade_date) FROM kline_daily
-                       WHERE code = ? AND close_raw IS NOT NULL""", (code,)).fetchone()
-                return _as_date(r[0]) if r and r[0] else ""
+                dates = []
+                if has_kline:
+                    r = conn.execute(
+                        """SELECT MAX(trade_date) FROM kline_daily
+                           WHERE code = ? AND close_raw IS NOT NULL""", (code,)).fetchone()
+                    if r and r[0]:
+                        dates.append(r[0])
+                if has_daily:
+                    r = conn.execute(
+                        """SELECT MAX(trade_date) FROM daily_close
+                           WHERE code = ? AND close IS NOT NULL""", (code,)).fetchone()
+                    if r and r[0]:
+                        dates.append(r[0])
+                return _as_date(max(dates)) if dates else ""
             try:
-                out[code] = _cached(f"rawasof:{_dbkey(conn)}:{code}", ttl, _fetch)
+                out[code] = _cached(f"rawasof2:{_dbkey(conn)}:{code}", ttl, _fetch)
             except Exception:               # noqa: BLE001
                 out[code] = ""
     finally:
@@ -688,6 +736,50 @@ def dividend(codes: Iterable[str], mother: Optional[Path] = None,
             conn.close()
         except Exception:                   # noqa: BLE001
             pass
+
+
+def sectors(codes: Iterable[str], mother: Optional[Path] = None,
+            ttl: float = TTL_FUNDAMENTAL) -> dict:
+    """母库行业字段：`stock_snapshot(code, sector, snapshot_date)`（只读）。
+
+    返回单个 block：`data={code: sector|None}`，`asof` 取这些 code 的最大
+    `snapshot_date`。缺失（无行或 NULL）保持 `None`，由调用方按“未知”展示——
+    **不回退上一个行业、不猜**。
+    """
+    codes = sorted({str(c).strip() for c in (codes or []) if str(c).strip()})
+    if not codes:
+        return unavailable("无代码")
+    conn = _conn(mother)
+    if conn is None or not _has(conn, "stock_snapshot",
+                                ("code", "sector", "snapshot_date")):
+        if conn is not None:
+            conn.close()
+        return unavailable("母库无 stock_snapshot(code,sector,snapshot_date) 或不可读")
+    try:
+        q = ",".join("?" * len(codes))
+
+        def _fetch():
+            return [dict(r) for r in conn.execute(
+                f"SELECT code, sector, snapshot_date FROM stock_snapshot"
+                f" WHERE code IN ({q})", codes).fetchall()]
+
+        try:
+            rows = _cached(f"sector:{_dbkey(conn)}:{','.join(codes)}", ttl, _fetch)
+        except Exception:                   # noqa: BLE001
+            rows = []
+    finally:
+        conn.close()
+    data: dict[str, Optional[str]] = {c: None for c in codes}
+    asof = ""
+    for r in rows:
+        c = str(r.get("code") or "")
+        if c in data:
+            data[c] = (str(r["sector"]) if r.get("sector") else None)
+        asof = max(asof, _as_date(r.get("snapshot_date")))
+    missing = sum(1 for v in data.values() if not v)
+    note = f"{missing} 只无行业记录（按未知展示）" if missing else ""
+    return block(data, mother_source("stock_snapshot"), asof=asof or None,
+                 note=note, max_age_days=3)
 
 
 def benchmark(codes: Iterable[str], days: int = 60,
@@ -870,6 +962,168 @@ def thesis(codes: Iterable[str], mother: Optional[Path] = None,
             pass
 
 
+def _history_outcome_fields(conn, ids: list[int]) -> tuple[dict, int]:
+    """从 `stock_analysis_history.ai_analysis` JSON 取回旧样本的 verdict/signal。
+
+    母库 2026-11 前 `analysis_outcome.verdict` 为空，但 `stock_analysis_history`
+    的 AI 原文 JSON 里有 `verdict` 与 `trade_strategy.signal`；这是**母库自己的
+    历史原文**，不是子项目推断。只读、按 id 精确取；解析不了就跳过。
+    """
+    if not ids or not _has(conn, "stock_analysis_history",
+                           ("id", "ai_analysis")):
+        return {}, 0
+    found: dict[int, dict] = {}
+    uniq = sorted({int(i) for i in ids if i is not None})
+    for start in range(0, len(uniq), 400):
+        chunk = uniq[start:start + 400]
+        q = ",".join("?" * len(chunk))
+        try:
+            rows = conn.execute(
+                f"""SELECT id, ai_analysis, ai_trade_strategy
+                    FROM stock_analysis_history WHERE id IN ({q})""",
+                chunk).fetchall()
+        except sqlite3.Error:
+            continue
+        for r in rows:
+            d = dict(r)
+            try:
+                raw = d.get("ai_analysis")
+                data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            except (TypeError, ValueError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            verdict = str(data.get("verdict") or "").strip()
+            trade = data.get("trade_strategy")
+            if not isinstance(trade, dict):
+                trade = {}
+            signal = str(trade.get("signal") or "").strip().upper()
+            if not signal:
+                try:
+                    ts = d.get("ai_trade_strategy")
+                    td = json.loads(ts) if isinstance(ts, str) else (ts or {})
+                    if isinstance(td, dict):
+                        signal = str(td.get("signal") or "").strip().upper()
+                except (TypeError, ValueError):
+                    signal = ""
+            if verdict or signal:
+                found[int(d["id"])] = {"verdict": verdict, "signal": signal}
+    return found, len(found)
+
+
+def _fill_outcome_rows(conn, rows: list[dict]) -> int:
+    """给 verdict/signal 为空的 outcome 行补历史原文；返回补到的行数。"""
+    need = [r for r in rows
+            if (not str(r.get("verdict") or "").strip()
+                or not str(r.get("signal") or "").strip())
+            and r.get("analysis_id") is not None]
+    if not need:
+        return 0
+    found, _ = _history_outcome_fields(
+        conn, [r.get("analysis_id") for r in need])
+    n = 0
+    for r in need:
+        f = found.get(int(r["analysis_id"])) if r.get("analysis_id") is not None else None
+        if not f:
+            continue
+        changed = False
+        if not str(r.get("verdict") or "").strip() and f.get("verdict"):
+            r["verdict"] = f["verdict"]
+            changed = True
+        if not str(r.get("signal") or "").strip() and f.get("signal"):
+            r["signal"] = f["signal"]
+            changed = True
+        if changed:
+            n += 1
+    return n
+
+
+def outcome_samples(*, benchmark: str = "sh000300",
+                    since: Optional[str] = None,
+                    mother: Optional[Path] = None,
+                    ttl: float = TTL_FUNDAMENTAL) -> dict:
+    """全量 AI 结论样本（成绩校准用）：按 analysis_id 去重 + 历史 verdict 回填。
+
+    与 `outcomes()` 的区别：这里要**统计样本**，不是单票上下文；因此：
+    - 固定一个基准（默认 sh000300），避免同一 analysis 的两条 benchmark 行双计；
+    - 同一 analysis_id 只留一条；
+    - `verdict` 为空时从 `stock_analysis_history.ai_analysis` 的 JSON 原文回填；
+    - 返回 `recovered` / `duplicates`，让调用方知道样本是怎么来的。
+    """
+    conn = _conn(mother)
+    if conn is None or not _has(conn, "analysis_outcome", ("stock_code",)):
+        if conn is not None:
+            conn.close()
+        return unavailable("母库无 analysis_outcome 或不可读")
+    try:
+        cols = _has(conn, "analysis_outcome", ("benchmark_code",))
+
+        def _fetch():
+            base = """SELECT analysis_id, stock_code, stock_name, analysis_date,
+                             signal, confidence, verdict, entry_price,
+                             ret_20, ret_60, ret_120, excess_20, excess_60,
+                             excess_120"""
+            if cols:
+                base += ", benchmark_code FROM analysis_outcome WHERE 1=1"
+                args: list = []
+                if benchmark:
+                    base += " AND benchmark_code = ?"
+                    args.append(str(benchmark))
+                if since:
+                    base += " AND analysis_date >= ?"
+                    args.append(str(since)[:10])
+            else:
+                base += " FROM analysis_outcome WHERE 1=1"
+                args = []
+                if since:
+                    base += " AND analysis_date >= ?"
+                    args.append(str(since)[:10])
+            base += " ORDER BY analysis_date DESC, stock_code"
+            raw = [dict(r) for r in conn.execute(base, args).fetchall()]
+            # 同一 analysis 只留一条（benchmark 过滤后通常已唯一；没有
+            # benchmark_code 的旧库则按 analysis_id 去重）
+            seen = set()
+            rows = []
+            for r in raw:
+                key = r.get("analysis_id")
+                if key is None:
+                    key = (r.get("stock_code"), r.get("analysis_date"),
+                           r.get("signal"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(r)
+            recovered = _fill_outcome_rows(conn, rows)
+            judged = [r for r in rows if str(r.get("verdict") or "").strip()]
+            return {"rows": rows, "raw_count": len(raw),
+                    "unique_count": len(rows),
+                    "recovered": recovered,
+                    "verdict_count": len(judged)}
+        try:
+            data = _cached(f"outcomesamples:{_dbkey(conn)}:{benchmark}:{since or '-'}",
+                           ttl, _fetch)
+        except Exception:                   # noqa: BLE001
+            data = {"rows": [], "raw_count": 0, "unique_count": 0,
+                    "recovered": 0, "verdict_count": 0}
+        if not data.get("rows"):
+            return unavailable("母库 analysis_outcome 为空")
+        asof = max((_as_date(r.get("analysis_date"))
+                    for r in data["rows"] if r.get("analysis_date")),
+                   default=None)
+        note = (f"{data['verdict_count']}/{data['unique_count']} 条有 verdict"
+                + (f"；从 stock_analysis_history 回填 {data['recovered']} 条"
+                   if data.get("recovered") else "")
+                + (f"；去重 {data['raw_count'] - data['unique_count']} 条"
+                   if data["raw_count"] != data["unique_count"] else ""))
+        return block(data, mother_source("analysis_outcome"),
+                     asof=asof, note=note, max_age_days=400)
+    finally:
+        try:
+            conn.close()
+        except Exception:                   # noqa: BLE001
+            pass
+
+
 def outcomes(codes: Iterable[str], mother: Optional[Path] = None,
              ttl: float = TTL_FUNDAMENTAL) -> dict:
     """母库 AI 结论追踪（analysis_outcome）。覆盖度低时明确提示，不阻断。"""
@@ -885,14 +1139,16 @@ def outcomes(codes: Iterable[str], mother: Optional[Path] = None,
         q = ",".join("?" * len(codes))
 
         def _fetch():
-            return [dict(r) for r in conn.execute(
-                f"""SELECT stock_code, analysis_date, signal, confidence, verdict,
-                           entry_price, ret_20, ret_60, excess_20, excess_60
+            rows = [dict(r) for r in conn.execute(
+                f"""SELECT analysis_id, stock_code, analysis_date, signal, confidence,
+                           verdict, entry_price, ret_20, ret_60, excess_20, excess_60
                     FROM analysis_outcome WHERE stock_code IN ({q})
                     ORDER BY analysis_date DESC""", codes).fetchall()]
+            _fill_outcome_rows(conn, rows)
+            return rows
 
         try:
-            rows = _cached(f"outcome:{_dbkey(conn)}:{','.join(codes)}", ttl, _fetch)
+            rows = _cached(f"outcome2:{_dbkey(conn)}:{','.join(codes)}", ttl, _fetch)
         except Exception:                   # noqa: BLE001
             rows = []
         grouped: dict = {}

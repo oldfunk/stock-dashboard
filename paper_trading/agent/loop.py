@@ -102,6 +102,17 @@ class AgentConfig:
     news_enabled: bool = True
     news_limit: int = 12        # 进 prompt 的条数上限（政策类排前）
     news_timeout_sec: float = 15.0  # 抓取硬超时：连不上的源按超时回空，不挂死
+    #: 策略健康策略：off=不注入；advisory=只注入建议（默认）；enforce=demote 时
+    #: 拒绝新买入（卖出/持有不受影响）。enforce 是**用户显式策略**，不是默认。
+    health_policy: str = "advisory"
+
+    def __post_init__(self):
+        hp = str(self.health_policy or "advisory").strip().lower()
+        if hp not in ("off", "advisory", "enforce"):
+            raise ValueError(
+                f"agent.health_policy 非法：{self.health_policy!r}"
+                "（可选 off/advisory/enforce）")
+        self.health_policy = hp
 
 
 #: basis 允许引用的上下文顶层字段（前缀校验，防止 AI 编造数据字段）
@@ -109,7 +120,8 @@ _BASIS_PREFIXES = frozenset({
     "account", "positions", "recent_closes", "recent_nav", "recent_ops",
     "value_view", "stock_cards", "financial_summary", "dividend", "outcomes",
     "thesis", "fundamentals", "screening", "market_regime", "data_provenance",
-    "news", "intraday", "portfolio",
+    "news", "intraday", "portfolio", "strategy_health", "strategy_allocations",
+    "ai_scorecard",
 })
 
 
@@ -256,15 +268,122 @@ class AgentTrader:
         s = self.bridge.scheme
         txt = SCHEME_TMPL.format(title=s.title or s.name, name=s.name,
                                  desc=s.desc or "（无说明）",
+                                 rules=s.rules or "（无额外规则，按通用风控与离场纪律执行）",
                                  exits=s.exits_note or "MA 死叉离场")
         if s.name == "custom" and (s.instruction or "").strip():
             txt += ("\n用户自定义交易指令（最高优先级，风控与合规除外）：\n"
                     + s.instruction.strip()[:2000])
         return txt
 
+    def _health_snapshot(self) -> dict | None:
+        """决策时的健康度原样快照（回放用；失败返回 unavailable，不阻断）。"""
+        try:
+            from paper_trading.strategy.health import health_payload
+
+            h = health_payload(self.bridge.account_db_path)
+        except Exception as exc:                # noqa: BLE001
+            return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return {"available": bool(h.get("available")), "health": h.get("health"),
+                "recommendation": h.get("recommendation"),
+                "reasons": h.get("reasons") or [],
+                "window": h.get("window"),
+                "metrics": h.get("metrics") or {},
+                "stale": h.get("stale"),
+                **({"reason": h.get("reason")} if h.get("reason") else {})}
+
+    def _alloc_snapshot(self, nav_total: float) -> dict:
+        from paper_trading.strategy.allocation import allocations_payload
+
+        try:
+            return allocations_payload(self._alloc_weights(),
+                                       getattr(self.bridge, "alloc_book", None),
+                                       nav_total)
+        except Exception as exc:                # noqa: BLE001
+            return {"enabled": bool(self._alloc_weights()), "available": False,
+                    "reason": f"{type(exc).__name__}: {exc}"}
+
     def _is_mother(self) -> bool:
         """当前方案是否母项目价值策略（决定参考信号与买入闸门）。"""
         return str(getattr(self.bridge.scheme, "source", "")) == "mother"
+
+    def _health_block(self) -> dict | None:
+        """enforce 且健康 demote 时返回 payload；其他情况 None。
+
+        `enforce` 是用户显式策略；健康不可用时**fail-open**（健康度是参考数据，
+        不是安全门禁，不能因为基准源缺失就冻结买入），但上下文会显示 unavailable。
+        """
+        if str(getattr(self.cfg, "health_policy", "advisory")) != "enforce":
+            return None
+        try:
+            from paper_trading.strategy.health import health_payload
+
+            h = health_payload(self.bridge.account_db_path)
+        except Exception:                   # noqa: BLE001 - 参考数据，不阻断交易
+            return None
+        return h if (h.get("available") and h.get("health") == "demote") else None
+
+    def _apply_health_policy(self, ctx: dict) -> dict:
+        """off=移除健康块；enforce=在上下文里标明本轮新买入会被拒。"""
+        hp = str(getattr(self.cfg, "health_policy", "advisory"))
+        if hp == "off":
+            ctx.pop("strategy_health", None)
+        elif hp == "enforce":
+            sh = ctx.get("strategy_health") or {}
+            if sh.get("health") == "demote":
+                sh["enforce"] = True
+                sh["note"] = ("enforce：本轮新买入将被拒绝（仅观察），"
+                              "卖出/持有不受影响")
+        return ctx
+
+    def _alloc_weights(self) -> dict:
+        """当前分配权重（空=未启用；桥接对象可能来自旧测试桩）。"""
+        return dict(getattr(self.bridge, "allocations", {}) or {})
+
+    def _alloc_guard(self, strategy: str, order_value: float, nav_total: float,
+                     run_spent: dict) -> tuple[bool, str]:
+        """统一买入额度入口：未配置分配=放行（旧行为）。"""
+        from paper_trading.strategy.allocation import check_buy
+
+        weights = self._alloc_weights()
+        if not weights:
+            return True, ""
+        return check_buy(weights, self.bridge.alloc_book, strategy=strategy,
+                         order_value=order_value, nav_total=nav_total,
+                         run_spent=run_spent)
+
+    def _filter_alloc_actions(self, actions: list, nav_total: float) -> tuple[list, list]:
+        """计划阶段按额度裁剪新买入（卖出/持有原样保留）。
+
+        顺序按模型原序；同轮多笔买入共享 `spent`，避免"每笔单独都不超、
+        合起来超"的漏洞。被裁条目进 `actions_rejected`，不静默丢弃。
+        """
+        weights = self._alloc_weights()
+        if not weights:
+            return list(actions), []
+        keep: list = []
+        rejected: list = []
+        spent: dict[str, float] = {}
+        for a in actions:
+            if not (isinstance(a, dict)
+                    and str(a.get("action", "")).lower() == "buy"):
+                keep.append(a)
+                continue
+            sym = str(a.get("symbol", ""))
+            try:
+                vol = int(a.get("volume") or 0)
+                px = float(a.get("price") or 0.0)
+            except (TypeError, ValueError):
+                keep.append(a)          # 交给执行层按既有规则拒（保持单一职责）
+                continue
+            value = vol * px
+            name = str(a.get("strategy") or "").strip()
+            ok, why = self._alloc_guard(name, value, nav_total, spent)
+            if not ok:
+                rejected.append({**a, "reject_reason": f"资金分配：{why}"})
+                continue
+            spent[name] = spent.get(name, 0.0) + value
+            keep.append(a)
+        return keep, rejected
 
     def _mother_refs(self) -> tuple[dict[str, dict], Optional[str]]:
         """母筛选最新一轮的策略引用 -> ({code: refs}, asof)。"""
@@ -371,6 +490,7 @@ class AgentTrader:
         try:
             cfg = b._llm_config()
             ctx = b.llm_context(max_ops=3, max_nav=2, closes_n=3)
+            ctx = self._apply_health_policy(ctx)
             hold = ["无（空仓）"] if not ctx.get("positions") else [
                 f"{p['stock']} {p['total']}股@{p['avg_cost']}" for p in ctx["positions"]]
             cand_lines = "\n".join(
@@ -496,11 +616,17 @@ class AgentTrader:
             filtered: list[dict] = []
             skipped: list[dict] = []
             arm_rejected: list[dict] = []
+            _health_block = self._health_block()
             for c in conditions:
                 if not isinstance(c, dict):
                     continue
                 sym = str(c.get("symbol") or "")
                 side = str(c.get("side") or "")
+                if side == "buy" and _health_block:
+                    arm_rejected.append(
+                        {"id": 0, "symbol": sym,
+                         "why": "策略健康降级（health_policy=enforce，不挂买入条件）"})
+                    continue
                 if side == "sell" and sym not in held_now:
                     arm_rejected.append(
                         {"id": 0, "symbol": sym,
@@ -553,6 +679,7 @@ class AgentTrader:
         except Exception:                      # noqa: BLE001 - 无实时价时仍可用收盘上下文
             quotes = {}
         ctx = b.llm_context(max_ops=3, max_nav=2, closes_n=3, symbols=pool)
+        ctx = self._apply_health_policy(ctx)
         min_ticket = self._engine_min_ticket()
         max_value = float(self.cfg.max_order_value)
         sys_p, user_p = build_prompt(
@@ -728,6 +855,7 @@ class AgentTrader:
 
         ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
+        ctx = self._apply_health_policy(ctx)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
             max_orders=self.cfg.max_orders_per_run,
@@ -806,11 +934,34 @@ class AgentTrader:
                     f"{a.get('symbol')}（{str(a.get('reject_reason'))[:20]}）"
                     for a in actions_rejected[:3])
                 summary = (summary + "；未执行：" + _rej)[:200]
+        # 用户显式 health_policy=enforce：计划阶段就不把新买入写进去（卖出/持有保留）
+        if self._health_block():
+            _keep, _rej = [], []
+            for a in actions:
+                if isinstance(a, dict) and str(a.get("action", "")).lower() == "buy":
+                    _rej.append({**a, "reject_reason":
+                                 "策略健康降级（health_policy=enforce）"})
+                else:
+                    _keep.append(a)
+            actions = _keep
+            if _rej:
+                actions_rejected.extend(_rej)
+                summary = (summary + "；健康降级未执行买入："
+                           + "、".join(str(a.get("symbol")) for a in _rej[:3]))[:200]
+        # 多策略资金分配：计划阶段按额度裁新买入（空配置=零行为变化）
+        actions, _alloc_rej = self._filter_alloc_actions(
+            actions, float(b.get_status().get("total_value") or 0.0))
+        if _alloc_rej:
+            actions_rejected.extend(_alloc_rej)
+            summary = (summary + "；额度不足未执行买入："
+                       + "、".join(str(a.get("symbol")) for a in _alloc_rej[:3]))[:200]
         # 计划是给"下一个交易日开盘"用的；plan_date 已在问模型前算好。
         pid = b.broker.save_plan(plan_date, symbols,
                                  {"actions": actions, "summary": summary,
                                   "actions_rejected": actions_rejected, "asof": asof,
                                   "freshness": fresh,
+                                  "strategy_health": ctx.get("strategy_health"),
+                                  "strategy_allocations": ctx.get("strategy_allocations"),
                                   "conditions": conditions,
                                   "conditions_rejected": conditions_rejected,
                                   "pool_source": pool_source,
@@ -1033,6 +1184,7 @@ class AgentTrader:
         # 5. 参考信号 + 上下文，问 LLM
         ref_txt = self._ref_text(all_bars, symbols)
         ctx = b.llm_context(max_ops=10, max_nav=3, closes_n=10, symbols=symbols)
+        ctx = self._apply_health_policy(ctx)
         prompt = USER_TMPL.format(
             pool="、".join(symbols),
             max_orders=self.cfg.max_orders_per_run,
@@ -1245,6 +1397,11 @@ class AgentTrader:
                 key=lambda a: _rank.get(str(a.get("action", "")).lower(), 2)
                 if isinstance(a, dict) else 3)
         n_cap = self.cfg.max_orders_per_run + 5
+        _health_block = self._health_block()
+        _alloc_weights = self._alloc_weights()
+        _run_spent: dict[str, float] = {}
+        _health_snap = self._health_snapshot()
+        _alloc_snap = self._alloc_snapshot(nav_total)
         for idx, a in enumerate(all_actions):
             if idx >= n_cap:
                 # H-2（2026-10-27 同事审查）：超出处理上限的条目也必须进审计，
@@ -1273,9 +1430,15 @@ class AgentTrader:
                 "confidence": _as_float(a.get("confidence")),
                 "expected_hold_days": _as_int(a.get("expected_hold_days")),
                 "position_size_reason": str(a.get("position_size_reason") or "")[:120],
+                "strategy": str(a.get("strategy") or "").strip()[:40],
             })
             if act == "hold" or not sym:
                 rec["status"] = "持有不动" if act == "hold" else "拒绝：无代码"
+                decided.append(rec)
+                continue
+            if act == "buy" and _health_block:
+                rec["status"] = ("拒绝：策略健康降级（health_policy=enforce，"
+                                 "仅观察，不新增买入）")
                 decided.append(rec)
                 continue
             try:
@@ -1315,6 +1478,11 @@ class AgentTrader:
                     _ref = 0.0
             _dev = (abs(px / _ref - 1.0)
                     if _ref > 0 and px > 0 and math.isfinite(px) else 0.0)
+            _alloc_ok, _alloc_why = True, ""
+            if act == "buy" and _alloc_weights:
+                _alloc_ok, _alloc_why = self._alloc_guard(
+                    rec["strategy"], float(vol) * float(px),
+                    nav_total, _run_spent)
             if act not in ("buy", "sell"):
                 rec["status"] = "拒绝：未知动作"
             elif basis_err:
@@ -1339,6 +1507,8 @@ class AgentTrader:
                 rec["status"] = "拒绝：数量须为100倍数"
             elif not math.isfinite(px) or px <= 0:
                 rec["status"] = "拒绝：无有效价格"
+            elif act == "buy" and not _alloc_ok:
+                rec["status"] = f"拒绝：资金分配：{_alloc_why}"
             elif not (_ref > 0 and math.isfinite(_ref)):
                 # H-1（2026-10-27 同事审查）fail-closed：px>0 但独立基准价缺失
                 # （bars/计划价都没有）时尺度门禁会静默失效——事故教训正是
@@ -1364,6 +1534,9 @@ class AgentTrader:
                 elif dry_run:
                     rec["status"] = "试运行通过（未下单）"
                     n_orders += 1
+                    if act == "buy" and _alloc_weights:
+                        _run_spent[rec["strategy"]] = (
+                            _run_spent.get(rec["strategy"], 0.0) + vol * px)
                 else:
                     bars = all_bars.get(sym, [])
                     prev = bars[-2].close if len(bars) >= 2 else None
@@ -1386,6 +1559,10 @@ class AgentTrader:
                         rec["status"] = f"已入意图队列（新线执行）：{biz}"
                         rec["queued_rq"] = True
                         n_orders += 1
+                        if act == "buy" and _alloc_weights:
+                            # 入队即占额度（以入队为口径；队列拒单不自动回冲，
+                            # 宁可少买不可超配，CLI 会显示 used）
+                            b.alloc_book.record_buy(rec["strategy"], sym, vol * px)
                     elif ex != "legacy":
                         # 底座读不出来/值非法 ⇒ 两侧都可能是活的，一条都不许下（纪律 3）
                         rec["status"] = f"拒绝：执行底座无法判定（{ex}），不许蒙眼下单"
@@ -1396,6 +1573,16 @@ class AgentTrader:
                                          else f"撮合拒绝：{res.status.value}")
                         rec["filled_price"] = res.filled_price
                         n_orders += 1
+                        if res.status.value == "filled" and _alloc_weights:
+                            try:
+                                _fill_val = float(res.filled_price) * vol
+                            except (TypeError, ValueError):
+                                _fill_val = vol * px
+                            if act == "buy":
+                                b.alloc_book.record_buy(rec["strategy"], sym,
+                                                        _fill_val)
+                            else:
+                                b.alloc_book.record_sell(sym, _fill_val)
                     # 刷新资金/持仓快照，供下一单校验
                     cash = b.broker.get_cash()
                     positions = {p.symbol: p for p in b.broker.get_all_positions()}
@@ -1421,6 +1608,8 @@ class AgentTrader:
                           **({"freshness": freshness} if freshness else {}),
                           **({"slot": slot} if slot else {})}, True,
             {"decisions": decided, "picks": picks or [], "conditions": cond_res,
+             "strategy_health": _health_snap,
+             "strategy_allocations": _alloc_snap,
              **({"freshness": freshness} if freshness else {})},
             nav2.cash, nav2.total_value)
         # 决策落库（供回放/审计）；失败不阻断决策链
@@ -1429,7 +1618,9 @@ class AgentTrader:
                 decision_date=now[:10], plan_id=plan_id, mode=mode,
                 from_plan=from_plan, pool_source=pool_source, summary=summary,
                 actions=decided, conditions=cond_res,
-                result={"decisions": decided, "conditions": cond_res})
+                result={"decisions": decided, "conditions": cond_res,
+                        "strategy_health": _health_snap,
+                        "strategy_allocations": _alloc_snap})
         except Exception:                       # noqa: BLE001
             logger.warning("save agent_decision failed")
         logger.info(f"AI decide done: {len(decided)} actions, mode={mode}, from_plan={from_plan}")

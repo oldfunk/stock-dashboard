@@ -120,6 +120,7 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
 .cov{font-size:11px;color:var(--text-tertiary);margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
 .cov .badge{border:1px solid var(--divider);border-radius:3px;padding:0 5px}
 .cov.warn .badge{border-color:#e8b4b1;color:var(--red)}
+.cov .badge.b{border-color:var(--divider);color:var(--text-tertiary)}
 .today-grid{display:flex;flex-direction:column}
 .today-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--divider-thin);font-size:13px}
 .today-row:last-child{border-bottom:none}
@@ -181,6 +182,7 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
   <button data-tab="overview" class="on" role="tab">总览</button>
   <button data-tab="trading" role="tab">交易</button>
   <button data-tab="ops" role="tab">运维</button>
+  <button data-tab="report" role="tab">报告</button>
   <button data-tab="control" role="tab">控制台</button>
 </nav>
 
@@ -232,9 +234,24 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
   <div class="scroll"><table id="pos"></table></div>
 </section>
 
+<section data-tab="overview">
+  <div class="section-header"><h2 class="section-title">行业分布</h2><span class="section-count" id="c-sectors"></span></div>
+  <div class="card">
+    <div class="chart-wrap" id="sectorwrap" style="height:240px">
+      <svg id="sectorchart" role="img" aria-label="持仓行业分布"></svg>
+    </div>
+    <div class="s" id="sector-note"></div>
+  </div>
+</section>
+
 <section data-tab="trading">
   <div class="section-header"><h2 class="section-title">订单记录</h2><span class="section-count" id="c-orders"></span><a class="csv-btn" href="/api/export.csv?type=orders">CSV</a></div>
   <div class="scroll"><table id="orders"></table></div>
+</section>
+
+<section data-tab="trading">
+  <div class="section-header"><h2 class="section-title">成交记录</h2><span class="section-count" id="c-fills"></span><a class="csv-btn" href="/api/export.csv?type=fills">CSV</a></div>
+  <div class="scroll"><table id="fills"></table></div>
 </section>
 
 <section data-tab="trading">
@@ -277,6 +294,14 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
 </section>
 
 <section data-tab="ops">
+  <div class="section-header"><h2 class="section-title">运维巡检</h2><span class="section-count" id="c-opsc"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="ops-sum">运维巡检：加载中…</div>
+    <div class="scroll"><table id="opschecks"></table></div>
+  </div>
+</section>
+
+<section data-tab="ops">
   <div class="section-header"><h2 class="section-title">今日体检</h2><span class="section-count" id="c-checks"></span></div>
   <div class="card"><div id="checksbox" class="s">加载中…</div></div>
 </section>
@@ -287,10 +312,44 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
 </section>
 
 <section data-tab="ops">
+  <div class="section-header"><h2 class="section-title">策略健康</h2><span class="section-count" id="c-shealth"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="shealth-sum">策略健康：加载中…</div>
+    <div class="scroll"><table id="shealth"></table></div>
+  </div>
+</section>
+
+<section data-tab="ops">
+  <div class="section-header"><h2 class="section-title">AI 成绩</h2><span class="section-count" id="c-score"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="score-sum">AI 成绩：加载中…</div>
+    <div class="scroll"><table id="scorecard"></table></div>
+    <div class="s mut" id="score-note"></div>
+  </div>
+</section>
+
+<section data-tab="ops">
+  <div class="section-header"><h2 class="section-title">策略资金额度</h2><span class="section-count" id="c-alloc"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="alloc-sum">资金额度：加载中…</div>
+    <div class="scroll"><table id="alloc"></table></div>
+    <div class="s mut" id="alloc-note"></div>
+  </div>
+</section>
+
+<section data-tab="ops">
   <div class="section-header"><h2 class="section-title">数据来源</h2><span class="section-count" id="c-prov"></span></div>
   <div class="ai-panel">
     <div class="s" id="prov-sum">数据来源：加载中…</div>
     <div class="scroll"><table id="prov"></table></div>
+  </div>
+</section>
+
+<section data-tab="ops">
+  <div class="section-header"><h2 class="section-title">母项目契约</h2><span class="section-count" id="c-contract"></span></div>
+  <div class="ai-panel">
+    <div class="s" id="contract-sum">契约探针：加载中…</div>
+    <div class="scroll"><table id="contract"></table></div>
   </div>
 </section>
 
@@ -357,6 +416,35 @@ tfoot .more-cell{padding:0;border-bottom:none;text-align:center}
 <section data-tab="ops">
   <div class="section-header"><h2 class="section-title">AI 操作流水</h2><span class="section-count" id="c-ops"></span></div>
   <div class="scroll"><table id="ops"></table></div>
+</section>
+
+<section data-tab="report">
+  <div class="section-header"><h2 class="section-title">日/周报</h2><span class="section-count" id="c-report"></span></div>
+  <div class="ai-panel">
+    <div class="ai-row">
+      <select id="rep-kind"><option value="daily">日报</option><option value="weekly">周报</option></select>
+      <input id="rep-date" type="date" style="width:150px">
+      <input id="rep-days" type="number" min="1" max="31" value="7" style="width:80px" title="周报自然日跨度">
+      <select id="rep-bench"><option value="sh000300">沪深300</option><option value="sh000922">中证红利</option></select>
+      <button id="btn-report" class="primary">生成</button>
+      <a class="csv-btn" id="rep-csv" href="#" onclick="return false" title="报告 JSON 导出用 CLI --out">JSON 说明</a>
+    </div>
+    <div class="s" id="report-sum">选日期后生成；只读，不写账本。</div>
+    <div class="scroll"><table id="report-trades"></table></div>
+    <div class="scroll"><table id="report-sector"></table></div>
+  </div>
+</section>
+
+<section data-tab="report">
+  <div class="section-header"><h2 class="section-title">逐日审计</h2><span class="section-count" id="c-audit"></span></div>
+  <div class="ai-panel">
+    <div class="ai-row">
+      <input id="audit-date" type="date" style="width:150px">
+      <button id="btn-audit" class="primary">查这一天</button>
+    </div>
+    <div class="s" id="audit-sum">选日期查“为什么买/没买/卖”；只读。</div>
+    <div class="scroll"><table id="audit-symbols"></table></div>
+  </div>
 </section>
 
 <section data-tab="control">
@@ -515,7 +603,8 @@ function resultCN(a,ok,j){let r={};try{r=JSON.parse(j||"{}")}catch(e){}
   if(a==="run"||a==="cron-run")return`产生信号 ${r.signals??0} 个，下单 ${r.orders??0} 笔`;
   if(a==="preview")return "风控检查通过";
   return "完成";}
-let PERF=null,OV=null,INTS=[],INTRA=null,PERFMODE="nav";
+let PERF=null,OV=null,INTS=[],INTRA=null,BENCH=null,SECT=null,SHEALTH=null,PERFMODE="nav";
+let SCORE=null,ALLOC=null,OPSCHK=null;
 function dayDiff(iso){if(!iso)return null;const t=Date.parse(iso+"T00:00:00");
   return isNaN(t)?null:Math.max(0,Math.round((Date.now()-t)/86400000));}
 function sparkSVG(vals){
@@ -531,6 +620,41 @@ function niceStep(raw){
   const p=Math.pow(10,Math.floor(Math.log10(raw))),n=raw/p;
   return (n<=1?1:n<=2?2:n<=5?5:10)*p;
 }
+function drawSectors(){
+  const svg=document.getElementById("sectorchart");
+  const wrap=document.getElementById("sectorwrap");
+  const cnt=document.getElementById("c-sectors");
+  const note=document.getElementById("sector-note");
+  if(!svg||!wrap)return;
+  if(!SECT||!SECT.available){
+    svg.innerHTML='<text x="50%" y="48%" text-anchor="middle" fill="var(--text-tertiary)" font-size="13">行业数据不可用（母库 stock_snapshot 不可读）</text>';
+    if(cnt)cnt.textContent="—";
+    if(note)note.textContent=(SECT&&SECT.note)||"";
+    return;
+  }
+  let rows=(SECT.sectors||[]).slice();
+  if(rows.length>8){
+    const head=rows.slice(0,8),rest=rows.slice(8);
+    head.push({sector:"其他",market_value:rest.reduce((a,b)=>a+b.market_value,0),
+               weight:rest.reduce((a,b)=>a+b.weight,0),n:rest.reduce((a,b)=>a+b.n,0)});
+    rows=head;
+  }
+  const W=Math.max(320,wrap.clientWidth||800),H=Math.max(140,rows.length*30+10);
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const labelW=100,rightW=96,barW=Math.max(40,W-labelW-rightW);
+  let g="";
+  rows.forEach((r,i)=>{
+    const y=6+i*30,unknown=(r.sector==="未知"||r.sector==="其他");
+    const w=Math.max(1,(r.weight||0)*barW);
+    g+=`<text x="0" y="${y+13}" font-size="12" fill="var(--text-secondary)">${esc(r.sector)}</text>`;
+    g+=`<rect x="${labelW}" y="${y+3}" width="${barW}" height="10" rx="2" fill="var(--divider-thin)"/>`;
+    g+=`<rect x="${labelW}" y="${y+3}" width="${w}" height="10" rx="2" fill="${unknown?"var(--text-tertiary)":"var(--accent)"}" opacity="${unknown?".55":".85"}"/>`;
+    g+=`<text x="${W}" y="${y+13}" text-anchor="end" font-size="11" fill="var(--text-tertiary)">${pct(r.weight)} · ${fmt(r.market_value,0)}</text>`;
+  });
+  svg.innerHTML=g;
+  if(cnt)cnt.textContent=`${rows.length} 个行业 · 覆盖 ${SECT.coverage.with_sector}/${SECT.coverage.total}`;
+  if(note)note.textContent=`${SECT.asof?`行业快照 ${SECT.asof}${SECT.stale?"（stale）":""}`:""}${SECT.note?" · "+SECT.note:""}`;
+}
 function drawPerf(){
   const svg=document.getElementById("perfchart");
   const wrap=document.getElementById("chartwrap");
@@ -540,10 +664,16 @@ function drawPerf(){
   const S=(PERF&&PERF.series)||[];
   const c=(PERF&&PERF.coverage)||{};
   const miss=(c.missing||[]).length;
+  const BM=(BENCH&&BENCH.available&&BENCH.series)||[];
+  const bMap={},bEx={};BM.forEach(p=>{bMap[p.date]=p.benchmark;bEx[p.date]=p.excess;});
   if(cov){
     cov.className="cov"+(miss?" warn":"");
+    const bBadge=BENCH?(BENCH.available
+      ?`<span class="badge b" title="${esc(BENCH.note||"")}">${esc(BENCH.name||"沪深300")} ${esc(BENCH.asof||"")}${BENCH.stale?" · stale":""}</span>`
+      :`<span class="badge b" title="${esc(BENCH.reason||"")}">基准不可用</span>`):"";
     cov.innerHTML=`<span class="badge">${c.present||S.length}/${c.expected||S.length} 交易日</span>`+
       (miss?`<span class="badge" title="${esc((c.missing||[]).slice(0,5).join("、"))}">缺 ${miss} 日</span>`:"")+
+      bBadge+(BM.length?`<span class="badge b">虚线：沪深300</span>`:"")+
       `<span>${esc((PERF&&PERF.definitions)||"")}</span>`;
   }
   if(S.length<2){
@@ -557,6 +687,7 @@ function drawPerf(){
   const t0=Date.parse(S[0].date),t1=Date.parse(S[S.length-1].date),span=Math.max(1,t1-t0);
   const x=i=>P.l+(Date.parse(S[i].date)-t0)/span*(W-P.l-P.r);
   let lo=Math.min(...vals),hi=Math.max(...vals);
+  if(mode==="ret"&&BM.length){for(const p of BM){lo=Math.min(lo,p.benchmark);hi=Math.max(hi,p.benchmark);}}
   if(mode==="nav"){const init=PERF.initial_cash||100000;lo=Math.min(lo,init);hi=Math.max(hi,init);}
   if(mode==="dd"){lo=Math.min(lo,-0.0001);hi=0;}
   if(hi-lo<1e-9)hi=lo+1;
@@ -581,6 +712,8 @@ function drawPerf(){
   const base=(mode==="dd")?0:lo;
   const area=`${x(0)},${y(base)} `+S.map((_,i)=>`${x(i)},${y(vals[i])}`).join(" ")+` ${x(S.length-1)},${y(base)}`;
   const dots=S.length<=60?S.map((_,i)=>`<circle cx="${x(i)}" cy="${y(vals[i])}" r="2.6" fill="var(--accent)"/>`).join(""):"";
+  let bpts=[];
+  if(mode==="ret"){for(let i=0;i<S.length;i++){const v=bMap[S[i].date];if(v!==undefined)bpts.push(`${x(i)},${y(v)}`);}}
   const xlabs=[0,Math.floor((S.length-1)/2),S.length-1].filter((v,i,a)=>a.indexOf(v)===i)
     .map(i=>`<text x="${x(i)}" y="${H-6}" text-anchor="middle" font-size="11" fill="var(--text-tertiary)">${S[i].date.slice(5)}</text>`).join("");
   svg.innerHTML=`<defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".16"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>`+
@@ -588,6 +721,7 @@ function drawPerf(){
     (mode==="dd"?`<polygon points="${area}" fill="var(--red-bg)"/>`:`<polygon points="${area}" fill="url(#pg)"/>`)+
     `<polyline points="${solid}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`+
     (dashed?`<polyline points="${dashed}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 4" opacity=".75"/>`:"")+
+    (bpts.length?`<polyline points="${bpts.join(" ")}" fill="none" stroke="var(--text-tertiary)" stroke-width="1.6" stroke-dasharray="5 4" stroke-linejoin="round" opacity=".9"/>`:"")+
     dots+xlabs+
     `<rect id="perfhit" x="${P.l}" y="${P.t}" width="${W-P.l-P.r}" height="${H-P.t-P.b}" fill="transparent"/>`;
   const hit=svg.querySelector("#perfhit");
@@ -597,7 +731,8 @@ function drawPerf(){
     const e=S[best],d=best>0?(e.total_value/S[best-1].total_value-1):null;
     tip.style.display="block";
     tip.innerHTML=`<b>${e.date}</b><br>总资产 ${fmt(e.total_value)}<br>累计 ${(e.ret>=0?"+":"")+pct(e.ret)}`+
-      (d==null?"":`<br>当日 ${(d>=0?"+":"")+pct(d)}`)+`<br>回撤 ${pct(e.drawdown)}`;
+      (d==null?"":`<br>当日 ${(d>=0?"+":"")+pct(d)}`)+`<br>回撤 ${pct(e.drawdown)}`+
+      (bEx[e.date]==null?"":`<br>沪深300 ${(bMap[e.date]>=0?"+":"")+pct(bMap[e.date])} · 超额 ${(bEx[e.date]>=0?"+":"")+pct(bEx[e.date])}`);
     const left=Math.min(W-200,Math.max(0,x(best)+14));
     tip.style.left=(left/W*100)+"%";tip.style.top="10px";
   });
@@ -654,6 +789,116 @@ function renderIntents(){
       `<td class="num">${r.volume||0}</td><td class="mut">${esc(src)}</td><td>${chip(r.status)}</td>`+
       `<td class="mut">${esc(String(why).slice(0,120))}</td></tr>`;
   }),10,"暂无意图");
+}
+function renderStrategyHealth(){
+  const t=document.getElementById("shealth");
+  const sum=document.getElementById("shealth-sum");
+  const cnt=document.getElementById("c-shealth");
+  if(!t)return;
+  const head=[["指标"],["值"],["说明"]];
+  if(!SHEALTH||!SHEALTH.available){
+    if(sum)sum.textContent="策略健康不可用："+((SHEALTH&&SHEALTH.reason)||"母库基准不可用");
+    if(cnt)cnt.textContent="—";
+    rows(t,head,`<tr><td colspan="3" class="mut">暂无数据</td></tr>`);
+    return;
+  }
+  const m=SHEALTH.metrics||{},w=SHEALTH.window||{};
+  const labels={healthy:'<span class="ok">健康</span>',watch:'<span class="mut">观察</span>',demote:'<span class="bad">建议降级</span>'};
+  const recTxt={active:"正常",watch:"观察",observe:"只观察，不新增买入"}[SHEALTH.recommendation]||SHEALTH.recommendation;
+  if(cnt)cnt.textContent=`${w.start||"—"} → ${w.end||"—"} · ${w.days||0} 日`;
+  if(sum)sum.textContent=`建议：${recTxt}${SHEALTH.reasons&&SHEALTH.reasons.length?" · "+SHEALTH.reasons.join("；"):""}${SHEALTH.stale?" · 基准 stale":""}`;
+  const body=[
+    ["组合 / 基准 / 超额",`${pct(m.portfolio_return)} / ${pct(m.benchmark_return)} / ${pct(m.excess)}`,"窗口内累计"],
+    ["20 日超额",pct(m.excess_20),"滚动 20 个共同日"],
+    ["最大回撤",pct(m.max_drawdown),"窗口内"],
+    ["换手",pct(m.turnover),"成交额 / 平均 NAV"],
+    ["费用拖累",`${(Number(m.fee_drag||0)*10000).toFixed(1)} bp`,"三项费用 / 平均 NAV"],
+    ["状态",labels[SHEALTH.health]||esc(SHEALTH.health||"—"),(SHEALTH.reasons||[]).join("；")||"阈值内"],
+  ].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td class="mut">${r[2]}</td></tr>`).join("");
+  rows(t,head,body);
+}
+function renderScorecard(){
+  const t=document.getElementById("scorecard");
+  const sum=document.getElementById("score-sum");
+  const cnt=document.getElementById("c-score");
+  const note=document.getElementById("score-note");
+  if(!t)return;
+  const head=[["信号",0],["样本",1],["20日平均超额",1],["命中率",1]];
+  if(!SCORE||!SCORE.available){
+    if(sum)sum.textContent="AI 成绩不可用："+((SCORE&&SCORE.reason)||"母库样本不足");
+    if(cnt)cnt.textContent="—";
+    if(note)note.textContent="";
+    rows(t,head,`<tr><td colspan="4" class="mut">暂无数据</td></tr>`);
+    return;
+  }
+  const sig=SCORE.by_signal||{};
+  const pick=k=>sig[k]||{};
+  const b=pick("BUY"),h=pick("HOLD"),a=pick("AVOID");
+  if(cnt)cnt.textContent=`${SCORE.n||0} 条 · ${(SCORE.window&&SCORE.window.start)||"—"} → ${(SCORE.window&&SCORE.window.end)||"—"}`;
+  const ex2=v=>v==null?"—":`${Number(v).toFixed(2)}%`;
+  if(sum)sum.textContent=(SCORE.sufficient?"样本足够":"样本不足（只展示，不结论）")
+    +` · BUY−AVOID ${SCORE.spread_buy_minus_avoid==null?"—":Number(SCORE.spread_buy_minus_avoid).toFixed(2)+"pp"}`
+    +` · 截至 ${SCORE.asof||"—"}`;
+  const line=(label,x)=>[label,x.n??0,ex2(x.avg_excess_20),
+    x.hit_rate==null?"—":pct(x.hit_rate)];
+  const body=[line("BUY",b),line("HOLD",h),line("AVOID",a)].map(r=>
+    `<tr><td><b>${r[0]}</b></td><td class="num">${r[1]}</td>`+
+    `<td class="num ${String(r[2]).startsWith("-")?"bad":"ok"}">${r[2]}</td>`+
+    `<td class="num">${r[3]}</td></tr>`).join("");
+  rows(t,head,body);
+  if(note)note.textContent=(SCORE.note||"")+((SCORE.warnings||[]).length?"；警告："+SCORE.warnings.join("；"):"");
+}
+function renderAllocations(){
+  const t=document.getElementById("alloc");
+  const sum=document.getElementById("alloc-sum");
+  const cnt=document.getElementById("c-alloc");
+  const note=document.getElementById("alloc-note");
+  if(!t)return;
+  const head=[["策略"],["权重",1],["额度",1],["已用",1],["剩余",1]];
+  if(!ALLOC||ALLOC.available===false){
+    if(sum)sum.textContent="资金额度不可用："+((ALLOC&&(ALLOC.reason||ALLOC.note))||"未配置");
+    if(cnt)cnt.textContent="—";
+    if(note)note.textContent="";
+    rows(t,head,`<tr><td colspan="5" class="mut">暂无数据</td></tr>`);
+    return;
+  }
+  if(!ALLOC.enabled){
+    if(sum)sum.textContent="未配置 strategy.allocations；沿用单方案行为";
+    if(cnt)cnt.textContent="未启用";
+    if(note)note.textContent=ALLOC.note||"";
+    rows(t,head,`<tr><td colspan="5" class="mut">未启用（空配置）</td></tr>`);
+    return;
+  }
+  const items=ALLOC.items||[];
+  if(cnt)cnt.textContent=`${items.length} 个策略 · 权重和 ${pct(ALLOC.total_weight)}`;
+  if(sum)sum.textContent=`NAV ${fmt(ALLOC.nav_total)} · 额度口径：${ALLOC.basis||"—"}`;
+  const body=items.map(x=>`<tr><td><b>${esc(x.strategy)}</b></td>`+
+    `<td class="num">${pct(x.weight)}</td><td class="num">${fmt(x.budget)}</td>`+
+    `<td class="num">${fmt(x.used)}</td><td class="num ${Number(x.remaining)<=0?"bad":""}">${fmt(x.remaining)}</td></tr>`).join("");
+  rows(t,head,body);
+  if(note)note.textContent=ALLOC.note||"";
+}
+function renderOpsCheck(){
+  const t=document.getElementById("opschecks");
+  const sum=document.getElementById("ops-sum");
+  const cnt=document.getElementById("c-opsc");
+  if(!t)return;
+  const head=[["检查"],["状态"],["详情"]];
+  if(!OPSCHK||OPSCHK.ok===undefined){
+    if(sum)sum.textContent="运维巡检不可用：尚未运行";
+    if(cnt)cnt.textContent="—";
+    rows(t,head,`<tr><td colspan="3" class="mut">暂无数据（cron 21:20 或手动 ops check）</td></tr>`);
+    return;
+  }
+  const reds=OPSCHK.red||[],warns=OPSCHK.warn||[];
+  if(cnt)cnt.textContent=OPSCHK.ok?"正常":`${reds.length} 红 / ${warns.length} 黄`;
+  if(sum)sum.textContent=(OPSCHK.ok?"全部通过":"需处理")+` · ${OPSCHK.checked_at||"—"}`;
+  const body=(OPSCHK.checks||[]).map(c=>{
+    const st={green:["ok","正常"],red:["bad","红"],warn:["warn","黄"],skip:["mut","跳过"]}[c.status]||["mut",c.status||"—"];
+    return `<tr><td>${esc(c.name||c.id)}</td><td class="${st[0]}">${st[1]}</td>`+
+      `<td class="mut">${esc(c.detail||"")}${c.fix?`<br><span class="s">处理：${esc(c.fix)}</span>`:""}</td></tr>`;
+  }).join("");
+  rows(t,head,body);
 }
 function renderOpsPanels(){
   const h=(OV&&OV.health)||{},ck=h.checks||{};
@@ -762,20 +1007,33 @@ document.getElementById("perfmodes").addEventListener("click",e=>{
     const on=x===b;x.classList.toggle("on",on);x.setAttribute("aria-selected",on?"true":"false");});
   drawPerf();
 });
-window.addEventListener("resize",()=>{clearTimeout(window.__ptResize);window.__ptResize=setTimeout(drawPerf,120);});
+window.addEventListener("resize",()=>{clearTimeout(window.__ptResize);window.__ptResize=setTimeout(()=>{drawPerf();drawIntraday();drawSectors();},120);});
 
 async function refresh(){
  try{
-  const [s,ops,pos,ord,nav,nm,prov]=await Promise.all(["/api/status","/api/ops?limit=30","/api/positions","/api/orders?limit=30","/api/nav?limit=60","/api/names","/api/data-provenance"].map(get));
-  const [perfR,ovR,intR,intraR]=await Promise.all([
+  const [s,ops,pos,ord,nav,nm,prov,fl,ct]=await Promise.all(["/api/status","/api/ops?limit=30","/api/positions","/api/orders?limit=30","/api/nav?limit=60","/api/names","/api/data-provenance","/api/fills?limit=30","/api/contract"].map(get));
+  const shR=await get("/api/strategy-health").catch(()=>({ok:false}));
+  SHEALTH=(shR&&shR.ok)?shR.data:null;
+  const [scoreR,allocR,opsR]=await Promise.all([
+    get("/api/ai-scorecard").catch(()=>({ok:false})),
+    get("/api/strategy-allocations").catch(()=>({ok:false})),
+    get("/api/ops-status").catch(()=>({ok:false}))]);
+  SCORE=(scoreR&&scoreR.ok)?scoreR.data:null;
+  ALLOC=(allocR&&allocR.ok)?allocR.data:null;
+  OPSCHK=(opsR&&opsR.ok)?opsR.data:null;
+  const [perfR,ovR,intR,intraR,benchR,sectR]=await Promise.all([
     get("/api/performance").catch(()=>({ok:false})),
     get("/api/overview").catch(()=>({ok:false})),
     get("/api/intents?limit=100").catch(()=>({ok:false})),
-    get("/api/intraday").catch(()=>({ok:false}))]);
+    get("/api/intraday").catch(()=>({ok:false})),
+    get("/api/benchmark").catch(()=>({ok:false})),
+    get("/api/sectors").catch(()=>({ok:false}))]);
   PERF=(perfR&&perfR.ok)?perfR.data:null;
   OV=(ovR&&ovR.ok)?ovR.data:null;
   INTS=(intR&&intR.ok)?intR.data:[];
   INTRA=(intraR&&intraR.ok)?intraR.data:null;
+  BENCH=(benchR&&benchR.ok)?benchR.data:null;
+  SECT=(sectR&&sectR.ok)?sectR.data:null;
   NAMES=(nm&&nm.data)||{};
   // T22 看门狗红条：不健康才显示；恢复后后端状态翻回 healthy=true ⇒ 红条自动消失
   try{const hh=await get("/api/health");const h=(hh&&hh.data)||{};
@@ -788,6 +1046,8 @@ async function refresh(){
   const st=s.data;
   const plist=(pos&&pos.data)||st.positions||[];
   const pf=(PERF&&PERF.summary)||{};
+  const bx=(BENCH&&BENCH.available&&BENCH.summary&&BENCH.summary.excess!=null)?BENCH.summary.excess:null;
+  const bxTxt=(bx==null)?"":` · 超额 ${(bx>=0?"+":"")+pct(bx)} vs 沪深300`;
   const liveMode=!!(OV&&OV.estimated&&OV.prices_ready&&OV.live_total!=null);
   const navTotal=liveMode?OV.live_total
     :((pf.total_value!=null)?pf.total_value:st.total_value);
@@ -808,14 +1068,19 @@ async function refresh(){
   document.getElementById("cards").innerHTML=`
    <div class="market-item"><div class="market-name">总资产 CNY</div><div class="market-value">${fmt(navTotal,0)}</div><div class="kpi-sub">现金 ${fmt(navCash,0)} + 市值 ${fmt(navMv,0)}${liveMode?" · 盘中价":(PERF&&PERF.asof?" · 收盘 "+PERF.asof:"")}</div></div>
    <div class="market-item"><div class="market-name">今日盈亏</div><div class="market-value ${cls(todayPnl)}">${todayPnl==null?"—":(todayPnl>=0?"+":"")+fmt(todayPnl)}</div><div class="kpi-sub ${cls(todayPnl)}">${todayPnl==null?"待今日行情":pct(todayPct)}${est?'<span class="kpi-tag">盘中估算</span>':""}</div></div>
-   <div class="market-item"><div class="market-name">累计收益</div><div class="market-value ${cls(pf.total_return)}">${pf.total_return==null?"—":(pf.total_return>=0?"+":"")+pct(pf.total_return)}</div><div class="kpi-sub ${cls(pf.total_pnl)}">${pf.total_pnl==null?"—":(pf.total_pnl>=0?"+":"")+fmt(pf.total_pnl)} · 自 ${(PERF&&PERF.series&&PERF.series[0])?PERF.series[0].date:"—"}</div></div>
+   <div class="market-item"><div class="market-name">累计收益</div><div class="market-value ${cls(pf.total_return)}">${pf.total_return==null?"—":(pf.total_return>=0?"+":"")+pct(pf.total_return)}</div><div class="kpi-sub ${cls(pf.total_pnl)}">${pf.total_pnl==null?"—":(pf.total_pnl>=0?"+":"")+fmt(pf.total_pnl)} · 自 ${(PERF&&PERF.series&&PERF.series[0])?PERF.series[0].date:"—"}${bxTxt}</div></div>
    <div class="market-item"><div class="market-name">最大回撤</div><div class="market-value">${pf.mdd==null?"—":pct(pf.mdd)}</div><div class="kpi-sub">${pf.mdd_date?"发生于 "+pf.mdd_date:""}${pf.current_drawdown!=null?" · 当前 "+pct(pf.current_drawdown):""}</div></div>
    <div class="market-item"><div class="market-name">仓位</div><div class="market-value">${expo==null?"—":pct(expo)}</div><div class="kpi-sub">现金占比 ${expo==null?"—":pct(1-expo)}</div></div>`;
   drawPerf();
   renderToday();
   renderIntents();
   renderOpsPanels();
+  renderStrategyHealth();
+  renderScorecard();
+  renderAllocations();
+  renderOpsCheck();
   drawIntraday();
+  drawSectors();
   const navRows=(nav.data||[]);
   const navDays=new Set(navRows.map(r=>String(r.timestamp).slice(0,10))).size;
   document.getElementById("c-nav").textContent=`${navRows.length} 行 · ${navDays} 个交易日（同日多条保留）`;
@@ -856,6 +1121,36 @@ async function refresh(){
     const stt=r.status=="filled"?`<span class="ok">已成交</span>`:`<span class="bad">已拒绝</span>`;
     return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td><span class="tag ${buy?"buy":"sell"}">${buy?"买入":"卖出"}</span></td><td><b>${esc(sym(r.symbol))}</b></td><td class="num">${r.volume}</td><td class="num">${fmt(r.filled_price||r.limit_price)}</td><td>${stt}</td><td class="num">${fmt(fee)}</td></tr>`}),
     10,"暂无订单");
+  const fillRows=(fl&&fl.data)||[];
+  document.getElementById("c-fills").textContent=`${fillRows.length} 笔`;
+  rowsC(document.getElementById("fills"),[["时间"],["方向"],["股票"],["股数",1],["价格",1],["费用",1]],
+    fillRows.map(r=>{const d=new Date(r.timestamp);const buy=r.direction==1;
+    const fee=(Number(r.commission)+Number(r.stamp_duty)+Number(r.transfer_fee));
+    return `<tr><td class="mut">${d.toLocaleString("zh-CN")}</td><td><span class="tag ${buy?"buy":"sell"}">${buy?"买入":"卖出"}</span></td><td><b>${esc(sym(r.symbol))}</b></td><td class="num">${r.volume}</td><td class="num">${fmt(r.price)}</td><td class="num">${fmt(fee)}</td></tr>`}),
+    6,"暂无成交");
+  const ctD=(ct&&ct.data)||{};
+  const cparts=ctD.parts||{};
+  const ctOk=!!(ct&&ct.ok);
+  document.getElementById("c-contract").textContent=ctOk?(ctD.ok?"形状 OK":(ctD.available?"形状异常":"母库不可用")):"不可用";
+  document.getElementById("contract-sum").textContent=ctOk?
+    `${ctD.available?"母库可读":"母库不可读"} · ${ctD.stale?"有 stale":"新鲜"} · ${Object.keys(cparts).length} 组契约${ctD.error?" · "+esc(String(ctD.error).slice(0,80)):""}${ctD.today?" · 核对 "+ctD.today:""}`
+    :"契约探针请求失败（/api/contract）";
+  rowsC(document.getElementById("contract"),[["接口"],["形状"],["截至"],["统计"],["问题"]],
+    Object.entries(cparts).map(([k,v])=>{
+      const stTxt=v.ok?(v.stale?'<span class="mut">stale</span>':'<span class="ok">OK</span>'):'<span class="bad">异常</span>';
+      const shape=v.shape||{};
+      let sum="";
+      if(k==="strategy")sum=`${shape.parsed||0}/${shape.rows||0} 条 · ${Object.entries(shape.signals||{}).map(([a,b])=>a+" "+b).join(" / ")}`;
+      else if(k==="sector")sum=`覆盖 ${((Number(shape.coverage)||0)*100).toFixed(1)}% · ${shape.with_sector||0}/${shape.rows||0}`;
+      else if(k==="benchmark"){
+        const per=shape.per_code||{},primary=per["sh000300"]||{};
+        const staleCodes=Object.entries(per).filter(([,p])=>p.stale).map(([c])=>c);
+        sum=`5 键 · sh000300 ${primary.asof||"—"}${staleCodes.length?` · stale ${staleCodes.join(",")}`:""}`;
+      }
+      const issues=[...(v.errors||[]),...(v.warnings||[])].map(e=>e.code).slice(0,3).join(" / ");
+      return `<tr><td><b>${esc(k)}</b></td><td>${stTxt}</td><td class="mut">${esc(v.asof||"—")}</td><td class="mut">${esc(sum)}</td><td class="mut">${esc(issues||"—")}</td></tr>`;
+    }),
+    5,"暂无探针结果");
   const provIf=(prov&&prov.data&&prov.data.interfaces)||{};
   document.getElementById("c-prov").textContent=Object.keys(provIf).length+" 个接口";
   document.getElementById("prov-sum").textContent=
@@ -872,14 +1167,14 @@ async function refresh(){
  }catch(e){document.getElementById("clock").textContent="刷新失败: "+e}
 }
 /* ---- P1：任务视图（总览 / 交易 / 运维 / 控制台） ---- */
-const TAB_IDS=["overview","trading","ops","control"];
+const TAB_IDS=["overview","trading","ops","report","control"];
 function applyTab(tab){
   const t=TAB_IDS.includes(tab)?tab:"overview";
   document.querySelectorAll("#tabs button").forEach(b=>{
     const on=b.dataset.tab===t;b.classList.toggle("on",on);
     b.setAttribute("aria-selected",on?"true":"false");});
   document.querySelectorAll("[data-tab]:not(button)").forEach(el=>el.classList.toggle("on",el.dataset.tab===t));
-  if(t==="overview"&&typeof drawPerf==="function")setTimeout(()=>{drawPerf();drawIntraday();},0);
+  if(t==="overview"&&typeof drawPerf==="function")setTimeout(()=>{drawPerf();drawIntraday();drawSectors();},0);
 }
 function hashTab(){
   const h=(location.hash||"").replace(/^#\/?/,"");
@@ -1208,6 +1503,72 @@ document.getElementById("btn-cond-design").onclick=async()=>{
   st.textContent=`已挂 ${d.n_created??0} 条${(d.n_rejected||[]).length?`，${d.n_rejected.length} 条未通过校验`:""}`;
   await condStatus();refresh();
 };
+function todayStr(){const d=new Date();const z=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;}
+async function loadReport(){
+  const sum=document.getElementById("report-sum");
+  const dateEl=document.getElementById("rep-date");
+  const day=dateEl.value||todayStr();
+  const kind=document.getElementById("rep-kind").value;
+  const days=Number(document.getElementById("rep-days").value)||7;
+  const bench=document.getElementById("rep-bench").value;
+  sum.textContent="生成中…";
+  const q=new URLSearchParams({kind,date:day,days:String(days),benchmark:bench});
+  const r=await get("/api/report?"+q.toString()).catch(e=>({ok:false,error:String(e)}));
+  if(!r.ok){sum.textContent="报告失败："+(r.error||"接口不可用");return;}
+  const d=r.data||{};
+  const nav=d.nav||{},b=d.benchmark||{};
+  document.getElementById("c-report").textContent=(d.period&&d.period.label)||"";
+  sum.textContent=`${(d.period&&d.period.start)||"—"} → ${(d.period&&d.period.end)||"—"}`
+    +` · NAV ${nav.start==null?"—":fmt(nav.start)} → ${nav.end==null?"—":fmt(nav.end)}`
+    +`（${nav.change==null?"—":pct(nav.change)}）`
+    +` · 基准 ${b.available?pct(b.return):"不可用"}`
+    +` · 超额 ${d.excess_return==null?"—":pct(d.excess_return)}`
+    +` · 健康 ${(d.health&&d.health.health)||"—"}`;
+  rows(document.getElementById("report-trades"),
+    [["时间"],["标的"],["方向"],["股数",1],["价格",1],["费用",1]],
+    (d.trades||[]).map(t=>`<tr><td class="mut">${esc(String(t.time||"").replace("T"," ").slice(0,16))}</td>`+
+      `<td><b>${esc(sym(t.symbol||""))}</b></td>`+
+      `<td><span class="tag ${t.direction==="buy"?"buy":"sell"}">${t.direction==="buy"?"买入":"卖出"}</span></td>`+
+      `<td class="num">${t.volume||0}</td><td class="num">${fmt(t.price)}</td>`+
+      `<td class="num">${fmt(t.fees)}</td></tr>`).join("") ||
+    `<tr><td colspan="6" class="mut">区间内无成交</td></tr>`);
+  const sa=d.sector_attribution||{};
+  rows(document.getElementById("report-sector"),
+    [["行业"],["市值",1],["权重",1]],
+    sa.available?(sa.items||[]).map(x=>`<tr><td>${esc(x.sector)}</td>`+
+      `<td class="num">${fmt(x.market_value)}</td><td class="num">${x.weight==null?"—":pct(x.weight)}</td></tr>`).join("")
+      :`<tr><td colspan="3" class="mut">${esc(sa.reason||"行业不可用")}</td></tr>`);
+}
+async function loadAudit(){
+  const sum=document.getElementById("audit-sum");
+  const day=document.getElementById("audit-date").value||todayStr();
+  sum.textContent="查询中…";
+  const r=await get("/api/audit?date="+encodeURIComponent(day)).catch(e=>({ok:false,error:String(e)}));
+  if(!r.ok){sum.textContent="审计失败："+(r.error||"接口不可用");return;}
+  const d=r.data||{},c=d.counts||{};
+  document.getElementById("c-audit").textContent=day;
+  sum.textContent=`计划 ${c.plans||0} / 决策 ${c.decisions||0} / 成交 ${c.fills||0}`
+    +` / 条件单 ${c.conditions||0} / 意图 ${c.intents||0}`
+    +` · 标的 ${(d.symbols||[]).length} 只`;
+  const tl=d.timeline||[];
+  rows(document.getElementById("audit-symbols"),
+    [["标的"],["结果"],["执行状态"],["证据"]],
+    tl.map(x=>{
+      const w=(x.why||[]).slice(0,2).map(y=>y.exec_status||y.reason||"").filter(Boolean).join("；");
+      return `<tr><td><b>${esc(sym(x.symbol||""))}</b></td>`+
+        `<td>${esc(x.outcome||"—")}</td>`+
+        `<td class="mut">${esc(w||"—")}</td>`+
+        `<td class="mut">${esc(x.evidence_gap||"")}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" class="mut">当日无计划/决策/成交</td></tr>`);
+}
+document.getElementById("btn-report").onclick=loadReport;
+document.getElementById("btn-audit").onclick=loadAudit;
+(function initReportDates(){
+  const t=todayStr();
+  const a=document.getElementById("rep-date"),b=document.getElementById("audit-date");
+  if(a&&!a.value)a.value=t;
+  if(b&&!b.value)b.value=t;
+})();
 condStatus();
 </script>
 </body>
@@ -1218,6 +1579,74 @@ def _ro(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+_BENCH_CODE = "sh000300"
+_BENCH_NAME = "沪深300"
+
+
+def _benchmark_payload(account_db: str, code: str = _BENCH_CODE,
+                       days: int = 260, today: str | None = None,
+                       mother=None) -> dict:
+    """基准曲线（服务端对齐 + 归一化）：只读母库，不写任何账本。
+
+    口径：
+    - 组合与基准都从**首个共同交易日**归一化，超额 = 组合累计 - 基准累计；
+    - 基准只认价格指数（不复权），`stale` 由 `asof` 与今天计算，缺数据显式不可用；
+    - 共同交易日 <2 时返回 `available=false`，不画假线。
+    """
+    perf = _perf_payload(account_db)
+    from paper_trading.integration import mother as m
+
+    blk = (m.benchmark([code], days=days, mother=mother) or {}).get(code) or {}
+    out = {"code": code, "name": _BENCH_NAME, "available": False,
+           "asof": blk.get("asof"), "stale": False, "source": blk.get("source"),
+           "series": [], "summary": {}, "note": ""}
+    if not blk.get("available"):
+        out["reason"] = blk.get("note") or "母库 benchmark_daily 不可用"
+        return out
+    bench: dict[str, float] = {}
+    for r in (blk.get("data") or []):
+        try:
+            bench[str(r["date"])[:10]] = float(r["close"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    nav = {p["date"]: float(p["total_value"]) for p in perf["series"]}
+    common = sorted(set(nav) & set(bench))
+    if len(common) < 2:
+        out["reason"] = f"与 NAV 的共同交易日不足（{len(common)} 天）"
+        return out
+
+    base_n, base_b = nav[common[0]], bench[common[0]]
+    series: list[dict] = []
+    peak_b: float | None = None
+    mdd_b = 0.0
+    for d in common:
+        pr = nav[d] / base_n - 1
+        br = bench[d] / base_b - 1
+        peak_b = bench[d] if peak_b is None else max(peak_b, bench[d])
+        mdd_b = max(mdd_b, 1 - bench[d] / peak_b)
+        series.append({"date": d, "portfolio": round(pr, 6),
+                       "benchmark": round(br, 6), "excess": round(pr - br, 6)})
+    today_s = str(today or date.today().isoformat())[:10]
+    asof = blk.get("asof")
+    out.update({
+        "available": True,
+        "asof": asof,
+        "stale": m._stale(asof, 3, today_s) if asof else True,
+        "window": {"start": common[0], "end": common[-1], "days": len(common)},
+        "series": series,
+        "summary": {
+            "portfolio_return": series[-1]["portfolio"],
+            "benchmark_return": series[-1]["benchmark"],
+            "excess": series[-1]["excess"],
+            "benchmark_mdd": round(mdd_b, 6),
+            "benchmark_asof": asof,
+            "missing_nav_days": len(set(nav) - set(bench)),
+        },
+        "note": "按首个共同交易日归一化；指数为价格指数、不复权",
+    })
+    return out
 
 
 def _limit_arg(q: dict, default: int = 30, maxv: int = 500) -> int:
@@ -1496,6 +1925,107 @@ def _walkforward_payload(bridge, grid: str, symbols, days: int, cash: float,
 
 
 _PROV_CACHE: dict = {"ts": 0.0, "data": None}
+_CONTRACT_CACHE: dict = {"ts": 0.0, "data": None}
+_SHEALTH_CACHE: dict = {"ts": 0.0, "data": None}
+_SCORE_CACHE: dict = {"ts": 0.0, "data": None}
+_ALLOC_CACHE: dict = {"ts": 0.0, "data": None}
+_OPS_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+def _strategy_health_payload(account_db, ttl: float = 30.0) -> dict:
+    """策略健康度（I5a，只读；30s 缓存）。"""
+    import time
+
+    now = time.time()
+    if _SHEALTH_CACHE["data"] is not None and now - _SHEALTH_CACHE["ts"] < ttl:
+        return _SHEALTH_CACHE["data"]
+    from paper_trading.strategy.health import health_payload
+
+    try:
+        data = health_payload(account_db)
+    except Exception as exc:                # noqa: BLE001 - 面板不因健康度失败
+        data = {"available": False, "metrics": {}, "reasons": [],
+                "reason": f"{type(exc).__name__}: {exc}"}
+    _SHEALTH_CACHE.update(ts=now, data=data)
+    return data
+
+
+def _scorecard_payload(ttl: float = 60.0) -> dict:
+    """AI 成绩校准（P5.5，只读；60s 缓存）。"""
+    import time
+
+    now = time.time()
+    if _SCORE_CACHE["data"] is not None and now - _SCORE_CACHE["ts"] < ttl:
+        return _SCORE_CACHE["data"]
+    try:
+        from paper_trading.strategy.calibration import build_calibration
+
+        data = build_calibration()
+    except Exception as exc:                # noqa: BLE001 - 面板不因校准失败
+        data = {"available": False, "sufficient": False,
+                "reason": f"{type(exc).__name__}: {exc}"}
+    _SCORE_CACHE.update(ts=now, data=data)
+    return data
+
+
+def _allocations_payload(bridge, ttl: float = 30.0) -> dict:
+    """策略资金额度（A3，只读；30s 缓存）。"""
+    import time
+
+    now = time.time()
+    if _ALLOC_CACHE["data"] is not None and now - _ALLOC_CACHE["ts"] < ttl:
+        return _ALLOC_CACHE["data"]
+    from paper_trading.strategy.allocation import allocations_payload
+
+    try:
+        st = bridge.get_status()
+        data = allocations_payload(
+            getattr(bridge, "allocations", {}) or {},
+            getattr(bridge, "alloc_book", None),
+            float(st.get("total_value") or 0.0))
+    except Exception as exc:                # noqa: BLE001
+        data = {"enabled": False, "available": False,
+                "reason": f"{type(exc).__name__}: {exc}"}
+    _ALLOC_CACHE.update(ts=now, data=data)
+    return data
+
+
+def _ops_status_payload(bridge, ttl: float = 60.0) -> dict:
+    """运维巡检（M4，只读；60s 缓存；GET 不写 ops_status.json）。"""
+    import time
+
+    now = time.time()
+    if _OPS_CACHE["data"] is not None and now - _OPS_CACHE["ts"] < ttl:
+        return _OPS_CACHE["data"]
+    try:
+        from paper_trading.utils.ops_status import build_status
+
+        data = build_status(bridge)
+    except Exception as exc:                # noqa: BLE001
+        data = {"ok": False, "red": ["ops"], "warn": [],
+                "checks": [], "alerts": [f"{type(exc).__name__}: {exc}"],
+                "note": "巡检失败"}
+    _OPS_CACHE.update(ts=now, data=data)
+    return data
+
+
+def _contract_payload(ttl: float = 30.0) -> dict:
+    """母项目接口契约探针（只读；策略/行业/基准形状+新鲜度），30s 缓存。"""
+    import time
+
+    now = time.time()
+    if _CONTRACT_CACHE["data"] is not None and now - _CONTRACT_CACHE["ts"] < ttl:
+        return _CONTRACT_CACHE["data"]
+    from paper_trading.integration.probes import probe_all
+
+    try:
+        data = probe_all()
+    except Exception as exc:                # noqa: BLE001 - 探针失败不拖垮面板
+        data = {"ok": False, "available": False, "parts": {},
+                "error": f"{type(exc).__name__}: {exc}"}
+    _CONTRACT_CACHE.update(ts=now, data=data)
+    return data
+
 
 
 def _data_provenance(bridge, symbols: list) -> dict:
@@ -2114,6 +2644,50 @@ def _positions_payload(bridge) -> list[dict]:
     return st["positions"]
 
 
+def _aggregate_sectors(rows, sector_map: dict) -> dict:
+    """持仓市值按行业聚合；无行业归“未知”，未知排最后。"""
+    total = 0.0
+    with_sector = 0
+    agg: dict[str, dict] = {}
+    for r in rows or []:
+        try:
+            mv = float(r.get("market_value") or 0.0)
+        except (TypeError, ValueError):
+            mv = 0.0
+        sym = str(r.get("symbol") or "")
+        total += mv
+        sec = (sector_map or {}).get(sym)
+        key = str(sec) if sec else "未知"
+        if sec:
+            with_sector += 1
+        a = agg.setdefault(key, {"market_value": 0.0, "n": 0})
+        a["market_value"] += mv
+        a["n"] += 1
+    items = [{"sector": k, "market_value": round(v["market_value"], 2),
+              "weight": round(v["market_value"] / total, 6) if total else 0.0,
+              "n": v["n"]} for k, v in agg.items()]
+    items.sort(key=lambda x: (x["sector"] == "未知", -x["market_value"]))
+    return {"total_mv": round(total, 2), "sectors": items,
+            "coverage": {"with_sector": with_sector, "total": len(rows or [])}}
+
+
+def _sector_payload(bridge, mother=None) -> dict:
+    """行业分布（服务端聚合）：持仓市值 + 母库 sector，NULL 归“未知”。"""
+    rows = _positions_payload(bridge)
+    from paper_trading.integration import mother as m
+
+    blk = m.sectors([r.get("symbol") for r in rows], mother=mother)
+    out = {"available": bool(blk.get("available")), "asof": blk.get("asof"),
+           "stale": bool(blk.get("stale")), "source": blk.get("source"),
+           "note": blk.get("note") or ""}
+    if not out["available"]:
+        out.update({"total_mv": 0.0, "sectors": [],
+                    "coverage": {"with_sector": 0, "total": len(rows)}})
+        return out
+    out.update(_aggregate_sectors(rows, blk.get("data") or {}))
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     data_db = "data.db"
     account_db = "paper_account.db"
@@ -2213,9 +2787,68 @@ class Handler(BaseHTTPRequestHandler):
                 syms = list(b.stock_pool) + [p.symbol for p in
                                              b.broker.get_all_positions()]
                 self._json({"ok": True, "data": _data_provenance(b, syms)})
+            elif u.path == "/api/contract":
+                # 母项目接口契约探针（只读；30s 缓存）
+                self._json({"ok": True, "data": _contract_payload()})
+            elif u.path == "/api/strategy-health":
+                # 策略健康度（只读；30s 缓存；不直接改交易）
+                self._json({"ok": True,
+                            "data": _strategy_health_payload(self.account_db)})
+            elif u.path == "/api/ai-scorecard":
+                # AI 成绩校准（只读；60s 缓存；样本不足时 available=false）
+                self._json({"ok": True, "data": _scorecard_payload()})
+            elif u.path == "/api/strategy-allocations":
+                # 策略资金额度（只读；30s 缓存）
+                self._json({"ok": True,
+                            "data": _allocations_payload(self._bridge())})
+            elif u.path == "/api/ops-status":
+                # 运维巡检（只读；60s 缓存；不写 ops_status.json）
+                self._json({"ok": True,
+                            "data": _ops_status_payload(self._bridge())})
+            elif u.path == "/api/report":
+                from paper_trading.report import daily_report, weekly_report
+
+                q = parse_qs(u.query)
+                kind = (q.get("kind") or ["daily"])[0]
+                day = (q.get("date") or [date.today().isoformat()])[0]
+                try:
+                    days = int((q.get("days") or ["7"])[0] or 7)
+                except (TypeError, ValueError):
+                    days = 7
+                bench = (q.get("benchmark") or ["sh000300"])[0]
+                try:
+                    if kind == "weekly":
+                        data = weekly_report(self._bridge(), day, days,
+                                             benchmark=bench)
+                    else:
+                        data = daily_report(self._bridge(), day,
+                                            benchmark=bench)
+                except ValueError as exc:
+                    self._json({"ok": False, "error": f"日期格式须为 YYYY-MM-DD：{exc}"},
+                               code=400)
+                    return
+                self._json({"ok": True, "data": data})
+            elif u.path == "/api/audit":
+                from paper_trading.audit_day import audit_day
+
+                q = parse_qs(u.query)
+                day = (q.get("date") or [date.today().isoformat()])[0]
+                try:
+                    data = audit_day(self._bridge(), day)
+                except ValueError as exc:
+                    self._json({"ok": False, "error": f"日期格式须为 YYYY-MM-DD：{exc}"},
+                               code=400)
+                    return
+                self._json({"ok": True, "data": data})
             elif u.path == "/api/performance":
                 # 收益曲线 + KPI 指标：只读 account db，不构造 bridge（快）
                 self._json({"ok": True, "data": _perf_payload(self.account_db)})
+            elif u.path == "/api/benchmark":
+                # CSI300 基准：只读母库 benchmark_daily；缺数据显式 unavailable
+                self._json({"ok": True, "data": _benchmark_payload(self.account_db)})
+            elif u.path == "/api/sectors":
+                # 行业分布：持仓市值 + 母库 stock_snapshot.sector（只读）
+                self._json({"ok": True, "data": _sector_payload(self._bridge())})
             elif u.path == "/api/export.csv":
                 q = parse_qs(u.query)
                 kind = (q.get("type") or ["nav"])[0]
@@ -2370,6 +3003,12 @@ class Handler(BaseHTTPRequestHandler):
                     # limit 走参数化，因此此处 f-string 无注入面
                     table = {"nav": "nav_history", "ops": "op_log",
                              "orders": "orders", "fills": "fills"}[u.path.split("/")[2]]
+                    if not conn.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table'"
+                            " AND name=?", (table,)).fetchone():
+                        self._json({"ok": True, "data": [],
+                                    "unavailable": f"{table} 表不存在"})
+                        return
                     order_col = {"nav_history": "id", "op_log": "id",
                                  "orders": "order_id", "fills": "fill_id"}[table]
                     rows = conn.execute(

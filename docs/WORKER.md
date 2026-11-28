@@ -1,7 +1,11 @@
-﻿# WORKER — 协作协议与任务箱（主 AI ↔ 员工 AI）
+# WORKER — 协作协议与任务箱（主 AI ↔ 员工 AI）
 
 > 你是本仓库的员工 AI（打下手 + 找问题）。主 AI（我）负责交易代码的最终把关、
 > 部署与发布。本文件通过 git 同步——**开工先 `git pull --ff-only`，完工推回去**。
+>
+> **当前执行队列**：`docs/iteration-plan-20261124.md`（I1 基准曲线 → I2 行业分布 →
+> I3 收尾 → I4 可靠性/治理 → I5+ 策略组合）；里程碑看 `docs/ROADMAP.md`，
+> 母库长线看 `docs/TODO-p5-p7.md`。
 
 ## 协作协议
 
@@ -1725,6 +1729,260 @@ T9/T10 结果裁决与 M1 门禁签核（§5.1 不绿不合）、P0 事故响应
   直接 500；现在返回 `{"ok":true,"data":[],"unavailable":"..."}`。
   验收：`tests/test_dashboard.py` 新增 3 条（免口令边界 / 内置切换 200 与
   custom 403 / 缺表降级）；AGENTS 面板口令规则同步补例外说明。
+
+- [x] **T104 母项目接口探针**（2026-11-24）：新增 `integration/probes.py` +
+  `python -m paper_trading.cli data contract --json`（只读）：
+  - `strategy`：`screening_result.ai_trade_strategy` 的列/JSON 键/signal/confidence
+    形状（JSON 字符串与 dict 都认；坏 JSON/未知 signal 报错）；
+  - `sector`：`stock_snapshot(code, sector, snapshot_date)` 覆盖度/NULL；
+  - `benchmark`：`benchmark_daily` 的 5 个契约键（`sh000300`/`sh000922`/
+    `000001`/`399001`/`399006`）最新日期与缺失键。
+  形状错误 exit 3，新鲜度单独用 `stale` 表达；母库不可读三组都
+  `available=false`，不抛异常、不写母库。
+  契约文档 `docs/mother-interface.md` §6；面板取舍
+  `docs/panel-information-architecture.md`。
+  验收：`tests/test_mother_probe_t104.py` 9 条。
+
+- [x] **T105 CSI300 基准曲线（I1）**（2026-11-24）：
+  `GET /api/benchmark` 只读母库 `benchmark_daily.sh000300`；与 NAV 按**首个共同
+  交易日**归一化，返回组合/基准/超额序列、基准 MDD、`asof/stale`；共同日 <2 或
+  母库不可用 → `available=false`，不画假线。
+  面板：累计收益率模式叠加沪深300虚线（tertiary `5 4`）；覆盖度徽标显示基准
+  `asof/stale`；累计收益卡显示“超额 vs 沪深300”；悬浮显示基准/超额。
+  验收：`tests/test_dashboard_benchmark_t105.py` 4 条；全量 **1009 passed /
+  13 skipped**；生产实测 `sh000300` asof 2026-11-23、28 个共同交易日、
+  组合 −2.29% vs 基准 −8.81%、**超额 +6.52pp**、基准 MDD 9.25%、0 console error。
+
+- [x] **T106 行业分布（I2）**（2026-11-24）：
+  `GET /api/sectors`：持仓市值按行业聚合（未知排最后），返回总市值/权重/覆盖度；
+  `integration.mother.sectors` 只读 `stock_snapshot(code,sector,snapshot_date)`，
+  NULL/缺行保持 None（按“未知”），母库不可用 `available=false`。
+  面板：持仓之后新增纯 SVG 行业条形（>8 个合并“其他”），显示 asof/stale + 覆盖 x/y。
+  验收：`tests/test_sector_t106.py` 4 条；全量 **1013 passed / 13 skipped**；
+  生产实测 6 个行业、覆盖 **8/8**、合计 **90,420** = 持仓市值；有色金属 51.33%、
+  基础化工 15.54%、生物制药 10.93%、酒店旅游 10.25%、金融 9.57%、农药化肥 2.38%；
+  800px 无页面横向溢出、0 console error。
+
+- [x] **T107 P2 收尾：成交记录 + 契约探针上屏（I3）**（2026-11-24）：
+  交易页新增**成交记录**（`/api/fills`，6 列：时间/方向/股票/股数/价格/费用）+ CSV；
+  旧库/空库缺表返回空列表 + `unavailable`，不再 500。
+  运维页新增**母项目契约**卡：`/api/contract`（30s 缓存）展示
+  strategy/sector/benchmark 的 `ok/stale/asof/统计/问题`；探针失败显式不可用；
+  基准统计收窄，问题列可见。
+  验收：`tests/test_contract_t107.py` 3 条；全量 **1016 passed / 13 skipped**；
+  生产实测 contract 3 组 OK（asof 11-23）、fills 30 笔、800px 页面无溢出、
+  contract 表 687/687 无内滚、fills 721/721、深色主题正常。
+
+- [x] **T108 可靠性与发布治理（I4 部分）**（2026-11-24）：
+  - **影子对账退役**：`m3_verify.SHADOW_PARITY_ENABLED=False`；缺 `parity:diff`
+    由每日 warn 改 **skip**（双轨交叉验证由 `intent_chain` 意图↔账本、
+    `action_funnel` 动作终态承担）。要恢复双轨：改 True + 装 15:45 cron。
+  - **GitHub 保护**：`main` 禁强推/禁删（`enforce_admins=true`，普通 push 不受影响）；
+    `v*` tag ruleset（deletion / non_fast_forward / update，active）。
+  - **部署抗中断**：本次不改母项目 `deploy.sh`（母侧发布工具）；操作口径改为
+    “gate 输出落远程文件可续读”，待母侧排期再改脚本。
+  - **未做（用户决定）**：母项目上游只读 / MERGE_GUIDE 禁止反向推条款。
+  验收：`test_m3_verify_t46.py` 新增退役用例；`gh api` 返回
+  `force=false / del=false / admins=true`；tag ruleset active；
+  全量 **1017 passed / 13 skipped**。
+  生产 daily-check（11-24 03:44）：`ok=true`，`parity_trace=skip`（退役生效），
+  其余 warn 为盘前无成交/无 NAV/无分钟线/母库参照滞后。
+
+- [x] **T109 v0.11.0 发布**（2026-11-28）：面板 P2 收口（I1 基准 / I2 行业 /
+  I3 成交+契约卡）+ 第二实例修复 + T101/T102 + 影子对账退役 + 仓库保护。
+  发布前置 **11-24..11-27 四个收盘链 0 红**、NAV 每日恰 1 行、`action_funnel` 无红；
+  全量 **1017 passed / 13 skipped**。tag `v0.11.0` + GitHub Release；:8080 已部署；
+  母项目 :8081 仍 v0.10.1，vendor 待母侧排期。
+
+- [x] **T110 策略健康度（I5a）**（2026-11-28）：
+  `strategy/health.py`：共同交易日窗口，组合/基准/超额、20 日超额、窗口回撤、
+  换手（成交额/平均 NAV）、费用拖累；`classify` → healthy/watch/demote。
+  CLI `strategy health [--window 60]`；运维页“策略健康”卡 + `/api/strategy-health`
+  （30s 缓存）。**只读建议，不直接改交易**；自动降级在 I5b 接入。
+  验收：`tests/test_strategy_health_t110.py` 5 条；全量 **1022 passed / 13 skipped**；
+  生产实测窗口 09-28..11-27（32 日）：组合 −3.00% / 基准 −6.40% / 超额 **+3.40%**，
+  20 日超额 **−5.14%** → `demote`（只观察）、回撤 9.13%、换手 366.72%、费用 32.0bp。
+  **定位：只读 / advisory，不自动拦买**；11-30 计划 #32 的买单不受影响；
+  `enforce` 是用户显式策略（见 `docs/ai-autonomy.md`）。
+
+- [x] **T112 健康度进 AI 上下文（I5c-1）**（2026-11-28）：
+  `llm_context` 新增 `strategy_health`（health/recommendation/reasons/window/
+  metrics/stale/note）；`TRADER_SYSTEM` 第 12 条声明 **advisory**：
+  `demote` 时必须在 summary/reason 说明“继续/放缓/停手”，框架不自动拦买；
+  健康度失败不拖垮上下文（`available=false` + reason）。
+  验收：`tests/test_health_context_t112.py` 3 条；全量 **1028 passed / 13 skipped**；
+  生产 `llm_context` 实测包含 `strategy_health`（不调用 LLM）。
+
+- [x] **T113 health_policy（I5c-2）**（2026-11-28）：`agent.health_policy`
+  `off/advisory/enforce`，默认 **advisory**；`enforce` 且健康 `demote` 时：
+  - 计划阶段新买入进 `actions_rejected`；
+  - 执行阶段买动作拒绝（**卖出/持有正常**）；
+  - 买入条件不挂（`arm_rejected`）；
+  - 健康不可用时 **fail-open**（健康是参考数据，不因基准源缺失冻结买入）。
+  配置三件套（`config.yaml` + `utils.config` + `cli.AgentConfig`）+ 校验测试；
+  验收：`tests/test_health_policy_t113.py` 5 条；全量 **1033 passed / 13 skipped**。
+
+- [x] **T111 默认通用策略（I5b）**（2026-11-28）：把旧默认 MA5/20 更新为
+  **MA20/60 + 趋势/质量/风险**的通用中线手册（10–30 个交易日）：
+  - `strategy/general_playbook.py` 的 `GENERAL_RULES` 是唯一真相源；
+    `general` 方案 title/desc/signal/exits/rules 同步；
+  - `SCHEME_TMPL` 新增 `{rules}`，`_scheme_txt()` 把手册注入 AI prompt；
+  - `config.yaml` / CLI / main / `utils.config` 的 fallback 窗口统一 20/60；
+  - 默认是基线，可被 `custom` 覆盖；健康度仍 advisory，不自动拦买；
+  - 验收：`tests/test_general_strategy_t111.py` 3 条；全量 **1025 passed / 13 skipped**；
+    生产 `TradingBridge.strategy` 为 `CompositeStrategy(ma_cross)`、内层 MA20/60，
+    下一次计划（12-01）使用新默认。
+
+- [x] **T114 多策略资金分配（I5c-3 / A3）**（2026-11-28）：
+  `strategy/allocation.py`：`strategy.allocations` 权重（空=旧行为）、
+  额度=`weight×NAV`（累计净买入成本口径）、`AllocationBook` 持久化已用额度；
+  计划阶段裁超额买入 + 执行阶段统一闸；卖出/持有不受限；配置后买入缺
+  `strategy` 拒单；非法权重/未知策略启动失败并写 `op_log[strategy:alloc]`。
+  `llm_context.strategy_allocations` + `strategy allocations` CLI。
+  验收：`tests/test_allocation_t114.py` 18 条。
+
+- [x] **T115 AI 风格审计（A4）**（2026-11-28）：`agent replay` 增加
+  `health_review`（健康度输入、是否 demote、AI 是否回应继续/放缓/停手）、
+  `strategy_allocations`、每动作 `strategy`；计划与决策结果持久化健康度/额度快照。
+  验收：`tests/test_health_replay_t115.py` 4 条。
+
+- [x] **T116 日/周报（A5）**（2026-11-28）：`report daily|weekly --out`
+  只读输出 NAV（日报对比上一净值日）、成交、标的级归因（成本口径，不宣称
+  单日因果）、持仓、风控事件、健康度变化（期初/期末 `as_of` 切片）。
+  验收：`tests/test_report_t116.py` 3 条；`health_payload` 新增 `as_of`
+  （回放/报告不读未来数据）。
+
+- [x] **T117 默认策略对照（A6）**（2026-11-28）：`strategy compare`
+  同窗口/同费用/同风控对照 MA20/60 与旧 MA5/20；全窗口 + 样本内 70% +
+  样本外 30%；明确“历史回测，不是收益承诺”。验收：`test_compare_t117.py` 2 条。
+
+- [x] **T118 账本备份/恢复/版本化（B1）**（2026-11-28）：
+  `ledger backup/inspect/restore/migrate/drill`；sqlite backup API；
+  restore 默认 dry-run、`--apply` 前自动 `.pre-restore` 安全副本；
+  `schema_meta` 版本化，未知高版本拒绝迁移；副本演练覆盖备份→损坏→恢复。
+  验收：`tests/test_ledger_backup_t118.py` 5 条。
+
+- [x] **T119 逐日审计（B2）**（2026-11-28）：`audit day --date` 串起
+  计划/决策/意图队列/成交/条件单/op_log；每条计划动作给最终归宿，
+  未成交写 `evidence_gap`（不推断原因）。验收：`test_audit_day_t119.py` 2 条。
+
+- [x] **T120 安全复核（B3）**（2026-11-28）：`security audit` 只读检查
+  secrets 忽略/跟踪/权限、admin_token 长度、config 误写 Key、面板监听提示；
+  `docs/security-review.md` 提供无口令写入/CSRF/跨实例接管/Key 泄露演练步骤。
+  验收：`test_security_t120.py` 2 条。
+
+- [x] **T121 公司行为建议（B4/B5）**（2026-11-28）：
+  `corporate tax` 分红税估算（≤30 天 20%、31–365 天 10%、>365 天 0%，
+  缺 entry_day 不按 0 税）；`corporate suggest` 母库优先、akshare 可选，
+  不猜除权日，只输出建议与 `corporate apply` 命令。验收：`test_corporate_t121.py` 6 条。
+
+- [x] **T122 v0.12 开发批次收口**（2026-11-28）：A3–A7 + B1–B5 全部落地；
+  新增 CLI `report`/`audit`/`security`、`ledger backup|inspect|restore|migrate|drill`、
+  `strategy allocations|compare`、`corporate tax|suggest`。全量 **1078 passed / 13 skipped**；
+  未打新 tag（post-release 开发）。
+  生产验证（2026-11-28，部署 `0f4ba0c`）：`ledger backup` 成功
+  （sha256 `c2a194fe…`）；`ledger migrate` 0→1；部署前后钱类快照一致
+  （cash 59385.96 / 持仓 1900 股 / 成本 36365.36 / fills 46 / nav 40 /
+  nav_last 96989.96）；`ledger drill` 各表行数匹配；`report daily` 11-27
+  NAV +2.56% / 基准 +4.17%；`audit day` 11-27（plans=1/decisions=1/fills=4/
+  conditions=7/intents=4）；`security audit` 0 fail；`strategy compare`
+  60 日可跑。dashboard :8080 active、`/api/health` healthy。
+
+- [x] **T123 母库 daily_close 补 raw 参照（C3）**（2026-11-28，母库侧新状态）：
+  母库 `kline_daily.close_raw` 对部分池内标的仍滞后（000858 到 11-17、000333 到 11-20），
+  但新表 `daily_close` 已覆盖全市场到 11-27，且与 `close_raw` 在 **69,560 个重叠行零差异**。
+  `mother.raw_close_map` / `raw_close_asof` 改为 `kline_daily` 优先、`daily_close` 补洞
+  （`ref_source` 标注）。生产 `data fetch-raw --days 30` 后
+  `raw-coverage --gate`：**violations=[]，440/440 checked，unflipped/waiting=0**。
+  验收：`tests/test_mother_daily_close_t123.py` 3 条。
+
+- [x] **T124 AI 成绩校准（P5.5 / C1）**（2026-11-28，母库侧新状态）：
+  母库 `analysis_outcome` 1,140 行（570 个 analysis × 2 基准），verdict 已回填 374 条；
+  旧样本 2026-07/08 的 verdict 仍为空，但 `signal` 与 `ret_20/excess_20` 齐全。
+  `mother.outcome_samples` 固定 `sh000300`、按 `analysis_id` 去重、从
+  `stock_analysis_history.ai_analysis` JSON 回填 verdict/signal；
+  `strategy/calibration.py` 输出 BUY/HOLD/AVOID 命中率/均值/中位数/价差，
+  样本不足（<30 或单侧 <10）时 `sufficient=false` 且只展示不结论。
+  生产：390 条可用；BUY 23（+10.39%，命中 91.3%）、AVOID 215（+0.57%，命中 51.6%）、
+  HOLD 152（+5.62%），spread +9.82pp；**BUY 样本少，已输出警告**。
+  `llm_context.ai_scorecard` 仅在样本足够时注入（advisory）；`TRADER_SYSTEM` 第 14 条
+  明确“历史统计不是命令”。验收：`tests/test_calibration_t124.py` 7 条。
+
+- [x] **T125 母项目新状态取数/复核**（2026-11-28，全量 1088 passed / 13 skipped）：母库 `analysis_outcome` 已回填、
+  `daily_close` 已全市场覆盖、`benchmark_daily` 5 个代码到 11-27；
+  第二实例 NAV 2026-11-20..11-27 每日 1 行（10-23..11-19 历史缺口仍不插值）；
+  母 `scripts/gate.sh` 已把 `paper_trading/tests` 作为 vendor 套件运行（含契约测试，
+  失败不阻塞）。母 vendor 仍 v0.10.1，需子项目发 v0.12 tag 后由母侧 subtree pull。
+  发现母侧 E3 `/api/performance` 把 `analysis_outcome` 的两个 benchmark 行都计入
+  `signals`（n 翻倍、均值混基准），已按跨仓协议提
+  [stock-dashboard#12](https://github.com/oldfunk/stock-dashboard/issues/12)，子项目不改母码。
+
+- [x] **T126 运维自动化（M4）**（2026-11-28）：`ledger backup --keep N` 自动轮转
+  （只删 `<stem>.<stamp>.db`，`pre-restore`/`drill` 永不删）；`ledger backup-status`
+  检查最近备份年龄/完整性；`ops check` 聚合备份、心跳、`raw_gate`、熔断态，
+  red 退出 1 并写 `var/ops_status.json`。`deploy/install-ops-cron.sh` 幂等安装
+  21:10 备份 + 21:20 巡检两条 cron（只增删带标记的行）。验收：
+  `tests/test_ops_t126.py` 3 条；生产安装后 `ops check` 0 red。
+  生产验证（2026-11-28）：备份 `backups/paper_account.20261128T154005.db`
+  （600；目录 700）；`ops check` 四项全绿（备份/心跳/quote 13 只/风控），
+  cron `10 21` 备份 + `20 21` 巡检已装（原有 43 行保留，新增 2 行）；
+  账本钱类快照未变。
+
+- [x] **T127 面板运维卡（D5）**（2026-11-28）：新增三个只读接口/卡片：
+  `/api/ai-scorecard`（BUY/HOLD/AVOID 样本/20日超额/命中率 + 警告）、
+  `/api/strategy-allocations`（权重/额度/已用/剩余，未启用显式提示）、
+  `/api/ops-status`（备份/心跳/raw_gate/熔断；GET 不写 ops_status.json）。
+  三接口 60/30/60s 缓存；页面纯 SVG/无前端依赖，未启用/不可用均显式文案。
+  验收：`tests/test_dashboard.py` 21 条（含 3 条新 payload 测试）；
+  `node --check` 面板脚本通过；全量 **1094 passed / 13 skipped**。
+  生产实测（:8080，深色）：AI 成绩 BUY 23/10.39%/91.30%、HOLD 152/5.62%、
+  AVOID 215/0.57%/51.63%，BUY−AVOID 9.82pp；额度卡显式“未配置，沿用单方案”；
+  运维巡检 4 项全绿；0 console error、无横向溢出。
+
+- [x] **T128 撮合设计与 v0.12 发布准备**（2026-11-28）：
+  `docs/matching-refinement.md` 明确当前“价格闸门 + 全额成交”事实、目标/非目标、
+  成交量参与率、一字板/排队近似、竞价口径、回归清单、分阶段启用与回滚；
+  **未改执行代码**。新增 `docs/release-v0.12.0.md` 与
+  `docs/release-v0.12.0-checklist.md`（草案，未 bump/未打 tag）；
+  等 12-01 收盘链与 12-02 新默认计划执行证据后再发。
+
+- [x] **T129 前复权锚点检测（M1.5）**（2026-11-28）：新增 `data/qfq_check.py`
+  与 `data qfq-check`：本地 `daily_bars` vs 母库 `close_qfq` 同日比值，
+  比值首日偏离 >10% → `scale_mismatch`（红），区间漂移 >tol（默认 0.1%）→
+  `anchor_shift`（黄，两边锚点谁新谁旧需人工/重拉确认）；母库不是 qfq →
+  `uncomparable`（不猜）。`data repair-qfq` 默认 dry-run，`--apply` 才重拉历史
+  并写 `data:revision`；只告警/退出码，不自动改账户。`ops check` 增加 `qfq` 项。
+  验收：`test_qfq_check_t129.py` 7 条；全量 **1101 passed / 13 skipped**。
+  生产实测（2026-11-28）：`data qfq-check` 对 13 只给出 **warn**：
+  600036/600900/601318/601888 比值漂移 0.46%/2.28%/1.19%/2.09%；
+  `repair-qfq` dry-run 显示前 3 只与 akshare 重拉一致（0 修订），
+  601888 有 125 个历史日期被重锚并已 `--apply`；之后仍与母库不一致
+  ⇒ 属于**本地 akshare 与母库 qfq 锚点差异**，执行侧 `auto` 用母库、
+  本地仅兜底；`ops check` 保持 qfq=warn，不自动改写两边数据。
+
+- [x] **T130 参数研究流程（D3）**（2026-11-28）：`strategy/research.py` +
+  `strategy research`：复用 `walk_forward`，输出样本内/样本外/过拟合差距/
+  `data_fingerprint`；`classify` → candidate/overfit_risk/reject；
+  `auto_apply=false`、`forward=pending`，不写配置/规则。文档
+  `docs/research-process.md`。验收：`test_research_t130.py` 3 条。
+
+- [x] **T131 基准/行业归因 + 报告页**（2026-11-28）：`report` 支持
+  `--benchmark sh000922` 等；新增 `sector_attribution`（持仓市值按
+  `stock_snapshot.sector` 聚合，NULL 归未知，母库不可用显式 unavailable）；
+  面板新增“报告”页：日报/周报（可选基准/行业）与逐日审计，接口
+  `/api/report`、`/api/audit`。验收：`test_report_t116.py` 6 条。
+
+- [x] **T132 发布门禁 + 安全治理**（2026-11-28）：`deploy/release-gate.sh`
+  串起 pytest/ops/备份/data contract/raw-coverage/qfq/daily-check/面板三接口，
+  输出 GO/NO-GO；`.github/CODEOWNERS` + `SECURITY.md` 治理/签名说明。
+  `data qfq-check` 现在也作为 `engine backtest/optimize/walkforward` 前置门禁
+  （scale_mismatch 拒绝，anchor warn 放行）；全量 **1107 passed / 13 skipped**。
+  生产 `release-gate --skip-tests`（PT_RUN_SCENES=0）：GO；daily-check
+  10 绿 / 5 黄 / 0 红，ops 仅 qfq warn，面板三接口 200，钱类快照未变。
+
+
+
+
 
 
 

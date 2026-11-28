@@ -54,7 +54,7 @@ class PaperTradingEngine:
             self.strategy = build_from_config(
                 config_path,
                 root=Path(__file__).resolve().parents[1],
-                defaults={"short_window": 5, "long_window": 20,
+                defaults={"short_window": 20, "long_window": 60,
                           "buy_volume": 100, "sell_volume": 100})
         except StrategyConfigError as exc:
             try:
