@@ -26,7 +26,8 @@ def test_aligned_daily_and_cumulative_excess():
     assert rows[1]["paper_ret"] == pytest.approx(0.02)
     assert rows[1]["excess"] == pytest.approx(0.01)
     assert rows[2]["paper_cum"] == pytest.approx(0.01)
-    assert rows[2]["excess_cum"] == pytest.approx(0.01)
+    assert rows[2]["bench_cum"] == pytest.approx(0.005)
+    assert rows[2]["excess_cum"] == pytest.approx(0.005)
     assert "超额" in render(rows, "sh000300")
 
 
