@@ -84,9 +84,16 @@ def run_drift(deployment_id: str, window: int = 4,
               "attributions": len(rows),
               "signals": signals, "decision_id": None}
     if signals and not dry_run:
-        existing = [d["id"] for d in dao.list_decisions(limit=200)]
-        did = next_id("DL", date.today(), existing)
         today = date.today()
+        # 同日同部署只留一条 drift 决策，重复运行不刷屏
+        for d in dao.list_decisions(limit=200):
+            if (d.get("type") == "drift_alert"
+                    and d.get("target") == deployment_id
+                    and d.get("decision_date") == today.isoformat()):
+                result["decision_id"] = d["id"]
+                return result
+        existing = [d["id"] for d in dao.list_decisions(limit=200)]
+        did = next_id("DL", today, existing)
         dao.insert_decision({
             "id": did,
             "decision_date": today.isoformat(),
