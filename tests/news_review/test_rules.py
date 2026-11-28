@@ -72,6 +72,12 @@ def test_remove_advice_sentences_and_wording():
     assert "情绪" not in rules.sanitize_short_term_wording(cleaned)
 
 
+def test_noise_filter_drops_short_term_flow():
+    assert rules.is_noise({"title": "111只北交所股票获融资净买入"})
+    assert rules.is_noise({"title": "主力资金流入板块"})
+    assert not rules.is_noise({"title": "公司签订重大合同"})
+
+
 def test_build_events_caps_and_keys():
     targets = {"000792": "盐湖股份"}
     items = [{"id": 1, "title": "盐湖股份被立案调查", "code": "000792",

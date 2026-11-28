@@ -41,6 +41,10 @@ ADVICE_PATTERN = re.compile(
     r"(建议|应当|可以|考虑|值得|不妨)[^。；\n]{0,12}"
     r"(买入|卖出|加仓|减仓|清仓|建仓|止盈|止损|抄底|追高)"
 )
+NOISE_TERMS = (
+    "融资净买入", "融资余额", "主力资金", "资金流入", "资金流出", "北向资金",
+    "龙虎榜", "涨停", "跌停", "游资", "牛散", "概念股", "题材股", "短线",
+)
 CITATION_RE = re.compile(r"\[news#(\d+)\]")
 _WS_PUNCT = re.compile(r"[\s，。！？、；：\"'“”‘’（）()【】\[\]<>《》\-—_/\\|.,!?;:]+")
 
@@ -73,6 +77,12 @@ def _match_keyword(text: str, keywords: Iterable[str]) -> Optional[str]:
         if kw in text:
             return kw
     return None
+
+
+def is_noise(item: dict) -> bool:
+    """短线/资金面噪音：不进入收盘检阅（设计 §1/§6）。"""
+    text = f"{item.get('title') or ''} {item.get('summary') or ''}"
+    return any(t in text for t in NOISE_TERMS)
 
 
 def event_type_for(text: str, level: str) -> str:

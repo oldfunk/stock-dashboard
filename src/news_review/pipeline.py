@@ -178,7 +178,7 @@ def collect_inputs(date: str, limit: int = 200,
         targets = target_facts(conn, date)
         facts = {"market": market_facts(conn, date),
                  "targets": targets,
-                 "portfolio": portfolio_facts()}
+                 "portfolio": portfolio_facts(date)}
 
     start, end = _day_window(date)
     dao = NewsDAO()
@@ -189,6 +189,7 @@ def collect_inputs(date: str, limit: int = 200,
                  ).strftime("%Y-%m-%d %H:%M:%S")
         raw = dao.between(since, end, limit=limit)
     news = rules.dedupe(link_news(raw, targets))
+    news = [n for n in news if not rules.is_noise(n)]
     roles = _roles_for(news, targets)
     news = rules.rank(news, roles)[:int(max_items)]
     return facts, news, targets

@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from src.utils import now_cn
+
 INDICES = (
     ("sh000300", "沪深300"),
     ("sh000001", "上证指数"),
@@ -206,8 +208,65 @@ def target_facts(conn, date: str) -> list[dict]:
     return out
 
 
-def portfolio_facts() -> dict:
-    """纸盘变量（只读）；桥不可用时返回 available=False，不阻断笔记。"""
+def portfolio_facts(asof_date: Optional[str] = None) -> dict:
+    """纸盘变量（只读）；桥不可用时返回 available=False，不阻断笔记。
+
+    asof_date 早于今天时（F0 回填/补跑），按该日 23:59 读取 NAV/成交/计划，
+    避免把未来数据写进历史笔记；持仓没有历史表，标注"当前持仓"。
+    """
+    today = now_cn().strftime("%Y-%m-%d")
+    if asof_date and asof_date < today:
+        try:
+            from src.paper_bridge.conn import connect
+            from src.paper_bridge.settings import bridge_paths
+            _, acct = bridge_paths()
+            conn = connect(acct)
+            if conn is None:
+                return {"available": False, "reason": "纸盘账户库不可读"}
+            end = f"{asof_date} 23:59:59"
+            try:
+                nav_row = conn.execute(
+                    "SELECT * FROM nav_history WHERE timestamp <= ? "
+                    "ORDER BY timestamp DESC LIMIT 1", (end,)).fetchone()
+                fills = [dict(r) for r in conn.execute(
+                    "SELECT * FROM fills WHERE timestamp <= ? "
+                    "ORDER BY timestamp DESC LIMIT 5", (end,)).fetchall()]
+                plan_row = conn.execute(
+                    "SELECT * FROM agent_plans WHERE created_at <= ? "
+                    "ORDER BY id DESC LIMIT 1", (end,)).fetchone()
+            finally:
+                conn.close()
+            nav = dict(nav_row) if nav_row else {}
+            try:
+                from src.paper_bridge import load_positions
+                pos = (load_positions().get("data") or [])
+            except Exception:
+                pos = []
+            return {
+                "available": bool(nav),
+                "asof": asof_date,
+                "nav": {k: nav.get(k) for k in
+                        ("timestamp", "cash", "market_value", "total_value",
+                         "pnl_pct")},
+                "nav_pct_str": pct_str(nav.get("pnl_pct")),
+                "nav_note": "pnl_pct 为成立以来累计收益，不是本周收益；"
+                            "展示优先用 nav_pct_str；NAV 已按笔记日期截断",
+                "cash": nav.get("cash"),
+                "positions": [{k: p.get(k) for k in
+                               ("symbol", "total_volume", "available_volume",
+                                "avg_cost")} for p in pos],
+                "positions_note": "持仓为当前快照（回填历史笔记时无历史持仓表）",
+                "pending_plan": ({k: plan_row[k] for k in
+                                  ("id", "plan_date", "created_at")}
+                                 if plan_row else None),
+                "fills": [{k: f.get(k) for k in
+                           ("timestamp", "symbol", "direction", "volume",
+                            "price", "commission", "stamp_duty", "transfer_fee")}
+                          for f in fills],
+            }
+        except Exception as e:                    # noqa: BLE001
+            return {"available": False, "reason": str(e)[:200]}
+
     try:
         from src.paper_bridge import load_status
         st = load_status(nav_limit=2, fills_limit=5)
