@@ -40,11 +40,12 @@ fi
 
 # 超时保护（2026-10-24）：挂死用例从“无限阻塞”变为“限时失败”（fail-closed）。
 # 背景：v0.6.7 曾有 vendor 用例打真实网络挂死，无超时会卡死整条部署；
-# 2026-10-24 母套件也出现过一次偶发挂起（akshare 真实调用），故母套件 600s 上限（正常约 230s）。
+# 2026-10-24 母套件也出现过一次偶发挂起（akshare 真实调用），故母套件 900s 上限
+# （2026-11-28 实测 1585 用例约 515s；600s 余量不足，遇慢盘会假超时）。
 # 只认 GNU coreutils 的 timeout（Windows 自带 timeout.exe 语法不同，误用会破坏本机语法检查）。
 TIMEOUT_BIN=""
 if timeout --version >/dev/null 2>&1; then TIMEOUT_BIN="timeout"; fi
-MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-600}"
+MOTHER_TIMEOUT="${GATE_TIMEOUT_MOTHER:-900}"
 VENDOR_TIMEOUT="${GATE_TIMEOUT_VENDOR:-600}"
 
 # 单条用例超时（2026-11-18）：整批超时只能证明"卡在 96%"，不知道是哪条。
