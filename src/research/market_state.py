@@ -81,8 +81,9 @@ def default_fields() -> list[StateField]:
         StateField("pb_median", "valuation", "全市场 PB 中位数",
                    "stock_snapshot.pb", "null", "x", "lower_better"),
         StateField("pe_percentile_5y", "valuation",
-                   "当前 PE 在过去 5 年的分位", "kline_daily.close_raw + financial_history",
-                   "null", "%", "lower_better", implemented=False),
+                   "全市场 PE 中位数在过去 5 年的分位（年报 EPS/PIT 口径）",
+                   "market_pe_history（kline_daily.close_raw + financial_history）",
+                   "null", "%", "lower_better"),
         # 基本面
         StateField("roe_median", "fundamentals", "全市场 ROE 中位数",
                    "stock_snapshot.roe", "null", "%", "higher_better"),
@@ -406,6 +407,15 @@ def _block_breadth(conn, trade_date: str) -> tuple[dict[str, float | None], dict
     }, {"breadth_n": total20, "breadth_n_60": total60, "overlay_n": overlay_n})
 
 
+def _block_valuation_percentile(conn, trade_date: str) -> dict[str, float | None]:
+    """全市场 PE 中位数的 5 年分位（年报 EPS/PIT；样本不足返回 None）。"""
+    try:
+        from src.research.market_pe import percentile_5y
+        return {"pe_percentile_5y": percentile_5y(conn, trade_date)}
+    except Exception:
+        return {"pe_percentile_5y": None}
+
+
 def _block_volatility(conn, trade_date: str) -> tuple[dict[str, float | None], dict[str, Any]]:
     """波动率：近 20 交易日**逐票日收益**等权日均 → 年化波动（regime 波动规则用）。
 
@@ -475,6 +485,7 @@ def compute_vector(trade_date: str,
     with _read_txn() as conn:
         raw, quality = _block_snapshot(conn, trade_date)
         raw.update(_block_liquidity(conn, trade_date))
+        raw.update(_block_valuation_percentile(conn, trade_date))
         breadth_metrics, breadth_quality = _block_breadth(conn, trade_date)
         raw.update(breadth_metrics)
         vol_metrics, vol_quality = _block_volatility(conn, trade_date)

@@ -288,4 +288,14 @@ CREATE TABLE IF NOT EXISTS market_state_daily (
     quality_json TEXT,
     created_at  TEXT NOT NULL
 );
+
+-- 市场 PE 历史（R1 估值分位的数据底座，2026-11-28）
+-- 每日全市场正 PE 中位数：年报 EPS（notice_date 为披露时点）+ 不复权收盘。
+CREATE TABLE IF NOT EXISTS market_pe_history (
+    trade_date  TEXT PRIMARY KEY,
+    pe_median   REAL,
+    sample_size INTEGER,
+    coverage    REAL,
+    created_at  TEXT NOT NULL
+);
 """
