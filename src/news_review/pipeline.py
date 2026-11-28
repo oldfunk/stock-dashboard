@@ -259,6 +259,8 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
             degraded = "llm_empty"
     else:
         content_md = rules.sanitize_db_fact_citations(content_md)
+        content_md = rules.sanitize_short_term_wording(content_md)
+    content_md, advice_removed = rules.remove_advice_sentences(content_md)
 
     valid_ids = [n["id"] for n in news]
     cited = rules.referenced_ids(content_md)
@@ -278,7 +280,8 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
         "redline_hits": int(redline_hits),
         "event_count": len(events),
         "citation_count": len(cited), "citation_missing": missing,
-        "advice_hits": advice, "degraded": degraded,
+        "advice_hits": advice, "advice_removed": advice_removed,
+        "degraded": degraded,
         "duration_ms": int((time.monotonic() - started) * 1000),
         "generated_at": now_cn().isoformat(),
         "disclaimer": "AI 自主生成，不构成投资建议",

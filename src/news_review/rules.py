@@ -213,6 +213,28 @@ def advice_hits(md: str) -> list[str]:
     return [m.group(0).strip() for m in ADVICE_PATTERN.finditer(str(md or ""))]
 
 
+def remove_advice_sentences(md: str) -> tuple[str, list[str]]:
+    """删掉含交易建议的整句（发布前硬处理），返回 (清理后正文, 被删句)。
+
+    设计写死"买卖建议出现次数=0"；模型偶尔仍会写一句"建议以合理估值买入"，
+    这里按句删除并记账，避免把违规文本直接发布。
+    """
+    parts = re.split(r"(?<=[。！？\n])", str(md or ""))
+    kept, removed = [], []
+    for p in parts:
+        if ADVICE_PATTERN.search(p):
+            if p.strip():
+                removed.append(p.strip())
+        else:
+            kept.append(p)
+    return "".join(kept), removed
+
+
+def sanitize_short_term_wording(md: str) -> str:
+    """去掉短线情绪词（保留原意，不做事实改写）。"""
+    return str(md or "").replace("市场情绪", "市场表现").replace("情绪", "表现")
+
+
 _DB_FACT_SECTIONS = (1, 4)
 _SECTION_RE = re.compile(r"(?m)^##\s*(\d+)\.")
 

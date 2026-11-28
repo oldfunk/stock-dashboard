@@ -64,6 +64,14 @@ def test_sanitize_strips_citations_only_from_db_fact_sections():
     assert "[news#2]" in out and "[news#4]" in out
 
 
+def test_remove_advice_sentences_and_wording():
+    md = "事实如下。建议以合理估值买入。市场情绪偏暖。"
+    cleaned, removed = rules.remove_advice_sentences(md)
+    assert "建议" not in cleaned
+    assert removed and "买入" in removed[0]
+    assert "情绪" not in rules.sanitize_short_term_wording(cleaned)
+
+
 def test_build_events_caps_and_keys():
     targets = {"000792": "盐湖股份"}
     items = [{"id": 1, "title": "盐湖股份被立案调查", "code": "000792",
