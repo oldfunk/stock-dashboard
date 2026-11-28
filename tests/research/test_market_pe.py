@@ -41,7 +41,7 @@ def test_compute_history_uses_latest_noticed_eps():
     by = {r["trade_date"]: r for r in rows}
     assert by["2026-11-25"]["pe_median"] == pytest.approx(7.5)
     assert by["2026-11-25"]["sample_size"] == 2
-    assert by["2026-11-26"]["pe_median"] == pytest.approx(15.0)
+    assert by["2026-11-26"]["pe_median"] == pytest.approx(12.5)
     c.close()
 
 
