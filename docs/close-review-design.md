@@ -111,6 +111,10 @@
 - 纸盘决策由母策略决定，不另设节奏规则；P0/P1 事件进入**下一次计划窗口**的复核清单，不直接下单；
 - 接口字段：`nav`、`positions`、`week_fills`、`pending_plan`、`rejects`；
   `asof/stale` 必带；失败降级为"无组合变量"。
+- **实际收益（2026-11-28 增补）**：收盘检阅优先只读子项目 :8081 面板
+  `/api/performance|overview|positions`，把 `total_return/total_pnl/realized_pnl/
+  fees_total/win_rate/mdd/exposure/today_pnl` 与逐仓末实现盈亏写进事实；
+  面板不可用时回退 E0 只读桥，并在笔记中标注来源。面板只 GET、不写、不交易。
 
 ## 5. 数据与架构
 

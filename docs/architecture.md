@@ -372,7 +372,9 @@ pending、三周零流水）。任务、命令与路径的真相源是
   `entities_json/cluster_id/severity/event_type/official`。
 - **收盘检阅**：`src/news_review/`（rules/facts/prompt/pipeline）→ `ai_journal`
   （`note_type=close_review`，`status=published|annotated`）。事实来自行情库与纸盘桥，
-  新闻事实必须 `[news#id]`；市场/组合事实不带新闻引用；交易建议句发布前删除。
+  新闻事实必须 `[news#id]`；市场/组合事实不带新闻引用；交易建议句发布前删除。组合变量
+  优先读子项目 :8081 面板 `/api/performance|overview|positions`（实际收益、FIFO 已实现、
+  费用、回撤、暴露、今日盈亏），失败回退 E0 只读桥；`/api/paper/performance` 暴露快照。
 - **事件**：`news_event`（P0 政策/监管、P1 公司重大、30 分钟冷却、P0≤5/P1≤10），
   规则先行，只落库/提醒，**不触发交易**，P0/P1 只进下一计划窗口复核清单。
 - **调度**：进程内 scheduler，15:45 首跑、18:30 重试（`news.review_*`）；

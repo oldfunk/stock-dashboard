@@ -177,7 +177,8 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 - **B3 周度审计**：`scripts/paper_weekly_audit.py`；11-20→11-27 计划动作买 3/卖 2、兑现率 100%、费用 30.47 元、换手 18.36%、NAV +1.31%；拒单原因优先 `reject_reason`。
 - **E3 统一绩效页**：`src/performance.py`（纸盘/基准对齐 + 信号汇总复用），`/performance` 与 `/api/performance`；纸盘 vs 沪深300 累计超额，AI 信号按 BUY/HOLD/AVOID 的 20/60/120 日前向收益；`paper_performance.py` 改为复用同一套函数。
 - **子项目 finding #12（已修）**：`/api/performance` 把同一 analysis 的两个 benchmark 行都汇总（n 1140、60 日 528）。修复：页面/API 均按所选 `benchmark_code` 过滤，`signal_summary` 再按 `analysis_id` 去重；生产修正为 570 条 / 60 日 264 条；回归覆盖同 analysis 的 sh000300/sh000922 两行。
-- **门禁**：母 **1574** / vendor **996**（1572 → 1574，issue #12 +2 用例）；生产 worktree 全绿。
+- **收盘检阅接 :8081 实际收益**：新增 `src/paper_bridge/panel.py`，只读 GET `/api/performance|overview|positions`（2s 超时、失败回退 E0 桥）；`portfolio_facts` 输出 `actual`（累计/已实现/费用/胜率/MDD/暴露/今日盈亏）与逐仓未实现；提示词要求第 4 节写"截至 asof"；新增 `/api/paper/performance`。11-28 dry-run 实测第 4 节："截至 2026-11-27，总收益 -2.87%，总盈亏 -2874.68，今日 +811.99，MDD 4.17%，已实现 -2859.54，费用 40.68，胜率 0%（2 笔全亏）"。
+- **门禁**：母 **1578** / vendor **996**（1574 → 1578，:8081 接入 +4 用例）；生产 worktree 全绿。
 - 想法/为什么：新闻是增强项，必须先保证"事实有来源、解释不越界、建议为零"；事件只提醒不交易，避免把新闻变成新的交易信号源。
 
 ### 2026-11-28（E1 纸盘只读 API + 首页卡；B2 绩效表；纸盘自主一周）
