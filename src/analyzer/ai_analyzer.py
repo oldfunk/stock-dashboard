@@ -1067,6 +1067,14 @@ class AiAnalyzer:
         if model_line:
             prompt += "\n\n" + model_line
 
+        # E4（2026-11-28）：组合上下文（只读）；失败不阻断分析
+        try:
+            pctx = _portfolio_context_text()
+        except Exception:
+            pctx = ""
+        if pctx:
+            prompt += "\n\n" + pctx
+
         # 用户自定义附加要求（队列/自定义分析经 extra_instruction 传入）
         if extra_instruction and str(extra_instruction).strip():
             prompt += ("\n\n用户附加要求（必须遵守并体现在结论中）：\n"
@@ -1528,6 +1536,15 @@ def _data_quality_facts(stock: dict, today=None) -> dict:
             rows.append(f"{m.get('index_name') or m.get('index_code') or '?'} {chg_s}")
         facts["market"] = rows or None
     return facts
+
+
+def _portfolio_context_text() -> str:
+    """E4：给单股分析注入只读组合上下文；失败返回空串。"""
+    try:
+        from src.paper_bridge.context import portfolio_context
+        return portfolio_context()
+    except Exception:
+        return ""
 
 
 def _data_quality_text(facts: dict) -> str:
