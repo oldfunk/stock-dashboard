@@ -12,12 +12,17 @@ def client(tmp_path, monkeypatch):
     db_mod.init_database()
     from src.research.dao import ResearchDAO
     dao = ResearchDAO()
-    dao.insert_hypothesis({"id": "H-T1", "statement": "s", "status": "locked"})
+    dao.insert_hypothesis({"id": "H-T1", "prior": "p", "statement": "s",
+                           "universe": "A", "status": "locked",
+                           "created_at": "2026-11-01T00:00:00"})
     dao.insert_experiment({"id": "E-T1", "hypothesis_id": "H-T1",
                            "status": "done", "verdict": "inconclusive",
-                           "plan": {}})
+                           "data_snapshot_id": "DS-T1", "code_commit": "abc",
+                           "config_hash": "h", "plan": {},
+                           "created_at": "2026-11-01T00:00:00"})
     dao.insert_result({"id": "R-T1", "experiment_id": "E-T1",
-                       "metric": "excess", "value": 1.0, "sample_size": 30})
+                       "metric": "excess", "value": 1.0, "sample_size": 30,
+                       "created_at": "2026-11-01T00:00:00"})
     from src.scheduler import MarketScheduler
     monkeypatch.setattr(MarketScheduler, "start", lambda self: None)
     monkeypatch.setattr(MarketScheduler, "stop", lambda self: None)

@@ -8,17 +8,21 @@ from src.research.dao import ResearchDAO
 def _seed():
     dao = ResearchDAO()
     dao.insert_hypothesis({
-        "id": "H-T1", "statement": "高 MOS 超额更高", "metric": "excess_60",
-        "threshold": ">0", "status": "locked", "owner": "human"})
+        "id": "H-T1", "prior": "p", "statement": "高 MOS 超额更高",
+        "universe": "A", "metric": "excess_60",
+        "threshold": ">0", "status": "locked", "owner": "human",
+        "created_at": "2026-11-01T00:00:00"})
     dao.insert_experiment({
         "id": "E-T1", "hypothesis_id": "H-T1", "status": "done",
         "verdict": "inconclusive", "data_snapshot_id": "DS-T1",
+        "code_commit": "abc", "config_hash": "h",
         "plan": {"metric": "excess_60", "splits": ["regime"]},
-        "notes": "样本 30"})
+        "notes": "样本 30", "created_at": "2026-11-01T00:00:00"})
     dao.insert_result({
         "id": "R-T1", "experiment_id": "E-T1", "metric": "excess_60",
         "value": 3.8, "ci_low": -3.1, "ci_high": 10.5,
-        "sample_size": 30, "verdict": "inconclusive"})
+        "sample_size": 30, "verdict": "inconclusive",
+        "created_at": "2026-11-01T00:00:00"})
     return dao
 
 
