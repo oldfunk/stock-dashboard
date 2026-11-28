@@ -2165,6 +2165,33 @@ async def api_outcomes(benchmark: str = "sh000300"):
     }
 
 
+@app.get("/performance", response_class=HTMLResponse)
+async def performance_page(request: Request, benchmark: str = "sh000300"):
+    """统一绩效（E3）：纸盘 vs 基准 + AI 信号前向收益。"""
+    from src.models.database import AnalysisOutcomeDAO
+    from src.performance import paper_vs_benchmark, signal_summary
+    config = load_config()
+    page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
+    perf = paper_vs_benchmark(benchmark=benchmark, limit=250)
+    return templates.TemplateResponse(request, "performance.html", {
+        "request": request,
+        "page_title": page_title,
+        "perf": perf,
+        "signals": signal_summary(AnalysisOutcomeDAO().get_all()),
+        "benchmark": benchmark,
+        "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.get("/api/performance")
+async def api_performance(benchmark: str = "sh000300", limit: int = 250):
+    from src.models.database import AnalysisOutcomeDAO
+    from src.performance import paper_vs_benchmark, signal_summary
+    return {"ok": True,
+            "paper": paper_vs_benchmark(benchmark=benchmark, limit=limit),
+            "signals": signal_summary(AnalysisOutcomeDAO().get_all())}
+
+
 @app.get("/news", response_class=HTMLResponse)
 async def news_page(request: Request):
     """新闻与收盘检阅（F4，2026-11-28）：只读展示，来源可点。"""

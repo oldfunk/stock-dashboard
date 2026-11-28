@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>绩效 - {{ page_title }}</title>
+<style>
+:root {
+    --bg-primary:#fff; --bg-secondary:#f7f8fa; --bg-tertiary:#eef0f3;
+    --text-primary:#1a1a1a; --text-secondary:#5f6368; --text-tertiary:#9aa0a6;
+    --divider:#e0e3e7; --divider-thin:#e8eaed; --accent:#1a73e8;
+    --red:#d93025; --green:#188038; --radius:8px;
+}
+[data-theme="dark"] {
+    --bg-primary:#1e1e1e; --bg-secondary:#252526; --bg-tertiary:#2d2d30;
+    --text-primary:#e8eaed; --text-secondary:#b0b4b9; --text-tertiary:#7a7f85;
+    --divider:#3c4043; --divider-thin:#33363a; --accent:#8ab4f8;
+    --red:#f28b82; --green:#81c995;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg-primary); color:var(--text-primary);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+.page { max-width:1100px; margin:0 auto; padding:20px; }
+.header { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+          border-bottom:1px solid var(--divider); padding-bottom:12px; margin-bottom:16px; }
+.header h1 { font-size:20px; font-weight:600; margin:0; }
+.header a { color:var(--accent); text-decoration:none; font-size:13px; }
+.meta { font-size:12px; color:var(--text-tertiary); }
+.card { background:var(--bg-secondary); border:1px solid var(--divider);
+        border-radius:var(--radius); padding:16px 18px; margin-bottom:16px; }
+.card h2 { font-size:16px; font-weight:600; margin:0 0 10px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th, td { padding:6px 8px; border-bottom:1px solid var(--divider-thin); text-align:right; }
+th:first-child, td:first-child { text-align:left; }
+th { color:var(--text-tertiary); font-weight:500; }
+.up { color:var(--red); } .down { color:var(--green); }
+.empty { color:var(--text-tertiary); font-size:13px; }
+.note { font-size:12px; color:var(--text-tertiary); margin-top:10px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <a href="/">&larr; 返回看板</a>
+        <a href="/journal">投资笔记</a>
+        <a href="/news">新闻检阅</a>
+        <a href="/outcomes">信号验证</a>
+        <h1>绩效</h1>
+        <span class="meta">更新 {{ now }} · 纸盘与基准按共有交易日对齐，不插值</span>
+    </div>
+
+    <div class="card">
+        <h2>纸盘 vs {{ benchmark }}</h2>
+        {% if perf.available %}
+        {% set first = perf.rows[0] %}
+        {% set last = perf.rows[-1] %}
+        <div class="meta" style="margin-bottom:10px;">
+            {{ first.date }} → {{ last.date }} ·
+            纸盘 <b class="{{ 'up' if last.paper_cum >= 0 else 'down' }}">{{ "%+.2f%%"|format(last.paper_cum * 100) }}</b> ·
+            基准 <b class="{{ 'up' if last.bench_cum >= 0 else 'down' }}">{{ "%+.2f%%"|format(last.bench_cum * 100) }}</b> ·
+            累计超额 <b class="{{ 'up' if last.excess_cum >= 0 else 'down' }}">{{ "%+.2f%%"|format(last.excess_cum * 100) }}</b>
+        </div>
+        <table>
+            <thead><tr><th>日期</th><th>纸盘 NAV</th><th>日收益</th>
+                <th>基准</th><th>日收益</th><th>日超额</th><th>累计超额</th></tr></thead>
+            <tbody>
+            {% for r in perf.rows|reverse %}
+            <tr>
+                <td>{{ r.date }}</td>
+                <td>{{ "%.2f"|format(r.paper) }}</td>
+                <td class="{{ 'up' if (r.paper_ret or 0) >= 0 else 'down' }}">{{ "--" if r.paper_ret is none else "%+.2f%%"|format(r.paper_ret * 100) }}</td>
+                <td>{{ "%.2f"|format(r.bench) }}</td>
+                <td class="{{ 'up' if (r.bench_ret or 0) >= 0 else 'down' }}">{{ "--" if r.bench_ret is none else "%+.2f%%"|format(r.bench_ret * 100) }}</td>
+                <td class="{{ 'up' if (r.excess or 0) >= 0 else 'down' }}">{{ "--" if r.excess is none else "%+.2f%%"|format(r.excess * 100) }}</td>
+                <td class="{{ 'up' if r.excess_cum >= 0 else 'down' }}">{{ "%+.2f%%"|format(r.excess_cum * 100) }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">纸盘 NAV 或基准数据不可用（{{ perf.reason or "无可对齐日期" }}）。</div>
+        {% endif %}
+        <div class="note">基准为价格指数，不含分红；纸盘 NAV 已含费用。10-23→11-19 断档日不插值。</div>
+    </div>
+
+    <div class="card">
+        <h2>AI 信号前向收益（analysis_outcome）</h2>
+        {% if signals %}
+        <table>
+            <thead><tr><th>信号</th><th>样本</th><th>20日样本</th><th>20日收益</th>
+                <th>60日样本</th><th>60日收益</th><th>60日超额</th>
+                <th>120日样本</th><th>120日收益</th></tr></thead>
+            <tbody>
+            {% for s in signals %}
+            <tr>
+                <td>{{ s.signal }}</td><td>{{ s.n }}</td>
+                <td>{{ s.n_20 }}</td>
+                <td class="{{ 'up' if (s.ret_20 or 0) >= 0 else 'down' }}">{{ "--" if s.ret_20 is none else "%+.2f%%"|format(s.ret_20) }}</td>
+                <td>{{ s.n_60 }}</td>
+                <td class="{{ 'up' if (s.ret_60 or 0) >= 0 else 'down' }}">{{ "--" if s.ret_60 is none else "%+.2f%%"|format(s.ret_60) }}</td>
+                <td class="{{ 'up' if (s.excess_60 or 0) >= 0 else 'down' }}">{{ "--" if s.excess_60 is none else "%+.2f%%"|format(s.excess_60) }}</td>
+                <td>{{ s.n_120 }}</td>
+                <td class="{{ 'up' if (s.ret_120 or 0) >= 0 else 'down' }}">{{ "--" if s.ret_120 is none else "%+.2f%%"|format(s.ret_120) }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div class="note">数值单位：百分点（%）；只统计已有前向窗口的样本，样本少时不做结论。</div>
+        {% else %}
+        <div class="empty">暂无信号前向收益样本。</div>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>
