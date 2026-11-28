@@ -135,7 +135,10 @@ MOTHER_RC=$(cat "$BASETEMP/mother.rc" 2>/dev/null)
 MOTHER_FLOOR=$(_floor scripts/gate-baseline.txt)
 
 echo "=== vendor 套件（记录，不阻塞母项目）==="
-_run vendor "$VENDOR_TIMEOUT" paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"} ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"}
+# 2026-11-28 v0.12.0 的 test_audit_passes_local_secrets 要求 secrets 文件 0600；
+# 门禁默认 umask 022 会造出 0644 导致 vendor 1106/1107。这里只对 vendor 套件
+# 收紧 umask（不碰生产技术文件），可用 GATE_VENDOR_UMASK 覆盖。
+(umask "${GATE_VENDOR_UMASK:-077}"; _run vendor "$VENDOR_TIMEOUT" paper_trading/tests ${DESELECT[@]+"${DESELECT[@]}"} ${TIMEOUT_ARGS[@]+"${TIMEOUT_ARGS[@]}"})
 VENDOR_PASSED=$(cat "$BASETEMP/vendor.count" 2>/dev/null)
 VENDOR_RC=$(cat "$BASETEMP/vendor.rc" 2>/dev/null)
 VENDOR_FLOOR=$(_floor scripts/gate-baseline-vendor.txt)
