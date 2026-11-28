@@ -167,6 +167,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-28（数据决策：10 月缺口不重建；PE 分位落地）
+
+- **2026-10 分析缺口：决定不重建**。10 月有 23 个 screening run / 460 行输入，但 `stock_analysis_history` 无原始 AI 文本；当前模型补写会“知道未来”，既非原始也非 PIT。按“缺就缺、不能有假数据”处理，只标历史缺失，不进入绩效样本。
+- **`pe_percentile_5y` 落地**：新增 `market_pe_history` + `src/research/market_pe.py` + `scripts/backfill_market_pe.py`；口径 5 年、年报 EPS、`notice_date` PIT、正 PE、全市场中位数；并入 `daily_close` 覆盖层（同日 kline 优先）。11-27 中位 PE 39.03、样本 5454、覆盖 98.7%、5 年分位 **62.9%**；`market_state_daily` 最近 10 日已回填，缺值 0。
+- **13 只无 K 线**：不强行补；data_quality_report 增加无 K 线/末根陈旧清单（13 只无 K 线、000001 止于 11-13），逐只归因后再定白名单。
+- **门禁**：母 **1609** / vendor **1107**；生产 worktree 全绿。
+
 ### 2026-11-28（深夜：vendor v0.12.0 合流；母 1607 / vendor 1107）
 
 - **合流**：远端 main 出现 `paper-trading v0.12.0`（squash 032b896..0091b9b），本地 nightly 合并 main，无冲突；vendor 用例 996 → **1107**。

@@ -404,3 +404,15 @@ pending、三周零流水）。任务、命令与路径的真相源是
 - **数据质量/巡检**：`scripts/data_quality_report.py`（分析月度缺口、market_state
   指标缺失、daily_close 覆盖、财务字段）；`scripts/check_news_review.py`（缺笔记/
   章节/引用/建议/面板来源）。
+
+### 11.1 市场 PE 历史与分位（2026-11-28）
+
+- `market_pe_history(trade_date, pe_median, sample_size, coverage)`：每日全市场
+  正 PE 中位数；年报 EPS（`notice_date` PIT）+ 不复权收盘（kline 优先，
+  `daily_close` 补当日覆盖）。
+- `market_state_daily.metrics_json.pe_percentile_5y`：当前中位 PE 在近 5 年的
+  百分位；样本不足返回 NULL，不估算。
+- 回填：`python scripts/backfill_market_pe.py --years 5 --publish`；
+  重算状态向量：`python scripts/backfill_market_state.py --days N --force`。
+- 口径说明：这是**年报静态 PE**，与 `pe_median`（快照 TTM 中位）不是同一序列，
+  不可混用；11-27 实测样本 5454、覆盖 98.7%、分位 62.9%。
