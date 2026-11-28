@@ -31,7 +31,8 @@ def test_plan_stats_matches_same_day_direction():
 def test_plan_stats_counts_rejected_and_unmatched():
     plans = [_plan(2, "2026-11-24", [
         {"action": "sell", "symbol": "000426", "volume": 100}],
-        rejected=[{"symbol": "601899", "action": "buy", "reason": "超买入区间"}])]
+        rejected=[{"symbol": "601899", "action": "buy",
+                   "reason": "买入理由", "reject_reason": "超买入区间"}])]
     st = plan_stats(plans, [])
     assert st["matched"] == 0 and st["compliance"] == 0.0
     assert st["rejected"][0]["reason"] == "超买入区间"

@@ -57,7 +57,8 @@ def plan_stats(plans: list[dict], fills: list[dict]) -> dict:
                 "plan_date": p.get("plan_date"),
                 "symbol": r.get("symbol"),
                 "action": r.get("action"),
-                "reason": str(r.get("reason") or "")[:160],
+                "reason": str(r.get("reject_reason")
+                              or r.get("reason") or "")[:160],
             })
 
     used = set()
