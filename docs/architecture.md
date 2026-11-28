@@ -378,6 +378,7 @@ pending、三周零流水）。任务、命令与路径的真相源是
 - **调度**：进程内 scheduler，15:45 首跑、18:30 重试（`news.review_*`）；
   盘中 09:30–15:05 每 10 分钟扫一次事件（`news.event_*`）。不是 crontab 任务。
 - **面板**：首页"收盘检阅"卡（最新一篇 + 今日 P0/P1）、`/news` 页（检阅/事件/最新新闻）、
-  `/journal/{date}` 全文；API `/api/news/review/*`、`/api/news/events`。
+  `/journal/{date}` 全文、`/performance`（纸盘 vs 基准 + 信号前向收益）；
+  API `/api/news/review/*`、`/api/news/events`、`/api/performance`。
 - **口径**：新闻不进入纸盘策略；NAV/成交按笔记日期截断（历史回填不偷看未来）；
   无新闻是合法输出，失败降级为确定性摘要并标 `degraded`。
