@@ -86,8 +86,8 @@ def market_facts(conn, date: str) -> dict:
             (prev,)).fetchone()["s"]
         # daily_close.amount 单位是万元；换算成亿元（/1e4）
         turnover = {
-            "cur_yi": round((cur_amt or 0) / 1e4, 1),
-            "prev_yi": round((prev_amt or 0) / 1e4, 1),
+            "cur_yi": round((cur_amt or 0) / 1e4, 2),
+            "prev_yi": round((prev_amt or 0) / 1e4, 2),
             "pct": pct(cur_amt, prev_amt),
         }
 

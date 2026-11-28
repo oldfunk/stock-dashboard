@@ -57,18 +57,18 @@ def execution_row(fill: dict, bar: dict | None) -> dict:
 
 
 def summarize(rows: list[dict]) -> dict:
-    def avg(key):
-        vals = [r[key] for r in rows if r.get(key) is not None]
+    def avg(key, subset):
+        vals = [r[key] for r in subset if r.get(key) is not None]
         return round(sum(vals) / len(vals), 1) if vals else None
     by_dir = {}
     for d in ("买入", "卖出"):
         sub = [r for r in rows if r["direction"] == d]
-        by_dir[d] = {"n": len(sub), "avg_dev_bps": avg("dev_bps")}
+        by_dir[d] = {"n": len(sub), "avg_dev_bps": avg("dev_bps", sub)}
     return {
         "n": len(rows),
         "fees": round(sum(r["fee"] for r in rows), 2),
-        "avg_dev_bps": avg("dev_bps"),
-        "avg_dev_close_bps": avg("dev_close_bps"),
+        "avg_dev_bps": avg("dev_bps", rows),
+        "avg_dev_close_bps": avg("dev_close_bps", rows),
         "by_direction": by_dir,
     }
 

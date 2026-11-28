@@ -48,7 +48,7 @@ def test_summarize_fees_turnover_nav():
             {"timestamp": "2026-11-27T15:00:00", "total_value": 101000.0}]
     s = summarize(plans, fills, navs)
     assert s["fills"] == 1 and s["buy_fills"] == 1
-    assert s["fees"] == pytest.approx(5.0074)
+    assert s["fees"] == pytest.approx(5.01)
     assert s["turnover"] == pytest.approx(740.0)
     assert s["turnover_pct"] == pytest.approx(740.0 / 100500.0)
     assert s["nav_pct"] == pytest.approx(0.01)

@@ -66,6 +66,18 @@ def _headline(text, max_len: int = 60) -> str:
     return s[:max_len] + ('…' if len(s) > max_len else '')
 
 
+def _bracket_headline(text, max_len: int = 60) -> str:
+    """新浪快讯用「【标题】正文」格式：优先取括号里的标题。"""
+    s = str(text or '').strip()
+    if s.startswith('【'):
+        end = s.find('】')
+        if 0 < end <= max_len + 2:
+            inner = s[1:end].strip()
+            if inner:
+                return inner
+    return _headline(s, max_len=max_len)
+
+
 class AkshareEmSource:
     """东方财富个股新闻（AKShare stock_news_em）——临时默认源。"""
 
@@ -217,7 +229,7 @@ class SinaGlobalSource(_GlobalFeedSource):
 
     def _row(self, row) -> Optional[dict]:
         content = row.get('内容')
-        return self._base(_headline(content), content, '', row.get('时间'))
+        return self._base(_bracket_headline(content), content, '', row.get('时间'))
 
 
 class ThsGlobalSource(_GlobalFeedSource):
