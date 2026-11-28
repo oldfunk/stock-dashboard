@@ -204,6 +204,119 @@ def save_llm_config(provider: str, api_base: str, model: str,
     return llm_status(local_path)
 
 
+RESEARCH_ENV_KEY = "STOCK_RESEARCH_AI_API_KEY"
+
+
+def _research_config(local_path: Path = None) -> dict:
+    lp = Path(local_path) if local_path else _default_local_path()
+    try:
+        with open(lp, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        cfg = {}
+    r = cfg.get("research_llm") if isinstance(cfg, dict) else None
+    return r if isinstance(r, dict) else {}
+
+
+def research_status(local_path: Path = None) -> dict:
+    r = _research_config(local_path)
+    key = os.getenv(RESEARCH_ENV_KEY) or ""
+    return {
+        "enabled": bool(r.get("enabled", True)),
+        "mode": r.get("mode") or "inherit",
+        "provider": r.get("provider") or "",
+        "api_base": r.get("api_base") or "",
+        "model": r.get("model") or "",
+        "temperature": r.get("temperature", 0.3),
+        "max_tokens": r.get("max_tokens", 6000),
+        "has_key": bool(key),
+        "key_preview": mask_key(key),
+        "fallback_key": bool(os.getenv(ENV_KEY)),
+    }
+
+
+def save_research_config(enabled: bool = True, mode: str = "inherit",
+                         provider: str = "custom", api_base: str = "",
+                         model: str = "", api_key: str = "",
+                         temperature: float = 0.3, max_tokens: int = 6000,
+                         env_path: Path = None,
+                         local_path: Path = None) -> dict:
+    """保存研究助手设置；非敏感进 local.yaml research_llm，Key 进 .env。"""
+    mode = (mode or "inherit").strip()
+    if mode not in ("inherit", "custom"):
+        raise LLMSetupError("mode 只能是 inherit 或 custom")
+    provider = (provider or "custom").strip()
+    if provider not in {p["id"] for p in PROVIDERS}:
+        raise LLMSetupError(f"未知 provider：{provider}")
+    if mode == "custom":
+        api_base = normalize_base(api_base)
+        model = (model or "").strip()
+        if not model:
+            raise LLMSetupError("自定义模式必须填模型名")
+    try:
+        temperature = float(temperature)
+        max_tokens = int(max_tokens)
+    except (TypeError, ValueError):
+        raise LLMSetupError("temperature/max_tokens 必须是数字") from None
+
+    local_path = Path(local_path) if local_path else _default_local_path()
+    env_path = Path(env_path) if env_path else _default_env_path()
+    try:
+        with open(local_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["research_llm"] = {
+        "enabled": bool(enabled), "mode": mode, "provider": provider,
+        "api_base": api_base, "model": model,
+        "temperature": temperature, "max_tokens": max_tokens,
+    }
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(local_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+    if api_key:
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        except OSError:
+            lines = []
+        seen = False
+        out = []
+        for line in lines:
+            if line.split("=", 1)[0].strip() == RESEARCH_ENV_KEY:
+                out.append(f"{RESEARCH_ENV_KEY}={api_key}")
+                seen = True
+            else:
+                out.append(line)
+        if not seen:
+            out.append(f"{RESEARCH_ENV_KEY}={api_key}")
+        env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        os.environ[RESEARCH_ENV_KEY] = api_key
+    return research_status(local_path)
+
+
+def research_analyzer(local_path: Path = None):
+    """按研究助手设置构造 AiAnalyzer；关闭返回 None。"""
+    st = research_status(local_path)
+    if not st["enabled"]:
+        return None
+    from src.analyzer.ai_analyzer import AiAnalyzer
+    if st["mode"] == "custom":
+        an = AiAnalyzer({
+            "api_base": st["api_base"], "model": st["model"],
+            "temperature": st["temperature"], "max_tokens": st["max_tokens"],
+            "fallback": {"enabled": False},
+        })
+        key = os.getenv(RESEARCH_ENV_KEY) or os.getenv(ENV_KEY)
+        if key:
+            an.api_key = key
+        return an
+    from src.config import load_config
+    return AiAnalyzer(load_config().get("ai", {}))
+
+
 def get_concurrency(local_path: Path = None) -> int:
     """并发数（local.yaml ai.concurrency，默认 2，钳制 1~5）。"""
     try:

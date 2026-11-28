@@ -1003,6 +1003,21 @@ class LLMSaveRequest(BaseModel):
     max_tokens: int = 6000
 
 
+class ResearchLLMRequest(BaseModel):
+    enabled: bool = True
+    mode: str = "inherit"
+    provider: str = "custom"
+    api_base: str = ""
+    model: str = ""
+    api_key: str = ""
+    temperature: float = 0.3
+    max_tokens: int = 6000
+
+
+class ExperimentReviewRequest(BaseModel):
+    experiment_id: str
+
+
 @app.get("/api/llm/providers")
 async def llm_providers():
     """厂商预设列表（无敏感信息）"""
@@ -1034,6 +1049,42 @@ async def llm_save(req: LLMSaveRequest):
 async def llm_status():
     """LLM 配置状态（脱敏：只有 has_key 布尔值 + key_preview）"""
     return llm_config.llm_status()
+
+
+@app.get("/api/llm/research")
+async def research_llm_status():
+    """研究助手（R4-lite）设置状态。"""
+    return llm_config.research_status()
+
+
+@app.post("/api/llm/research/save")
+async def research_llm_save(req: ResearchLLMRequest):
+    try:
+        return llm_config.save_research_config(
+            req.enabled, req.mode, req.provider, req.api_base, req.model,
+            req.api_key or "", req.temperature, req.max_tokens)
+    except llm_config.LLMSetupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/research/experiments")
+async def api_research_experiments(limit: int = 30):
+    from src.research.dao import ResearchDAO
+    return {"ok": True, "data": ResearchDAO().list_experiments(limit=limit)}
+
+
+@app.post("/api/research/experiment_review")
+def api_experiment_review(req: ExperimentReviewRequest):
+    """R4-lite：只读研究数据，生成实验复核备忘录；不写库。"""
+    from src.research.assistant import review_experiment
+    try:
+        res = review_experiment(req.experiment_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not res.get("ok") and not res.get("content_md"):
+        raise HTTPException(status_code=400,
+                            detail=res.get("reason") or "review_failed")
+    return {"ok": True, "data": res}
 
 
 # ── LLM 分析队列 + 自定义分析 ──────────────────────────────────
