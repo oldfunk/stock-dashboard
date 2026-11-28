@@ -250,6 +250,39 @@ class ResearchDAO:
                 "UPDATE strategy_deployment SET status = ? WHERE id = ?",
                 (status, deployment_id)).rowcount
 
+    def get_deployment(self, deployment_id: str) -> dict | None:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM strategy_deployment WHERE id = ?",
+                (deployment_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_deployments(self, strategy_id: str | None = None,
+                         limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM strategy_deployment"
+        args: list = []
+        if strategy_id:
+            sql += " WHERE strategy_id = ?"
+            args.append(strategy_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        with db_conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_attributions(self, deployment_id: str | None = None,
+                          limit: int = 50) -> list[dict]:
+        sql = "SELECT * FROM strategy_attribution"
+        args: list = []
+        if deployment_id:
+            sql += " WHERE deployment_id = ?"
+            args.append(deployment_id)
+        sql += " ORDER BY period_end DESC, created_at DESC LIMIT ?"
+        args.append(limit)
+        with db_conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
+
     def insert_attribution(self, obj: Any) -> None:
         d = _data(obj)
         with db_conn() as conn:
