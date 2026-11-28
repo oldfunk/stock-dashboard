@@ -147,3 +147,21 @@
 
 **待确认**：P0/P1 事件的**阈值 v1** 已按用户授权由本文 §F1.5 设计（政策关键词/公司事件类型/
 指数阈值/限流），待用户审阅后固化到配置；dry-run 一周后再上线。
+
+## 9. 实现记录（2026-11-28）
+
+- **模块**：`src/news_review/`（`rules` 规则、`facts` 只读事实、`prompt` 提示词、
+  `pipeline` 编排）；`src/models/news_review.py`（`NewsReviewDAO`/`NewsEventDAO`）。
+- **数据**：`ai_journal` 扩 `note_type/status/sources_json/annotations/updated_at`；
+  新增 `news_event`（30 分钟冷却、P0/P1 上限）与 `news_review_run`（F3 运行记录）；
+  `news_item` 扩 `entities_json/cluster_id/severity/event_type/official`。
+- **新闻源**：新增财联社电报、东财全球快讯、新浪/同花顺/富途全球快讯适配器；
+  默认启用 `akshare_em + caixin_hot + cls_telegraph + em_global`，市场级单轮去重上限 40。
+- **发布**：scheduler 15:45 首跑、18:30 重试；AI 自主写 `ai_journal`，
+  `status=published`，人工批注不覆盖；首页"收盘检阅"卡 + `/news` 页 + `/journal` 全文。
+- **硬处理**：市场事实/组合变量两节的 `[news#]` 引用会被清掉（它们不是新闻）；
+  含交易建议的整句在发布前删除；"情绪"按"表现"替换；短线资金面新闻不进入检阅。
+- **F0 实测（11-25/26/27）**：三份均已发布；引用 14/11/18 条、无效引用 0、
+  买卖建议 0；NAV/成交按笔记日期截断（回填不偷看未来）；单次约 3.5–5.5 分钟。
+- **未做**：P2 市场级阈值（指数 ±3%/成交额 ±50%）未接入；事件只落库/面板提醒，
+  未调用 LLM 写"影响与待验证点"；F2 的周度聚合/diff 未开始。

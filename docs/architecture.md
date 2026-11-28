@@ -327,6 +327,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 - `/api/data/market_state` `/market_index` `/outcomes`
 - `/api/data/benchmark` `/benchmark/{code}` `/calendar` `/coverage`
 - `/api/data/research/hypotheses|experiments|decisions|market_states`
+- `/api/paper/status|nav|fills`（母站读纸盘账本，E1；块级降级）
 - 原则：只读、稳定 JSON 契约、缺失不抛错（子项目可静默回退）。
 
 ### 9.7 母侧实例（:8081）的运行契约（2026-11-19 补；2026-11-24 扩为 7 条）
@@ -361,3 +362,22 @@ pending、三周零流水）。任务、命令与路径的真相源是
   退出 0（收盘窗口后要求下一交易日有计划、开盘窗口后要求当天计划已 `done`，休市日只查 cron）；
   `logs/agent.log` 在计划窗口出现 tick 流水；`agent_plans` 出现目标日为下一交易日的 pending 行。
 
+
+## 10. 新闻与收盘检阅（F 线，2026-11-28）
+
+- **采集**：`src/collector/news_fetcher.py` 源注册表。个股 `akshare_em`；市场级
+  `caixin_hot / cls_telegraph / em_global / sina_global / ths_global / futu_global`。
+  默认启用前四个；市场级单源 20 条、合并去重后单轮 ≤40（`news.market_total`）。
+- **入库**：`news_item`（UNIQUE(url,title)）；实体/聚类/级别回写
+  `entities_json/cluster_id/severity/event_type/official`。
+- **收盘检阅**：`src/news_review/`（rules/facts/prompt/pipeline）→ `ai_journal`
+  （`note_type=close_review`，`status=published|annotated`）。事实来自行情库与纸盘桥，
+  新闻事实必须 `[news#id]`；市场/组合事实不带新闻引用；交易建议句发布前删除。
+- **事件**：`news_event`（P0 政策/监管、P1 公司重大、30 分钟冷却、P0≤5/P1≤10），
+  规则先行，只落库/提醒，**不触发交易**，P0/P1 只进下一计划窗口复核清单。
+- **调度**：进程内 scheduler，15:45 首跑、18:30 重试（`news.review_*`）；
+  盘中 09:30–15:05 每 10 分钟扫一次事件（`news.event_*`）。不是 crontab 任务。
+- **面板**：首页"收盘检阅"卡（最新一篇 + 今日 P0/P1）、`/news` 页（检阅/事件/最新新闻）、
+  `/journal/{date}` 全文；API `/api/news/review/*`、`/api/news/events`。
+- **口径**：新闻不进入纸盘策略；NAV/成交按笔记日期截断（历史回填不偷看未来）；
+  无新闻是合法输出，失败降级为确定性摘要并标 `degraded`。
