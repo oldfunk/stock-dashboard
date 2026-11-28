@@ -86,7 +86,7 @@ def test_run_close_review_publishes_and_links(env, monkeypatch):
                                     cfg={"news": {"review_max_items": 30}})
     assert res["ok"] is True, res
     assert res["item_count"] == 1
-    assert res["event_count"] == 1
+    assert res["event_count"] == 2   # 公司 P1 + 沪深300 +4.17% 的 P2 市场事件
     assert len(fake.calls) == 2
 
     row = NewsReviewDAO().get_review("2026-11-27")
@@ -98,7 +98,8 @@ def test_run_close_review_publishes_and_links(env, monkeypatch):
     assert run["status"] == "ok" and run["event_count"] == 1
 
     ev = NewsEventDAO().recent(trade_date="2026-11-27")
-    assert len(ev) == 1 and ev[0]["level"] == "P1"
+    assert len(ev) == 2
+    assert {e["level"] for e in ev} == {"P1", "P2"}
     with db_mod.db_conn() as conn:
         linked = conn.execute(
             "SELECT entities_json, severity, cluster_id FROM news_item "
