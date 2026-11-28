@@ -37,12 +37,15 @@ def plan_stats(plans: list[dict], fills: list[dict]) -> dict:
     rejected = []
     actions = []
     for p in plans:
+        # superseded 是历史草稿，不参与兑现率；pending 尚未到执行日，也不判未兑现。
+        if p.get("status") == "superseded":
+            continue
         data = parse_plan_json(p.get("plan_json"))
         for a in (data.get("actions") or []):
             act = str(a.get("action") or "").lower()
             if act in planned:
                 planned[act] += 1
-            if act in ("buy", "sell"):
+            if act in ("buy", "sell") and p.get("status") == "done":
                 actions.append({"plan_id": p.get("id"),
                                 "plan_date": p.get("plan_date"),
                                 "action": act,
@@ -75,7 +78,7 @@ def plan_stats(plans: list[dict], fills: list[dict]) -> dict:
         else:
             used.add(hit)
             matched += 1
-    trade_actions = planned["buy"] + planned["sell"]
+    trade_actions = len(actions)
     return {
         "plans": len(plans),
         "pending": sum(1 for p in plans if p.get("status") == "pending"),

@@ -37,6 +37,18 @@ def test_plan_stats_counts_rejected_and_unmatched():
     assert st["rejected"][0]["reason"] == "超买入区间"
 
 
+def test_plan_stats_ignores_superseded_and_pending_unmatched():
+    plans = [_plan(1, "2026-11-20", [{"action": "buy", "symbol": "601899",
+                                      "volume": 100}], status="superseded"),
+             _plan(2, "2026-11-30", [{"action": "buy", "symbol": "000848",
+                                      "volume": 100}], status="pending")]
+    st = plan_stats(plans, [])
+    assert st["planned"] == {"buy": 1, "sell": 0, "hold": 0}
+    assert st["matched"] == 0
+    assert st["compliance"] is None
+    assert st["unmatched"] == []
+
+
 def test_summarize_fees_turnover_nav():
     plans = [_plan(1, "2026-11-27", [
         {"action": "buy", "symbol": "000848", "volume": 100}])]
