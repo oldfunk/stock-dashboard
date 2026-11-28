@@ -24,6 +24,11 @@ def pct(cur: Optional[float], prev: Optional[float]) -> Optional[float]:
     return cur / prev - 1.0
 
 
+def pct_str(v: Optional[float]) -> Optional[str]:
+    """给模型看的百分比字符串（避免把 0.0417 读成 0.42%）。"""
+    return None if v is None else f"{v * 100:+.2f}%"
+
+
 def breadth_from_pairs(pairs: list[tuple[float, float]]) -> dict:
     """(今日收盘, 昨日收盘) → 涨/跌/平/总数。缺昨收的样本直接剔除。"""
     up = down = flat = 0
@@ -74,7 +79,8 @@ def market_facts(conn, date: str) -> dict:
     for code, name in INDICES:
         cur, before = _close_on(conn, code, d), _close_before(conn, code, d)
         indices.append({"code": code, "name": name, "close": cur,
-                        "pct": pct(cur, before)})
+                        "pct": pct(cur, before),
+                        "pct_str": pct_str(pct(cur, before))})
 
     turnover = None
     if prev:
@@ -89,15 +95,18 @@ def market_facts(conn, date: str) -> dict:
             "cur_yi": round((cur_amt or 0) / 1e4, 2),
             "prev_yi": round((prev_amt or 0) / 1e4, 2),
             "pct": pct(cur_amt, prev_amt),
+            "pct_str": pct_str(pct(cur_amt, prev_amt)),
         }
 
-    breadth = {"up": 0, "down": 0, "flat": 0, "total": 0, "up_pct": None}
+    breadth = {"up": 0, "down": 0, "flat": 0, "total": 0, "up_pct": None,
+               "up_pct_str": None}
     if prev:
         rows = conn.execute(
             "SELECT d.close AS cur, p.close AS prev FROM daily_close d "
             "JOIN daily_close p ON p.code = d.code AND p.trade_date = ? "
             "WHERE d.trade_date = ?", (prev, d)).fetchall()
         breadth = breadth_from_pairs([(r["cur"], r["prev"]) for r in rows])
+        breadth["up_pct_str"] = pct_str(breadth.get("up_pct"))
 
     return {"asof": d, "prev_date": prev, "indices": indices,
             "turnover": turnover, "breadth": breadth}
@@ -187,6 +196,7 @@ def target_facts(conn, date: str) -> list[dict]:
             "last_date": last_date,
             "close": cur,
             "pct": pct(cur, prev),
+            "pct_str": pct_str(pct(cur, prev)),
             "thesis": (th.get("core_thesis") or "")[:300],
             "red_lines": [r.get("condition") for r in (th.get("red_lines") or [])
                           if isinstance(r, dict)][:5],
@@ -213,7 +223,8 @@ def portfolio_facts() -> dict:
         "available": bool(nav or acc),
         "nav": {k: nav.get(k) for k in
                 ("timestamp", "cash", "market_value", "total_value", "pnl_pct")},
-        "nav_note": "pnl_pct 为成立以来累计收益，不是本周收益",
+        "nav_pct_str": pct_str(nav.get("pnl_pct")),
+        "nav_note": "pnl_pct 为成立以来累计收益，不是本周收益；展示优先用 nav_pct_str",
         "cash": acc.get("cash"),
         "positions": [{k: p.get(k) for k in
                        ("symbol", "total_volume", "available_volume", "avg_cost")}
