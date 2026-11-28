@@ -12,8 +12,9 @@
 - **E2/B3 完成**：`paper_execution_quality.py` 逐笔 VWAP/区间/收盘偏离（7 笔，2 笔在当日高低点外，记录子项目按昨收撮合）；`paper_weekly_audit.py` 11-20→11-27 兑现率 100%、费用 30.47 元、换手 18.36%。
 - **E3 绩效页完成**：`/performance` + `/api/performance`：纸盘 vs 沪深300（共有交易日、累计超额），AI 信号前向收益按 BUY/HOLD/AVOID 汇总；已按子项目 issue #12 修正为**只统计所选基准、按 analysis_id 去重**（生产 570 条/60 日 264 条，不再是 1140/528）。
 - **子项目 finding 已处理**：`oldfunk/stock-dashboard#12`（`/api/performance` analysis×benchmark 双计）修复并加回归；子项目只读、未改母码。
+- **F1.5/F5 补齐**：市场级 P2/P0 事件（指数单日 ±3%，≥5% 升 P0；成交额 ±50%）已并入收盘检阅事件；`scripts/news_review_eval.py` 可查章节/引用/建议/面板 asof，带人工标注时算 precision/recall，`--check` 硬失败 exit 1；标注模板见 `docs/news-review-annotations-template.json`。
 - **纸盘/数据**：NAV 97,125.32（-2.87%）；A2 目标池 20/20 当日；基准 5/5 到 11-27；三端口 200。
-- 门禁母 **1581** / vendor **996**；基线已更新。
+- 门禁母 **1585** / vendor **996**；基线已更新；母套件超时下限调到 900s（1585 用例实测约 515s）。
 
 > 以下为 11-24 及更早的历史状态，保留原文（只追加不删）；最新状态以上面为准。
 
