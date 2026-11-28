@@ -127,6 +127,7 @@ news:
   review_enabled: true
   review_time: "15:45"          # 首跑
   review_retry_time: "18:30"    # 源晚到/失败重试
+  review_refresh_time: "20:55"  # NAV 兜底后，若面板 asof 已到当天，刷新 AI 笔记（不覆盖人工批注）
   review_max_items: 30
   # F1.5 重大事件：规则先行，只提醒不交易
   event_check_enabled: true

@@ -171,6 +171,7 @@ class MarketScheduler:
         # 收盘检阅（2026-11-28）：首跑/重试各自只一次；事件检查独立低频
         self._last_close_review = None
         self._close_review_attempts = {}
+        self._close_review_refresh_done = None
         self._last_event_check = None
         # 每周数据维护（2026-10-21）：股息 + 信号前向收益
         self._last_weekly_refresh = None
@@ -643,8 +644,28 @@ class MarketScheduler:
         from src.models.news_review import NewsReviewDAO
         dao = NewsReviewDAO()
         date_s = today.isoformat()
-        if self._last_close_review == today or dao.get_review(date_s):
+        review = dao.get_review(date_s)
+        if review:
             self._last_close_review = today
+            refresh = _parse_hhmm(cfg.get("review_refresh_time", "20:55"))
+            if (refresh is not None and now.time() >= refresh
+                    and self._close_review_refresh_done != today):
+                self._close_review_refresh_done = today
+                if (review.get("status") or "") != "annotated":
+                    asof = ""
+                    try:
+                        from src.paper_bridge import load_panel_snapshot
+                        snap = load_panel_snapshot()
+                        asof = snap.get("asof") if snap.get("available") else ""
+                    except Exception:
+                        asof = ""
+                    if asof == date_s:
+                        threading.Thread(target=self._run_close_review,
+                                         args=(False,), daemon=True).start()
+                        logger.info("[收盘检阅] 面板已更新到 %s，刷新当日笔记",
+                                    date_s)
+            return
+        if self._last_close_review == today:
             return
         first = _parse_hhmm(cfg.get("review_time", "15:45"))
         retry = _parse_hhmm(cfg.get("review_retry_time", "18:30"))
