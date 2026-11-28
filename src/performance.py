@@ -67,10 +67,30 @@ def paper_vs_benchmark(benchmark: str = "sh000300",
             "nav_asof": nav.get("asof")}
 
 
-def signal_summary(rows: list[dict]) -> list[dict]:
-    """按 signal 汇总前向收益/超额；NULL 样本不参与均值。"""
-    buckets: dict[str, dict] = {}
+def signal_summary(rows: list[dict],
+                   benchmark_code: Optional[str] = None) -> list[dict]:
+    """按 signal 汇总前向收益/超额；NULL 样本不参与均值。
+
+    `analysis_outcome` 主键是 `(analysis_id, benchmark_code)`；若调用方传入
+    多基准行，同一 analysis_id 只计一次（优先 benchmark_code 过滤），避免
+    n 翻倍、均值混入另一个基准（issue #12）。
+    """
+    if benchmark_code:
+        rows = [r for r in (rows or [])
+                if r.get("benchmark_code") == benchmark_code]
+    seen = set()
+    unique = []
     for r in rows or []:
+        aid = r.get("analysis_id")
+        if aid is not None:
+            key = ("id", aid)
+            if key in seen:
+                continue
+            seen.add(key)
+        unique.append(r)
+
+    buckets: dict[str, dict] = {}
+    for r in unique:
         sig = str(r.get("signal") or "未知")
         b = buckets.setdefault(sig, {"signal": sig, "n": 0,
                                      "n_20": 0, "n_60": 0, "n_120": 0,

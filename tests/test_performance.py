@@ -35,6 +35,20 @@ def test_signal_summary_ignores_null_windows():
     assert out["AVOID"]["n_20"] == 0
 
 
+def test_signal_summary_dedupes_analysis_across_benchmarks():
+    rows = [
+        {"analysis_id": 1, "benchmark_code": "sh000300", "signal": "BUY",
+         "ret_60": 10.0, "excess_60": 5.0},
+        {"analysis_id": 1, "benchmark_code": "sh000922", "signal": "BUY",
+         "ret_60": 99.0, "excess_60": 88.0},
+    ]
+    out = signal_summary(rows, benchmark_code="sh000300")[0]
+    assert out["n"] == 1 and out["ret_60"] == pytest.approx(10.0)
+    # 不传基准时也按 analysis_id 去重，不把同一条分析算两次
+    out2 = signal_summary(rows)[0]
+    assert out2["n"] == 1
+
+
 def test_paper_series_sorts_and_drops_invalid():
     rows = [{"timestamp": "2026-11-27T15:00:00", "total_value": 101.0},
             {"timestamp": "2026-11-25T15:00:00", "total_value": 100.0},

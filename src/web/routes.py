@@ -2177,7 +2177,9 @@ async def performance_page(request: Request, benchmark: str = "sh000300"):
         "request": request,
         "page_title": page_title,
         "perf": perf,
-        "signals": signal_summary(AnalysisOutcomeDAO().get_all()),
+        "signals": signal_summary(
+            AnalysisOutcomeDAO().get_all(benchmark_code=benchmark),
+            benchmark_code=benchmark),
         "benchmark": benchmark,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
