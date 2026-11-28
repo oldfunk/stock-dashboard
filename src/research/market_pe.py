@@ -37,15 +37,25 @@ def compute_history(conn, start: str, end: str,
     by_date: dict[str, list[float]] = {}
     cur_code, cur_reports, ptr = None, [], 0
     rows = conn.execute(
-        "SELECT code, trade_date, COALESCE(close_raw, close) AS px "
-        "FROM kline_daily WHERE trade_date BETWEEN ? AND ? "
-        "AND COALESCE(close_raw, close) > 0 ORDER BY code, trade_date",
-        (start, end))
+        "SELECT code, trade_date, px FROM ("
+        "  SELECT code, trade_date, COALESCE(close_raw, close) AS px, 0 AS prio "
+        "  FROM kline_daily WHERE trade_date BETWEEN ? AND ? "
+        "    AND COALESCE(close_raw, close) > 0 "
+        "  UNION ALL "
+        "  SELECT code, trade_date, close AS px, 1 AS prio "
+        "  FROM daily_close WHERE trade_date BETWEEN ? AND ? "
+        "    AND close > 0"
+        ") ORDER BY code, trade_date, prio", (start, end, start, end))
+    last_day = None
     for r in rows:
         code = str(r["code"]).zfill(6)
         if code != cur_code:
             cur_code, cur_reports, ptr = code, reports.get(code, []), 0
+            last_day = None
         day, px = str(r["trade_date"])[:10], float(r["px"])
+        if day == last_day:          # kline 优先；daily_close 同日去重
+            continue
+        last_day = day
         while ptr < len(cur_reports) and cur_reports[ptr][0] <= day:
             ptr += 1
         if ptr == 0:

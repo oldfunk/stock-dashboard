@@ -17,6 +17,7 @@ def _conn():
       notice_date TEXT, eps REAL);
     CREATE TABLE kline_daily (code TEXT, trade_date TEXT, close_raw REAL,
       close REAL);
+    CREATE TABLE daily_close (code TEXT, trade_date TEXT, close REAL);
     CREATE TABLE market_pe_history (trade_date TEXT PRIMARY KEY,
       pe_median REAL, sample_size INTEGER, coverage REAL, created_at TEXT);
     """)
