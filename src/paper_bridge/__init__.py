@@ -12,10 +12,12 @@
 from .settings import bridge_paths
 from .state import (
     load_account,
+    load_latest_pending_plan,
     load_nav,
     load_pending_plan,
     load_positions,
     load_recent_fills,
+    load_status,
 )
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "load_account",
     "load_positions",
     "load_pending_plan",
+    "load_latest_pending_plan",
     "load_recent_fills",
     "load_nav",
+    "load_status",
 ]

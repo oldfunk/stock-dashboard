@@ -290,6 +290,10 @@ app = FastAPI(title="价值投资选股看板", lifespan=lifespan)
 from src.web.data_api import register_data_api
 register_data_api(app)
 
+# 纸盘只读桥（E1：母站读子项目账本；失败降级，不影响主站）
+from src.paper_bridge.api import router as paper_router
+app.include_router(paper_router)
+
 
 # -------- 模板和静态文件 --------
 templates_dir = Path(__file__).parent / "templates"
@@ -530,6 +534,10 @@ async def index(request: Request):
     # 获取最新笔记摘要
     ai_journal_latest = AiJournalDAO().get_latest()
 
+    # 纸盘只读摘要（E1；桥失败时模板整块不渲染）
+    from src.paper_bridge import load_status as _paper_status
+    paper = _paper_status(nav_limit=1, fills_limit=0)
+
     refresh = config.get('web', {}).get('refresh_interval', 30)
 
     return templates.TemplateResponse(request, "index.html", {
@@ -543,6 +551,7 @@ async def index(request: Request):
         "refresh_interval": refresh,
         "ai_watchlist": ai_watchlist,
         "ai_journal_latest": ai_journal_latest,
+        "paper": paper,
         "sector_avg": sector_avg,
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })

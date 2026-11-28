@@ -1,0 +1,21 @@
+{% if paper and paper.account and paper.account.source != 'unavailable' and paper.account.data %}
+{% set acc = paper.account.data %}
+{% set nav = (paper.nav.data[0] if paper.nav and paper.nav.data else None) %}
+{% set pos = (paper.positions.data if paper.positions and paper.positions.data else []) %}
+{% set plan = (paper.plan.data if paper.plan and paper.plan.data else None) %}
+<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin:12px 0 0;padding:10px 14px;border:1px solid var(--divider);border-radius:var(--radius);background:var(--bg-secondary);font-size:13px;color:var(--text-secondary);">
+    <span style="font-weight:600;color:var(--text-primary);">纸盘</span>
+    {% if nav %}
+    <span>总资产 <strong style="color:var(--text-primary);">{{ "%.2f"|format(nav.total_value) }}</strong>
+        <span class="{{ 'up' if (nav.pnl_pct or 0) >= 0 else 'down' }}">{{ "%+.2f"|format((nav.pnl_pct or 0) * 100) }}%</span>
+    </span>
+    {% else %}
+    <span>现金 <strong style="color:var(--text-primary);">{{ "%.2f"|format(acc.cash or 0) }}</strong></span>
+    {% endif %}
+    <span>持仓 {{ pos|length }}</span>
+    {% if plan %}<span>待执行 {{ plan.plan_date }} #{{ plan.id }}</span>{% endif %}
+    {% if nav %}<span>NAV 截至 {{ nav.timestamp[:10] }}</span>
+    {% elif paper.nav and paper.nav.asof %}<span>NAV 截至 {{ paper.nav.asof[:10] }}</span>{% endif %}
+    <a href="/paper" style="margin-left:auto;color:var(--accent);text-decoration:none;">打开纸盘 →</a>
+</div>
+{% endif %}

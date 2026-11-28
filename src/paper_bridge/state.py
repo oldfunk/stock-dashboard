@@ -94,6 +94,27 @@ def load_pending_plan(day: str | None = None, data_db=None,
         return _unavailable(f"agent_plans 读取失败：{e}")
     finally:
         conn.close()
+    return _plan_payload(row)
+
+
+def load_latest_pending_plan(data_db=None, account_db=None) -> dict:
+    """最近一条 pending 计划（不要求 plan_date=今天；面板摘要用）。"""
+    conn = _open(data_db, account_db)
+    if conn is None:
+        return _unavailable("纸盘账户库不存在或不可读")
+    try:
+        row = conn.execute(
+            "SELECT id, plan_date, symbols, plan_json, status, created_at, "
+            "executed_at FROM agent_plans WHERE status = 'pending' "
+            "ORDER BY plan_date DESC, id DESC LIMIT 1").fetchone()
+    except sqlite3.Error as e:
+        return _unavailable(f"agent_plans 读取失败：{e}")
+    finally:
+        conn.close()
+    return _plan_payload(row)
+
+
+def _plan_payload(row) -> dict:
     if not row:
         return _payload("paper:plans", None, None)
     data = dict(row)
@@ -137,3 +158,16 @@ def load_nav(limit: int = 30, data_db=None, account_db=None) -> dict:
         conn.close()
     asof = rows[0]["timestamp"] if rows else None
     return _payload("paper:nav", rows, asof)
+
+
+def load_status(nav_limit: int = 5, fills_limit: int = 5) -> dict:
+    """面板/摘要用的一组状态（每块都带 source/asof/stale）。"""
+    out = {
+        "account": load_account(),
+        "positions": load_positions(),
+        "plan": load_latest_pending_plan(),
+        "nav": load_nav(limit=nav_limit),
+    }
+    if fills_limit:
+        out["fills"] = load_recent_fills(limit=fills_limit)
+    return out
