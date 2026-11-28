@@ -132,6 +132,55 @@ class NewsReviewDAO:
         return dict(row) if row else None
 
 
+class NewsWeeklyDAO:
+    """周度收盘检阅汇总（F2）；与周六观察池复盘分开存。"""
+
+    def __init__(self, conn_factory=None):
+        if conn_factory is None:
+            from src.models.database import db_conn as conn_factory
+        self._conn = conn_factory
+
+    def save(self, week_end: str, week_start: str, title: str,
+             content_md: str, sources: list[dict], actions: dict,
+             status: str = 'published', model: str = '') -> None:
+        now = now_cn().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO news_weekly (week_end, week_start, title, "
+                "content_md, sources_json, actions_json, status, model, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(week_end) DO UPDATE SET week_start=excluded.week_start, "
+                "title=excluded.title, content_md=excluded.content_md, "
+                "sources_json=excluded.sources_json, actions_json=excluded.actions_json, "
+                "status=excluded.status, model=excluded.model, "
+                "updated_at=excluded.updated_at",
+                (week_end, week_start, title, content_md,
+                 json.dumps(sources, ensure_ascii=False),
+                 json.dumps(actions, ensure_ascii=False),
+                 status, model, now, now))
+
+    def get(self, week_end: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM news_weekly WHERE week_end = ?",
+                (week_end,)).fetchone()
+        return dict(row) if row else None
+
+    def latest(self) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM news_weekly ORDER BY week_end DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_recent(self, limit: int = 20) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT week_end, week_start, title, status FROM news_weekly "
+                "ORDER BY week_end DESC LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+
 class NewsEventDAO:
     def __init__(self, conn_factory=None):
         if conn_factory is None:

@@ -173,6 +173,7 @@ class MarketScheduler:
         self._close_review_attempts = {}
         self._close_review_refresh_done = None
         self._last_event_check = None
+        self._last_weekly_review = None
         # 每周数据维护（2026-10-21）：股息 + 信号前向收益
         self._last_weekly_refresh = None
         self._weekly_in_progress = False
@@ -620,6 +621,8 @@ class MarketScheduler:
         self._check_close_review(cfg, now)
         # ④ 盘中重大事件（F1.5）：只落提醒，不交易
         self._check_news_events(cfg, now)
+        # ⑤ 周度收盘检阅汇总（F2，默认周六 09:30）
+        self._check_weekly_news(cfg, now)
 
     def _is_trading_day(self, day) -> bool:
         try:
@@ -814,6 +817,42 @@ class MarketScheduler:
                         len(items), len(res["judgments"]))
         except Exception as e:
             logger.warning("[调度器] 舆情摘要异常: %s", e)
+
+    def _check_weekly_news(self, cfg: dict, now):
+        if not cfg.get("weekly_enabled", False):
+            return
+        try:
+            day = int(cfg.get("weekly_day", 5))
+        except (TypeError, ValueError):
+            day = 5
+        if now.weekday() != day:
+            return
+        t = _parse_hhmm(cfg.get("weekly_time", "09:30"))
+        if t is None or now.time() < t:
+            return
+        today = now.date()
+        if self._last_weekly_review == today:
+            return
+        from src.news_review.weekly import week_bounds
+        from src.models.news_review import NewsWeeklyDAO
+        start, end = week_bounds(today.isoformat())
+        if NewsWeeklyDAO().get(end):
+            self._last_weekly_review = today
+            return
+        self._last_weekly_review = today
+        threading.Thread(target=self._run_weekly_news,
+                         args=(end,), daemon=True).start()
+
+    @staticmethod
+    def _run_weekly_news(week_end: str):
+        try:
+            from src.news_review.weekly import run_weekly
+            res = run_weekly(week_end)
+            logger.info("[新闻周报] %s → %s：%s 篇日笔记",
+                        res.get("week_start"), res.get("week_end"),
+                        (res.get("actions") or {}).get("reviews"))
+        except Exception as e:                    # noqa: BLE001
+            logger.warning("[新闻周报] 生成异常: %s", e)
 
     def _check_scheduled_review(self):
         """检查是否需要触发定时 AI 复盘（节奏见 ai_review.days/time）。

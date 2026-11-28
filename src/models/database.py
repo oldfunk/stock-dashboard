@@ -421,6 +421,20 @@ CREATE TABLE IF NOT EXISTS news_review_run (
     updated_at      TEXT NOT NULL
 );
 
+-- 周度收盘检阅汇总（F2，2026-11-28）：聚合本周日笔记，不覆盖周六观察池复盘。
+CREATE TABLE IF NOT EXISTS news_weekly (
+    week_end        TEXT PRIMARY KEY,
+    week_start      TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    content_md      TEXT NOT NULL,
+    sources_json    TEXT,
+    actions_json    TEXT,
+    status          TEXT NOT NULL DEFAULT 'published',
+    model           TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 -- 基准指数日线（2026-10-21）：信号前向收益对比用；只存收盘价，价格指数不含分红。
 CREATE TABLE IF NOT EXISTS benchmark_daily (
     code            TEXT NOT NULL,

@@ -1272,6 +1272,33 @@ async def api_news_events(date: str = "", limit: int = 20,
     return {"ok": True, "data": rows}
 
 
+@app.get("/api/news/weekly")
+async def api_news_weekly(week_end: str = ""):
+    from src.models.news_review import NewsWeeklyDAO
+    dao = NewsWeeklyDAO()
+    row = dao.get(week_end) if week_end else dao.latest()
+    if not row:
+        return {"ok": True, "data": None, "message": "暂无周报"}
+    for key in ("sources_json", "actions_json"):
+        if row.get(key):
+            try:
+                row[key] = json.loads(row[key])
+            except (json.JSONDecodeError, TypeError):
+                row[key] = None
+    return {"ok": True, "data": row}
+
+
+@app.post("/api/news/weekly/run")
+async def api_news_weekly_run(week_end: str = "", dry_run: bool = False):
+    from src.news_review.weekly import run_weekly
+    if dry_run:
+        res = run_weekly(week_end or None, dry_run=True)
+        return {"ok": True, "data": res}
+    threading.Thread(target=run_weekly, kwargs={"week_end": week_end or None},
+                     daemon=True).start()
+    return {"ok": True, "accepted": True}
+
+
 def _enrich_with_financial_summary(stocks: list) -> None:
     """run_ai_analysis.py 同款富集：financial_summary 字段注入 stock（原地修改）。"""
     from src.models.database import FinancialSummaryDAO
@@ -2199,7 +2226,7 @@ async def api_performance(benchmark: str = "sh000300", limit: int = 250):
 async def news_page(request: Request):
     """新闻与收盘检阅（F4，2026-11-28）：只读展示，来源可点。"""
     from src.models.news import NewsDAO
-    from src.models.news_review import NewsEventDAO, NewsReviewDAO
+    from src.models.news_review import NewsEventDAO, NewsReviewDAO, NewsWeeklyDAO
     config = load_config()
     page_title = config.get('web', {}).get('page_title', '价值投资选股看板')
     return templates.TemplateResponse(request, "news.html", {
@@ -2209,6 +2236,8 @@ async def news_page(request: Request):
         "review": NewsReviewDAO().latest_review(),
         "reviews": NewsReviewDAO().list_reviews(limit=20),
         "events": NewsEventDAO().recent(limit=30),
+        "weekly": NewsWeeklyDAO().latest(),
+        "weeklies": NewsWeeklyDAO().list_recent(limit=12),
         "now": now_cn().strftime("%Y-%m-%d %H:%M:%S"),
     })
 

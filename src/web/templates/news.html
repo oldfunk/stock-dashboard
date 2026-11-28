@@ -81,6 +81,16 @@ body { margin:0; background:var(--bg-primary); color:var(--text-primary);
         <div class="card"><h2>收盘检阅</h2><div class="empty">暂无检阅。每个交易日 15:45 自动生成；也可在 /news 页手动触发 API。</div></div>
         {% endif %}
 
+        {% if weekly %}
+        <div class="card">
+            <h2>{{ weekly.title }}</h2>
+            <div class="meta" style="margin-bottom:8px;">
+                {{ weekly.week_start }} → {{ weekly.week_end }} · 周度聚合 · {{ weekly.status }}
+            </div>
+            <div class="md">{{ weekly.content_md | markdown_to_html | safe }}</div>
+        </div>
+        {% endif %}
+
         <div class="card">
             <h2>重大事件（P0/P1，只提醒）</h2>
             {% if events %}
@@ -128,6 +138,14 @@ body { margin:0; background:var(--bg-primary); color:var(--text-primary);
         {% endfor %}
         {% else %}
         <div class="empty">暂无归档</div>
+        {% endif %}
+        <h3 style="margin-top:16px;">周报</h3>
+        {% if weeklies %}
+        {% for w in weeklies %}
+        <a class="side-item" href="/api/news/weekly?week_end={{ w.week_end }}">{{ w.week_end }}<br>{{ w.title }}</a>
+        {% endfor %}
+        {% else %}
+        <div class="empty">暂无周报</div>
         {% endif %}
     </aside>
 </div>

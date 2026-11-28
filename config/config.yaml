@@ -136,6 +136,10 @@ news:
   event_active_end: "15:05"
   event_lookback_min: 90
   event_limits: {P0: 5, P1: 10}
+  # F2 周度聚合（2026-11-28）：周六 09:30 聚合本周日笔记
+  weekly_enabled: true
+  weekly_day: 5                 # Python weekday：0=周一，5=周六
+  weekly_time: "09:30"
   code_cooldown_min: 15         # 个股两次抓取的最小间隔（与轮询同步）
   market_cooldown_min: 60       # 市场源冷却（财新单轮约 15s，放慢到 1 小时）
 
