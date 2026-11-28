@@ -8,6 +8,7 @@
 | 项 | 路径/说明 |
 |---|---|
 | 域内代码 | `paper_trading/`（策略、撮合、风控、引擎、面板、AI 决策、集成层） |
+| 接缝探针 | `paper_trading/integration/probes.py`（`data contract`，只读形状/新鲜度检测） |
 | 本地行情库 | `data.db`（daily_bars / minute_bars / stock_pool / quote_log） |
 | 本地账户库 | `paper_account.db`（account/positions/orders/fills/nav_history/op_log/agent_plans/agent_decisions/risk_state/engine_state/conditional_orders/t1_freeze） |
 | 配置 | `config.yaml`、`engine.local.yaml`（gitignored）、`strategy.local.yaml` |
@@ -20,7 +21,7 @@
 | 项 | 路径/说明 |
 |---|---|
 | 母库市场库 | `data/db/stock_dashboard.db`（SQLite `mode=ro` + `query_only`） |
-| 读取的表 | `kline_daily`、`financial_summary`、`dividend_annual`、`benchmark_daily`、`news_item`、`screening_result`、`watchlist_thesis`、`analysis_outcome`、`market_index`、`instrument`、`trading_calendar`、`ai_watchlist`、`watchlist`、`stock_snapshot`、`stock_analysis_history`、`watchlist_notes` |
+| 读取的表 | `kline_daily`、`daily_close`、`financial_summary`、`dividend_annual`、`benchmark_daily`、`news_item`、`screening_result`、`watchlist_thesis`、`analysis_outcome`、`market_index`、`instrument`、`trading_calendar`、`ai_watchlist`、`watchlist`、`stock_snapshot`、`stock_analysis_history`、`watchlist_notes` |
 | 路径解析 | 环境变量 `STOCK_DASHBOARD_DIR`（默认 `~/stock-dashboard`）；测试用 `PAPER_TRADING_MOTHER_DIR` |
 | 只读保证 | 只 `SELECT`/`PRAGMA`；不建索引、不写、不触发母库回填 |
 
@@ -44,6 +45,7 @@
 | 运行锁 | `paper_trading.lock` / `paper_trading.event.lock`（CWD） |
 | 配置命名空间 | `config.yaml`（母项目可 vendor 一份）；子项目不读母项目 config |
 | 版本流 | 子项目 tag → 母项目 `git subtree pull --prefix=paper_trading <remote> <tag> --squash` |
+| 母项目接口形状 | 由子项目 `data contract` 只读探针检测（策略/行业/基准）；形变按 Issue 反馈，子项目不改母代码、母项目不反向推分支 |
 
 ## 5. 门禁建议（母项目侧）
 

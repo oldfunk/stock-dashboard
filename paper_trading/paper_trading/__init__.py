@@ -1,2 +1,2 @@
 """Paper Trading Framework - 本地事件驱动型模拟交易框架。"""
-__version__ = "0.10.1"
+__version__ = "0.12.0"

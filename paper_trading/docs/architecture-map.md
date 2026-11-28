@@ -3,8 +3,13 @@
 工具：`spikes/arch_map_scan.py`（纯标准库 AST，产数据到 `spikes/arch_map_data.json`）；
 基线 `main@b5983f6`。地图里的**每个数字都能重跑出来**，跑法：
 
+> **2026-11-24 复核**：`main@94c1586` 实测 **84 模块 / 24,316 行 / 69 条内部边**
+> （10-29 基线 72 / 16,517 / 49）。下表是 10-29 的历史分层快照；当前新增
+> `integration/probes.py`、`strategy/*`、面板 P2 等以代码与
+> `spikes/arch_map_data.json` 为准。
+
 ```bash
-python spikes/arch_map_scan.py .        # 72 模块 / 16,517 行 / 45 个测试文件
+python spikes/arch_map_scan.py .        # 当前实测 84 模块 / 24,316 行（2026-11-24）
 ```
 
 **方法与已知误差**（先说这个，否则后面的数字会被当成客观真理）：

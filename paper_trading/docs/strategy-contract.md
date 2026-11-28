@@ -101,7 +101,7 @@ class MyStrategy(BaseStrategy):
 
 - `TradingBridge.strategy`（CLI/cron）与 `PaperTradingEngine.strategy`
   （`main.py`）都走注册表，不再硬编码 `MACrossStrategy`；
-- 空策略列表 ⇒ 内置默认 MA5/20；
+- 空策略列表 ⇒ 内置默认 MA20/60；
 - 坏配置 ⇒ 启动即失败；cron 下一轮仍会失败并留痕，不会带病下单。
 
 ## 4. 离线独立运行（断网 + 无 LLM key）
@@ -121,10 +121,76 @@ python -m paper_trading.cli \
 - `--dry-run` 只出信号 + 风控预览，不落单；
 - 策略只看 `daily_bars`/本地行情；离线日建议用 `breakout` 或 `ma_cross`。
 
-## 5. 回归与回滚
+## 5. 母项目价值策略输入（2026-11-24）
+
+本文件的策略注册表（内置/自定义）是**子项目自己的执行策略**；母项目的价值策略
+是另一条输入，走只读契约：
+
+- 位置：`screening_result.ai_trade_strategy`（JSON 字符串，`signal/buy_zone/stop_loss`），
+  详见 `docs/mother-interface.md` §6；
+- 子项目消费点：`agent/mother_strategy.py`（买入闸门/AVOID 强制离场/计划整备）；
+- 探针：`python -m paper_trading.cli data contract --json`，形状漂移 exit 3；
+- 边界：母项目供数、子项目只读；不把母策略写进本文件的注册表，也不反向写母库。
+
+## 6. 默认通用策略（general，2026-11-28）
+
+旧默认 MA5/20 已更新为 **MA20/60 + 趋势/质量/风险**的通用中线手册：
+
+- 唯一真相源：`paper_trading/strategy/general_playbook.py` 的 `GENERAL_RULES`；
+- `general` 方案：`signal={short_window:20, long_window:60}`，`rules=GENERAL_RULES`；
+- `SCHEME_TMPL` 通过 `{rules}` 注入 AI prompt（`_scheme_txt()`）；
+- `config.yaml` / CLI / main / `utils.config` 的 fallback 同步 20/60；
+- 默认是基线，可被 `custom` 覆盖；健康度仍 advisory，不自动拦买；
+- 详细规则与边界见 `docs/default-strategy.md`。
+
+## 7. 回归与回滚
 
 - 单测：`tests/test_strategy_registry_t87.py`（正常/未知类/坏参数/重复名/
   禁用/自定义白名单/内置信号/Bridge 装配与留痕）；
+  默认策略：`tests/test_general_strategy_t111.py`（方案/提示词/config 接线）；
 - 全量 `pytest` 必须绿（除既存时窗失败）；
 - 回滚：删掉 `strategy.local.yaml` 的 `strategies` 或把 `config.yaml` 的列表
-  清空 ⇒ 自动回到内置 MA5/20；不改账本、不改执行底座。
+  清空 ⇒ 回到内置默认（当前 MA20/60）；不改账本、不改执行底座。
+
+## 8. 策略注册表 / 方案 / AI 风格 / 母策略（A7）
+
+四层不是同一个东西，边界如下：
+
+| 层 | 位置 | 谁决定 | 作用 |
+|---|---|---|---|
+| 策略注册表 | `config.yaml strategy.strategies` / `strategy.local.yaml` | 用户（本地文件） | 构造 `TradingBridge.strategy`，产出规则信号（MA/RSI/突破/自定义类） |
+| 投资方案 scheme | `strategy/schemes.py` | 用户（`strategy.local.yaml active`） | `mother/general/custom` 三种打法；决定股票池、signal 参数、prompt 手册 |
+| AI 风格 | prompt + `custom` 指令 + 每次决策的 thesis/reason | AI（在框架约束内） | 选股、择时、仓位、持有期；健康度/额度是输入，不是命令 |
+| 母策略 | 母库 `screening_result.ai_trade_strategy` | 母项目 | 只读价值信号（signal/buy_zone/stop_loss）；`mother` 方案才消费 |
+
+关系：
+
+- `general` 方案的 `signal` 会覆盖 `strategy` 段的均线参数；注册表仍负责
+  **构造实例**（默认 `ma_cross` 20/60）。两者冲突时以方案 signal 为准，
+  并在启动留痕；
+- `custom` 只替换 prompt 里的交易手册（`instruction`），不绕过注册表的
+  信号构造、风控、额度、账本；
+- 母策略不写进注册表：它是输入，不是子项目的执行策略；子项目只读，
+  不反向写母库；
+- AI 风格可以覆盖“买什么/何时买/拿多久”，但不能覆盖安全/账本/执行/数据口径；
+- 多策略资金分配（A3）在注册表之上：`strategy.allocations` 用**策略实例名**
+  给额度，方案切换不会隐式改权重；空配置=单方案旧行为。
+
+### 8.1 多策略资金分配
+
+```yaml
+strategy:
+  allocations:
+    ma_cross: 0.6
+    rsi_zone: 0.4
+```
+
+- 权重由用户/AI 显式配置，代码无默认偏好；和 ≤100%，否则启动失败；
+- 额度 = `weight × NAV`，按**累计净买入成本**计；成交后累加，卖出按标的
+  归属回冲（近似口径，CLI `strategy allocations` 明确标注）；
+- 计划与执行两处都过闸：计划阶段裁掉超额买入并写 `actions_rejected`，
+  执行阶段再校验一次；卖出/持有永不因额度被拒；
+- 未配置 = 旧行为；配置后买入缺 `strategy` 字段直接拒（fail-closed）；
+- 空/非法配置的行为：空=放行；非法=启动失败并写 `op_log[strategy:alloc]`；
+- 默认策略对照：`strategy compare`（MA20/60 vs 旧 MA5/20，同一窗口/费用/风控，
+  样本内外分段，**不是收益承诺**）。

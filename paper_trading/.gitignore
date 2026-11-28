@@ -42,6 +42,8 @@ data.db
 run_*.txt
 paper_account.db
 *.db
+*.db.bak
+*.db.pre-*.bak
 *.sqlite3
 *.db-journal
 *.db-wal

@@ -255,7 +255,7 @@ def build_all(specs: list[dict]) -> BaseStrategy:
 
 
 def default_specs(defaults: Optional[dict] = None) -> list[dict]:
-    """无 strategies 配置时的内置默认（MA5/20），参数来自 config 的 strategy 段。"""
+    """无 strategies 配置时的内置默认（MA20/60），参数来自 config 的 strategy 段。"""
     d = dict(defaults or {})
     try:
         params = {k: int(d[k]) for k in ("short_window", "long_window",

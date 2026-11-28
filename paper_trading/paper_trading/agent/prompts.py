@@ -19,7 +19,7 @@ TRADER_SYSTEM = """你是本地 A 股模拟盘的 AI 交易员。今天只做一
 "basis": ["recent_closes", "financial_summary.roe_5y_avg"],
 "thesis": "一句话论点", "catalyst": "催化（可空）",
 "risk_stop": 1450.0, "confidence": 72, "expected_hold_days": 20,
-"position_size_reason": "仓位理由"}}],
+"position_size_reason": "仓位理由", "strategy": "策略名（启用资金分配时必填）"}}],
 "conditions": [{{"symbol": "代码", "side": "buy|sell",
 "cond": {{"type": "price_below|price_above|pct_below|pct_above", "value": 数字}},
 "volume": 100, "value": 0, "expiry": "YYYY-MM-DD", "reason": "一句话理由"}}],
@@ -62,6 +62,19 @@ price 为 null 表示按最新收盘价成交；hold 也要写一行（说明为
    - 每只 hold 的 reason 必须写清“什么情况就卖”（止损价、或引用论点卖出条件），
      只写“看好/基本面好”而没有任何离场安排的 hold 视为不合格。
    - 卖出条件只能挂在当前持仓的代码上；无持仓的代码给 sell 条件会被作废。
+12. 策略健康（strategy_health）是**参考，不是命令**：
+    - 若 health=demote，必须在 summary 或相关 reason 里说明“继续/放缓/停手”的理由；
+    - 框架不会因 demote 自动拦买；是否停手由你的风格与用户显式策略决定；
+    - 不得只因为 20 日跑输就清掉仍有论点的仓位，也不得忽略它而不解释。
+13. 多策略资金分配（strategy_allocations）：
+    - `enabled=false` 时忽略此条；
+    - `enabled=true` 时，每条 buy 必须写 `strategy`，且必须是 items 里的策略名；
+    - 不得超出该策略的 remaining（额度 = weight × NAV，成本口径）；
+    - 卖出/持有不受额度限制；额度不足时降手数或换策略，不许绕过。
+14. AI 历史成绩（ai_scorecard）是**历史统计，不是命令**：
+    - 样本不足（available=false）时忽略它，不得编造命中率；
+    - 样本足够时只作自我校准参考：不得用历史命中率替代本次论点/数据/止损；
+    - 若本次判断与历史弱项一致（例如继续买历史弱侧的类别），在 reason 里说明为什么这次不同。
 """
 
 USER_TMPL = """股票池：{pool}
@@ -74,6 +87,8 @@ USER_TMPL = """股票池：{pool}
 请输出今日决策 JSON。"""
 
 SCHEME_TMPL = """当前投资方案：{title}（{name}）——{desc}
+方案规则：
+{rules}
 离场纪律：{exits}"""
 
 MOTHER_RULES = """

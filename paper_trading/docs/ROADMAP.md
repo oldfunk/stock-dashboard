@@ -4,8 +4,9 @@
 > **每次迭代开始前先读本文件，完成后回来勾选复选框并补一行进度记录。**
 > 迭代时不得遗忘这里的事项；未完成的 P0 不进入下一里程碑。
 
-- 当前里程碑：**M1 已验收（2026-10-23）**：观察日全绿后按门禁在 Pi 开启引擎（本机 `engine.local.yaml`，repo 默认保持 `false`）；下一步 M1.5 除权除息自动化
-- 当前版本：v0.7.8（M2 行情质量守卫上线 + 协作任务箱 WORKER.md；本地 301 项全绿）
+- 当前里程碑：**M1/M2/M3/M4 已验收**（M3 观察期 2026-11-16 签字；M4 收尾完成）；当前阶段 **v0.12 开发批次（I5c + I6/I7/I8）**
+- 当前版本：**v0.12.0**（2026-11-28 发布；I5a–I5c / A4–A7 / B1–B5 / C1/C3 / 运维+面板+研究；**1107 passed / 13 skipped**；生产 :8080 已部署）
+- 当前迭代计划：**`docs/iteration-plan-20261124.md`**（I1 基准曲线 → I2 行业分布 → I3 收尾 → I4 可靠性/治理 → I5 策略组合 → I6 审计/报告 → I7 运维/安全 → I8 公司行为）
 - 纪律：**M1 已验收，Pi 于 2026-10-23 开启引擎**（本机 `engine.local.yaml`；发布版 `config.yaml` 保持 `enabled: false`，防止母项目/新克隆被自动开启）
 - 相关：`README.md`（用法）、`AGENTS.md`（Agent 硬约束）、`docs/`（本文档）
 
@@ -124,10 +125,12 @@
 
 ### M1.5 — 除权除息自动化（M1 之后、M2 之前）
 
-- [ ] 用 akshare 分红送配数据自动生成调整建议（只建议，人工确认后落账）。
-- [ ] 前复权数据源切换检测 + 数据快照对比，自动触发复核流程。
+- [x] 用 akshare 分红送配数据自动生成调整建议（只建议，人工确认后落账）。✅ 2026-11-28 `corporate suggest`（母库优先，akshare 可选；不猜除权日）
+- [x] 前复权数据源切换检测 + 数据快照对比，自动触发复核流程。✅ 2026-11-28
+  `data qfq-check`：本地 vs 母库同日比值漂移/尺度不一致；`ops check` 纳入 qfq 项。
+  只告警/退出码，不自动改数据（快照对比由 `data compare` + 引擎 fingerprint 承担）。
 - [x] 自动交易日历（akshare 缓存 + 本地回退），T+1 解冻不再依赖手填 `holidays`（v0.6.5：`calendar sync/status`，缓存 `var/trading_calendar.json`，失败回退周末+`config.holidays`）。
-- [ ] 分红税口径（持股 1 个月内 20%、1 月–1 年 10%、超 1 年免税）建模。
+- [x] 分红税口径（持股 1 个月内 20%、1 月–1 年 10%、超 1 年免税）建模。✅ 2026-11-28 `corporate tax`（缺 entry_day 不按 0 税）
 
 ### M1.6 — AI 实时执行层（v0.6.2–v0.6.5，提前于 M1.5 落地）
 
@@ -173,22 +176,31 @@
   fingerprint、`optimize/walkforward` 绑 `data_fingerprint`；5 项测试
   （稳定性/敏感性/序无关/可复现/分钟哈希）。
 - [ ] 撮合细化：成交量约束、涨跌停排队近似、集合竞价简化口径集中到一处文档。
+  2026-11-28：设计与回归清单完成 `docs/matching-refinement.md`；代码待 v0.12 发布后单独分支，默认关闭。
 - [ ] 基准与归因：等权买入持有之外，加入指数基准、行业/风格暴露（可选）。
-- [ ] 参数研究流程固化：样本内选择 → 样本外检验 → 前向模拟；禁止把网格第一名直接写生产。
+  - 2026-11-24 进度：数据契约已由母项目 issue #10 交付（`sh000300` 到 11-23、
+    `stock_snapshot.sector` 94.9%）；只读探针 `data contract` 已上线；
+    **面板实现见 `docs/iteration-plan-20261124.md` I1/I2**。
+  - 2026-11-28：报告已支持 `--benchmark sh000922` 与行业归因；风格暴露仍未做。
+- [x] 参数研究流程固化：样本内选择 → 样本外检验 → 前向模拟；禁止把网格第一名直接写生产。
+  2026-11-28：`strategy research` + `docs/research-process.md`；前向仍 pending，不自动写配置。
 
 ## 3. M3 — 策略与组合
 
-- [ ] 多策略并行与资金分配（方案层），组合层风控统一入口。
-- [ ] 策略健康度：滚动超额、回撤、换手、费用拖累；策略失效自动降级为观察。
-- [ ] AI 选股与规则执行的分工审计：AI 提名 → 程序校验 → 规则择时，每步可回放。
-- [ ] 报告：日/周报（持仓、成交、归因、风控事件），CLI 可导出。
+- [x] 多策略并行与资金分配（方案层），组合层风控统一入口。✅ 2026-11-28 `strategy.allocations`（计划/执行两处闸，卖出不受限）
+- [x] 策略健康度：滚动超额、回撤、换手、费用拖累；健康度作为 **AI 输入/建议**，
+  是否降级为观察由 AI 风格或用户显式策略决定（默认 `advisory`，不自动拦买）。✅ 2026-11-28 `strategy health` + `health_policy`
+- [x] AI 选股与规则执行的分工审计：AI 提名 → 程序校验 → 规则择时，每步可回放。✅ 2026-11-28 `agent replay` + `audit day`
+- [x] 报告：日/周报（持仓、成交、归因、风控事件），CLI 可导出。✅ 2026-11-28 `report daily|weekly --out`
 
 ## 4. M4 — 可运维与可审计
 
-- [ ] 账户与风控状态备份/恢复演练；`paper_account.db` 迁移工具与版本化。
-- [ ] 任务监控：cron/守护进程心跳、报价源健康、熔断事件通知。
-- [ ] 审计报告：任意一天可回答「为什么买/为什么没买/为什么卖」。
-- [ ] 安全复核：本地面板、Key、口令的攻防演练与文档更新。
+- [x] 账户与风控状态备份/恢复演练；`paper_account.db` 迁移工具与版本化。✅ 2026-11-28 `ledger backup/inspect/restore/migrate/drill`
+- [x] 任务监控：cron/守护进程心跳、报价源健康、熔断事件通知。✅ 2026-11-28
+  `ops check`（heartbeat + raw_gate + risk halt + backup）；cron 日志/退出码 +
+  `var/ops_status.json`；外部推送未接（用户未要求）
+- [x] 审计报告：任意一天可回答「为什么买/为什么没买/为什么卖」。✅ 2026-11-28 `audit day`
+- [x] 安全复核：本地面板、Key、口令的攻防演练与文档更新。✅ 2026-11-28 `security audit` + `docs/security-review.md`
 
 > 明确不做（用户决策）：不接券商实盘、不做 tick/HFT、不做期权、不做空。
 
@@ -202,6 +214,29 @@
 
 | 日期 | 版本 | 里程碑 | 内容 |
 |------|------|--------|------|
+| 2026-11-24 | v0.10.1+ | P2-1 | **I1 CSI300 基准**：`/api/benchmark` 服务端对齐/归一化（首个共同交易日）；面板累计收益率叠加沪深300虚线、超额 KPI、`asof/stale` 徽标；母库缺数据显式不可用。生产 28 个共同交易日、组合 −2.29% vs 基准 −8.81%、**超额 +6.52pp**、基准 MDD 9.25%；全量 **1009 passed / 13 skipped**。 |
+| 2026-11-24 | v0.10.1+ | P2-2 | **I2 行业分布**：`/api/sectors` 持仓市值按 `stock_snapshot.sector` 聚合（NULL→未知、未知排最后、>8 合并其他）；面板纯 SVG 条形 + 覆盖 x/y。生产 6 行业、覆盖 8/8、合计 90,420 = 持仓市值；全量 **1013 passed / 13 skipped**。 |
+| 2026-11-24 | v0.10.1+ | P2-3 | **I3 P2 收尾**：交易页成交记录（6 列 + CSV，缺表降级空）；运维页母项目契约卡（`/api/contract` 30s 缓存，三组 ok/stale/asof/统计/问题）；基准统计收窄、问题列可见。生产 contract 3 组 OK、fills 30 笔、800px 无溢出、深色正常；全量 **1016 passed / 13 skipped**。 |
+| 2026-11-24 | v0.10.1+ | I4 | **可靠性与治理（部分）**：影子对账退役（缺 `parity:diff` 由 warn 改 skip，双轨交叉验证由 `intent_chain`/`action_funnel` 承担）；`main` 禁强推/禁删、`v*` tag ruleset active；部署抗中断留母侧；上游只读按用户决定不做。 |
+| 2026-11-28 | v0.11.0 | 发布 | **v0.11.0 发布**：面板 P2 收口（CSI300 基准/行业分布/成交记录+CSV/母项目契约卡）+ 第二实例面板修复 + T101/T102 + 影子对账退役 + 仓库保护；发布前置 11-24..11-27 **4 个收盘链 0 红**、NAV 每日 1 行；全量 **1017 passed / 13 skipped**。 |
+| 2026-11-28 | v0.11.0+ | I5a | **策略健康度**：`strategy health` + `/api/strategy-health` + 运维页卡；窗口超额/20日超额/回撤/换手/费用拖累，healthy/watch/demote 建议（只读）。生产 32 日：组合 −3.00% vs 基准 −6.40%、20日超额 −5.14% → demote；全量 **1022 passed / 13 skipped**。 |
+| 2026-11-28 | v0.11.0+ | I5b | **默认通用策略**：旧 MA5/20 → **MA20/60 + 趋势/质量/风险 playbook**；`GENERAL_RULES` 由 `SCHEME_TMPL` 注入 AI prompt，`general` 方案 title/desc/exits/signal 与 config fallback 同步；默认基线可被 `custom` 覆盖，健康度仍 advisory。全量 **1025 passed / 13 skipped**。 |
+| 2026-11-28 | v0.11.0+ | I5c-1 | **健康度进 AI 上下文**：`llm_context.strategy_health`（health/recommendation/reasons/window/metrics/stale）；`TRADER_SYSTEM` 第 12 条 advisory（demote 必须解释继续/放缓/停手，不自动拦买）。全量 **1028 passed / 13 skipped**。 |
+| 2026-11-28 | v0.11.0+ | I5c-2 | **health_policy**：`agent.health_policy=off/advisory/enforce`（默认 advisory）；enforce 且 demote 时计划/执行/买入条件三处拒新买，卖出/持有正常；健康不可用 fail-open。配置三件套 + 5 条测试；全量 **1033 passed / 13 skipped**。 |
+| 2026-11-28 | v0.11.0+ | I5c-3 / A3 | **多策略资金分配**：`strategy.allocations`（空=旧行为）；额度=weight×NAV（累计净买入成本）；计划/执行两处闸，卖出/持有不受限；配置后买入缺 strategy 拒单；非法配置启动失败。`strategy allocations` + 18 条测试。 |
+| 2026-11-28 | v0.11.0+ | A4/A5 | **AI 风格审计 + 日/周报**：`agent replay.health_review`（demote 是否回应）；`report daily/weekly --out`（NAV/成交/归因/风控/健康度变化）。7 条测试。 |
+| 2026-11-28 | v0.11.0+ | A6/A7 | **默认策略对照 + 文档**：`strategy compare`（MA20/60 vs MA5/20，同窗口/费用/风控，样本内外分段，非收益承诺）；`strategy-contract.md` §8 四层边界与分配口径。2 条测试。 |
+| 2026-11-28 | v0.11.0+ | B1/B2 | **账本备份/恢复/版本化 + 逐日审计**：`ledger backup/inspect/restore/migrate/drill`（restore 默认 dry-run，`--apply` 前自动安全副本）；`audit day` 串计划/决策/意图/成交/条件单。7 条测试。 |
+| 2026-11-28 | v0.11.0+ | B3/B4/B5 | **安全复核 + 公司行为建议**：`security audit` + `docs/security-review.md`；`corporate tax`（≤30天20%/31-365天10%/>365天0%，缺 entry_day 不按0）；`corporate suggest`（母库优先，akshare 可选，不猜除权日）。8 条测试。 |
+| 2026-11-28 | v0.11.0+ | 生产验证 | 部署 `0f4ba0c`：`ledger backup` + `migrate 0→1`；部署前后钱类快照一致（cash 59385.96 / 1900 股 / 成本 36365.36 / fills 46 / nav 40 / nav_last 96989.96）；`ledger drill` 行数匹配；report/audit/security/compare 生产只读验证通过；dashboard active、health healthy。 |
+| 2026-11-28 | v0.11.0+ | C3 | **母库 `daily_close` 补 raw 参照**：`kline_daily.close_raw` 按标的滞后时用 `daily_close` 补洞（69,560 重叠行零差异）；生产 `raw-coverage --gate` 0 violations、440/440 checked；3 条测试。 |
+| 2026-11-28 | v0.11.0+ | C1 / P5.5 | **AI 成绩校准**：母库 570 analysis 去重（固定 sh000300）、旧样本按 signal+20日超额；生产 390 条可用，BUY 23/AVOID 215/HOLD 152，spread +9.82pp；`ai_scorecard` 样本足够才进上下文（advisory）；7 条测试。 |
+| 2026-11-28 | v0.11.0+ | T126/T127 | **运维自动化 + 面板卡**：`ledger backup --keep`/`backup-status`、`ops check`（备份/心跳/raw_gate/熔断）与 21:10/21:20 cron；面板新增 AI 成绩/策略额度/运维巡检三卡（`/api/ai-scorecard`、`/api/strategy-allocations`、`/api/ops-status`）；生产 4 项全绿。 |
+| 2026-11-28 | v0.11.0+ | T129 | **qfq 锚点检测**：`data qfq-check` / `repair-qfq`，`ops check` 纳入 qfq；生产 4 只 warn（akshare 与母库锚点差异），601888 已重拉 125 日；执行侧 auto 用母库，本地仅兜底。 |
+| 2026-11-28 | v0.11.0+ | T130–T132 | **研究/报告/门禁**：`strategy research`（样本内→样本外→前向占位，不自动写生产）；`report --benchmark` + 行业归因；面板“报告”页（日/周报+逐日审计）；`deploy/release-gate.sh`；CODEOWNERS/安全治理。 |
+| 2026-11-28 | v0.12.0 | 发布 | **v0.12.0 发布**（用户决定加速，post-release 观察 11-30/12-01）：I5 策略组合/额度、A4–A7、B1–B5、C1/C3、运维自动化、面板四页、参数研究；全量 1107 passed / 13 skipped；release-gate GO；daily-check 0 红；母侧 vendor 随后。 |
+| 2026-11-24 | v0.10.1 | P2 + 接缝 | **第二实例面板修复**：内置方案切换免口令（custom/改指令仍要口令）、`/api/intents` 旧线实例降级；**母项目接口探针** `data contract`（策略/行业/基准形状+新鲜度，形状错误 exit 3）；母项目 issue #10（基准/行业契约）与 #11（v0.10.1 通知）关闭；新增面板信息架构与迭代计划。全量 **1005 passed / 13 skipped**；生产 :8080/:8081 已部署。 |
+| 2026-11-23 | v0.10.0 | M3/M4 + P2 | **v0.10.0** 合流与发布（母项目 vendor）：母策略闸门/AVOID 强制离场、T96 计划新鲜度、执行顺序 卖→买→hold、面板 P1/P2（曲线/分时/FIFO/CSV）、T101 丢单修复、T102 `action_funnel` 终态门禁。全量 993→996；引擎接单沙箱复验（SELL 000426 100 成交，生产账本 md5 未变）。 |
 | 2026-10-29 | — | **重构 M1 关闭**（`refactor-plan-open-source.md` 里程碑体系，与本文件旧 M1/M2 编号并存待 T27 统一） | **M1（rqalpha 数据适配与 parity）正式签字关闭**：七条门禁+第 8 条+四条件全满足（`docs/m1-signoff.md` 终评）。关键证据：判定层 111/111 全等（T19）、S 级 97.3%/100%、26+1 笔缺口全归因（T19-F 表+T12 收尾）、T16 钱类双侧双跑（T29：事故尺度/涨跌停带实测等价、费用差=过户费 0.001% 量化到分、3 条 L2 N/A 论证）、D1 终局裁决（T18：current_bar+F 级书面容差，T+1=M2 路径）。生产迁 NEC（Pi 过劳，sha256 数据零丢失）；心跳看门狗上线。340 passed。**下一步 M2 拍板（前置 T13）**。 |
 | 2026-10-27 | v0.7.8 | M2 + 双 AI 协作 | ① **M2 行情质量守卫**：`data/quality.py` 五类发现（no_data/同日重复/非法价/异常涨跌幅±31%/中段缺日/停牌停滞≥10 交易日），`sync_data` 钩子落 `op_log[data:quality]`（同步失败与停滞不静默）+ CLI `data quality`，守卫异常不阻断同步，5 项测试（含 CLI 子进程实测）；② **双 AI 协作启动**：`docs/WORKER.md` 协议 + 任务箱 Batch 1（T1 对抗性重审/T2 文档清扫/T3 覆盖盘点/T4 路线图评估），git 同步、分支提案制。本地 **301** 项全绿。 |
 | 2026-10-27 | v0.7.7 | 一周代码重审 | **`docs/TODO-code-review-20261027.md` R0–R9 全部完成**（用户指令：事故后全量重审本周 40 提交/~2400 行）。发现真问题 6 个全修：① 配置接线双层白名单断层（load_config 归一化层 + cli 构造层，`require_stop`/`news_*`/`context_budget` 共 7 字段断线）→ 两层补齐+反射回归测试+wiring_audit 脚本；② 母库 TTL 缓存永不命中（12 处键含连接序号、_COLUMNS 每连全清）→ 键改库路径；③ 6 处价源绕过 bar_source（get_status/手动单/preview/dry-run）→ 统一；④ 条件单无尺度闸 → parse 加 prices 带闸四路径全接；⑤ 回放无口径检查 → caliber_warning；⑥ financial_summary SELECT * → 动态列。**新增根因级防线**：R1.3 跨源尺度闸（daily_bars 出口母库 vs 本地同日比值 [0.9,1.1]）。R3 执行链/R5 引擎回测/R6 账本/R7 锁超时/R8 安全全部审查通过（证据见清单各节）；AGENTS 规则 3.2 重写 + 硬约束第 7 条（配置三件套）。本地/Pi **296** 项全绿。 |
