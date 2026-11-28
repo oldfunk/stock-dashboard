@@ -72,7 +72,7 @@
 - [x] **B5 个股 UI 全面统一**（`58e4f74`…`15f3d7e`，gate 691）：候选/AI 观察池/钉选共用 `_stock_card.html`；钉选服务端渲染；计数并入标签；浏览器实测三视图一致。
 - [ ] **B6 全代码审计 + 文档更新**（进行中，2026-11-19）：architecture（流水线/48 张表/基线）、handoff、iteration-log、roadmap、subproject-protocol、development-workflow 已校准；剩余：`agent-api.md`、`research-os-tasklist.md` 进度回填、历史 audit 报告的"归档"标注。
 
-## Phase 8 — Research OS（2026-10-26 设计；R0–R2 已落地，R3–R6 未启用）
+## Phase 8 — Research OS（2026-10-26 设计；R0–R3 已落地，R4–R6 未启用）
 
 > 目标：从"一套固定策略"升级为"市场状态 → 假设 → 实验 → 版本化策略 → 部署归因 → 决策账本"的研究操作系统；价值投资只是先验。
 > 设计：`docs/research-os.md`；任务：`docs/research-os-tasklist.md`。
@@ -81,7 +81,7 @@
 - [x] R0 框架（11 项）— 2026-10-26 完成（表/注册表/质量门/LLM 契约）
 - [x] R1 市场状态 — 2026-10-27 完成（`market_state_daily`，F2/F6）
 - [x] R2 假设与实验 — 2026-11 完成（预注册 → `ci_rule` → Bonferroni → 参数敏感性 → verdict；合成库双验）
-- [ ] R3 策略与归因 — 表已建（`strategy_*` / `decision_log`，0 行），未启用
+- [x] R3 策略与归因 — 表已建（`strategy_*` / `decision_log`）；S-BASE-v0、部署 D-20261128-001、11-20→11-27 归因、drift DL-20261128-001 已落库（2026-11-28）
 - [ ] R4 LLM 研究助手 — 表已建（`llm_task` / `llm_run` / `prompt_registry`，0 行），未启用
 - [ ] R5 研究界面/API — JSON API 已可用（`/api/data/research/*`）；HTML 研究页批21 在途（Issue #9）
 - [ ] R6 最小闭环试点 — 未开始
