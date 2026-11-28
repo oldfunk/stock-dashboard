@@ -416,3 +416,15 @@ pending、三周零流水）。任务、命令与路径的真相源是
   重算状态向量：`python scripts/backfill_market_state.py --days N --force`。
 - 口径说明：这是**年报静态 PE**，与 `pe_median`（快照 TTM 中位）不是同一序列，
   不可混用；11-27 实测样本 5454、覆盖 98.7%、分位 62.9%。
+
+### 11.2 R4-lite 研究助手（2026-11-28）
+
+- `src/research/assistant.py`：只读 `research_hypothesis/experiment/result`，生成
+  四节实验复核备忘录；引用格式 `[H-...] [E-...] [R-...]`，校验未知引用、交易建议、
+  数字是否来自事实；不写库、不改策略、不下单。
+- `llm_config` 新增 `research_llm`：默认 `enabled=true / mode=inherit`；可切
+  `custom`（provider/api_base/model/Key/temperature/max_tokens），Key 存
+  `STOCK_RESEARCH_AI_API_KEY`，页面只显示脱敏预览。
+- 面板 `/llm` 新增“研究助手”卡 + 实验复核下拉；API：
+  `/api/llm/research`、`/api/llm/research/save`、`/api/research/experiments`、
+  `/api/research/experiment_review`。

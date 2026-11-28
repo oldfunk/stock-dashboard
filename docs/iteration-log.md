@@ -167,6 +167,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-28（R4-lite：研究助手设置 + 实验复核）
+
+- **面板设置**：`/llm` 新增“研究助手（R4-lite）”卡，默认开启；模型来源可选“跟随分析模型”或“自定义”（provider/api_base/model/Key/temperature/max_tokens）；Key 存 `.env` 的 `STOCK_RESEARCH_AI_API_KEY`，页面只显示脱敏预览。
+- **只读复核**：`src/research/assistant.py` 读 hypothesis/experiment/result，生成四节 Markdown（结论支持度/设计问题/证据缺口/下一步）；引用格式 `[H-...] [E-...] [R-...]`，发布前校验未知引用、交易建议、数字是否来自事实；**不写库、不改策略、不下单**。
+- **试跑**：E-H002b（H-002 MOS 净增量）真实调用 glm-4.5-flash，约 1 分钟；结论“CI 覆盖 0、证据不足”，引用 E/R、无未知引用、无建议。
+- **门禁**：母 **1617** / vendor **1107**（1609 → 1617，+8 用例）。
+
 ### 2026-11-28（数据决策：10 月缺口不重建；PE 分位落地）
 
 - **2026-10 分析缺口：决定不重建**。10 月有 23 个 screening run / 460 行输入，但 `stock_analysis_history` 无原始 AI 文本；当前模型补写会“知道未来”，既非原始也非 PIT。按“缺就缺、不能有假数据”处理，只标历史缺失，不进入绩效样本。
