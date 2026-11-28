@@ -39,12 +39,15 @@ def collect(days: int = 10) -> dict:
             "ORDER BY s.code")]
         latest_k = conn.execute(
             "SELECT MAX(trade_date) d FROM kline_daily").fetchone()["d"]
-        kline_stale = [str(r["code"]).zfill(6) for r in conn.execute(
+        latest_count = int(conn.execute(
+            "SELECT COUNT(DISTINCT code) n FROM kline_daily WHERE trade_date=?",
+            (latest_k,)).fetchone()["n"]) if latest_k else 0
+        stale_30 = [str(r["code"]).zfill(6) for r in conn.execute(
             "SELECT s.code FROM stock_snapshot s WHERE s.market='A' "
             "AND EXISTS (SELECT 1 FROM kline_daily k WHERE k.code=s.code) "
             "AND (SELECT MAX(k.trade_date) FROM kline_daily k "
-            "     WHERE k.code=s.code) < ? ORDER BY s.code", (latest_k,))] \
-            if latest_k else []
+            "     WHERE k.code=s.code) < date(?, '-30 days') ORDER BY s.code",
+            (latest_k,))] if latest_k else []
         open_dates = [r["trade_date"] for r in conn.execute(
             "SELECT trade_date FROM trading_calendar WHERE market_id='CN' "
             "AND is_open=1 AND trade_date <= date('now') "
@@ -91,7 +94,8 @@ def collect(days: int = 10) -> dict:
         "daily_close": {"expect": active, "gaps": gaps,
                         "checked": open_dates},
         "kline": {"active": active, "missing": kline_missing,
-                  "stale": kline_stale, "latest": latest_k},
+                  "latest": latest_k, "latest_count": latest_count,
+                  "stale_30": stale_30},
         "market_state": {"rows": states, "stale_metrics": stale,
                          "pe_percentile_missing": sum(
                              1 for s in states
@@ -132,8 +136,10 @@ def render(rep: dict) -> str:
     k = rep["kline"]
     lines.append(f"- 活跃 {k['active']}；无任何 K 线 {len(k['missing'])} 只"
                  + ("：" + "、".join(k["missing"][:20]) if k["missing"] else ""))
-    lines.append(f"- 最新日 {k['latest']}；末根早于最新日 {len(k['stale'])} 只"
-                 + ("：" + "、".join(k["stale"][:20]) if k["stale"] else ""))
+    lines.append(f"- 最新日 {k['latest']} 有 K 线 **{k['latest_count']}** 只"
+                 "（轮换池设计，不等于全市场）")
+    lines.append(f"- 末根超过 30 日未更新 {len(k['stale_30'])} 只"
+                 + ("：" + "、".join(k["stale_30"][:20]) if k["stale_30"] else ""))
     lines += ["", "## 4. market_state_daily"]
     ms = rep["market_state"]
     lines.append(f"- 检查 {len(ms['rows'])} 天；pe_percentile_5y 缺失/为空 "
