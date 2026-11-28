@@ -95,7 +95,7 @@ def test_run_close_review_publishes_and_links(env, monkeypatch):
     assert "news#" in row["content_md"]
     assert json.loads(row["sources_json"])[0]["id"] == news_id
     run = NewsReviewDAO().get_run("2026-11-27")
-    assert run["status"] == "ok" and run["event_count"] == 1
+    assert run["status"] == "ok" and run["event_count"] == 2
 
     ev = NewsEventDAO().recent(trade_date="2026-11-27")
     assert len(ev) == 2
