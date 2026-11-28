@@ -167,6 +167,14 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-28（E1 纸盘只读 API + 首页卡；B2 绩效表；纸盘自主一周）
+
+- **纸盘自主运行（11-24 → 11-27）**：plan #20–#23 均 09:30 自动执行——11-24 卖 **000426 100@19.64**、11-27 买 **000848 100@7.40**；持仓 000792 400 / 603979 100 / 000848 100；NAV **97,125.32（-2.87%）**；plan #24（11-30）pending。母策略出信号、子项目执行，全程无人工干预。
+- **E1 只读桥（完成）**：`src/paper_bridge/api.py` 提供 `GET /api/paper/status|nav|fills`，`load_status()` 聚合 account/positions/plan/nav/fills，每块带 `source/asof/stale`；缺库/缺表逐块 `unavailable` 并返回 200，不拖母站。首页新增 `_paper_card.html`（总资产/涨跌、持仓数、待执行计划、链接 `/paper`），桥不可用时整块隐藏。新增 `tests/test_paper_bridge_api.py` 3 例（聚合/降级/limit 校验）。生产实测 `/api/paper/status` 200，现金与持仓数字与 :8081 一致，首页出现"纸盘"。gate 母 **1522 → 1525**。
+- **B2 绩效表（完成）**：`scripts/paper_performance.py` 只读 NAV + `benchmark_daily`，按**双方共有的交易日**对齐，输出逐日收益/超额与累计收益/超额，不插值、不猜缺失日。实测 09-28 → 11-27：纸盘 **-2.87%** vs 沪深300 **-6.40%**，累计超额 **+3.52pp**；10-23→11-19 的 NAV 断档如实少行。新增 3 条纯函数测试；期间修正一处测试期望（基准 201/200 应为 +0.5%，原写 1%）。gate 母 **1525 → 1528**。
+- **基线**：母 **1528** / vendor **996**（生产 worktree `bash scripts/gate.sh` 全绿）。
+- 想法/为什么：先把"看得见、算得清"补上——母站能只读看到纸盘状态，周报能算出相对基准的超额；桥保持只读和块级降级，避免母站被外部账本拖垮。
+
 ### 2026-11-24（vendor v0.10.1：第二实例方案切换免口令 + intents 降级）
 
 - **合流**：`git subtree pull --prefix=paper_trading paper-upstream v0.10.1 --squash`（单向 tag 流，无冲突）；vendor 树与上游 v0.10.1 逐字节一致（305 文件）。
