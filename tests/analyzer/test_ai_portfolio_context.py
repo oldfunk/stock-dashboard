@@ -27,7 +27,7 @@ def test_prompt_includes_portfolio_context(monkeypatch):
     monkeypatch.setattr(an, "_call_llm", fake_call)
     an.analyze_stock({"code": "600519", "name": "贵州茅台"})
     assert "组合上下文" in captured["prompt"]
-    assert "不得据此给交易建议" in captured["prompt"]
+    assert "持仓 000792" in captured["prompt"]
 
 
 def test_prompt_survives_context_failure(monkeypatch):
