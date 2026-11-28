@@ -88,3 +88,26 @@ def test_build_events_caps_and_keys():
     assert len(events) == 1
     assert events[0]["level"] == "P1"
     assert events[0]["event_key"].startswith("P1:000792:")
+
+
+def test_market_events_thresholds():
+    market = {
+        "asof": "2026-11-27",
+        "indices": [
+            {"code": "sh000300", "name": "沪深300", "close": 4063.06,
+             "pct": 0.0417},
+            {"code": "sz399006", "name": "创业板指", "close": 2443.96,
+             "pct": 0.051},
+            {"code": "sh000001", "name": "上证指数", "close": 3476.88,
+             "pct": 0.0001},
+        ],
+        "turnover": {"pct": 0.5141, "cur_yi": 19741.13, "prev_yi": 13038.12},
+    }
+    ev = rules.market_events(market)
+    levels = {e["event_type"]: e["level"] for e in ev}
+    assert levels["指数异动"] in ("P0", "P2")
+    assert any(e["level"] == "P0" for e in ev)      # 创业板 5.1% → P0
+    assert any(e["event_type"] == "成交额异动" for e in ev)
+    assert len({e["event_key"] for e in ev}) == len(ev)
+    assert rules.market_events({"asof": "2026-11-27", "indices": [
+        {"code": "sh000300", "pct": 0.01}], "turnover": {"pct": 0.1}}) == []

@@ -1,0 +1,12 @@
+{
+  "_note": "人工标注模板：items 的键是 news_item.id；relevant=true 表示该新闻与持仓/观察池/候选相关，role 用于复盘相关性分层。复制本文件为 docs/news-review-annotations-YYYYMMDD.json 后填写。",
+  "date": "YYYY-MM-DD",
+  "items": {
+    "123456": {
+      "relevant": true,
+      "role": "持仓",
+      "expected_level": "",
+      "comment": "示例：公司公告/政策，需人工判断"
+    }
+  }
+}

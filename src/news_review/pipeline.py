@@ -225,6 +225,15 @@ def run_close_review(analyzer=None, date: Optional[str] = None,
         news, {t["code"]: t.get("name") or "" for t in targets},
         now=f"{date} 15:45:00",
         limits=news_cfg.get("event_limits") or {"P0": 5, "P1": 10})
+    events += rules.market_events(facts.get("market") or {})
+    # 同一 event_key 只留一条（新闻事件与市场事件可能撞同日键）
+    seen, merged = set(), []
+    for e in events:
+        if e["event_key"] in seen:
+            continue
+        seen.add(e["event_key"])
+        merged.append(e)
+    events = merged
 
     if analyzer is None:
         from src.analyzer.ai_analyzer import AiAnalyzer

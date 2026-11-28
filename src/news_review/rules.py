@@ -173,7 +173,7 @@ def event_bucket(ts: str) -> str:
 
 def build_events(items: list[dict], targets: dict[str, str], now: str,
                  limits: Optional[dict] = None) -> list[dict]:
-    """规则引擎输出事件（不调 LLM、不写库）；同键去重由 DB 唯一索引兜底。"""
+    """规则引擎输出新闻事件（不调 LLM、不写库）；同键去重由 DB 唯一索引兜底。"""
     limits = limits or {"P0": 5, "P1": 10}
     target_codes = set(targets)
     events, seen = [], set()
@@ -208,6 +208,64 @@ def build_events(items: list[dict], targets: dict[str, str], now: str,
             "official": is_official(it),
         })
     return events
+
+
+def market_events(market: dict) -> list[dict]:
+    """P2/P0 市场级事件：指数单日 |涨跌|≥3%（≥5% 升 P0）、成交额 ±50%。
+
+    数据来自行情库，不需要新闻；只落提醒，不交易。event_key 按日唯一。
+    """
+    asof = str((market or {}).get("asof") or "")
+    if not asof:
+        return []
+    out = []
+    for idx in (market.get("indices") or []):
+        p = idx.get("pct")
+        if p is None:
+            continue
+        ap = abs(float(p))
+        if ap < 0.03:
+            continue
+        level = "P0" if ap >= 0.05 else "P2"
+        direction = "上涨" if p > 0 else "下跌"
+        out.append({
+            "event_key": f"{level}:market:index_move:{asof}:{idx.get('code')}",
+            "event_time": f"{asof} 15:00:00",
+            "trade_date": asof,
+            "level": level,
+            "event_type": "指数异动",
+            "code": "",
+            "name": "市场",
+            "title": f"{idx.get('name') or idx.get('code')} {direction} "
+                     f"{ap * 100:.2f}%（阈值 3%）",
+            "fact": f"收盘 {idx.get('close')}，日涨跌 {p * 100:+.2f}%",
+            "inference": "",
+            "source": "行情库",
+            "url": "",
+            "news_id": None,
+            "official": 0,
+        })
+    turn = market.get("turnover") or {}
+    tp = turn.get("pct")
+    if tp is not None and abs(float(tp)) >= 0.5:
+        out.append({
+            "event_key": f"P2:market:turnover:{asof}",
+            "event_time": f"{asof} 15:00:00",
+            "trade_date": asof,
+            "level": "P2",
+            "event_type": "成交额异动",
+            "code": "",
+            "name": "市场",
+            "title": f"两市成交额 {float(tp) * 100:+.1f}%（阈值 ±50%）",
+            "fact": f"{turn.get('prev_yi')} 亿 → {turn.get('cur_yi')} 亿",
+            "inference": "",
+            "source": "行情库",
+            "url": "",
+            "news_id": None,
+            "official": 0,
+        })
+    return out
+    return {int(x) for x in CITATION_RE.findall(str(md or ""))}
 
 
 def referenced_ids(md: str) -> set[int]:
