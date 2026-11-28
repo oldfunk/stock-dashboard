@@ -58,3 +58,27 @@ def test_market_facts_falls_back_to_latest_available_date():
     out = facts.market_facts(conn, "2026-11-30")   # 周末/非交易日
     conn.close()
     assert out["asof"] == "2026-11-27"
+
+
+def test_portfolio_facts_prefers_panel_actual_returns(monkeypatch):
+    import src.paper_bridge as pb
+    monkeypatch.setattr(pb, "load_panel_snapshot", lambda **k: {
+        "available": True, "source": "paper:panel", "asof": "2026-11-27",
+        "performance": {"total_return": -0.0287, "total_pnl": -2874.68,
+                        "cash": 82399.32, "market_value": 14726.0,
+                        "total_value": 97125.32, "realized_pnl": -2859.54,
+                        "fees_total": 40.68, "mdd": 0.0417, "exposure": 0.15},
+        "today": {"today_pnl": 811.99},
+        "positions": [{"symbol": "000792", "total_volume": 400,
+                       "available_volume": 400, "avg_cost": 23.98,
+                       "current_price": 22.64, "market_value": 9056.0}],
+    })
+    monkeypatch.setattr(pb, "load_status", lambda **k: {
+        "plan": {"data": []}, "fills": {"data": []}})
+    out = facts.portfolio_facts()
+    assert out["source"] == "paper:panel"
+    assert out["actual"]["total_return"] == -0.0287
+    assert out["actual"]["realized_pnl"] == -2859.54
+    assert out["positions"][0]["unrealized_pnl"] == pytest.approx(
+        (22.64 - 23.98) * 400, abs=0.01)
+    assert out["nav"]["total_value"] == 97125.32

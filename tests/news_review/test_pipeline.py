@@ -16,6 +16,8 @@ def env(tmp_path, monkeypatch):
     db_mod.init_database()
     import src.paper_bridge as pb
     monkeypatch.setattr(pb, "load_positions", lambda: {"data": []})
+    monkeypatch.setattr(pb, "load_panel_snapshot", lambda **k: {
+        "available": False, "source": "paper:panel"})
     monkeypatch.setattr(pb, "load_status", lambda **k: {
         "account": {"data": {"cash": 80000.0}},
         "positions": {"data": [{"symbol": "000792", "total_volume": 400,

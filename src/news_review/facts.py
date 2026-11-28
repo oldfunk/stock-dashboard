@@ -244,7 +244,9 @@ def portfolio_facts(asof_date: Optional[str] = None) -> dict:
                 pos = []
             return {
                 "available": bool(nav),
+                "source": "paper:bridge",
                 "asof": asof_date,
+                "actual": None,
                 "nav": {k: nav.get(k) for k in
                         ("timestamp", "cash", "market_value", "total_value",
                          "pnl_pct")},
@@ -267,6 +269,67 @@ def portfolio_facts(asof_date: Optional[str] = None) -> dict:
         except Exception as e:                    # noqa: BLE001
             return {"available": False, "reason": str(e)[:200]}
 
+    if not asof_date or asof_date >= today:
+        try:
+            from src.paper_bridge import load_panel_snapshot, load_status
+            panel = load_panel_snapshot()
+        except Exception as e:                    # noqa: BLE001
+            panel = {"available": False, "reason": str(e)[:200]}
+        if panel.get("available"):
+            try:
+                st = load_status(nav_limit=2, fills_limit=5)
+            except Exception:
+                st = {}
+            plan = ((st.get("plan") or {}).get("data") or [])
+            fills = ((st.get("fills") or {}).get("data") or [])
+            perf = panel.get("performance") or {}
+            positions = []
+            for p in panel.get("positions") or []:
+                item = dict(p)
+                try:
+                    cost = float(p.get("avg_cost") or 0)
+                    price = float(p.get("current_price") or 0)
+                    vol = int(p.get("total_volume") or 0)
+                    if cost and price and vol:
+                        item["unrealized_pnl"] = round((price - cost) * vol, 2)
+                        item["unrealized_pct"] = round(price / cost - 1.0, 6)
+                except (TypeError, ValueError):
+                    pass
+                positions.append(item)
+            actual = dict(perf)
+            actual["asof"] = panel.get("asof")
+            actual["today"] = panel.get("today")
+            actual["return_str"] = pct_str(perf.get("total_return"))
+            actual["today_pnl_pct_str"] = pct_str(perf.get("today_pnl_pct"))
+            actual["mdd_str"] = pct_str(perf.get("mdd"))
+            return {
+                "available": True,
+                "source": "paper:panel",
+                "asof": panel.get("asof"),
+                "nav": {
+                    "timestamp": panel.get("asof"),
+                    "cash": perf.get("cash"),
+                    "market_value": perf.get("market_value"),
+                    "total_value": perf.get("total_value"),
+                    "pnl_pct": perf.get("total_return"),
+                    "pnl": perf.get("total_pnl"),
+                },
+                "nav_pct_str": actual["return_str"],
+                "nav_note": "来自子项目 :8081 面板（FIFO 已实现/费用/回撤口径）；"
+                            "total_return 为成立以来累计，不是本周",
+                "cash": perf.get("cash"),
+                "positions": positions,
+                "positions_note": "来自 :8081 面板，含现价/市值/未实现盈亏",
+                "pending_plan": ({k: plan.get(k) for k in
+                                  ("id", "plan_date", "created_at")}
+                                 if plan else None),
+                "fills": [{k: f.get(k) for k in
+                           ("timestamp", "symbol", "direction", "volume",
+                            "price", "commission", "stamp_duty", "transfer_fee")}
+                          for f in fills],
+                "actual": actual,
+            }
+
     try:
         from src.paper_bridge import load_status
         st = load_status(nav_limit=2, fills_limit=5)
@@ -280,6 +343,8 @@ def portfolio_facts(asof_date: Optional[str] = None) -> dict:
     nav = navs[0] if navs else {}
     return {
         "available": bool(nav or acc),
+        "source": "paper:bridge",
+        "actual": None,
         "nav": {k: nav.get(k) for k in
                 ("timestamp", "cash", "market_value", "total_value", "pnl_pct")},
         "nav_pct_str": pct_str(nav.get("pnl_pct")),

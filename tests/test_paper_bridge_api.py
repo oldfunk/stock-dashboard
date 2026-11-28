@@ -82,3 +82,14 @@ def test_nav_limit_and_validation(client):
     assert client.get("/api/paper/nav?limit=1").json()["data"]["data"][0]["total_value"] \
         == pytest.approx(97125.31)
     assert client.get("/api/paper/nav?limit=0").status_code == 422
+
+
+def test_panel_performance_endpoint(client, monkeypatch):
+    import src.paper_bridge.api as api_mod
+    monkeypatch.setattr(api_mod, "load_panel_snapshot", lambda: {
+        "available": True, "source": "paper:panel", "asof": "2026-11-27",
+        "performance": {"total_return": -0.0287, "realized_pnl": -2859.54},
+        "today": {"today_pnl": 811.99}, "positions": []})
+    body = client.get("/api/paper/performance").json()
+    assert body["ok"] is True
+    assert body["data"]["performance"]["total_return"] == -0.0287

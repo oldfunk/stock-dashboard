@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
+from .panel import load_panel_snapshot
 from .state import load_nav, load_recent_fills, load_status
 
 router = APIRouter(prefix="/api/paper", tags=["paper-bridge"])
@@ -30,3 +31,9 @@ def paper_nav(limit: int = Query(30, ge=1, le=200)):
 @router.get("/fills")
 def paper_fills(limit: int = Query(20, ge=1, le=200)):
     return {"ok": True, "data": load_recent_fills(limit=limit)}
+
+
+@router.get("/performance")
+def paper_performance():
+    """子项目 :8081 面板的实际收益（只读 GET；不可用时 available=False）。"""
+    return {"ok": True, "data": load_panel_snapshot()}

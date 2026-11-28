@@ -9,6 +9,7 @@
 - 失败降级：库缺失/被锁/缺列 → 返回 `{"source": "unavailable", "reason": ...}`，
   调用方按"无纸盘上下文"继续，绝不阻断主流程。
 """
+from .panel import load_panel_snapshot
 from .settings import bridge_paths
 from .state import (
     load_account,
@@ -29,4 +30,5 @@ __all__ = [
     "load_recent_fills",
     "load_nav",
     "load_status",
+    "load_panel_snapshot",
 ]

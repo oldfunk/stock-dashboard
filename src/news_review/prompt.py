@@ -28,7 +28,8 @@ def _news_block(items: list[dict], limit: int = 30) -> str:
 def build_facts_prompt(date: str, facts: dict, news: list[dict]) -> str:
     return NL.join([
         f"你是A股价值投资研究助手。日期：{date}。",
-        "下面是市场事实、组合变量、标的清单与今日新闻。请逐条判断新闻对标的的影响。",
+        "下面是市场事实、组合变量（含实际收益）、标的清单与今日新闻。请逐条判断新闻对标的的影响，",
+        "并把组合的实际收益/回撤/费用作为判断背景，不要只看净值。",
         "",
         "纪律（必须遵守）：",
         "1. 只从价值/基本面/政策/风险角度分析；禁止短线、资金流、情绪、涨跌预测。",
@@ -77,7 +78,7 @@ def build_markdown_prompt(date: str, facts: dict, judgments: dict,
         "4. 解释与事实分开写；不得使用“利好/利空/资金流入/主力/情绪”等短线词。",
         "5. 严禁任何交易建议（买入/卖出/加仓/减仓/目标价/止损），新闻不构成交易指令；复盘成交时用“成交价 vs 计划价”，不写“建议买入价”。",
         "6. 第 2 节优先写持仓；第 3 节只列有相关新闻的候选，不覆盖全部 20 只。",
-        "7. 第 4 节的 NAV/现金/持仓/计划/成交只用给定数据，带 asof；nav.pnl_pct 是**累计收益**，不要写成“本周回撤”。桥不可用就写“纸盘桥不可用”。",
+        "7. 第 4 节写组合变量与**实际收益**：优先用 portfolio.actual 的 total_return / total_pnl / realized_pnl / fees_total / win_rate / mdd / exposure / today_pnl；区分已实现与未实现、费用；带 asof；不要只写 NAV。source=paper:panel 时注明“子项目 :8081 面板”，否则注明“只读桥”。",
         "8. 第 5 节只做纪律复盘：本周计划/成交/费用/回撤；不预测下周涨跌。",
         "9. 第 7 节逐条列出来源：`[news#id] 标题 — 来源 时间 URL`；没有 URL 就省略 URL。",
         "10. 结尾写一句：“本笔记由 AI 自主生成，不构成投资建议。”",

@@ -145,6 +145,15 @@ def _fallback_markdown(date: str, facts: dict, news: list[dict],
         plan = p.get("pending_plan")
         if plan:
             lines.append(f"- 待执行计划 #{plan.get('id')}（{plan.get('plan_date')}）。")
+        actual = p.get("actual") or {}
+        if actual:
+            lines.append(
+                f"- 实际收益（{p.get('source') or '纸盘'}，截至 {actual.get('asof') or '--'}）："
+                f"累计 {actual.get('return_str') or _fmt_pct(actual.get('total_return'))}，"
+                f"已实现 {actual.get('realized_pnl') if actual.get('realized_pnl') is not None else '--'}，"
+                f"费用 {actual.get('fees_total') if actual.get('fees_total') is not None else '--'}，"
+                f"最大回撤 {actual.get('mdd_str') or _fmt_pct(actual.get('mdd'))}，"
+                f"暴露 {_fmt_pct(actual.get('exposure'))}。")
     else:
         lines.append("纸盘桥不可用；组合变量缺失。")
 
@@ -176,9 +185,9 @@ def collect_inputs(date: str, limit: int = 200,
 
     with db_conn() as conn:
         targets = target_facts(conn, date)
-        facts = {"market": market_facts(conn, date),
-                 "targets": targets,
-                 "portfolio": portfolio_facts(date)}
+        market = market_facts(conn, date)
+    facts = {"market": market, "targets": targets,
+             "portfolio": portfolio_facts(date)}
 
     start, end = _day_window(date)
     dao = NewsDAO()
