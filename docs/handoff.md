@@ -18,7 +18,8 @@
 - **R3 策略/归因**：`S-BASE-v0` 已登记（7 门+五维权重）；CLI `scripts/research_strategy.py` 支持 new/promote/retire/deploy/attribute/drift；部署 `D-20261128-001`（100,000，2026-09-28 起）；11-20→11-27 归因已落库（总收益 +1.31%、超额 -1.43%、费用 30.47、regime risk_off）；漂移写 `DL-20261128-001`。
 - **数据质量与巡检**：`scripts/data_quality_report.py` 查出 2026-10 分析记录两边都缺、market_state `pe_percentile_5y` 近 10 日全缺、daily_close 近 10 日 ≥98%；`scripts/check_news_review.py` 可做收盘后硬检查。
 - **纸盘/数据**：NAV 97,125.32（-2.87%）；A2 目标池 20/20 当日；基准 5/5 到 11-27；三端口 200。
-- 门禁母 **1606** / vendor **996**；基线已更新；母套件超时下限 900s。
+- 门禁母 **1606** / vendor **1107**；基线已更新；母套件超时下限 900s。
+- **vendor v0.12.0 已合流（2026-11-28 晚）**：远端 main 的 `paper-trading v0.12.0`（squash 032b896..0091b9b）合入 nightly，无冲突；vendor 用例 996 → **1107**。v0.12.0 的 `test_audit_passes_local_secrets` 要求 secrets 0600，gate 仅对 vendor 套件用 umask 077，vendor 1107 全绿；母侧功能不受影响。:8081 生产进程仍归子项目，母方未重启/未改其配置。
 
 > 以下为 11-24 及更早的历史状态，保留原文（只追加不删）；最新状态以上面为准。
 
@@ -148,7 +149,7 @@
 - **`analysis_outcome` 写入方停滞（2026-11-12）**：10 月 0 条、11 月仅 1 条（9 月 73 条）。非重复行（双基准是设计）。外部 AI 分析写入方，待查。
 - **`daily_close` 间歇缺口（2026-11-12）**：11-10 缺 80 只（603/605 开头）、11-12 缺 7 只（3016xx/3021xx）；缺失代码均 active 且其它日有数据。疑腾讯批查漏拉/停牌，待查。
 - **`market_state` 覆盖虚高（2026-11-12）**：每日 pass、coverage=1.0，但 `pe_percentile_5y` 缺失；11-09/10/11 三天指标完全一致（疑似同一份快照）。
-- **母仓库 `paper-upstream` remote 指向 GitHub `oldfunk/paper-trading`**：`subtree pull` 是**只读拉取**（不写子项目仓库、不推 main/tag/Release）。当前 vendored **v0.10.1**；下次跟新 tag 同样只读拉取，发布权归子方。
+- **母仓库 `paper-upstream` remote 指向 GitHub `oldfunk/paper-trading`**：`subtree pull` 是**只读拉取**（不写子项目仓库、不推 main/tag/Release）。当前 vendored **v0.12.0**；下次跟新 tag 同样只读拉取，发布权归子方。:8081 进程重启归子项目，母方不代重启。
 - **nec 独立版框架状态与账本曾脱节（2026-11-12 修复）**：`portfolio.state` 停在 11-06（2 仓 vs 账本 8 仓）。修复用 `ledger reset-state --only rq_session_state`；若再出现 `InitPositionError`，同样处置。
 
 ## 历史交接区（追加，不删）

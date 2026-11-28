@@ -167,6 +167,13 @@ A股价值投资看板。生产实例跑在生产服务器的 systemd `stock-das
 
 ## 变更记录（Changelog）
 
+### 2026-11-28（深夜：vendor v0.12.0 合流；母 1606 / vendor 1107）
+
+- **合流**：远端 main 出现 `paper-trading v0.12.0`（squash 032b896..0091b9b），本地 nightly 合并 main，无冲突；vendor 用例 996 → **1107**。
+- **门禁**：v0.12.0 的 `test_audit_passes_local_secrets` 要求 secrets 0600，默认 umask 022 下会红；门禁仅对 vendor 套件 `umask 077`，vendor 1107 全绿。母 **1606** / vendor **1107**。
+- **边界**：`paper_trading/` 未手改；:8081 生产进程/配置归子项目，母方只跟代码、未重启其服务。
+- **母侧功能**：E4/F2/R3/数据质量/巡检不受 vendor 升级影响，生产端点复核 200。
+
 ### 2026-11-28（晚：E4 分析上下文 + F2 周报 + R3 归因 + 数据质量/巡检）
 
 - **E4**：新增 `src/paper_bridge/context.py`，单股 AI 分析 prompt 注入只读组合上下文（面板实际收益/持仓/计划；桥回退；300s 缓存）；异常不阻断分析；提示明确不得据此给交易建议。5 条测试。

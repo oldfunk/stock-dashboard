@@ -275,7 +275,7 @@ AI 分析用用户自带 Key（`/llm` 页配置 + 面板队列执行），面板
 
 ## 9. 价格模型 / 主键 / 子项目数据契约（2026-10-27）
 
-> 背景：子项目 `paper-trading`（本仓 vendored **v0.10.1**；下列契约自 v0.7.2 起沿用）执行侧已切"母库优先"（`config.data.daily_source=auto`），
+> 背景：子项目 `paper-trading`（本仓 vendored **v0.12.0**；下列契约自 v0.7.2 起沿用）执行侧已切"母库优先"（`config.data.daily_source=auto`），
 > 只读母库 SQLite（`mode=ro`），缺标的回退本地 akshare 前复权日线。以下契约来自子项目 Issue #4–#8。
 
 ### 9.1 复权口径（`kline_daily`）
