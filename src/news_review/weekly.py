@@ -86,8 +86,12 @@ def build_weekly(reviews: list[dict], events: list[dict],
     sources_map = {}
     for r in reviews:
         for s in _json(r.get("sources_json"), []):
-            if s.get("id") is not None:
-                sources_map[int(s["id"])] = s
+            if s.get("id") is None:
+                continue
+            from src.news_review import rules
+            if rules.is_noise({"title": s.get("title") or ""}):
+                continue
+            sources_map[int(s["id"])] = s
     actions_list = [_json(r.get("actions_summary"), {}) for r in reviews]
     diff = diff_reviews(reviews)
 
