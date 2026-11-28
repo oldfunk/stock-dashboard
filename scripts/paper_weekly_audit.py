@@ -29,24 +29,25 @@ def parse_plan_json(raw) -> dict:
 
 
 def plan_stats(plans: list[dict], fills: list[dict]) -> dict:
-    """计划动作 vs 实际成交：买卖动作的兑现率、拒单、持仓动作数。"""
+    """计划动作 vs 实际成交：买卖动作的兑现率、拒单、持仓动作数。
+
+    每笔成交只能兑现一个计划动作（贪心匹配），避免同一笔成交被多份计划重复计数。
+    """
     planned = {"buy": 0, "sell": 0, "hold": 0}
     rejected = []
-    matched = 0
+    actions = []
     for p in plans:
         data = parse_plan_json(p.get("plan_json"))
         for a in (data.get("actions") or []):
             act = str(a.get("action") or "").lower()
             if act in planned:
                 planned[act] += 1
-            if act not in ("buy", "sell"):
-                continue
-            hit = [f for f in fills
-                   if str(f.get("symbol")).zfill(6) == str(a.get("symbol")).zfill(6)
-                   and str(f.get("timestamp") or "")[:10] == p.get("plan_date")
-                   and (int(f.get("direction") or 0) > 0) == (act == "buy")]
-            if hit:
-                matched += 1
+            if act in ("buy", "sell"):
+                actions.append({"plan_id": p.get("id"),
+                                "plan_date": p.get("plan_date"),
+                                "action": act,
+                                "symbol": str(a.get("symbol") or "").zfill(6),
+                                "volume": a.get("volume")})
         for r in (data.get("actions_rejected") or []):
             rejected.append({
                 "plan_id": p.get("id"),
@@ -55,12 +56,32 @@ def plan_stats(plans: list[dict], fills: list[dict]) -> dict:
                 "action": r.get("action"),
                 "reason": str(r.get("reason") or "")[:160],
             })
+
+    used = set()
+    matched = 0
+    unmatched = []
+    for a in actions:
+        hit = None
+        for i, f in enumerate(fills):
+            if i in used:
+                continue
+            if (str(f.get("symbol")).zfill(6) == a["symbol"]
+                    and str(f.get("timestamp") or "")[:10] == a["plan_date"]
+                    and (int(f.get("direction") or 0) > 0) == (a["action"] == "buy")):
+                hit = i
+                break
+        if hit is None:
+            unmatched.append(a)
+        else:
+            used.add(hit)
+            matched += 1
     trade_actions = planned["buy"] + planned["sell"]
     return {
         "plans": len(plans),
         "pending": sum(1 for p in plans if p.get("status") == "pending"),
         "planned": planned,
         "matched": matched,
+        "unmatched": unmatched,
         "compliance": (matched / trade_actions) if trade_actions else None,
         "rejected": rejected,
     }
@@ -117,6 +138,15 @@ def render(s: dict, start: str, end: str) -> str:
         for r in s["rejected"]:
             lines.append(f"| #{r['plan_id']} | {r['plan_date']} | "
                          f"{r['symbol']} | {r['action']} | {r['reason']} |")
+    else:
+        lines.append("无。")
+    lines += ["", "## 未兑现的买卖动作"]
+    if s.get("unmatched"):
+        lines += ["| 计划 | 日期 | 代码 | 动作 | 计划数量 |",
+                  "|---|---|---|---|---:|"]
+        for a in s["unmatched"]:
+            lines.append(f"| #{a['plan_id']} | {a['plan_date']} | "
+                         f"{a['symbol']} | {a['action']} | {a['volume']} |")
     else:
         lines.append("无。")
     return "\n".join(lines)

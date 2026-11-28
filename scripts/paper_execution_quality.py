@@ -47,8 +47,10 @@ def execution_row(fill: dict, bar: dict | None) -> dict:
     if vwap:
         row["dev_bps"] = round((price / vwap - 1.0) * 10000, 1)
     high, low = bar.get("high"), bar.get("low")
+    row["outside_range"] = False
     if high is not None and low is not None and high > low:
         row["range_pos"] = round((price - float(low)) / (float(high) - float(low)), 3)
+        row["outside_range"] = not (float(low) <= price <= float(high))
     close = bar.get("close")
     if close:
         row["close"] = round(float(close), 4)
@@ -75,8 +77,8 @@ def summarize(rows: list[dict]) -> dict:
 
 def _bar(conn, code: str, day: str) -> dict | None:
     row = conn.execute(
-        "SELECT high, low, close, amount, volume FROM kline_daily "
-        "WHERE code = ? AND trade_date = ?", (code, day)).fetchone()
+        "SELECT high, low, COALESCE(close_raw, close) AS close, amount, volume "
+        "FROM kline_daily WHERE code = ? AND trade_date = ?", (code, day)).fetchone()
     if row and row["close"] is not None:
         return dict(row)
     row = conn.execute(
@@ -127,6 +129,11 @@ def render(rows: list[dict], summary: dict) -> str:
                   f"平均对收盘偏离 {summary['avg_dev_close_bps']} bps。"]
     for d, s in summary["by_direction"].items():
         lines.append(f"- {d} {s['n']} 笔，平均 VWAP 偏离 {s['avg_dev_bps']} bps")
+    outside = [r for r in rows if r.get("outside_range")]
+    if outside:
+        lines += ["", f"注意：{len(outside)} 笔成交价在当日高低点之外"
+                      "（多为子项目按昨收价撮合，非当日盘中价）；"
+                      "区间位置仅作执行质量证据，不据此改交易。" ]
     return "\n".join(lines)
 
 
