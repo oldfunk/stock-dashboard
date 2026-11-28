@@ -35,3 +35,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 norecursedirs = ["*_legacy"]
+markers = [
+    "allow_onboard: 允许用例启动后台 onboard 线程（默认被 conftest 拦住）",
+]

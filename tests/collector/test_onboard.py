@@ -28,6 +28,7 @@ class TestOnboardStock:
         assert len(result["errors"]) == 3
         assert "snapshot" in result["errors"][0]
 
+    @pytest.mark.allow_onboard
     @patch("src.collector.onboard.onboard_stock")
     def test_onboard_stock_async_starts_thread(self, mock_fn):
         from src.collector.onboard import onboard_stock_async
